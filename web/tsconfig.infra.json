@@ -1,0 +1,17 @@
+{
+  // The deployment (sst.config.ts), checked against SST's platform as `sst install` lays it out (the platform's own
+  // settings, less one TypeScript 7 removed): npx tsc -p tsconfig.infra.json
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "isolatedModules": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "files": ["sst.config.ts"]
+}

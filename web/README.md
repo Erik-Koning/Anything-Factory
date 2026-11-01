@@ -1,21 +1,26 @@
 # E9G web app
 
 A small Next.js app, on the same MongoDB as the teams' task graphs, where people beyond the operator's machine send
-**requests** to a team and follow its work, and where the operator **decides on proposals** from anywhere. The plan is
+**requests** to a team and follow its work, members **suggest tasks** for the planner to triage, and the operator
+**adds tasks** and **decides on proposals** from anywhere, switching between the teams they run. The plan is
 [docs/plans/web-app.md](../docs/plans/web-app.md).
 
 It has no rules of its own. It imports the factory's task code from `../lib/tasks/` (no copies) and writes only through
-it: a request is the factory's `addRequest`, a person's stakeholder record its `stakeholderFor`, and an admin's decision
-its `decide`, as the operator, with the team's approval rules from the `teams` document `e9g register` publishes. An
-approval from the web is exactly `e9g task approve` by the operator.
+it: a request is the factory's `addRequest`, a person's stakeholder record its `stakeholderFor`, a task its `addTask`,
+and an admin's decision its `decide`, as the operator, with the team's approval rules from the `teams` document
+`e9g register` publishes. An approval from the web is exactly `e9g task approve` by the operator, and a task an admin
+adds is exactly `e9g task add` by the operator (`--approved` when they approve it as they add it). A member's
+suggestion is a task in `triage` by `stakeholder`. Either way the task records who added it, as their stakeholder id
+(`from`, and in its first history event), never their name: the board shows them as "you", by name to an admin and by
+role to anyone else.
 
 ## Who sees what
 
-| Role                        | Sees and does                                                                                                     |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **admin** (the operator)    | everything, on every team; decides proposals; invites, changes and removes people; sees senders' names and emails |
-| **member** (of a team)      | the board, journeys, the graph, recent merges and every request (senders by role, never by name); sends requests  |
-| **contributor** (to a team) | the team's overview (status, journeys, progress counts) and their own requests; sends requests                    |
+| Role                        | Sees and does                                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **admin** (the operator)    | everything, on every team; adds tasks; decides proposals; invites, changes and removes people; sees senders' names and emails                          |
+| **member** (of a team)      | the board, journeys, the graph, recent merges, each task and every request (senders by role, never by name); sends requests; suggests tasks for triage |
+| **contributor** (to a team) | the team's overview (status, journeys, progress counts) and their own requests; sends requests                                                         |
 
 Roles are per team (a member of one team can be a contributor to another). The rules are in `server/access.ts`; every
 page and server action asks there, and `tests/unit/access.test.ts` proves them. The team's agents still see a request's
@@ -24,17 +29,40 @@ request (Article 8).
 
 ## Pages
 
-- `/` Teams: the teams you can see, each with its state, planner, members at work, aim, last merge.
+- `/` Teams: the teams you can see, each with its state, planner, members at work by role, aim, last merge, and links
+  to its pages.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
-  board, the graph (the factory's own `layout`, as SVG) and recent merges.
+  graph (the factory's own `layout`, as SVG) and recent merges.
+- `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
+  Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
+  (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked
+  (only when something is) and Done (the newest eight, with a count of the rest and of what was rejected; "show them"
+  opens `?done=all`, every done task and a Rejected lane). Each card says who it came from ("suggested by", "added
+  by", "requested by" for work the planner made of a request, or the team role) and links its journey. Journeys aren't
+  cards. The lanes run to the window's edge and scroll sideways when they don't fit. A team with no tasks yet gets one
+  empty state. The board shows the work; moves stay with the team (claims, review, the merge queue) and the Decisions
+  page.
+- `/t/<team>/add`, from the board's button: Add a task (admins: a proposal, or approved as it's added, under a
+  journey, after other tasks) or Suggest a task (members: title, kind, how bad it is for a bug or a UX problem, and
+  what's needed, at least 20 characters; it goes to triage, and the planner never approves it itself: it makes it its
+  own proposal for the approver or the operator).
+- `/t/<team>/tasks/<id>` (members and admins): one task, as `e9g task show` prints it: where it stands, its journey and
+  dependencies, who holds it, who it came from, its gate and score, notes and history (people in it said as you may
+  read them). For an admin, a proposal or a task in triage has a Decide button. The board, journeys, merges, the
+  Decisions page and a request's page link here.
+- **Switch team**, beside each team's name: the other teams you follow and their state, keeping the page you're on.
 - `/t/<team>/requests` and `/t/<team>/requests/<id>`: the form, the list, and each request with its status, the tasks
   it became and theirs, notes and the reason when it's turned down. Contributors see their own.
-- `/t/<team>/proposals` (admins): proposals with their gate and score; approve with a note, reject with a reason, send
-  back for research, escalate.
+- `/t/<team>/proposals` (admins): proposals with who they came from, their gate and score; approve with a note, reject
+  with a reason, send back for research, escalate. Tasks in triage come last, for when one can't wait for the planner.
 - `/admin/people` (admins): invite by email with a role on a team, change a role, remove from a team, ban and unban.
-- `/account`: passkeys, backup codes (admins), where you're signed in, sign out.
+- `/admin/audit` (admins): the audit log, newest first, filtered by what, how it went, who and IP address.
+- `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
+  you're signed in, with each session's address; the IP addresses you've confirmed; your recent activity; sign out.
+- `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
+  address to be confirmed by email; `/sign-in/confirm` is the email's page (“Was this you?”), no session needed.
 
-## Signing in, and admins' two factors
+## Signing in: two factors, new IP addresses, and the audit log
 
 Invite only: nobody signs up. An admin invites someone by email from People; the app makes the account (Better Auth's
 admin plugin), gives it its role on the team and a stakeholder record there, and emails a sign-in link.
@@ -46,21 +74,41 @@ admin plugin), gives it its role on the team and a stakeholder record there, and
     **and enrols its authenticator (TOTP) at once**, printing the setup link and ten backup codes. No admin account
     exists with only a password.
   - An admin signs in with **password + authenticator code** (or a backup code), or with a **passkey whose
-    authenticator verified them** (PIN or biometrics: the UV flag of the signed assertion, checked on the server; a
-    passkey that didn't verify them gives no second factor).
+    authenticator verified them** (PIN or biometrics: the UV flag of the signed assertion, checked on the server).
   - **No magic link for admins**: none is sent to an admin's address, and a session from one is refused for an admin.
-- Each session records **whether it began with a second factor** (`session.secondFactor`, set by the server as the
-  session is made, from how it was made; the client can't set it). Every admin page and every server action checks it
-  on the server, along with the person's role for the team (`server/viewer.ts`, `server/access.ts`). An admin whose
-  session lacks it is sent to `/second-factor` and can do nothing until they sign in again with one.
-- Over HTTP, an admin session without its second factor may only look at itself, sign out or sign in again, so it
-  can't enrol a passkey or new backup codes to raise itself. Better Auth's own admin endpoints (`/api/auth/admin/*`)
-  and turning the authenticator on or off are never served over HTTP; the app calls the admin plugin from its server
-  actions after its own checks. (`server/auth.ts` has all of this in one place.)
+- **Anyone else may turn on an authenticator** from their account page (a QR code, a code to prove it, ten backup
+  codes shown once; Better Auth's two-factor plugin, passwordless). From then on every sign-in, by passkey or link,
+  also asks for its code. Turning it off takes a current code.
+- Each session records **whether it has its second factor** (`session.secondFactor`): set by the server from how the
+  session was made, or once a code is entered for it at `/second-factor` (an admin whose passkey didn't verify them,
+  anyone with an authenticator after a link). Five wrong codes end the session. The client can't set it.
+- **A new IP address is confirmed by email.** Every session records its IP address, and each person has a list of the
+  addresses they've confirmed (an IPv4 address whole, an IPv6 address by its /64). A session used from any other
+  address, at sign-in or later (a cookie taken elsewhere), can do nothing until its person confirms it: they're
+  emailed a link to a page that shows the address, device and time, with **Yes, it was me** (the address joins their
+  list) and **It wasn't me** (every session on the account ends). A button answers, not the link, so a mail scanner
+  that opens links answers nothing; the link works once, for 30 minutes, and a new one goes out at most every 10
+  minutes. Signing in by an email link confirms the address it's opened from, since opening it already proves the
+  inbox. The account page lists your addresses (with Forget) and each session's address.
+- **The audit log** keeps every sign-in (by method, or why it failed), sign-out and ended session, second factor, new
+  address (asked, confirmed, denied, forgotten), passkey and authenticator change, invitation, role change, removal,
+  ban, request, task and decision: who, when, from which address and device, and how it went. It's in the accounts
+  database (`audit`), written once and never changed, kept `AUDIT_RETENTION_DAYS` (400). Admins read and filter it at
+  `/admin/audit`; each person sees their own recent activity on their account page. The team's agents never see it.
+- Pages and server actions check all of this on the server (`server/viewer.ts`, `server/access.ts`): a session that
+  owes its second factor or an address confirmation is sent to finish that and can do nothing else. Over HTTP it may
+  only look at itself, sign out or sign in again, so it can't enrol a passkey or new backup codes to raise itself.
+  Better Auth's own admin endpoints (`/api/auth/admin/*`) and turning the authenticator on or off are never served over
+  HTTP; the app calls them from its server actions after its own checks. (`server/auth.ts` has the sign-in rules in
+  one place.)
+- **The viewer's address comes from the CDN**, never from what a browser says: CloudFront's function sets
+  `x-e9g-viewer-ip` (`CLIENT_IP_HEADER`), and the app refuses every request without CloudFront's secret
+  (`ORIGIN_SECRET`, sent as `x-e9g-origin`; `proxy.ts`), so nobody reaches it around CloudFront or makes the header up.
+  Sessions, rate limits, the new-address check and the audit log all read the same address.
 - Sessions are revocable from the account page; a ban ends all of a person's sessions and keeps them out.
-- Rate limits: Better Auth's, kept in the database so they hold across serverless instances (from one IP address, 5
-  password sign-ins, 5 link requests and 5 two-factor tries a minute; 100 auth requests a minute in all), plus
-  Better Auth's own lockout after repeated wrong codes; and at most 20 requests a day per person.
+- Rate limits: Better Auth's, kept in the database (from one IP address, 5 password sign-ins, 5 link requests and 5
+  two-factor tries a minute; 100 auth requests a minute in all), plus Better Auth's own lockout after repeated wrong
+  codes; and at most 20 requests and task suggestions a day per person.
 
 ## Running it locally
 
@@ -76,30 +124,40 @@ npm run create-admin -- --email you@example.com --name "Your Name"
 npm run dev            # http://localhost:3000
 ```
 
-Without `RESEND_API_KEY`, sign-in links and invitations are printed to the dev server's console (`[mail] to=… link=…`).
+Without a mail service, sign-in links and invitations are printed to the dev server's console (`[mail] to=… link=…`):
+only while the app's address is this machine (`http://localhost`), never where a log could hand someone a link.
 A team shows up once its settings are in the `teams` collection: `e9g register` publishes them for a team whose tasks
 are in Mongo (team.json `tasks.store: "mongo"`), and the lead's watchdog keeps its status current.
 
 ### Environment variables
 
-| Variable             | Needed         | What                                                                                                                   |
-| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `MONGODB_URI`        | yes            | The connection string (`mongodb+srv://…`), the app's own database user                                                 |
-| `E9G_DATABASE`       | no (`e9g`)     | The task graphs' database (team.json `tasks.database`)                                                                 |
-| `AUTH_DATABASE`      | no (`e9g_web`) | The app's accounts (Better Auth's users, sessions, passkeys, two-factor, rate limits; memberships)                     |
-| `BETTER_AUTH_SECRET` | yes            | At least 32 random characters (`openssl rand -base64 32`); signs cookies, encrypts TOTP secrets                        |
-| `BETTER_AUTH_URL`    | yes            | The app's address (`https://e9g.example.com`): email links, and the passkeys' relying party and origin                 |
-| `RESEND_API_KEY`     | production     | Resend's API key, for sign-in links and invitations                                                                    |
-| `MAIL_FROM`          | production     | The sender, on a domain verified in Resend (`E9G <e9g@example.com>`)                                                   |
-| `MAIL_LOG`           | no             | `1` prints emails to the console when there's no Resend key (on by default in development; never on Vercel production) |
+| Variable                                                   | Needed                      | What                                                                                                                  |
+| ---------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `MONGODB_URI`                                              | yes                         | The connection string (`mongodb+srv://…`), the app's own database user                                                |
+| `E9G_DATABASE`                                             | no (`e9g`)                  | The task graphs' database (team.json `tasks.database`)                                                                |
+| `AUTH_DATABASE`                                            | no (`e9g_web`)              | The app's accounts (Better Auth's users, sessions, passkeys, two-factor, rate limits; memberships)                    |
+| `BETTER_AUTH_SECRET`                                       | yes                         | At least 32 random characters (`openssl rand -base64 32`); signs cookies, encrypts TOTP secrets                       |
+| `BETTER_AUTH_URL`                                          | yes                         | The app's address (`https://e9g.example.com`): email links, and the passkeys' relying party and origin                |
+| `SES_REGION`, `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` | served for real (or Resend) | Amazon SES and a key that may only send as the sender (`sst.config.ts` makes both)                                    |
+| `RESEND_API_KEY`                                           | served for real (or SES)    | Resend's API key, instead of SES                                                                                      |
+| `MAIL_FROM`                                                | served for real             | The sender, verified with the mail service (`E9G <e9g@example.com>`)                                                  |
+| `MAIL_LOG`                                                 | no                          | `1` prints emails to the console when there's no mail service: only while `BETTER_AUTH_URL` is `http://localhost`     |
+| `CLIENT_IP_HEADER`                                         | served for real             | The one header that carries the viewer's IP address (`x-e9g-viewer-ip` behind CloudFront; `x-forwarded-for` if unset) |
+| `ORIGIN_SECRET`                                            | served for real             | At least 32 characters, the same as the CDN sends in `x-e9g-origin`; requests without it are refused                  |
+| `AUDIT_RETENTION_DAYS`                                     | no (400)                    | How long the audit log keeps each event                                                                               |
 
-`.env.local` is ignored by git. The connection string, the secret and the Resend key are the app's, never a team's.
+`.env.local` is ignored by git. The connection string, the secret and the mail key are the app's, never a team's.
+Served anywhere but `http://localhost` with `NODE_ENV=production`, the app refuses to start without `ORIGIN_SECRET`,
+`CLIENT_IP_HEADER` and a mail service: without the first two anyone could say what address they come from, and
+without the last nobody could sign in.
 
 ### Tests
 
 ```sh
-npm test               # tsc, then the unit tests (node --test): access rules, the UV check, TOTP, views, import boundaries
+npm test               # tsc, then the unit tests (node --test): access rules, the UV check, TOTP, views, the origin check, import boundaries
 npm run test:e2e       # next build, then Playwright against a local MongoDB
+npm run test:e2e:atlas # the same against a real cluster, from the repository's .env (below)
+npm run check:infra    # sst install, then tsc against SST's platform: the deployment (sst.config.ts) type-checks
 ```
 
 The end-to-end tests start a MongoDB replica set with `mongodb-memory-server` from the mongod binary already on this
@@ -109,8 +167,20 @@ downloaded), seed it with the factory's own functions (`tests/e2e/seed.ts`), run
 backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board and
 requests (senders by role); approving and rejecting (checked in the task documents); a contributor and an admin
 session without its second factor calling admin server actions directly (refused, nothing changes); passkeys with and
-without user verification; the daily limit; phone width; and the sign-in rate limit. Playwright's Chromium must be
-installed (`npx playwright install chromium`).
+without user verification; the daily limit; phone width; and the sign-in rate limit. Its browsers send a viewer IP
+address and the origin secret as CloudFront does (`playwright.config.ts`), and `security.spec.ts` covers the rest of
+signing in: a request without the secret refused, an admin's new address confirmed by email (the link once), a session
+taken elsewhere and “it wasn't me”, a member's authenticator and every sign-in after it asking for a code, and the
+audit log. Playwright's Chromium must be installed (`npx playwright install chromium`).
+
+`npm run test:e2e:atlas` runs the same suite against a real cluster: it reads `DB_USER`, `DB_PASSWORD` and `DB_HOST`
+from the repository's `.env` (gitignored; or `E2E_MONGODB_URI`), and uses databases of its own, `e9g_e2e` and
+`e9g_web_e2e`, which every run empties first (it refuses any name that doesn't end in `_e2e`, so it never touches the
+app's own). It leaves them after the run, with that run's admin (the e2e user) in `web/.env.e2e`: its address,
+password, authenticator link and unused backup codes, to sign in with `npm run dev` against the same databases. The
+tests' sign-ins come from 198.51.100.7, so one from your own address asks for an email confirmation first (printed to
+the dev server's console). Against a distant cluster each page waits on several round trips, so the run takes minutes
+rather than one.
 
 ## The first admin
 
@@ -127,9 +197,78 @@ Run it again for the same address to start that admin afresh: a new password, au
 earlier session and passkey ended (a lost authenticator; or to make an existing person an admin). There's no way to
 make an admin from the web.
 
-## Deploying: Vercel and MongoDB Atlas
+The admin's first sign-in comes from an address they haven't confirmed, so it asks them to confirm it by email: the
+app's email (SES or Resend) must reach them before the first admin can get in.
 
-The operator deploys the app; teams never do (Article 7).
+## Deploying: Lightsail, behind CloudFront, by SST
+
+The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4) makes all of it in one AWS account:
+
+```
+ viewer ──https──▶ CloudFront ──https + x-e9g-origin──▶ Lightsail container service ──▶ the app (Dockerfile)
+                    │ its function sets x-e9g-viewer-ip and x-forwarded-host; /_next/static/* cached
+```
+
+- **The image** (`Dockerfile`, built from the repository's root since the app compiles `../lib/tasks`): Next's
+  standalone server on Node 24 Alpine, as an unprivileged user, pushed to the stage's own ECR repository (the newest
+  10 kept, scanned on push) for `linux/amd64`.
+- **Lightsail**: a container service (`micro`, one container, by default), allowed to pull from that repository alone,
+  and a deployment of the image by its digest with the app's environment. Its health check calls `/api/health`, the
+  one path open without the origin secret.
+- **CloudFront** (SST's `Cdn`): everything passed through uncached with every viewer header but Host, except Next's
+  hashed static files; HTTPS only; a viewer-request function that sets the viewer's address and the public host; the
+  origin secret (made by SST, kept in its state) on every request to Lightsail. With `E9G_WEB_DOMAIN`, a certificate and
+  DNS records for that domain in the account's Route 53 zone.
+
+### Before the first deploy
+
+1. **AWS**: credentials for the account (`aws configure` or SSO), and Docker running (SST builds the image).
+2. **MongoDB Atlas**: a database user for the app alone (below), and its `mongodb+srv://` connection string. Put the
+   cluster in the same place as the app (an AWS cluster in `E9G_WEB_REGION`): every page waits on several round trips
+   to it, a millisecond each next door and tens of milliseconds across a continent or between clouds.
+3. **Email (Amazon SES)**: once per domain, not per stage, make the sender's domain an SES sender: with its Route 53
+   zone in the account, `AWS_REGION=us-east-2 scripts/ses-domain.sh a6gfactory.dev` adds the SES identity with DKIM,
+   its own MAIL FROM (`mail.<domain>`, for SPF) and a DMARC policy, so mail from it is signed, authorised and not spam.
+   Each stage then sends from `E9G_WEB_SENDER` (`no-reply@a6gfactory.dev`) with an IAM user's key that may send from
+   that address alone. Until the account has SES production access (asked for in the SES console), SES sends only to
+   verified addresses, 200 a day: verify each person's address in SES meanwhile. Sign-in links, invitations and
+   new-address confirmations all go by email; the first admin can't get in without them.
+4. **The domain**: pick it now (`E9G_WEB_DOMAIN`, in a Route 53 hosted zone of the account). Passkeys belong to the
+   domain they were made on, so moving later means everyone adds theirs again. Without one the app is on CloudFront's
+   `*.cloudfront.net` address.
+5. **The secrets**, per stage (SST keeps them encrypted in the account; never in the repository):
+
+   ```sh
+   cd web
+   npx sst secret set MongodbUri --stage production < connection-string.txt   # or the value as an argument
+   openssl rand -base64 32 | npx sst secret set BetterAuthSecret --stage production
+   ```
+
+6. **The indexes**, made once with an operator's database user (the app's own may not make any on the audit log):
+   `npm run create-indexes` with that user's `MONGODB_URI` and the stage's `AUTH_DATABASE` in the environment.
+
+### Deploying
+
+```sh
+cd web
+E9G_WEB_SENDER=no-reply@a6gfactory.dev E9G_WEB_DOMAIN=app.a6gfactory.dev npx sst deploy --stage production
+```
+
+It prints the app's `url` and Lightsail's `origin`. Then make the first admin (above) against the production database
+and sign in. A later deploy builds the image again and moves Lightsail to the new digest; the origin secret, the
+certificate and the distribution stay. `E9G_WEB_REGION` (`us-east-2`, where the account's organization allows Lightsail, SSM and ECR), `E9G_WEB_POWER` (`micro`) and
+`E9G_WEB_SCALE` (1) change where and how big it runs. The production stage is protected and retained: removing it
+takes an explicit change.
+
+Things to know:
+
+- **Lightsail keeps a deployment's environment in the deployment**, readable by anyone with Lightsail access to the
+  account: the connection string, the auth secret and the mailer's key included. Give that access to the operators only.
+- **Lightsail's own address** (`*.cs.amazonlightsail.com`) answers anyone, but the app refuses every request there
+  without CloudFront's secret, except `/api/health` (which says `ok` and nothing else).
+- **Server actions** compare the browser's Origin with the public host CloudFront passes in `x-forwarded-host`. If a
+  setup in front ever drops that header, list the public host in `SERVER_ACTIONS_ORIGINS` at build (the image build
+  sets it to `E9G_WEB_DOMAIN`).
 
 ### Atlas
 
@@ -138,40 +277,28 @@ The operator deploys the app; teams never do (Article 7).
    - `find` on the whole database;
    - `insert` on `requests` (the app only adds them; the planner changes them, through the factory's commands);
    - `insert` and `update` on `stakeholders` (linking a person's account) and `counters` (new ids come from them);
-   - `update` on `tasks` (decisions; the app's code changes only a task's status, approval and notes, through the
-     factory's move table). MongoDB can't scope a role to fields, so whoever holds this user's password can rewrite
-     any team's tasks, which agents then act on: keep it only in Vercel's environment, and rotate it if it leaks;
+   - `insert` and `update` on `tasks` (an admin's tasks and members' suggestions, through the factory's `addTask`, and
+     decisions; the app's code changes only a task's status, approval and notes, through the factory's move table).
+     MongoDB can't scope a role to fields, so whoever holds this user's password can add and rewrite any team's tasks,
+     which agents then act on: keep it only in the deployment's environment, and rotate it if it leaks;
    - `createIndex` on `tasks`, `requests`, `stakeholders` and `cycles` (the store asks for its index; refused, it
      carries on).
 
-   And on the accounts database (`e9g_web`): the built-in `readWrite`. Nothing else: no `remove` on `e9g`, nothing on
-   other databases, no admin roles. Give it a long random password.
+   On the accounts database (`e9g_web`): `find`, `insert`, `update` and `remove` on each of Better Auth's collections
+   and the app's own (`user`, `session`, `account`, `verification`, `twoFactor`, `passkey`, `rateLimit`, `memberships`,
+   `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`), and only `find` and `insert`
+   on `audit`, so the app can't change or delete what it recorded, nor add an index that would expire it early
+   (MongoDB's own expiry still removes old events). The indexes are an operator's to make (`npm run create-indexes`);
+   the app tries its own too and carries on when refused. Nothing else: no `remove` on `e9g`, nothing on other
+   databases, no admin roles. Give it a long random password.
 
-2. **Network access**: Vercel's functions don't have fixed addresses unless your plan gives the project static egress
-   IPs; if it does, allow only those. Otherwise allow `0.0.0.0/0`, and let the narrow role, the long password and TLS
-   (always on with Atlas) carry the protection.
-3. The connection string is the cluster's `mongodb+srv://` one with this user: `MONGODB_URI`.
-
-### Vercel
-
-1. Import the repository as a project with **Root Directory `web`**, and keep **"Include files outside the root
-   directory in the Build Step"** on (the app compiles `../lib/tasks/*.ts`). The framework is detected as Next.js;
-   the build is `npm run build`. Node.js 22.x or later.
-2. Environment variables (Production, and Preview if you use one, with its own database): `MONGODB_URI`,
-   `E9G_DATABASE`, `AUTH_DATABASE`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (the production domain, `https://…`),
-   `RESEND_API_KEY`, `MAIL_FROM`. Don't set `MAIL_LOG`.
-3. In Resend, verify the domain `MAIL_FROM` sends from.
-4. Deploy, then run `npm run create-admin` locally against the production database for the first admin, and sign in.
-   It prints the password, the authenticator's secret and the backup codes once: run it in your own terminal, never
-   in CI or a recorded session, and delete the production values from `web/.env.local` afterwards.
-
-Sign-in rate limits (and the one-link-a-minute limit per address) count by the client's address, which Better Auth
-reads from `x-forwarded-for`. Vercel sets that header itself; if you ever host the app elsewhere, put it behind a
-proxy that overwrites it, or the limits can be dodged with made-up addresses.
+2. **Network access**: Lightsail containers have no fixed outbound address, so allow `0.0.0.0/0`, and let the narrow
+   role, the long password and TLS (always on with Atlas) carry the protection.
+3. The connection string is the cluster's `mongodb+srv://` one with this user: the `MongodbUri` secret.
 
 `next.config.ts` sets `turbopack.root` and `outputFileTracingRoot` to the repository, so the factory's files compile
-and nothing outside `web/` is traced into the function. Passkeys are bound to `BETTER_AUTH_URL`'s host: changing the
-domain means adding passkeys again.
+and nothing outside `web/` is traced into the standalone server. Passkeys are bound to `BETTER_AUTH_URL`'s host:
+changing the domain means adding passkeys again.
 
 ## The code
 
@@ -179,11 +306,21 @@ domain means adding passkeys again.
 - `server/auth.ts`: Better Auth: plugins, the second-factor rule, the HTTP guard, emails.
 - `server/viewer.ts`: the signed-in person, their roles and second factor, for pages and actions.
 - `server/factory.ts`: the bridge to `../lib/tasks` (`storeOver` over the app's MongoClient, `addRequest`,
-  `stakeholderFor`, `decide`); `server/views.ts`: what the pages work out from a graph.
-- `server/people.ts`: memberships, stakeholder links, the daily request limit. `server/bootstrap.ts`: create-admin.
+  `stakeholderFor`, `addTask`, `decide`); `server/views.ts`: what the pages work out from a graph (progress, journeys,
+  merges, proposals, the board's lanes).
+- `server/origin.ts`: who a task came from, as the person looking may read it, the same on every page.
+- `server/auth-indexes.ts`: the indexes Better Auth's MongoDB adapter doesn't make (sessions by token, people by
+  address, passkeys by credential, rate limits by key) and expiry for old sessions and verifications.
+- `server/code-attempts.ts`: five authenticator or backup codes per person in 15 minutes, counted before each is
+  checked; `scripts/create-indexes.ts`: the app's indexes, made by an operator.
+- `server/audit.ts`: the audit log; `server/known-ips.ts`: confirmed addresses and the emails that confirm new ones;
+  `server/origin-check.ts`: the CDN's secret; `server/device.ts`: a browser's name from its user agent.
+- `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
 - `app/`: the pages; `app/t/[team]/actions.ts`, `app/admin/people/actions.ts`, `app/account/actions.ts`: every write.
-- `proxy.ts`: a nonce-based Content Security Policy, and anyone without a session cookie off to sign in.
+- `proxy.ts`: requests without the CDN's secret refused, a nonce-based Content Security Policy, and anyone without a
+  session cookie off to sign in.
+- `sst.config.ts`, `Dockerfile`: the deployment (Lightsail behind CloudFront); `tsconfig.infra.json` checks it.
 
-The app imports only `model`, `store` (for `update`), `mongo`, `requests`, `decide`, `teams` and `graph` from
+The app imports only `model`, `store` (for `update`), `mongo`, `requests`, `decide`, `add`, `teams` and `graph` from
 `lib/tasks`; never the file store, the Keychain, migrations or machines, and it never calls `openStore`
 (`tests/unit/boundaries.test.ts` keeps it so).

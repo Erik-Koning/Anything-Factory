@@ -1,0 +1,17 @@
+# The web app's image (web/Dockerfile) needs web/ and lib/ only; nothing local, built or secret.
+**/node_modules
+**/.next
+**/.env*
+.git
+.cache
+web/.sst
+web/test-results
+web/playwright-report
+web/tsconfig.tsbuildinfo
+bin
+docs
+examples
+plugin
+schema
+templates
+test

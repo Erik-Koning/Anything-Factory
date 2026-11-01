@@ -8,6 +8,9 @@ test.describe.configure({ mode: "serial" });
 const CONTRIBUTOR = "casey@example.com";
 let admin: { context: BrowserContext; page: Page };
 let contributor: { context: BrowserContext; page: Page };
+let member: { context: BrowserContext; page: Page };
+// A lane of the board, by its name.
+const lane = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
 
 test.afterAll(async () => {
   await closeDatabases();
@@ -129,15 +132,25 @@ test("the contributor signs in by the invitation's link, sends a request, and se
 });
 
 test("a member sees the board, the graph and every request, senders by role only", async ({ browser }) => {
-  const { context, page } = await newPage(browser);
+  member = await newPage(browser);
+  const { page } = member;
   await signInByLink(page, state().member);
   await page.goto("/t/shop");
-  await expect(page.getByRole("heading", { name: "Board" })).toBeVisible();
-  await expect(page.locator(".board").getByText("Export orders as CSV")).toBeVisible();
-  await expect(page.locator(".board").getByText("builder on studio")).toBeVisible();
   await expect(page.getByRole("img", { name: "The task graph" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent merges" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Recent merges" }).getByText("Pay by card")).toBeVisible();
+  await page.getByRole("link", { name: "Board", exact: true }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/board$/);
+  await expect(lane(page, "Proposed").getByRole("link", { name: "Export orders as CSV" })).toBeVisible();
+  await expect(lane(page, "Building").getByText("builder on studio")).toBeVisible();
+  await expect(lane(page, "Done").getByRole("link", { name: "Pay by card" })).toBeVisible();
+  // Work the planner made of a request says who asked, by role.
+  await expect(
+    lane(page, "Proposed")
+      .getByRole("listitem")
+      .filter({ hasText: "Export orders as CSV" })
+      .getByText(/^requested by customer/)
+  ).toBeVisible();
 
   await page.goto("/t/shop/requests");
   await expect(page.getByRole("heading", { name: "All requests" })).toBeVisible();
@@ -154,7 +167,79 @@ test("a member sees the board, the graph and every request, senders by role only
   // No decisions for a member.
   await page.goto("/t/shop/proposals");
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
-  await context.close();
+});
+
+test("a member follows the work on the board, and suggests a task, which goes to triage as theirs", async () => {
+  const { page } = member;
+  await page.goto("/t/shop/board");
+  const building = lane(page, "Building");
+  await expect(building.getByRole("link", { name: "Save the card for next time" })).toBeVisible();
+  await expect(building.getByText("builder on studio")).toBeVisible();
+  await expect(building.getByText(/lease \d+ min left/)).toBeVisible();
+  // The team's own work says which role added it.
+  await expect(building.getByText(/^by the planner/)).toBeVisible();
+  await expect(lane(page, "Approved").getByRole("link", { name: "Totals round the wrong way" })).toBeVisible();
+  // A member suggests; only an admin adds. Shop is the only team they're on, so there's nothing to switch to.
+  await expect(page.getByRole("link", { name: "Add a task" })).toHaveCount(0);
+  await expect(page.getByText("Switch team")).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Suggest a task" }).click();
+  await expect(page.getByRole("heading", { name: "Suggest a task" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: /^Journey/ })).toHaveCount(0);
+  // How bad it is, asked only of a bug or a UX problem.
+  await expect(page.getByLabel(/How bad/)).toHaveCount(0);
+  await page.getByLabel("Kind").selectOption("ux");
+  await expect(page.getByLabel("How bad it is")).toBeVisible();
+  await page.getByLabel("Title").fill("Search orders by email");
+  await page.getByLabel("Kind").selectOption("feature");
+  await page.getByLabel("What's needed, and why").fill("Support looks up a customer's orders by email several times a day.");
+  await page.getByRole("button", { name: "Suggest the task" }).click();
+  await expect(page.getByRole("status")).toContainText("The planner triages it.");
+  await expect(page.getByRole("heading", { name: "Search orders by email" })).toBeVisible();
+  await expect(page.getByText(/^suggested by you/)).toBeVisible();
+  // A task's page is the board's.
+  await expect(page.getByRole("link", { name: "Board", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("added as triage, from the web app by you")).toBeVisible();
+
+  // In triage, by "stakeholder", from their stakeholder record: an id, never a name (Article 8).
+  const { graph, accounts } = await databases();
+  const userId = String((await accounts.collection("user").findOne({ email: state().member }))?._id);
+  const stakeholder = await graph.collection("stakeholders").findOne({ team: "shop", userId });
+  const suggested = await graph.collection("tasks").findOne({ team: "shop", title: "Search orders by email" });
+  expect(suggested).toMatchObject({ status: "triage", kind: "feature", by: "stakeholder", from: stakeholder?.id, approval: null });
+  expect(JSON.stringify(suggested)).not.toMatch(/Morgan|member@example\.com/);
+  // On the board, as theirs.
+  await page.goto("/t/shop/board");
+  const card = lane(page, "Triage").getByRole("listitem").filter({ hasText: "Search orders by email" });
+  await expect(card.getByText(/^suggested by you/)).toBeVisible();
+
+  // A suggestion whose form was changed to say it's approved, under a journey, after other work, is still only a
+  // suggestion.
+  await page.goto("/t/shop/add");
+  await page.locator("main form").evaluate((form) => {
+    for (const [name, value] of [
+      ["approved", "yes"],
+      ["parent", "1"],
+      ["after", "2"],
+    ]) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name ?? "";
+      input.value = value ?? "";
+      form.appendChild(input);
+    }
+  });
+  await page.getByLabel("Title").fill("Free shipping, approved");
+  await page.getByLabel("What's needed, and why").fill("Every order should ship free from now on, please.");
+  await page.getByRole("button", { name: "Suggest the task" }).click();
+  await expect(page.getByRole("status")).toContainText("The planner triages it.");
+  expect(await graph.collection("tasks").findOne({ team: "shop", title: "Free shipping, approved" })).toMatchObject({
+    status: "triage",
+    approval: null,
+    parent: null,
+    after: [],
+  });
+  await member.context.close();
 });
 
 test("the admin approves one proposal with a note and rejects another with a reason", async ({ browser }) => {
@@ -224,6 +309,144 @@ test("a contributor calling an admin's server action directly is refused, and no
   expect(await accounts.collection("user").findOne({ email: "mallory@example.com" })).toBeNull();
 });
 
+test("the admin adds a proposal, and a task approved under a journey after another", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const journey = await graph.collection("tasks").findOne({ team: "shop", title: "Checkout" });
+  const paid = await graph.collection("tasks").findOne({ team: "shop", title: "Pay by card" });
+
+  await page.goto("/t/shop/add");
+  await expect(page.getByRole("heading", { name: "Add a task" })).toBeVisible();
+  await page.getByLabel("Title").fill("A receipt by email");
+  await page.getByLabel("Description").fill("Send the receipt once the payment goes through.");
+  await page.getByRole("button", { name: "Add the task" }).click();
+  await expect(page.getByRole("status")).toContainText("added, proposed.");
+  // Added as the operator, and by whom: the admin's own stakeholder record, as on their requests.
+  const adminStakeholder = await graph.collection("stakeholders").findOne({ team: "shop", email: state().admin.email });
+  expect(adminStakeholder).toMatchObject({ role: "operator" });
+  const receipt = await graph.collection("tasks").findOne({ team: "shop", title: "A receipt by email" });
+  expect(receipt).toMatchObject({ status: "proposed", by: "operator", from: adminStakeholder?.id, approval: null });
+  expect(receipt?.history[0]).toMatchObject({ by: "operator", what: `added as proposed, from the web app by stakeholder ${adminStakeholder?.id}` });
+
+  await page.goto("/t/shop/add");
+  await page.getByLabel("Title").fill("Refund from the order page");
+  await page.getByRole("combobox", { name: /^Journey/ }).selectOption({ label: `#${journey?.id} Checkout` });
+  await page.getByLabel("Comes after (task numbers)").fill(`#${paid?.id}, 999`);
+  await page.getByLabel(/Approve it now/).check();
+  await page.getByRole("button", { name: "Add the task" }).click();
+  await expect(page.locator("main").getByRole("alert")).toContainText("There's no task #999 on this team.");
+  // What was typed is still there.
+  await expect(page.getByLabel("Title")).toHaveValue("Refund from the order page");
+  await page.getByLabel("Comes after (task numbers)").fill(`#${paid?.id}`);
+  await page.getByRole("button", { name: "Add the task" }).click();
+  await expect(page.getByRole("status")).toContainText("added, approved.");
+  await expect(page.getByRole("region", { name: "Where it stands" }).getByRole("link", { name: `#${journey?.id} Checkout` })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Where it stands" }).getByRole("link", { name: `#${paid?.id} Pay by card` })).toBeVisible();
+  // Exactly what e9g task add --approved writes, as the operator.
+  expect(await graph.collection("tasks").findOne({ team: "shop", title: "Refund from the order page" })).toMatchObject({
+    status: "approved",
+    by: "operator",
+    parent: journey?.id,
+    after: [paid?.id],
+    approval: { by: "operator", note: "added approved by the operator" },
+  });
+  await page.goto("/t/shop/board");
+  const refund = lane(page, "Approved").getByRole("listitem").filter({ hasText: "Refund from the order page" });
+  // Their own, to them.
+  await expect(refund.getByText(/^added by you/)).toBeVisible();
+  await expect(refund.getByText("in Checkout")).toBeVisible();
+
+  // To an admin, who asked for work is a name.
+  await expect(
+    page
+      .getByRole("listitem")
+      .filter({ hasText: "Export orders as CSV" })
+      .getByText(/^requested by Grace Hopper/)
+  ).toBeVisible();
+  // The member's suggestion, as the admin sees it: by name, in its history too.
+  const suggestion = lane(page, "Triage").getByRole("listitem").filter({ hasText: "Search orders by email" });
+  await expect(suggestion.getByText(/^suggested by Morgan Member/)).toBeVisible();
+  await suggestion.getByRole("link", { name: "Search orders by email" }).click();
+  await expect(page.getByText("suggested by Morgan Member <member@example.com> (sales)")).toBeVisible();
+  await expect(page.getByText("added as triage, from the web app by Morgan Member")).toBeVisible();
+
+  // A proposal's page leads to where it's decided.
+  const receiptId = String(receipt?.id);
+  await page.goto(`/t/shop/tasks/${receiptId}`);
+  await page.getByRole("link", { name: `Decide on #${receiptId}` }).click();
+  await expect(page).toHaveURL(new RegExp(`/t/shop/proposals#task-${receiptId}$`));
+  await expect(page.getByRole("button", { name: `Approve #${receiptId}` })).toBeVisible();
+
+  // Triage waits for the planner, but an admin can decide one that can't wait.
+  await page.goto("/t/shop/proposals");
+  await expect(page.getByRole("heading", { name: /^In triage/ })).toBeVisible();
+  const triaged = String((await graph.collection("tasks").findOne({ team: "shop", title: "Search orders by email" }))?.id);
+  await expect(page.getByRole("button", { name: `Reject #${triaged}` })).toBeVisible();
+  await page.goto(`/t/shop/tasks/${triaged}`);
+  await expect(page.getByRole("link", { name: `Decide on #${triaged}` })).toBeVisible();
+
+  // Everything done, and what was turned down, on request.
+  await page.goto("/t/shop/board");
+  await lane(page, "Done").getByRole("link", { name: "show them" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/board\?done=all$/);
+  await expect(lane(page, "Rejected").getByRole("link", { name: "Dark mode for receipts" })).toBeVisible();
+});
+
+test("a contributor neither sees the work nor adds to it, by page or by calling the action", async () => {
+  const { page } = contributor;
+  for (const path of ["/t/shop/board", "/t/shop/add", "/t/shop/tasks/1"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "Not found" }), path).toBeVisible();
+  }
+  await page.goto("/t/shop");
+  await expect(page.getByRole("link", { name: "Board", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Suggest a task" })).toHaveCount(0);
+  // The add form's own fields, as the admin's page has them, posted as a browser without scripts would post them: the
+  // admin's adds a task, the contributor's adds nothing.
+  await admin.page.goto("/t/shop/add");
+  const hidden = await admin.page
+    .locator("main form input[type=hidden]")
+    .evaluateAll((inputs) => inputs.map((input) => [(input as HTMLInputElement).name, (input as HTMLInputElement).value]));
+  const post = (as: Page, title: string) =>
+    as.request.post("/t/shop/add", {
+      multipart: { ...Object.fromEntries(hidden), team: "shop", title, kind: "feature", body: "This should reach the graph only from an admin." },
+      headers: { origin: state().baseURL },
+    });
+  await post(admin.page, "An admin's task, posted");
+  await post(page, "Sneaky task");
+  const { graph } = await databases();
+  expect(await graph.collection("tasks").findOne({ team: "shop", title: "An admin's task, posted" })).toMatchObject({
+    status: "proposed",
+    by: "operator",
+  });
+  expect(await graph.collection("tasks").findOne({ team: "shop", title: "Sneaky task" })).toBeNull();
+});
+
+test("the admin switches between teams, staying on the same page", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  await expect(page.getByRole("listitem").filter({ hasText: "Shop" }).getByRole("link", { name: "Board" })).toBeVisible();
+  await page.goto("/t/shop/board");
+  // It closes like a menu: on Escape, and on a click elsewhere.
+  await page.getByText("Switch team").click();
+  await expect(page.getByRole("link", { name: /^Blog/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("link", { name: /^Blog/ })).toBeHidden();
+  await page.getByText("Switch team").click();
+  await page.getByRole("heading", { name: "Shop", level: 1 }).click();
+  await expect(page.getByRole("link", { name: /^Blog/ })).toBeHidden();
+  await page.getByText("Switch team").click();
+  await page.getByRole("link", { name: /^Blog/ }).click();
+  await expect(page).toHaveURL(/\/t\/blog\/board$/);
+  await expect(page.getByRole("heading", { name: "Blog", level: 1 })).toBeVisible();
+  await expect(lane(page, "Approved").getByRole("link", { name: "Write the launch post" })).toBeVisible();
+  // From one task's page, to the other team's list: ids are a team's own.
+  await page.goto("/t/blog/tasks/1");
+  await page.getByText("Switch team").click();
+  await page.getByRole("link", { name: /^Shop/ }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/board$/);
+});
+
 test("an admin session without its second factor is refused every admin page and action", async ({ browser }) => {
   // The admin adds a passkey, on an authenticator that can verify them (a PIN or biometrics).
   const { page } = admin;
@@ -259,7 +482,7 @@ test("an admin session without its second factor is refused every admin page and
   await unverified.page.goto("/sign-in");
   await unverified.page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(unverified.page).toHaveURL(/\/second-factor$/);
-  await expect(unverified.page.getByRole("heading", { name: "Sign in with your second factor" })).toBeVisible();
+  await expect(unverified.page.getByRole("heading", { name: "Enter your authenticator's code" })).toBeVisible();
   for (const path of ["/", "/t/shop/proposals", "/admin/people", "/account"]) {
     await unverified.page.goto(path);
     await expect(unverified.page, path).toHaveURL(/\/second-factor$/);
@@ -274,7 +497,7 @@ test("an admin session without its second factor is refused every admin page and
     headers: { origin: state().baseURL },
     maxRedirects: 0,
   });
-  expect(errorOf(response)).toContain("Sign in again with your authenticator or a passkey first.");
+  expect(errorOf(response)).toContain("Enter your authenticator's code first.");
   expect(await graph.collection("tasks").findOne({ _id: `shop:${untouched}` as never })).toMatchObject({ status: "proposed", approval: null });
   // Nor can it raise itself: no new passkeys or backup codes over HTTP.
   for (const [method, path] of [
@@ -319,7 +542,7 @@ test(`a person sends at most 20 requests a day`, async ({ browser }) => {
   await page.getByLabel("Title").fill("Idea 21");
   await page.getByLabel("What you need, and why").fill("Kept when it's refused.");
   await page.getByRole("button", { name: "Send the request" }).click();
-  await expect(page.locator("main").getByRole("alert")).toContainText("You've sent 20 requests today");
+  await expect(page.locator("main").getByRole("alert")).toContainText("You've sent 20 requests and suggestions today");
   // What was typed is still there.
   await expect(page.getByLabel("Title")).toHaveValue("Idea 21");
   await expect(page.getByLabel("What you need, and why")).toHaveValue("Kept when it's refused.");
@@ -329,14 +552,23 @@ test(`a person sends at most 20 requests a day`, async ({ browser }) => {
 });
 
 test("pages fit a phone's width without scrolling sideways", async ({ browser }) => {
-  const context = await browser.newContext({
-    baseURL: state().baseURL,
-    storageState: await admin.context.storageState(),
-    viewport: { width: 360, height: 740 },
-  });
-  const page = await context.newPage();
-  for (const path of ["/", "/t/shop", "/t/shop/requests", "/t/shop/proposals", "/admin/people", "/account"]) {
+  const { context, page } = await newPage(browser, { storageState: await admin.context.storageState() });
+  await page.setViewportSize({ width: 360, height: 740 });
+  for (const path of [
+    "/",
+    "/t/shop",
+    "/t/shop/board",
+    "/t/shop/add",
+    "/t/shop/tasks/1",
+    "/t/shop/requests",
+    "/t/shop/proposals",
+    "/admin/people",
+    "/admin/audit",
+    "/account",
+  ]) {
     await page.goto(path);
+    // The page itself, not a refusal.
+    await expect(page.getByRole("heading", { level: 1 }).first(), path).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, path).toBeLessThanOrEqual(0);
   }

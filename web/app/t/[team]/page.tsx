@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { storeFor, type Task } from "../../../server/factory.ts";
-import { board, journeys, merges, progress } from "../../../server/views.ts";
+import { storeFor } from "../../../server/factory.ts";
+import { journeys, merges, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -50,6 +51,11 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               </li>
             ))}
           </ul>
+          {details ? (
+            <p className="small">
+              <Link href={`/t/${team.name}/board`}>Open the board →</Link>
+            </p>
+          ) : null}
         </section>
       </div>
 
@@ -61,7 +67,13 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               <li key={j.id}>
                 <div className="head">
                   <span className="id">#{j.id}</span>
-                  <span className="title">{j.title}</span>
+                  {details ? (
+                    <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
+                      {j.title}
+                    </Link>
+                  ) : (
+                    <span className="title">{j.title}</span>
+                  )}
                   <Chip>{j.status}</Chip>
                   {j.due ? <Chip tone="caution">due its verification</Chip> : null}
                 </div>
@@ -78,10 +90,6 @@ export default async function OverviewPage({ params, searchParams }: { params: P
 
       {details ? (
         <>
-          <section className="panel" aria-labelledby="board">
-            <h2 id="board">Board</h2>
-            <Board tasks={tasks} />
-          </section>
           <section className="panel" aria-labelledby="graph">
             <h2 id="graph">Graph</h2>
             <TaskGraph tasks={tasks} />
@@ -92,7 +100,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               <ul className="plain rows">
                 {merges(tasks).map(({ task, at }) => (
                   <li key={task.id}>
-                    <span className="id">#{task.id}</span> {task.title}{" "}
+                    <span className="id">#{task.id}</span> <Link href={`/t/${team.name}/tasks/${task.id}`}>{task.title}</Link>{" "}
                     <span className="muted small">
                       · <Ago at={at} />
                     </span>
@@ -106,48 +114,5 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </>
       ) : null}
     </>
-  );
-}
-
-function Board({ tasks }: { tasks: Task[] }) {
-  const columns = board(tasks);
-  if (!columns.length) return <p className="empty">No tasks yet.</p>;
-  return (
-    <div className="board">
-      {columns.map(({ status, tasks: list }) => {
-        const cards = (
-          <ul className="plain">
-            {list.map((t) => (
-              <li key={t.id} className={`card status-${t.status}`}>
-                <div>
-                  <span className="id">#{t.id}</span> {t.title}
-                </div>
-                <div className="small muted">{[t.kind, t.severity, t.priority === null ? null : `p${t.priority}`].filter(Boolean).join(" · ")}</div>
-                {t.claim ? (
-                  <div className="claim">
-                    {t.claim.role} on {t.claim.machine}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        );
-        return (
-          <div key={status} className="column">
-            <h3>
-              {status} <span className="muted">{list.length}</span>
-            </h3>
-            {status === "done" || status === "rejected" ? (
-              <details>
-                <summary>Show</summary>
-                {cards}
-              </details>
-            ) : (
-              cards
-            )}
-          </div>
-        );
-      })}
-    </div>
   );
 }

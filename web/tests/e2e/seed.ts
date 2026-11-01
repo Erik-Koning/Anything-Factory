@@ -8,7 +8,9 @@ import type { TeamSettings } from "../../../lib/tasks/teams.ts";
 import { auth } from "../../server/auth.ts";
 import { createAdmin } from "../../server/bootstrap.ts";
 import { storeFor } from "../../server/factory.ts";
+import { rememberIp } from "../../server/known-ips.ts";
 import { setMembership } from "../../server/people.ts";
+import { DEFAULT_IP } from "../../playwright.config.ts";
 
 export interface World {
   admin: { email: string; password: string; totpURI: string; backupCodes: string[] };
@@ -117,7 +119,11 @@ export async function seed(): Promise<World> {
   for (const p of people) {
     const { user } = await auth().api.createUser({ body: { email: p.email, name: p.name, role: "user" } });
     await setMembership({ userId: user.id, name: user.name, email: user.email }, "shop", p.role, p.label);
+    await rememberIp(user.id, DEFAULT_IP, "confirmed by email");
   }
+  // Everyone the story starts with has confirmed the address the tests' browsers come from; a new one asks by email.
+  const operator = await (await auth().$context).internalAdapter.findUserByEmail(admin.email);
+  if (operator) await rememberIp(operator.user.id, DEFAULT_IP, "confirmed by email");
   return {
     admin,
     member: "member@example.com",

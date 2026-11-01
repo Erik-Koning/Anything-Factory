@@ -2,8 +2,9 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, teams.ts and graph.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
+// decide.ts, add.ts, teams.ts and graph.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
+import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../lib/tasks/mongo.ts";
@@ -73,4 +74,12 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
   const settings = await teamDoc(team);
   if (!settings?.approval) throw new Refused(`${team} hasn't published its approval rules (e9g register publishes them)`);
   return decide(storeFor(team), id, decision, { who: OPERATOR, approval: settings.approval, text: text.trim() });
+}
+
+// A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
+// added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,
+// by their stakeholder id, never their name (Article 8).
+export function addTaskFromWeb(team: string, input: Omit<TaskInput, "from">, { admin, from }: { admin: boolean; from: string }): Promise<Task> {
+  const fields: TaskInput = { ...input, title: input.title.trim(), body: input.body?.trim() ?? "", from };
+  return admin ? addTask(storeFor(team), team, fields, OPERATOR) : addTask(storeFor(team), team, { ...fields, approved: false }, "stakeholder");
 }

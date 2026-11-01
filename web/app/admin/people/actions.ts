@@ -9,7 +9,8 @@ import { invitationProblem, isTeamRole, LIMITS, TEAM_PARAM } from "../../../serv
 import { auth, isAdminRole } from "../../../server/auth.ts";
 import { Refused, teamDoc } from "../../../server/factory.ts";
 import { changeRole, removeMembership, setMembership } from "../../../server/people.ts";
-import { allowed, NotAllowed } from "../../../server/viewer.ts";
+import type { AuditAction } from "../../../server/audit.ts";
+import { allowed, getViewer, NotAllowed, type Person, record } from "../../../server/viewer.ts";
 
 const BACK = "/admin/people";
 const text = (form: FormData, key: string): string => {
@@ -23,13 +24,31 @@ function reasonOf(error: unknown): string {
   console.error(error);
   return "Something went wrong; try again.";
 }
-async function run(work: () => Promise<string>): Promise<never> {
+// What a change did, for the notice and the audit log.
+interface Done {
+  ok: string;
+  target: string;
+  team?: string;
+  detail?: string;
+}
+// Each change: the admin and their second factor checked, the work done, and both kinds of outcome recorded.
+async function run(action: AuditAction, form: FormData, work: (admin: Person) => Promise<Done>): Promise<never> {
   let notice: { ok?: string; error?: string };
+  let admin: Person | null = null;
   try {
-    await allowed("people:manage");
-    notice = { ok: await work() };
+    admin = await allowed("people:manage");
+    const done = await work(admin);
+    notice = { ok: done.ok };
+    await record(admin, { action, outcome: "ok", target: done.target, team: done.team ?? null, detail: done.detail ?? null });
   } catch (error) {
     notice = { error: reasonOf(error) };
+    await record(admin ?? (await getViewer()), {
+      action,
+      outcome: "refused",
+      target: text(form, "email") || text(form, "userId") || null,
+      team: text(form, "team") || null,
+      detail: notice.error,
+    });
   }
   redirect(withNotice(BACK, notice));
 }
@@ -45,7 +64,7 @@ async function userById(id: string): Promise<{ id: string; name: string; email: 
 // Invites someone to a team: their account when new (no password: they sign in by email or a passkey), their role
 // and stakeholder record on the team, and for a new account an invitation with a sign-in link.
 export async function inviteAction(form: FormData): Promise<void> {
-  await run(async () => {
+  await run("person.invited", form, async () => {
     const email = text(form, "email").toLowerCase();
     const name = text(form, "name");
     const team = text(form, "team");
@@ -59,48 +78,48 @@ export async function inviteAction(form: FormData): Promise<void> {
     const known = (await context.internalAdapter.findUserByEmail(email))?.user as { id: string; name: string; email: string; role?: string } | undefined;
     const user = known ?? (await auth().api.createUser({ body: { email, name, role: "user" }, headers: await headers() })).user;
     await setMembership({ userId: user.id, name: user.name, email: user.email }, team, role, label);
-    if (known) return `${known.email} is now a ${role} of ${team}.`;
+    if (known) return { ok: `${known.email} is now a ${role} of ${team}.`, target: known.email, team, detail: `${role}, already had an account` };
     await auth().api.signInMagicLink({ body: { email, callbackURL: `/t/${team}`, metadata: { team: settings.title || team } }, headers: await headers() });
-    return `Invited ${email} to ${team} as a ${role}; they have a sign-in link by email.`;
+    return { ok: `Invited ${email} to ${team} as a ${role}; they have a sign-in link by email.`, target: email, team, detail: role };
   });
 }
 
 export async function changeRoleAction(form: FormData): Promise<void> {
-  await run(async () => {
+  await run("person.role", form, async () => {
     const user = await userById(text(form, "userId"));
     const team = text(form, "team");
     const role = text(form, "role");
     if (!TEAM_PARAM.test(team) || !isTeamRole(role)) throw new Refused("Choose member or contributor.");
     if (!(await changeRole(user.id, team, role))) throw new Refused(`${user.email} isn't on ${team}.`);
-    return `${user.email} is now a ${role} of ${team}.`;
+    return { ok: `${user.email} is now a ${role} of ${team}.`, target: user.email, team, detail: role };
   });
 }
 
 export async function removeAction(form: FormData): Promise<void> {
-  await run(async () => {
+  await run("person.removed", form, async () => {
     const user = await userById(text(form, "userId"));
     const team = text(form, "team");
     if (!TEAM_PARAM.test(team)) throw new Refused("No such team.");
     await removeMembership(user.id, team);
-    return `${user.email} is no longer on ${team}.`;
+    return { ok: `${user.email} is no longer on ${team}.`, target: user.email, team };
   });
 }
 
 // A ban ends every session the person has and keeps them from signing in; admins are managed by create-admin.
 export async function banAction(form: FormData): Promise<void> {
-  await run(async () => {
+  await run("person.banned", form, async () => {
     const user = await userById(text(form, "userId"));
     if (isAdminRole(user.role)) throw new Refused("Admins aren't banned from here; remove one with create-admin on the operator's machine.");
     const reason = text(form, "reason").slice(0, LIMITS.label) || "removed by an admin";
     await auth().api.banUser({ body: { userId: user.id, banReason: reason }, headers: await headers() });
-    return `${user.email} is banned and signed out everywhere.`;
+    return { ok: `${user.email} is banned and signed out everywhere.`, target: user.email, detail: reason };
   });
 }
 
 export async function unbanAction(form: FormData): Promise<void> {
-  await run(async () => {
+  await run("person.unbanned", form, async () => {
     const user = await userById(text(form, "userId"));
     await auth().api.unbanUser({ body: { userId: user.id }, headers: await headers() });
-    return `${user.email} can sign in again.`;
+    return { ok: `${user.email} can sign in again.`, target: user.email };
   });
 }

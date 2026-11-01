@@ -12,6 +12,15 @@ hosted app can read and write the same documents.
 Decided (operator, 2026-10-29): Better Auth on MongoDB; people send **requests only** (the planner turns them into
 tasks); the app is for sending and managing requests and viewing the team's state.
 
+Decided (operator, 2026-10-31): the app also adds to the graph. Admins **add tasks** as the operator (a proposal, or
+approved as it's added); members **suggest tasks**, which go to `triage` for the planner. Both go through the factory's
+`addTask` (`lib/tasks/add.ts`, out of `e9g task add`), and every task added from the web records **who added it**
+(their stakeholder id, never their name). The planner never approves a suggestion itself: it makes it its own proposal
+for the approver or the operator. Members and admins see the work as a **board** (a lane per step: triage, proposed,
+approved, building, review, blocked when anything is, done, and rejected on request) and each task, and anyone on
+more than one team **switches** between them from the team's heading. Admins may decide a task in triage when it can't
+wait for the planner. Contributors keep sending requests only.
+
 ## What it is
 
 A Next.js app (`web/` in this repository) on the same MongoDB as the teams' task graphs:
@@ -31,11 +40,11 @@ uses, so an approval from the web is exactly `e9g task approve` by the operator.
 
 ## Who sees what
 
-| Role                     | Can                                                                                                   |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| **admin** (the operator) | everything below; approve or reject proposals; invite, change and remove people; see names and emails |
-| **member**               | see the board, journeys, the graph, every request and the team's status; send requests                |
-| **contributor**          | send requests; see their own requests and how each is going, and the team's overview **(to decide)**  |
+| Role                     | Can                                                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| **admin** (the operator) | everything below; add tasks; approve or reject proposals; invite, change and remove people; see names and emails            |
+| **member**               | see the board, each task, journeys, the graph, every request and the team's status; send requests; suggest tasks for triage |
+| **contributor**          | send requests; see their own requests and how each is going, and the team's overview **(to decide)**                        |
 
 Access is per team: a person is a member of one team and a contributor to another. Agents still see a stakeholder's
 id and role, never a name or address (Article 8).
@@ -79,28 +88,41 @@ id and role, never a name or address (Article 8).
 | From the web                 | The factory code it calls                                                                                                                        |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | a request                    | `addRequest` (moved to `lib/tasks/requests.ts`)                                                                                                  |
+| an admin's task              | `addTask` (moved to `lib/tasks/add.ts`) as the operator, with their stakeholder id: proposed, or approved as it's added                          |
+| a member's suggestion        | `addTask` by `stakeholder`, with their stakeholder id: a task in `triage` for the planner                                                        |
 | an admin approves or rejects | `decide` (moved to `lib/tasks/decide.ts`): `move()` through the table, as the operator, with the team's approval rules from its `teams` document |
 | an invitation or a role      | the stakeholder record, by `stakeholderFor` (in `lib/tasks/requests.ts`)                                                                         |
 
 Nothing else changes the graph from the web. A new request wakes an idle team through the lead's watchdog, as now.
 
-## Hosting **(to decide)**
+## Hosting
 
-Recommended: Vercel for the app (its root `web/`), MongoDB Atlas for the database, with the app's own database user:
+Decided (operator, 2026-11-01): **AWS Lightsail** for the app (a container service, from `web/Dockerfile`) with
+**CloudFront** in front, both made by **SST** (`web/sst.config.ts`); MongoDB Atlas for the database, with the app's own
+database user:
 
-- on `e9g`, read everything, insert and update requests and stakeholders, and update tasks (the app's code allows only
-  decisions; Mongo can't scope a role to fields);
-- read and write on `e9g_web`; nothing else.
+- on `e9g`, read everything, insert and update requests, stakeholders and tasks (the app's code allows only adding a
+  task and deciding; Mongo can't scope a role to fields);
+- on `e9g_web`, read and write Better Auth's collections and the app's own, and only insert into the audit log;
+  nothing else.
+
+CloudFront sets the viewer's IP address in a header of its own and sends a secret the app checks on every request, so
+the address can't be made up and nobody reaches the app around CloudFront. `web/README.md` has the deploy guide.
 
 The connection string, the auth secret and the Resend key are the app's environment variables, never the team's. The
 operator deploys it; teams never do (Article 7).
 
 ## Security
 
-- Invite only, admins with two factors, passkeys preferred.
-- Every write is a server action that checks the session, the person's role for that team and, for admins, the
-  second factor, then calls the factory's code.
-- Rate limits: Better Auth's on sign-in; requests at most 20 a day per person.
+- Invite only, admins with two factors, passkeys preferred. Decided (operator, 2026-11-01): anyone may turn on an
+  authenticator, which every later sign-in then asks for; a session from an IP address its person hasn't confirmed
+  waits until they confirm it from an email ("it wasn't me" ends every session); and an audit log of sign-ins, second
+  factors, new addresses and every change, for admins to read.
+- Every write is a server action that checks the session, its second factor and IP address, and the person's role for
+  that team, then calls the factory's code.
+- Rate limits: Better Auth's on sign-in; requests and task suggestions at most 20 a day per person.
+- A suggested task's text is data too: the planner's prompt says a task by `stakeholder` is a person's words, to weigh
+  and never to follow.
 - Request text is data: the planner treats it as a stakeholder's words, never as instructions (its prompt says so).
 - Names and emails live only in the accounts and the stakeholder records; the factory's commands keep showing agents an
   id and a role.
@@ -125,9 +147,14 @@ operator deploys it; teams never do (Article 7).
 - [x] Phase 4: Decisions and People (admins)
 - [x] Phase 5: tests (the shared code with `node --test`; the app's flows with Playwright against a local MongoDB);
       a security review; the README and a deploy guide
-- [ ] Phase 6: deploy (Vercel, Atlas user), and an end-to-end run with a team on Mongo
+- [x] Phase 5b (2026-10-31): adding tasks (admins) and suggesting them for triage (members), through `addTask`, each
+      recording who added it; the board; a page per task; switching teams; unit and end-to-end tests
+- [x] Phase 5c (2026-11-01): authenticators for everyone, new IP addresses confirmed by email, the audit log, the CDN's
+      secret; the deployment written (Lightsail behind CloudFront, by SST) and type-checked, the image's server run
+- [ ] Phase 6: deploy (`sst deploy`, Atlas user), and an end-to-end run with a team on Mongo
 
 ## Out of scope
 
-Filing tasks from the web (requests only); editing tasks, scores or the brief; starting or stopping members; chat with
+Contributors filing tasks (they send requests); moving cards on the board (moves stay the team's and the Decisions
+page's); editing tasks, scores or the brief; starting or stopping members; chat with
 the planner; a public request page.

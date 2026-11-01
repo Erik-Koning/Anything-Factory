@@ -1,0 +1,232 @@
+/// <reference path="./.sst/platform/config.d.ts" />
+// The web app on AWS: the container on Lightsail, CloudFront in front.
+//
+//   viewer ──https──▶ CloudFront ──https, x-e9g-origin: <secret>──▶ Lightsail container service ──▶ Next.js (web/)
+//                      │ a viewer-request function sets x-e9g-viewer-ip (the viewer's address) and x-forwarded-host
+//                      │ /_next/static/* cached; everything else passed through, cookies and all
+//
+// The app refuses any request without the CDN's secret (proxy.ts), so nobody reaches it around CloudFront or sets
+// the viewer-IP header themselves; Lightsail's health check, which comes from inside, reaches /api/health alone.
+//
+// Email goes through Amazon SES, from E9G_WEB_SENDER, an address at a domain made an SES sender once for every stage
+// and app (scripts/ses-domain.sh: DKIM, its MAIL FROM, DMARC; not per stage, so removing one keeps the domain's mail).
+// Until the account has SES production access, SES sends only to verified addresses. Lightsail can't take an IAM role,
+// so each stage sends with its own IAM user's key, which may only send from that address.
+//
+// Before the first deploy, per stage (the values stay in SST's encrypted secrets, never in the repository):
+//   npx sst secret set MongodbUri "mongodb+srv://…" --stage production
+//   npx sst secret set BetterAuthSecret "$(openssl rand -base64 32)" --stage production
+// Then: E9G_WEB_SENDER=no-reply@a6gfactory.dev E9G_WEB_DOMAIN=app.a6gfactory.dev npx sst deploy --stage production
+//
+// Settings, from the environment of the deploy:
+//   E9G_WEB_SENDER   the address email comes from (required), at a domain verified in SES: no-reply@a6gfactory.dev.
+//   E9G_WEB_DOMAIN   the app's own domain, in a Route 53 hosted zone of this account (a certificate is made for it).
+//                    Without it the app is served on CloudFront's own *.cloudfront.net address. Passkeys belong to
+//                    the domain they were made on, so choose it before people add theirs.
+//   E9G_WEB_REGION   where Lightsail runs it (us-east-2: the account's organization allows Lightsail, SSM and ECR there,
+//                    and it's near the database's region).
+//   E9G_WEB_POWER    the container's size: nano, micro (1 GB, the default), small, medium, large, xlarge.
+//   E9G_WEB_SCALE    how many containers (1).
+export default $config({
+  app(input) {
+    return {
+      name: "e9g-web",
+      home: "aws",
+      removal: input?.stage === "production" ? "retain" : "remove",
+      protect: input?.stage === "production",
+      providers: {
+        aws: { region: (process.env.E9G_WEB_REGION ?? "us-east-2") as "us-east-2" },
+        "docker-build": "0.0.22",
+        random: "4.21.4",
+      },
+    };
+  },
+  async run() {
+    const path = await import("node:path");
+    const domain = process.env.E9G_WEB_DOMAIN || undefined;
+    const sender = process.env.E9G_WEB_SENDER ?? "";
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sender)) throw new Error("E9G_WEB_SENDER: the address the app's email comes from, such as e9g@example.com");
+    const power = process.env.E9G_WEB_POWER ?? "micro";
+    const scale = Number(process.env.E9G_WEB_SCALE ?? "1");
+    if (!Number.isInteger(scale) || scale < 1 || scale > 20) throw new Error("E9G_WEB_SCALE: a whole number of containers, 1 to 20");
+
+    const mongodbUri = new sst.Secret("MongodbUri");
+    const authSecret = new sst.Secret("BetterAuthSecret");
+    // Only CloudFront and the app know it; kept in SST's state, made once per stage.
+    const originSecret = new random.RandomPassword("OriginSecret", { length: 48, special: false });
+
+    // Email: a key that may send from the sender's address and nothing else (the domain is SES's already).
+    const mailer = new aws.iam.User("WebMailer", { path: "/e9g/" });
+    new aws.iam.UserPolicy("WebMailerSends", {
+      user: mailer.name,
+      policy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["ses:SendEmail", "ses:SendRawEmail"],
+            Resource: "*",
+            Condition: { StringEquals: { "ses:FromAddress": sender } },
+          },
+        ],
+      }),
+    });
+    const mailerKey = new aws.iam.AccessKey("WebMailerKey", { user: mailer.name });
+
+    // The image: built from the repository's root (the app compiles ../lib/tasks), for Lightsail's x86 hosts.
+    const images = new aws.ecr.Repository("WebImages", {
+      forceDelete: $app.stage !== "production",
+      imageScanningConfiguration: { scanOnPush: true },
+    });
+    new aws.ecr.LifecyclePolicy("WebImagesExpiry", {
+      repository: images.name,
+      policy: JSON.stringify({
+        rules: [
+          {
+            rulePriority: 1,
+            description: "Keep the newest 10 images",
+            selection: { tagStatus: "any", countType: "imageCountMoreThan", countNumber: 10 },
+            action: { type: "expire" },
+          },
+        ],
+      }),
+    });
+    const login = aws.ecr.getAuthorizationTokenOutput({ registryId: images.registryId });
+    const repository = path.resolve($cli.paths.root, "..");
+    const image = new dockerbuild.Image("WebImage", {
+      context: { location: repository },
+      dockerfile: { location: path.join(repository, "web", "Dockerfile") },
+      platforms: ["linux/amd64"],
+      buildArgs: { SERVER_ACTIONS_ORIGINS: domain ?? "" },
+      tags: [$interpolate`${images.repositoryUrl}:${$app.stage}`],
+      registries: [{ address: login.proxyEndpoint, username: login.userName, password: $util.secret(login.password) }],
+      push: true,
+    });
+
+    // The container service, allowed to pull from the repository above and nothing else.
+    const service = new aws.lightsail.ContainerService("Web", {
+      name: `e9g-web-${$app.stage}`.slice(0, 63),
+      power,
+      scale,
+      privateRegistryAccess: { ecrImagePullerRole: { isActive: true } },
+    });
+    const pull = new aws.ecr.RepositoryPolicy("WebImagesPull", {
+      repository: images.name,
+      policy: service.privateRegistryAccess.apply((access) =>
+        JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Sid: "LightsailPullsTheWebImage",
+              Effect: "Allow",
+              Principal: { AWS: access.ecrImagePullerRole?.principalArn },
+              Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+            },
+          ],
+        })
+      ),
+    });
+
+    // CloudFront: the viewer's address and the public host for the app, the secret on every request to the origin.
+    const viewerRequest = new aws.cloudfront.Function("WebViewerRequest", {
+      runtime: "cloudfront-js-2.0",
+      publish: true,
+      comment: "E9G web: the viewer's IP address and public host, for the app",
+      code: [
+        "function handler(event) {",
+        "  var request = event.request;",
+        "  // Replaces whatever a viewer sent under these names.",
+        '  request.headers["x-e9g-viewer-ip"] = { value: event.viewer.ip };',
+        '  request.headers["x-forwarded-host"] = { value: request.headers.host.value };',
+        "  return request;",
+        "}",
+      ].join("\n"),
+    });
+    // AWS's managed policies: no caching, every viewer header but Host (the origin's own name goes to Lightsail), and
+    // the usual caching for Next's hashed static files.
+    const CACHING_DISABLED = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
+    const CACHING_OPTIMIZED = "658327ea-f89d-4fab-a63d-7e88639e58f6";
+    const ALL_VIEWER_EXCEPT_HOST = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
+    const ORIGIN = "lightsail";
+    const cdn = new sst.aws.Cdn("WebCdn", {
+      comment: `E9G web (${$app.stage})`,
+      ...(domain ? { domain } : {}),
+      origins: [
+        {
+          originId: ORIGIN,
+          domainName: service.url.apply((url) => new URL(url).hostname),
+          customOriginConfig: {
+            httpPort: 80,
+            httpsPort: 443,
+            originProtocolPolicy: "https-only",
+            originSslProtocols: ["TLSv1.2"],
+            originReadTimeout: 30,
+            originKeepaliveTimeout: 5,
+          },
+          customHeaders: [{ name: "x-e9g-origin", value: originSecret.result }],
+        },
+      ],
+      defaultCacheBehavior: {
+        targetOriginId: ORIGIN,
+        viewerProtocolPolicy: "redirect-to-https",
+        allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+        cachedMethods: ["GET", "HEAD"],
+        compress: true,
+        cachePolicyId: CACHING_DISABLED,
+        originRequestPolicyId: ALL_VIEWER_EXCEPT_HOST,
+        functionAssociations: [{ eventType: "viewer-request", functionArn: viewerRequest.arn }],
+      },
+      orderedCacheBehaviors: [
+        {
+          pathPattern: "/_next/static/*",
+          targetOriginId: ORIGIN,
+          viewerProtocolPolicy: "redirect-to-https",
+          allowedMethods: ["GET", "HEAD"],
+          cachedMethods: ["GET", "HEAD"],
+          compress: true,
+          cachePolicyId: CACHING_OPTIMIZED,
+        },
+      ],
+    });
+    const url = domain ? `https://${domain}` : cdn.url;
+
+    // The running app: the image by its digest (a new build deploys a new version), the settings it reads at start.
+    // Lightsail keeps a deployment's environment in the deployment (the database's connection string, the auth secret,
+    // the mailer's key), readable by anyone with Lightsail access to this account: give that access to the operators only.
+    new aws.lightsail.ContainerServiceDeploymentVersion(
+      "WebDeployment",
+      {
+        serviceName: service.name,
+        containers: [
+          {
+            containerName: "web",
+            image: $interpolate`${images.repositoryUrl}@${image.digest}`,
+            ports: { "3000": "HTTP" },
+            environment: {
+              NODE_ENV: "production",
+              MONGODB_URI: mongodbUri.value,
+              E9G_DATABASE: "e9g",
+              AUTH_DATABASE: "e9g_web",
+              BETTER_AUTH_SECRET: authSecret.value,
+              BETTER_AUTH_URL: url,
+              SES_REGION: aws.getRegionOutput().name,
+              SES_ACCESS_KEY_ID: mailerKey.id,
+              SES_SECRET_ACCESS_KEY: mailerKey.secret,
+              MAIL_FROM: `${$app.stage === "production" ? "E9G" : `E9G (${$app.stage})`} <${sender}>`,
+              CLIENT_IP_HEADER: "x-e9g-viewer-ip",
+              ORIGIN_SECRET: originSecret.result,
+            },
+          },
+        ],
+        publicEndpoint: {
+          containerName: "web",
+          containerPort: 3000,
+          healthCheck: { path: "/api/health", intervalSeconds: 10, timeoutSeconds: 5, healthyThreshold: 2, unhealthyThreshold: 3, successCodes: "200" },
+        },
+      },
+      { dependsOn: [pull] }
+    );
+
+    return { url, origin: service.url, sender };
+  },
+});

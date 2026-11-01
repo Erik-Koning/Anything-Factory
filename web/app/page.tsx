@@ -22,7 +22,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
           {cards.map(({ team, waiting, cycles, lastMerge }) => {
             const role = roleIn(viewer, team.name);
             const status = team.status;
-            const working = status ? Object.values(status.members).reduce((sum, n) => sum + n, 0) : 0;
+            const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
             return (
               <li key={team.name}>
                 <div className="head">
@@ -37,7 +37,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                   <dt>Planner</dt>
                   <dd>{status?.planner ?? "not running"}</dd>
                   <dt>At work</dt>
-                  <dd>{working ? `${working} member${working === 1 ? "" : "s"}` : "nobody"}</dd>
+                  <dd>{atWork.length ? atWork.map(([r, n]) => `${n} ${r}${n === 1 ? "" : "s"}`).join(", ") : "nobody"}</dd>
                   <dt>Aim</dt>
                   <dd>
                     {team.mode === "cycles" ? `cycle ${cycles + 1}` : status?.state === "complete" ? "finish line reached" : "working to its finish line"}
@@ -52,7 +52,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                   </dd>
                 </dl>
                 <p className="small">
-                  <Link href={`/t/${team.name}`}>Overview</Link> · <Link href={`/t/${team.name}/requests`}>Requests</Link>
+                  <Link href={`/t/${team.name}`}>Overview</Link>
+                  {can(viewer, "team:board", team.name) ? (
+                    <>
+                      {" "}
+                      · <Link href={`/t/${team.name}/board`}>Board</Link>
+                    </>
+                  ) : null}{" "}
+                  · <Link href={`/t/${team.name}/requests`}>Requests</Link>
                   {can(viewer, "proposals:decide", team.name) ? (
                     <>
                       {" "}

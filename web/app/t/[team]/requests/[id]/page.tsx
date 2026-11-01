@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/ui.tsx";
-import { canSeeRequest, REQUEST_ID, senderLabel } from "../../../../../server/access.ts";
+import { can, canSeeRequest, REQUEST_ID, senderLabel } from "../../../../../server/access.ts";
 import { linkedStakeholder, storeFor } from "../../../../../server/factory.ts";
 import { rejectionOf, requestState } from "../../../../../server/views.ts";
 import { teamFor } from "../../team.ts";
@@ -56,7 +56,13 @@ export default async function RequestPage({ params, searchParams }: { params: Pr
             <ul className="plain rows">
               {became.map(({ id: tid, task }) => (
                 <li key={tid}>
-                  <span className="id">#{tid}</span> {task ? task.title : "(gone)"} {task ? <Chip>{task.status}</Chip> : null}
+                  <span className="id">#{tid}</span>{" "}
+                  {task && can(viewer, "team:board", team.name) ? (
+                    <Link href={`/t/${team.name}/tasks/${tid}`}>{task.title}</Link>
+                  ) : (
+                    (task?.title ?? "(gone)")
+                  )}{" "}
+                  {task ? <Chip>{task.status}</Chip> : null}
                 </li>
               ))}
             </ul>

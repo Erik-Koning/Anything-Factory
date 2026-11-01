@@ -23,5 +23,6 @@
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
-  "exclude": ["node_modules", ".next", "test-results", "playwright-report"]
+  // The deployment (sst.config.ts, infra/) is checked on its own, against SST's platform (tsconfig.infra.json).
+  "exclude": ["node_modules", ".next", "test-results", "playwright-report", ".sst", "sst.config.ts", "infra"]
 }

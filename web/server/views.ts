@@ -1,9 +1,10 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
-import { claimOrder, type FeatureRequest, journeyDue, MERGE, STATUSES, type Status, type Task } from "../../lib/tasks/model.ts";
+import { claimOrder, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
 
 // How many tasks are where, in words a contributor reads (journeys aren't counted: they group tasks).
 export const PROGRESS: { label: string; statuses: Status[] }[] = [
-  { label: "Waiting for a decision", statuses: ["triage", "proposed", "researching", "question"] },
+  { label: "In triage", statuses: ["triage"] },
+  { label: "Waiting for a decision", statuses: ["proposed", "researching", "question"] },
   { label: "Approved, to build", statuses: ["approved"] },
   { label: "Being built", statuses: ["building"] },
   { label: "In review", statuses: ["review"] },
@@ -39,11 +40,6 @@ export function journeys(tasks: Task[]): JourneyView[] {
     });
 }
 
-// The board: a column per status that has tasks, in claim order.
-export function board(tasks: Task[]): { status: Status; tasks: Task[] }[] {
-  return STATUSES.map((status) => ({ status, tasks: tasks.filter((t) => t.status === status).sort(claimOrder) })).filter((c) => c.tasks.length);
-}
-
 // The merge queue's merges, newest first.
 export function merges(tasks: Task[], limit = 5): { task: Task; at: string }[] {
   return tasks
@@ -73,4 +69,77 @@ export function proposals(tasks: Task[]): Task[] {
   return tasks
     .filter((t) => PROPOSALS.includes(t.status) && t.kind !== "journey")
     .sort((a, b) => PROPOSALS.indexOf(a.status) - PROPOSALS.indexOf(b.status) || (b.priority ?? -1) - (a.priority ?? -1) || Number(a.id) - Number(b.id));
+}
+
+// --- The board ----------------------------------------------------------------------------------------------------
+// A column per step of a task's way through the team, left to right: the planner triages, the approver (or the
+// operator) decides, members claim and build, the reviewer reviews, the merge queue merges. Journeys aren't cards (they
+// group them: each card names its journey). Done shows the newest `doneLimit`; rejected work is counted, or a lane of
+// its own when asked for.
+
+export type Lane = "triage" | "proposed" | "approved" | "building" | "review" | "blocked" | "done" | "rejected";
+export const LANES: { lane: Lane; label: string; statuses: Status[]; hint: string }[] = [
+  { lane: "triage", label: "Triage", statuses: ["triage"], hint: "Suggestions and findings, for the planner to sort" },
+  { lane: "proposed", label: "Proposed", statuses: ["question", "proposed", "researching"], hint: "Waiting for a decision" },
+  { lane: "approved", label: "Approved", statuses: ["approved"], hint: "In the order members claim them" },
+  { lane: "building", label: "Building", statuses: ["building"], hint: "Claimed by a member" },
+  { lane: "review", label: "Review", statuses: ["review"], hint: "Waiting for the reviewer" },
+  { lane: "blocked", label: "Blocked", statuses: ["blocked"], hint: "Stopped until something changes" },
+  { lane: "done", label: "Done", statuses: ["done"], hint: "Newest first" },
+  { lane: "rejected", label: "Rejected", statuses: ["rejected"], hint: "Turned down, newest first" },
+];
+
+export interface Card {
+  task: Task;
+  // A building task whose member's lease ran out: the watchdog hands it back on its next run.
+  lapsed: boolean;
+  // The tasks it comes after that aren't done yet.
+  waits: { id: string; status: Status | "missing" }[];
+  // When it got where it is (done: when it was done).
+  since: string;
+}
+export interface Column {
+  lane: Lane;
+  label: string;
+  hint: string;
+  cards: Card[];
+  // Cards past the limit (done only).
+  more: number;
+}
+
+const enteredAt = (t: Task): string => t.history.findLast((e) => e.to === t.status)?.at ?? t.createdAt;
+
+// The board's columns; `rejected` adds a lane of the rejected work, otherwise only counted.
+export function kanban(tasks: Task[], { now = Date.now(), doneLimit = 8, rejected = false } = {}): { columns: Column[]; rejected: number } {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const work = tasks.filter((t) => t.kind !== "journey");
+  const card = (task: Task): Card => ({
+    task,
+    lapsed: task.status === "building" && task.claim !== null && Date.parse(task.claim.until) <= now,
+    waits: task.after.flatMap((id) => {
+      const status: Status | "missing" = byId.get(id)?.status ?? "missing";
+      return status === "done" ? [] : [{ id, status }];
+    }),
+    since: task.status === "building" && task.claim ? task.claim.at : enteredAt(task),
+  });
+  const order: Record<Lane, (a: Card, b: Card) => number> = {
+    triage: (a, b) => b.task.createdAt.localeCompare(a.task.createdAt),
+    // Escalated first, then by priority, as on the Decisions page.
+    proposed: (a, b) => PROPOSALS.indexOf(a.task.status) - PROPOSALS.indexOf(b.task.status) || (b.task.priority ?? -1) - (a.task.priority ?? -1),
+    approved: (a, b) => claimOrder(a.task, b.task),
+    building: (a, b) => a.since.localeCompare(b.since),
+    review: (a, b) => a.since.localeCompare(b.since),
+    blocked: (a, b) => b.since.localeCompare(a.since),
+    done: (a, b) => b.since.localeCompare(a.since),
+    rejected: (a, b) => b.since.localeCompare(a.since),
+  };
+  const columns = LANES.map(({ lane, label, statuses, hint }) => {
+    const cards = work
+      .filter((t) => statuses.includes(t.status))
+      .map(card)
+      .sort(order[lane]);
+    const limit = lane === "done" ? doneLimit : cards.length;
+    return { lane, label, hint, cards: cards.slice(0, limit), more: Math.max(0, cards.length - limit) };
+  }).filter((c) => (c.lane === "blocked" ? c.cards.length > 0 : c.lane === "rejected" ? rejected : true));
+  return { columns, rejected: rejected ? 0 : work.filter((t) => t.status === "rejected").length };
 }

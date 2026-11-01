@@ -1,13 +1,18 @@
-// Before every page: a Content Security Policy with a fresh nonce (Next puts it on its own scripts), and anyone
-// without a session cookie off to sign in. The cookie is only a hint here; every page and action checks the session
-// itself (server/viewer.ts).
+// Before every request: behind the CDN, nothing that didn't come through it (ORIGIN_SECRET); a Content Security Policy
+// with a fresh nonce (Next puts it on its own scripts); and anyone without a session cookie off to sign in. The cookie
+// is only a hint here; every page and action checks the session itself (server/viewer.ts).
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
+import { originAllowed } from "./server/origin-check.ts";
 
-const OPEN = [/^\/sign-in(\/|$)/, /^\/api\/auth\//];
+const OPEN = [/^\/sign-in(\/|$)/, /^\/api\/auth\//, /^\/api\/health$/];
 
 export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
+  // The CDN sends the secret with every request it passes on, and sets the viewer-IP header the app trusts; a request
+  // straight to the origin has neither, and is refused. The container's own health check is let through.
+  if (pathname !== "/api/health" && !originAllowed(request.headers, process.env.ORIGIN_SECRET))
+    return new NextResponse("Not here.", { status: 403, headers: { "Cache-Control": "no-store" } });
   if (!OPEN.some((path) => path.test(pathname)) && !getSessionCookie(request)) {
     const to = new URL("/sign-in", request.url);
     if (pathname !== "/") to.searchParams.set("next", `${pathname}${search}`);
@@ -37,13 +42,7 @@ export function proxy(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: [
-    {
-      source: "/((?!_next/static|_next/image|favicon.ico).*)",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-      ],
-    },
-  ],
+  // Every request but Next's own static files, prefetches included: a matcher that skipped some would let them past the
+  // CDN's secret.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

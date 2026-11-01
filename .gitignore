@@ -1,6 +1,9 @@
 node_modules/
 .DS_Store
 .cache/
+# Local secrets, anywhere: database credentials and the like.
+.env
+.env.*
 # The web app (web/, its own package): dependencies, builds, test output and local secrets.
 web/node_modules/
 web/.next/
@@ -9,3 +12,5 @@ web/tsconfig.tsbuildinfo
 web/test-results/
 web/playwright-report/
 web/.env*
+# SST: its platform and providers (sst install) and local state.
+web/.sst/

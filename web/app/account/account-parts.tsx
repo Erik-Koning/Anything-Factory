@@ -1,7 +1,8 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { authClient, problemOf } from "../auth-client.ts";
+import { type BackupCodesState, backupCodesAction } from "./actions.ts";
 
 export function Passkeys({ passkeys }: { passkeys: { id: string; name: string; createdAt: string }[] }) {
   const router = useRouter();
@@ -62,48 +63,39 @@ export function Passkeys({ passkeys }: { passkeys: { id: string; name: string; c
   );
 }
 
-export function BackupCodes() {
-  const [codes, setCodes] = useState<string[] | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+// New backup codes: a current code from the authenticator, and an admin's password too. The codes show once.
+export function BackupCodes({ password }: { password: boolean }) {
+  const [state, action, pending] = useActionState<BackupCodesState, FormData>(backupCodesAction, { error: null, codes: [] });
   return (
     <>
-      {problem ? (
+      {state.error ? (
         <p className="notice error" role="alert">
-          {problem}
+          {state.error}
         </p>
       ) : null}
-      {codes ? (
+      {state.codes.length ? (
         <div className="notice ok" role="status">
           <p>Your new backup codes. Keep them somewhere safe: each works once, and the old ones no longer do.</p>
           <div className="codes">
-            {codes.map((c) => (
+            {state.codes.map((c) => (
               <span key={c}>{c}</span>
             ))}
           </div>
         </div>
       ) : null}
-      <form
-        className="inline"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const form = event.currentTarget;
-          const password = String(new FormData(form).get("password") ?? "");
-          setBusy(true);
-          setProblem(null);
-          const { data, error } = await authClient.twoFactor.generateBackupCodes({ password });
-          setBusy(false);
-          if (error || !data) return setProblem(problemOf(error, "No new codes were made."));
-          form.reset();
-          setCodes(data.backupCodes);
-        }}
-      >
+      <form action={action} className="inline">
+        {password ? (
+          <label>
+            Your password
+            <input name="password" type="password" required autoComplete="current-password" />
+          </label>
+        ) : null}
         <label>
-          Your password
-          <input name="password" type="password" required autoComplete="current-password" />
+          A code from your authenticator
+          <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
         </label>
-        <button type="submit" disabled={busy}>
-          Make new backup codes
+        <button type="submit" disabled={pending}>
+          {pending ? "Making them…" : "Make new backup codes"}
         </button>
       </form>
     </>

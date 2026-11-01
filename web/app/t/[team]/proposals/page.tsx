@@ -6,19 +6,27 @@ import { Chip, clip, Notice, type SearchParams } from "../../../../components/ui
 import { DIMENSIONS } from "../../../../../lib/tasks/model.ts";
 import { can, LIMITS } from "../../../../server/access.ts";
 import { storeFor, type Task } from "../../../../server/factory.ts";
+import { originsFor } from "../../../../server/origin.ts";
 import { proposals } from "../../../../server/views.ts";
 import { decideAction } from "../actions.ts";
 import { teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Decisions" };
 
-const HEADINGS: Record<string, string> = { question: "Escalated to you", proposed: "Proposed", researching: "Being researched" };
+const HEADINGS: Record<string, string> = {
+  question: "Escalated to you",
+  proposed: "Proposed",
+  researching: "Being researched",
+  triage: "In triage",
+};
 
 export default async function ProposalsPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "proposals:decide", team.name)) notFound();
-  const waiting = proposals(await storeFor(team.name).tasks.all());
+  const [tasks, origins] = await Promise.all([storeFor(team.name).tasks.all(), originsFor(team.name, viewer)]);
+  // Triage is the planner's to sort; an admin may decide one too (it's down, or it's spam), by the same rules.
+  const waiting = [...proposals(tasks), ...tasks.filter((t) => t.status === "triage" && t.kind !== "journey")];
   const groups = Object.keys(HEADINGS)
     .map((status) => ({ status, tasks: waiting.filter((t) => t.status === status) }))
     .filter((g) => g.tasks.length);
@@ -42,9 +50,12 @@ export default async function ProposalsPage({ params, searchParams }: { params: 
             <h2 id={`h-${g.status}`}>
               {HEADINGS[g.status]} <span className="muted">{g.tasks.length}</span>
             </h2>
+            {g.status === "triage" ? (
+              <p className="hint">The planner sorts these. Decide one yourself only when it can&apos;t wait for the planner.</p>
+            ) : null}
             <ul className="plain rows">
               {g.tasks.map((t) => (
-                <Proposal key={t.id} team={team.name} task={t} />
+                <Proposal key={t.id} team={team.name} task={t} origin={origins.of(t, true)} />
               ))}
             </ul>
           </section>
@@ -56,18 +67,21 @@ export default async function ProposalsPage({ params, searchParams }: { params: 
   );
 }
 
-function Proposal({ team, task: t }: { team: string; task: Task }) {
+function Proposal({ team, task: t, origin }: { team: string; task: Task; origin: string }) {
   const last = t.notes.at(-1);
   return (
     <li id={`task-${t.id}`}>
       <div className="head">
         <span className="id">#{t.id}</span>
-        <h3 className="title">{t.title}</h3>
+        <h3 className="title">
+          <Link href={`/t/${team}/tasks/${t.id}`}>{t.title}</Link>
+        </h3>
         <Chip>{t.status}</Chip>
         <Chip tone="">{t.kind}</Chip>
         {t.severity ? <Chip tone="">{t.severity}</Chip> : null}
         {t.priority !== null ? <Chip tone="">{`p${t.priority}`}</Chip> : null}
       </div>
+      <p className="small muted">{origin}</p>
       {t.gate ? (
         <dl className="facts small">
           <dt>Who asked, why</dt>

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { blockedAdmin } from "../server/access.ts";
+import { blocked } from "../server/access.ts";
 import { getViewer } from "../server/viewer.ts";
 import { SignOutButton } from "./sign-out-button.tsx";
 import "./globals.css";
@@ -25,7 +25,7 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
-  const signedIn = viewer !== null && !blockedAdmin(viewer);
+  const signedIn = viewer !== null && !blocked(viewer);
   return (
     <html lang="en">
       <body>
@@ -41,6 +41,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <nav aria-label="Main">
                 <Link href="/">Teams</Link>
                 {viewer.admin ? <Link href="/admin/people">People</Link> : null}
+                {viewer.admin ? <Link href="/admin/audit">Audit</Link> : null}
                 <Link href="/account">Account</Link>
               </nav>
             ) : (

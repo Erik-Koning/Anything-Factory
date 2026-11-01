@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { param, type SearchParams } from "../../components/ui.tsx";
-import { blockedAdmin } from "../../server/access.ts";
+import { blocked } from "../../server/access.ts";
 import { getViewer } from "../../server/viewer.ts";
 import { SignInForm } from "./sign-in-form.tsx";
 
@@ -21,7 +21,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
   const params = await searchParams;
   const viewer = await getViewer();
   const next = safeNext(param(params["next"]));
-  if (viewer && !blockedAdmin(viewer)) redirect(next);
+  if (viewer && !blocked(viewer)) redirect(next);
   const error = param(params["error"]);
   return (
     <div className="narrow">

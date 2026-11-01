@@ -77,8 +77,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
               </label>
             </div>
             <p className="hint">
-              A contributor sends requests and sees their own, and the team&apos;s overview. A member sees the board, the graph and every request (senders
-              by role). Agents see the role you give here, never a name or email.
+              A contributor sends requests and sees their own, and the team&apos;s overview. A member also sees the board, each task, the graph and every
+              request (senders by role), and suggests tasks for the planner to triage. Agents see the role you give here, never a name or email.
             </p>
             <div>
               <SubmitButton className="primary">Invite</SubmitButton>

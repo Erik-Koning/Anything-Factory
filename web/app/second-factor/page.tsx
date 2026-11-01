@@ -1,28 +1,37 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { blockedAdmin } from "../../server/access.ts";
-import { getViewer } from "../../server/viewer.ts";
+import { pendingStep } from "../../server/access.ts";
+import { getViewer, STEP_PAGE } from "../../server/viewer.ts";
 import { SignOutButton } from "../sign-out-button.tsx";
+import { StepUpForm } from "./step-up-form.tsx";
 
 export const metadata: Metadata = { title: "Second factor needed" };
 
-// Where an admin lands whose session began without a second factor (a passkey that didn't verify them, say): nothing
-// else opens until they sign in again with one.
+// Where a session without its second factor lands (an admin's, or anyone's who turned on an authenticator, after a
+// sign-in by an email link or a passkey that didn't check it was them): nothing else opens until the code is entered.
 export default async function SecondFactorPage() {
   const viewer = await getViewer();
   if (!viewer) redirect("/sign-in");
-  if (!blockedAdmin(viewer)) redirect("/");
+  const step = pendingStep(viewer);
+  if (step !== "second-factor") redirect(step ? STEP_PAGE[step] : "/");
   return (
-    <div className="narrow">
-      <h1>Sign in with your second factor</h1>
+    <div className="narrow stack">
+      <h1>Enter your authenticator&apos;s code</h1>
       <p>
-        You&apos;re an admin, and this session began without a second factor. Admins sign in with their password and their authenticator&apos;s code (or a
-        backup code), or with a passkey that checks it&apos;s you with a PIN, fingerprint or face.
+        {viewer.admin
+          ? "You're an admin, so every session needs a second factor, and this one began without it."
+          : "You've turned on an authenticator, so every session needs its code as well."}{" "}
+        Enter the code it shows now, or one of your backup codes.
       </p>
+      {viewer.twoFactor ? (
+        <StepUpForm />
+      ) : (
+        <p className="notice error">This admin account has no authenticator. Run create-admin again on the operator&apos;s machine.</p>
+      )}
       <p>
-        <SignOutButton label="Sign out and sign in again" className="primary" />
+        <SignOutButton label="Sign out instead" className="linkish" />
       </p>
-      <p className="hint">Lost the authenticator and the backup codes? Run create-admin again on the operator&apos;s machine.</p>
+      {viewer.admin ? <p className="hint">Lost the authenticator and the backup codes? Run create-admin again on the operator&apos;s machine.</p> : null}
     </div>
   );
 }

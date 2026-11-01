@@ -1,48 +1,26 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
+import { ACTION_LABEL, listAudit } from "../../server/audit.ts";
 import { auth } from "../../server/auth.ts";
-import { requireViewer } from "../../server/viewer.ts";
+import { deviceOf } from "../../server/device.ts";
+import { knownIps } from "../../server/known-ips.ts";
+import { authHeaders, requireViewer } from "../../server/viewer.ts";
 import { SignOutButton } from "../sign-out-button.tsx";
 import { BackupCodes, Passkeys } from "./account-parts.tsx";
-import { revokeOtherSessionsAction, revokeSessionAction } from "./actions.ts";
+import { forgetIpAction, revokeOtherSessionsAction, revokeSessionAction, turnOffAuthenticatorAction } from "./actions.ts";
+import { AuthenticatorSetup } from "./authenticator.tsx";
 
 export const metadata: Metadata = { title: "Account" };
 
-// A rough name for a browser, from its user agent.
-const deviceOf = (agent: string | null | undefined): string => {
-  if (!agent) return "Unknown device";
-  const browser = /Edg\//.test(agent)
-    ? "Edge"
-    : /Firefox\//.test(agent)
-      ? "Firefox"
-      : /Chrome\//.test(agent)
-        ? "Chrome"
-        : /Safari\//.test(agent)
-          ? "Safari"
-          : "A browser";
-  const os = /iPhone|iPad/.test(agent)
-    ? "iOS"
-    : /Android/.test(agent)
-      ? "Android"
-      : /Mac OS X/.test(agent)
-        ? "macOS"
-        : /Windows/.test(agent)
-          ? "Windows"
-          : /Linux/.test(agent)
-            ? "Linux"
-            : "";
-  return os ? `${browser} on ${os}` : browser;
-};
-
 export default async function AccountPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
-  const requestHeaders = await headers();
-  const [passkeys, sessions, current] = await Promise.all([
+  const requestHeaders = await authHeaders();
+  const [passkeys, sessions, addresses, activity] = await Promise.all([
     auth().api.listPasskeys({ headers: requestHeaders }),
     auth().api.listSessions({ headers: requestHeaders }),
-    auth().api.getSession({ headers: requestHeaders }),
+    knownIps(viewer.userId),
+    listAudit({ userId: viewer.userId, limit: 15 }),
   ]);
   const teams = Object.entries(viewer.teams);
   return (
@@ -62,34 +40,33 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </p>
           <Passkeys passkeys={passkeys.map((p) => ({ id: p.id, name: p.name || "Passkey", createdAt: new Date(p.createdAt).toISOString() }))} />
         </section>
-        {viewer.admin ? (
-          <section className="panel" aria-labelledby="authenticator">
-            <h2 id="authenticator">Authenticator and backup codes</h2>
-            <p>
-              <Chip tone={current?.user.twoFactorEnabled ? "ok" : "warn"}>{current?.user.twoFactorEnabled ? "authenticator on" : "no authenticator"}</Chip>
-            </p>
-            <p className="hint">
-              Your authenticator was set up by create-admin; running it again replaces it. Backup codes sign you in once each when the authenticator
-              isn&apos;t at hand.
-            </p>
-            <BackupCodes />
-          </section>
-        ) : (
-          <section className="panel" aria-labelledby="teams">
-            <h2 id="teams">Your teams</h2>
-            {teams.length ? (
-              <ul className="plain">
-                {teams.map(([team, role]) => (
-                  <li key={team}>
-                    {team}: {role}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty">None yet.</p>
-            )}
-          </section>
-        )}
+        <section className="panel" aria-labelledby="authenticator">
+          <h2 id="authenticator">Authenticator</h2>
+          <p>
+            <Chip tone={viewer.twoFactor ? "ok" : viewer.admin ? "warn" : ""}>{viewer.twoFactor ? "on" : "off"}</Chip>
+          </p>
+          {viewer.admin ? (
+            <>
+              <p className="hint">
+                Admins always sign in with one. Yours was set up by create-admin; running it again replaces it. Backup codes sign you in once each when the
+                authenticator isn&apos;t at hand.
+              </p>
+              <BackupCodes password />
+            </>
+          ) : (
+            <AuthenticatorSetup enabled={viewer.twoFactor}>
+              <p className="hint">Every sign-in asks for its code too, whether by passkey or email link.</p>
+              <BackupCodes password={false} />
+              <form action={turnOffAuthenticatorAction} className="inline">
+                <label>
+                  A code from it, to turn it off
+                  <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
+                </label>
+                <SubmitButton className="danger">Turn it off</SubmitButton>
+              </form>
+            </AuthenticatorSetup>
+          )}
+        </section>
       </div>
       <section className="panel" aria-labelledby="sessions">
         <h2 id="sessions">Where you&apos;re signed in</h2>
@@ -98,7 +75,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             <li key={s.id} className="head">
               <span className="title">{deviceOf(s.userAgent)}</span>
               <span className="muted small">
-                signed in <Ago at={new Date(s.createdAt).toISOString()} />
+                {s.ipAddress ? `${s.ipAddress} · ` : ""}signed in <Ago at={new Date(s.createdAt).toISOString()} />
               </span>
               {s.id === viewer.sessionId ? (
                 <Chip tone="ok">this one</Chip>
@@ -120,6 +97,56 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           <SignOutButton label="Sign out" className="button" />
         </div>
       </section>
+      <div className="grid">
+        <section className="panel" aria-labelledby="addresses">
+          <h2 id="addresses">Your IP addresses</h2>
+          <p className="hint">A sign-in from any other address asks you to confirm it by email first.</p>
+          {addresses.length ? (
+            <ul className="plain rows">
+              {addresses.map((a) => (
+                <li key={a.ip} className="head">
+                  <code>{a.ip}</code>
+                  <span className="muted small">
+                    {a.via} · last used <Ago at={a.lastSeenAt.toISOString()} />
+                  </span>
+                  {a.ip === viewer.ip ? (
+                    <Chip tone="ok">this one</Chip>
+                  ) : (
+                    <form action={forgetIpAction}>
+                      <input type="hidden" name="ip" value={a.ip} />
+                      <SubmitButton className="linkish">{`Forget ${a.ip}`}</SubmitButton>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty">None yet.</p>
+          )}
+        </section>
+        <section className="panel" aria-labelledby="activity">
+          <h2 id="activity">Recent activity</h2>
+          {activity.length ? (
+            <ul className="plain rows small">
+              {activity.map((e) => (
+                <li key={e.id}>
+                  <div className="head">
+                    <span className="title">{ACTION_LABEL[e.action]}</span>
+                    {e.outcome === "ok" ? null : <Chip tone="warn">{e.outcome}</Chip>}
+                    <span className="muted">
+                      <Ago at={e.at.toISOString()} />
+                    </span>
+                  </div>
+                  <div className="muted">{[e.detail, e.ip, deviceOf(e.userAgent)].filter(Boolean).join(" · ")}</div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty">Nothing yet.</p>
+          )}
+          {teams.length ? <p className="hint">Your teams: {teams.map(([team, role]) => `${team} (${role})`).join(", ")}.</p> : null}
+        </section>
+      </div>
     </>
   );
 }

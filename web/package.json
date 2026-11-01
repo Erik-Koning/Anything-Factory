@@ -15,14 +15,21 @@
     "typecheck": "tsc -p .",
     "test": "tsc -p . && node --test tests/unit/*.test.ts",
     "test:e2e": "next build && playwright test",
-    "create-admin": "node scripts/create-admin.ts"
+    "test:e2e:atlas": "next build && node --env-file=../.env node_modules/@playwright/test/cli.js test",
+    "create-admin": "node scripts/create-admin.ts",
+    "check:infra": "sst install && tsc -p tsconfig.infra.json",
+    "deploy": "sst deploy",
+    "create-indexes": "node scripts/create-indexes.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1152.0",
+    "@better-auth/core": "^1.7.14",
     "@better-auth/mongo-adapter": "1.7.14",
     "@better-auth/passkey": "1.7.14",
     "better-auth": "1.7.14",
     "mongodb": "7.7.0",
     "next": "16.4.3",
+    "qrcode": "^1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "resend": "6.37.0"
@@ -30,9 +37,11 @@
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "mongodb-memory-server-core": "11.3.0",
+    "sst": "^4.17.2",
     "typescript": "7.0.2"
   }
 }
