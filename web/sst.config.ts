@@ -36,6 +36,7 @@ export default $config({
       protect: input?.stage === "production",
       providers: {
         aws: { region: (process.env.E9G_WEB_REGION ?? "us-east-2") as "us-east-2" },
+        command: "1.0.1",
         "docker-build": "0.0.22",
         random: "4.21.4",
       },
@@ -73,28 +74,13 @@ export default $config({
     });
     const mailerKey = new aws.iam.AccessKey("WebMailerKey", { user: mailer.name });
 
-    // The image: built from the repository's root (the app compiles ../lib/tasks), for Lightsail's x86 hosts.
-    const images = new aws.ecr.Repository("WebImages", {
-      // ECR names are lowercase; Pulumi's own would take the resource's capitals.
-      name: `e9g-web-${$app.stage}`.toLowerCase(),
-      forceDelete: $app.stage !== "production",
-      imageScanningConfiguration: { scanOnPush: true },
-    });
-    new aws.ecr.LifecyclePolicy("WebImagesExpiry", {
-      repository: images.name,
-      policy: JSON.stringify({
-        rules: [
-          {
-            rulePriority: 1,
-            description: "Keep the newest 10 images",
-            selection: { tagStatus: "any", countType: "imageCountMoreThan", countNumber: 10 },
-            action: { type: "expire" },
-          },
-        ],
-      }),
-    });
-    const login = aws.ecr.getAuthorizationTokenOutput({ registryId: images.registryId });
+    const service = new aws.lightsail.ContainerService("Web", { name: `e9g-web-${$app.stage}`.slice(0, 63), power, scale });
+
+    // The image: built from the repository's root (the app compiles ../lib/tasks), for Lightsail's x86 hosts, into the
+    // local Docker engine, then pushed into the container service's own registry. Not ECR: the organization's resource
+    // control policy refuses Lightsail's puller role, which belongs to AWS's account, not the organization.
     const repository = path.resolve($cli.paths.root, "..");
+    const local = `e9g-web-${$app.stage}:latest`;
     const image = new dockerbuild.Image("WebImage", {
       context: { location: repository },
       dockerfile: { location: path.join(repository, "web", "Dockerfile") },
@@ -102,33 +88,19 @@ export default $config({
       // A named buildx builder (scripts/rosetta-builder.sh on Apple silicon); else the provider makes its own.
       builder: process.env.BUILDX_BUILDER ? { name: process.env.BUILDX_BUILDER } : undefined,
       buildArgs: { SERVER_ACTIONS_ORIGINS: domain ?? "" },
-      tags: [$interpolate`${images.repositoryUrl}:${$app.stage}`],
-      registries: [{ address: login.proxyEndpoint, username: login.userName, password: $util.secret(login.password) }],
-      push: true,
+      tags: [local],
+      load: true,
+      push: false,
     });
-
-    // The container service, allowed to pull from the repository above and nothing else.
-    const service = new aws.lightsail.ContainerService("Web", {
-      name: `e9g-web-${$app.stage}`.slice(0, 63),
-      power,
-      scale,
-      privateRegistryAccess: { ecrImagePullerRole: { isActive: true } },
-    });
-    const pull = new aws.ecr.RepositoryPolicy("WebImagesPull", {
-      repository: images.name,
-      policy: service.privateRegistryAccess.apply((access) =>
-        JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [
-            {
-              Sid: "LightsailPullsTheWebImage",
-              Effect: "Allow",
-              Principal: { AWS: access.ecrImagePullerRole?.principalArn },
-              Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-            },
-          ],
-        })
-      ),
+    // Each new build is pushed once (AWS's lightsailctl plugin does the pushing) and deployed by the name Lightsail
+    // gives it (":e9g-web-dev.web.3"). A replaced image is deleted once the update is through; the one a deployment
+    // still runs can't be, and a removed stage's service takes its images with it, so a failed delete is let go.
+    const region = aws.getRegionOutput().name;
+    const pushed = new command.local.Command("WebImagePush", {
+      interpreter: ["/bin/bash", "-c"],
+      create: $interpolate`set -eo pipefail; aws lightsail push-container-image --region ${region} --service-name ${service.name} --label web --image ${local} | sed -nE 's/.*Refer to this image as "([^"]+)".*/\\1/p'`,
+      delete: $interpolate`aws lightsail delete-container-image --region ${region} --service-name ${service.name} --image "$PULUMI_COMMAND_STDOUT" || true`,
+      triggers: [image.contextHash, image.digest],
     });
 
     // CloudFront: the viewer's address and the public host for the app, the secret on every request to the origin.
@@ -194,42 +166,41 @@ export default $config({
     });
     const url = domain ? `https://${domain}` : cdn.url;
 
-    // The running app: the image by its digest (a new build deploys a new version), the settings it reads at start.
+    // The running app: the image pushed above (a new build deploys a new version), the settings it reads at start.
     // Lightsail keeps a deployment's environment in the deployment (the database's connection string, the auth secret,
     // the mailer's key), readable by anyone with Lightsail access to this account: give that access to the operators only.
-    new aws.lightsail.ContainerServiceDeploymentVersion(
-      "WebDeployment",
-      {
-        serviceName: service.name,
-        containers: [
-          {
-            containerName: "web",
-            image: $interpolate`${images.repositoryUrl}@${image.digest}`,
-            ports: { "3000": "HTTP" },
-            environment: {
-              NODE_ENV: "production",
-              MONGODB_URI: mongodbUri.value,
-              E9G_DATABASE: "e9g",
-              AUTH_DATABASE: "e9g_web",
-              BETTER_AUTH_SECRET: authSecret.value,
-              BETTER_AUTH_URL: url,
-              SES_REGION: aws.getRegionOutput().name,
-              SES_ACCESS_KEY_ID: mailerKey.id,
-              SES_SECRET_ACCESS_KEY: mailerKey.secret,
-              MAIL_FROM: `${$app.stage === "production" ? "E9G" : `E9G (${$app.stage})`} <${sender}>`,
-              CLIENT_IP_HEADER: "x-e9g-viewer-ip",
-              ORIGIN_SECRET: originSecret.result,
-            },
-          },
-        ],
-        publicEndpoint: {
+    new aws.lightsail.ContainerServiceDeploymentVersion("WebDeployment", {
+      serviceName: service.name,
+      containers: [
+        {
           containerName: "web",
-          containerPort: 3000,
-          healthCheck: { path: "/api/health", intervalSeconds: 10, timeoutSeconds: 5, healthyThreshold: 2, unhealthyThreshold: 3, successCodes: "200" },
+          image: pushed.stdout.apply((name) => {
+            if (!name.startsWith(":")) throw new Error(`lightsail push-container-image gave no image name (${name || "empty output"})`);
+            return name.trim();
+          }),
+          ports: { "3000": "HTTP" },
+          environment: {
+            NODE_ENV: "production",
+            MONGODB_URI: mongodbUri.value,
+            E9G_DATABASE: "e9g",
+            AUTH_DATABASE: "e9g_web",
+            BETTER_AUTH_SECRET: authSecret.value,
+            BETTER_AUTH_URL: url,
+            SES_REGION: region,
+            SES_ACCESS_KEY_ID: mailerKey.id,
+            SES_SECRET_ACCESS_KEY: mailerKey.secret,
+            MAIL_FROM: `${$app.stage === "production" ? "E9G" : `E9G (${$app.stage})`} <${sender}>`,
+            CLIENT_IP_HEADER: "x-e9g-viewer-ip",
+            ORIGIN_SECRET: originSecret.result,
+          },
         },
+      ],
+      publicEndpoint: {
+        containerName: "web",
+        containerPort: 3000,
+        healthCheck: { path: "/api/health", intervalSeconds: 10, timeoutSeconds: 5, healthyThreshold: 2, unhealthyThreshold: 3, successCodes: "200" },
       },
-      { dependsOn: [pull] }
-    );
+    });
 
     return { url, origin: service.url, sender };
   },

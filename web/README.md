@@ -210,11 +210,11 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
 ```
 
 - **The image** (`Dockerfile`, built from the repository's root since the app compiles `../lib/tasks`): Next's
-  standalone server on Node 24 Alpine, as an unprivileged user, pushed to the stage's own ECR repository (the newest
-  10 kept, scanned on push) for `linux/amd64`.
-- **Lightsail**: a container service (`micro`, one container, by default), allowed to pull from that repository alone,
-  and a deployment of the image by its digest with the app's environment. Its health check calls `/api/health`, the
-  one path open without the origin secret.
+  standalone server on Node 24 Alpine, as an unprivileged user, for `linux/amd64`, built into the local Docker engine
+  and pushed into the container service's own registry (AWS's `lightsailctl` plugin). Not ECR: the organization's
+  resource control policy refuses Lightsail's puller role, which belongs to AWS's account.
+- **Lightsail**: a container service (`micro`, one container, by default) and a deployment of the newest image with the
+  app's environment. Its health check calls `/api/health`, the one path open without the origin secret.
 - **CloudFront** (SST's `Cdn`): everything passed through uncached with every viewer header but Host, except Next's
   hashed static files; HTTPS only; a viewer-request function that sets the viewer's address and the public host; the
   origin secret (made by SST, kept in its state) on every request to Lightsail. With `E9G_WEB_DOMAIN`, a certificate and
@@ -222,7 +222,8 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
 
 ### Before the first deploy
 
-1. **AWS**: credentials for the account (`aws configure` or SSO), and Docker running (SST builds the image). On an
+1. **AWS**: credentials for the account (`aws configure` or SSO), AWS's `lightsailctl` plugin
+   (`brew install aws/tap/lightsailctl`), and Docker running (SST builds the image). On an
    Apple-silicon Mac, run `scripts/rosetta-builder.sh` once and deploy with `BUILDX_BUILDER=e9g-rosetta`: the default
    builder emulates amd64 with QEMU, where `next build` hangs.
 2. **MongoDB Atlas**: a database user for the app alone (below), and its `mongodb+srv://` connection string. Put the
