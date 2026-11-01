@@ -222,7 +222,9 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
 
 ### Before the first deploy
 
-1. **AWS**: credentials for the account (`aws configure` or SSO), and Docker running (SST builds the image).
+1. **AWS**: credentials for the account (`aws configure` or SSO), and Docker running (SST builds the image). On an
+   Apple-silicon Mac, run `scripts/rosetta-builder.sh` once and deploy with `BUILDX_BUILDER=e9g-rosetta`: the default
+   builder emulates amd64 with QEMU, where `next build` hangs.
 2. **MongoDB Atlas**: a database user for the app alone (below), and its `mongodb+srv://` connection string. Put the
    cluster in the same place as the app (an AWS cluster in `E9G_WEB_REGION`): every page waits on several round trips
    to it, a millisecond each next door and tens of milliseconds across a continent or between clouds.

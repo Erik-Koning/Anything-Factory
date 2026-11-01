@@ -99,6 +99,8 @@ export default $config({
       context: { location: repository },
       dockerfile: { location: path.join(repository, "web", "Dockerfile") },
       platforms: ["linux/amd64"],
+      // A named buildx builder (scripts/rosetta-builder.sh on Apple silicon); else the provider makes its own.
+      builder: process.env.BUILDX_BUILDER ? { name: process.env.BUILDX_BUILDER } : undefined,
       buildArgs: { SERVER_ACTIONS_ORIGINS: domain ?? "" },
       tags: [$interpolate`${images.repositoryUrl}:${$app.stage}`],
       registries: [{ address: login.proxyEndpoint, username: login.userName, password: $util.secret(login.password) }],
