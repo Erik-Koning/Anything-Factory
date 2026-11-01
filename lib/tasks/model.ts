@@ -88,6 +88,9 @@ export interface Task extends Doc {
   // How much could break, as the reviewer judged it when it approved (a high-risk change merges with its tests).
   risk: Risk | null;
   by: string;
+  // The person who added or suggested it from the web app, by stakeholder id (Article 8); none for the team's own work
+  // and what the operator adds with e9g task add.
+  from?: string | null;
   createdAt: string;
   updatedAt: string;
   history: Event[];
@@ -238,8 +241,12 @@ const withinThresholds: Check = (t, _to, _actor, { approval }) => {
 };
 // A finding the planner rewrote (its title, body or kind) is the planner's proposal now, not the member's finding.
 const rewrittenByPlanner = (t: Task): boolean => t.history.some((e) => e.by === "planner" && /\bedited\b[^;]*\b(title|body|kind)\b/.test(e.what));
-// The planner approves a finding another member filed, so nobody approves their own (team.json approval.findings).
+// The planner approves a finding another member filed, so nobody approves their own (team.json approval.findings). A
+// person's suggestion from the web app is never one: it's their words, which reach builders only through the planner's
+// own proposal, approved by the approver or the operator (Article 8).
 const othersFinding: Check = (t, _to, _actor, { approval }) => {
+  if (t.by === "stakeholder")
+    return `task ${t.id} was suggested from the web app: make it your own proposal (e9g task edit, score, then e9g task status ${t.id} proposed) for the approver or the operator`;
   if (!FINDINGS.includes(t.kind) || t.by === "planner" || rewrittenByPlanner(t))
     return `the planner doesn't approve its own proposals: the approver or the operator does (e9g task approve ${t.id})`;
   if (approval?.findings === "approver") return "this team's approver decides findings too (team.json approval.findings)";
