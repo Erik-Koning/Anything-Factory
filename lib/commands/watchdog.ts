@@ -40,6 +40,13 @@ function notify(title: string, text: string): void {
 }
 const minutesSince = (path: string): number => (existsSync(path) ? (Date.now() - statSync(path).mtimeMs) / 60_000 : Number.POSITIVE_INFINITY);
 
+// The Docker engines a Mac may have, by app and where each keeps its docker CLI (launchd's PATH has none of them).
+const DOCKER_APPS = [
+  { app: "Docker", bin: "/Applications/Docker.app/Contents/Resources/bin" },
+  { app: "Rancher Desktop", bin: join(homedir(), ".rd", "bin") },
+  { app: "OrbStack", bin: join(homedir(), ".orbstack", "bin") },
+].filter(({ app }) => existsSync(join("/Applications", `${app}.app`)));
+
 // An alert through each connected channel too: the same one at most every 6 hours per channel (stamped in dir), so a
 // night of waiting is a message and a reminder, not one an hour. A failed send is tried again with the next alert.
 // Sent for a team, the operator can answer it. Returns what to log.
@@ -450,8 +457,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   }
 
   if (entry.needsDocker && spawnSync("docker", ["info"], { stdio: "ignore" }).status !== 0) {
-    log("Docker isn't running; starting it");
-    spawnSync("open", ["-a", "Docker"], { stdio: "ignore" });
+    const engine = DOCKER_APPS[0]?.app;
+    log(engine ? `Docker isn't running; starting ${engine}` : "Docker isn't running, and no Docker app is installed to start");
+    if (engine) spawnSync("open", ["-a", engine], { stdio: "ignore" });
     return;
   }
 
@@ -729,6 +737,7 @@ function install(): void {
     dirname(node),
     dirname(which("t3") ?? join(homedir(), ".local/bin/t3")),
     join(homedir(), ".local/bin"),
+    ...DOCKER_APPS.map(({ bin }) => bin),
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
