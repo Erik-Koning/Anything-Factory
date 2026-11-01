@@ -75,6 +75,8 @@ export default $config({
 
     // The image: built from the repository's root (the app compiles ../lib/tasks), for Lightsail's x86 hosts.
     const images = new aws.ecr.Repository("WebImages", {
+      // ECR names are lowercase; Pulumi's own would take the resource's capitals.
+      name: `e9g-web-${$app.stage}`.toLowerCase(),
       forceDelete: $app.stage !== "production",
       imageScanningConfiguration: { scanOnPush: true },
     });
