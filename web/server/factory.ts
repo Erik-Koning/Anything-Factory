@@ -96,7 +96,9 @@ export const controlsOf = (team: string): Promise<Control[]> => storeFor(team).c
 // A pause from the web, by an admin's stakeholder id: its scope fixed against the graph as it is now (controls.ts).
 export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journeys: string[]; note: string; from: string }): Promise<Control> {
   const store = storeFor(team);
-  const journeys = ask.scope === "journeys" && ask.journeys.length ? ask.journeys : undefined;
+  // On the web the journeys are ticked, those under way to start with: none ticked is a mistake, not "the default".
+  if (ask.scope === "journeys" && !ask.journeys.length) throw new Refused("Tick the journeys to finish before the team pauses.");
+  const journeys = ask.scope === "journeys" ? ask.journeys : undefined;
   return store.controls.create(pauseControl(await store.tasks.all(), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
 }
 

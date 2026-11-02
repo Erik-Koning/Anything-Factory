@@ -91,12 +91,15 @@ export function SpendPanel({
   usage,
   limits,
   tasks,
+  open = false,
 }: {
   team: string;
   spend: Spend | null;
   usage: UsageDay[];
   limits: Limits | null;
   tasks: Task[];
+  // The budget form, reopened after a refusal.
+  open?: boolean;
 }) {
   const titles = new Map(tasks.map((t) => [t.id, t.title]));
   const last = spend?.day ?? usage.at(-1)?.day ?? null;
@@ -190,7 +193,7 @@ export function SpendPanel({
           </div>
         </>
       )}
-      <details>
+      <details open={open}>
         <summary>{limits ? "Change the budget" : "Set a budget"}</summary>
         <form action={budgetAction} className="stack">
           <input type="hidden" name="team" value={team} />

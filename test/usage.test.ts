@@ -7,7 +7,7 @@ import { costOf, modelKey } from "../lib/prices.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 import { newTask, type Task } from "../lib/tasks/model.ts";
 import { dayOf, spendByWork, spendOf, type UsageDay, weekOf } from "../lib/tasks/spend.ts";
-import { collectUsage, transcriptDirs } from "../lib/usage.ts";
+import { collectUsage, countedDays, transcriptDirs } from "../lib/usage.ts";
 
 const close = (actual: number | null, expected: number) => assert.ok(actual !== null && Math.abs(actual - expected) < 1e-9, `${actual} ≠ ${expected}`);
 const none = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
@@ -122,6 +122,30 @@ describe("counting what a team used", () => {
       later.map((d) => [d.day, d.rows.map((r) => `${r.role} ${r.requests}`)]),
       [["2026-11-03", ["planner 1"]]]
     );
+  });
+
+  test("every day counted can be published again whole, for a store the team moved to", () => {
+    const w = world();
+    const dirs = transcriptDirs(w.home, w.worktrees, w.projects);
+    const usage = { input_tokens: 1000, output_tokens: 0 };
+    writeFileSync(
+      join(w.ours, "p.jsonl"),
+      [
+        agent("e9g:planner"),
+        said("a", at("2026-11-01"), "claude-opus-5-5", "e9g/next", usage),
+        said("b", at("2026-11-02"), "claude-opus-5-5", "e9g/next", usage),
+        "",
+      ].join("\n")
+    );
+    collectUsage({ run: w.run, team: "app", machine: "studio", dirs });
+    assert.deepEqual(
+      countedDays(w.run, "app", "studio").map((d) => [d.day, d.machine, d.rows[0]?.requests]),
+      [
+        ["2026-11-01", "studio", 1],
+        ["2026-11-02", "studio", 1],
+      ]
+    );
+    assert.deepEqual(countedDays(tmp("e9g-empty-"), "app", "studio"), []);
   });
 
   test("an unknown model's requests are counted, not priced", () => {

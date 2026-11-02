@@ -594,11 +594,15 @@ const migrateTasks: Handler = async ({ team, run, store, who }, _positional, opt
       return 0;
     }
     const copied = await migrate(store, target);
+    // What this machine counted the team using (lib/usage.ts), so its budget and charts carry on from the same totals.
+    const { countedDays } = await import("../usage.ts");
+    const days = countedDays(run, team.name, machineName());
+    await target.usage.publish(days);
     if (store.kind === "files") markMoved(run, to);
     else rmSync(movedMark(run), { force: true });
     console.info(
       [
-        `copied ${said(copied)} from ${store.kind} to ${to}.`,
+        `copied ${said(copied)} from ${store.kind} to ${to}, and ${days.length} days of usage.`,
         `Now set team.json "tasks": {"store": "${to}"${to === "mongo" && team.tasks.lead ? `, "lead": "${team.tasks.lead}"` : ""}} and run e9g register again${to === "mongo" ? " on each machine" : ""}.`,
         store.kind === "files" ? "The file store is marked moved: commands refuse it from now on." : "",
       ]

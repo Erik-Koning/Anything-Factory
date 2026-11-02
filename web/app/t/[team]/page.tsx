@@ -3,7 +3,7 @@ import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { SpendPanel } from "../../../components/spend-panel.tsx";
 import { TeamControls } from "../../../components/team-controls.tsx";
-import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
+import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
 import { controlsOf, limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
 import { journeys, merges, progress } from "../../../server/views.ts";
@@ -13,6 +13,8 @@ export const metadata: Metadata = { title: "Overview" };
 
 export default async function OverviewPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  // Which form a refused control reopens (actions.ts).
+  const open = param((await searchParams)["open"]);
   const { viewer, team } = await teamFor(name);
   const store = storeFor(team.name);
   const control = can(viewer, "team:control", team.name);
@@ -70,8 +72,10 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </section>
       </div>
 
-      {control ? <TeamControls team={team} controls={controls} tasks={tasks} /> : null}
-      {control ? <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} /> : null}
+      {control ? <TeamControls team={team} controls={controls} tasks={tasks} expanded={open === "pause"} /> : null}
+      {control ? (
+        <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
+      ) : null}
 
       <section className="panel" aria-labelledby="journeys">
         <h2 id="journeys">Journeys</h2>

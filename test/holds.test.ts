@@ -78,7 +78,7 @@ describe("graceful pauses", () => {
     if (!hold) throw new Error("no hold");
     const first = settling(hold, all, 2);
     assert.equal(first.settled, false);
-    assert.deepEqual(first.left, ["#11 being built", "#12 in review", "#14 to build", "2 members at work"]);
+    assert.deepEqual(first.left, ["#11 being built: task 11", "#12 in review: task 12", "#14 to build: task 14", "2 members at work"]);
     // All three finish: nothing in it is left, whatever else is approved.
     all = all.map((t) => (["11", "12", "14"].includes(t.id) ? { ...t, status: "done" as const } : t));
     assert.deepEqual(settling(hold, all, 0), { settled: true, left: [], stuck: [] });
@@ -165,7 +165,7 @@ describe("controls in the run folder", () => {
     let all = graph();
     applyControls(run, [control(pauseControl(all, "fixture", { scope: "tasks", by: "operator" }))]);
     assert.equal(progressHold(run, all, 1)?.settled, false);
-    assert.deepEqual(readHold(run)?.left, ["#11 being built", "#12 in review", "#14 to build", "1 member at work"]);
+    assert.deepEqual(readHold(run)?.left, ["#11 being built: task 11", "#12 in review: task 12", "#14 to build: task 14", "1 member at work"]);
     assert.ok(!existsSync(join(run, "paused")));
     all = all.map((t) => (["11", "12", "14"].includes(t.id) ? { ...t, status: "done" as const } : t));
     assert.equal(progressHold(run, all, 0)?.settled, true);
@@ -228,7 +228,7 @@ describe("e9g pause and resume, and the watchdog", () => {
       // The watchdog: still work left, so the team keeps going, its ticks saying so.
       assert.equal((await w.e9g("watchdog", "run", "fixture")).code, 0);
       assert.ok(!existsSync(join(w.run, "paused")));
-      assert.deepEqual(readHold(w.run)?.left, ["#11 being built", "#12 in review", "#14 to build"]);
+      assert.deepEqual(readHold(w.run)?.left, ["#11 being built: task 11", "#12 in review: task 12", "#14 to build: task 14"]);
 
       // It's all merged: the next run pauses the team and keeps the report.
       for (const id of ["11", "12", "14"]) {

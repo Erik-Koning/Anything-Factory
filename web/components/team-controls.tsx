@@ -26,7 +26,8 @@ function CodeField({ id }: { id: string }) {
   );
 }
 
-export function TeamControls({ team, controls, tasks }: { team: TeamDoc; controls: Control[]; tasks: Task[] }) {
+// `expanded`: the pause form, reopened after a refusal.
+export function TeamControls({ team, controls, tasks, expanded = false }: { team: TeamDoc; controls: Control[]; tasks: Task[]; expanded?: boolean }) {
   const status = team.status;
   const hold = status?.hold ?? null;
   const { pending, recent } = controlsView(status, controls);
@@ -109,7 +110,7 @@ export function TeamControls({ team, controls, tasks }: { team: TeamDoc; control
       ) : null}
 
       {!paused ? (
-        <details open={!pausing}>
+        <details open={expanded}>
           <summary>{pausing ? "Pause now instead" : "Pause the team"}</summary>
           <form action={controlAction} className="stack">
             <input type="hidden" name="team" value={team.name} />

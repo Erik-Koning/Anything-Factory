@@ -229,7 +229,8 @@ export async function controlAction(form: FormData): Promise<void> {
     notice = { error: reasonOf(error) };
     await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${notice.error}`.trim() });
   }
-  redirect(withNotice(`/t/${team}`, notice));
+  // A refused pause opens its form again (open=…, beside the signed notice), so it's there to correct.
+  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error && kind !== "resume" ? "&open=pause" : ""}`);
 }
 
 // An admin sets the team's budget, as the operator, with a code from their authenticator. Each limit is dollars
@@ -268,5 +269,5 @@ export async function budgetAction(form: FormData): Promise<void> {
     notice = { error: reasonOf(error) };
     await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: notice.error });
   }
-  redirect(withNotice(`/t/${team}`, notice));
+  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=budget" : ""}`);
 }

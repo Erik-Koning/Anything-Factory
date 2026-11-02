@@ -439,12 +439,17 @@ test("the admin pauses the team after the work under way, reads where it stands,
   const panel = page.getByRole("region", { name: "Pause and resume" });
 
   await page.goto("/t/shop");
+  // Closed until asked for: a stop control doesn't greet every visit.
+  await expect(panel.getByText("After the work under way")).toBeHidden();
+  await panel.getByText("Pause the team").click();
   await expect(panel.getByText("After the work under way")).toBeVisible();
   // A wrong code changes nothing.
   await panel.getByLabel("Code from your authenticator").first().fill("000000");
   await panel.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.locator("main").getByRole("alert")).toContainText("That code isn't right");
   expect(await controls()).toEqual([]);
+  // The refused form is open again, to correct.
+  await expect(panel.getByText("After the work under way")).toBeVisible();
 
   await panel.getByLabel("Note (optional, for the record and the report)").fill("Let me check the board");
   await panel

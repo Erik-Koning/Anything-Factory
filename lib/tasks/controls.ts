@@ -154,7 +154,7 @@ export function settling(hold: Hold, all: Task[], membersAtWork: number): { sett
   const byId = new Map(all.map((t) => [t.id, t]));
   // Anything being built or in review finishes first, in the hold's scope or not (a claim made as the hold was asked).
   for (const t of all)
-    if (t.status === "building" || t.status === "review") left.push(`#${t.id} ${t.status === "building" ? "being built" : "in review"}`);
+    if (t.status === "building" || t.status === "review") left.push(`#${t.id} ${t.status === "building" ? "being built" : "in review"}: ${t.title}`);
   const scoped = all.filter((t) => t.kind !== "journey" && inScope(t, hold) && !finished(t) && t.status !== "building" && t.status !== "review");
   for (const t of scoped) {
     const waiting = t.after.filter((id) => byId.get(id)?.status !== "done");
@@ -164,8 +164,8 @@ export function settling(hold: Hold, all: Task[], membersAtWork: number): { sett
     });
     if (t.status === "blocked" || t.status === "question") stuck.push(`#${t.id} ${t.status}: ${t.title}`);
     else if (outside.length) stuck.push(`#${t.id} waits for ${ids(outside)}, which can't finish in this hold`);
-    else if (t.status === "approved") left.push(`#${t.id} to build${waiting.length ? ` after ${ids(waiting)}` : ""}`);
-    else left.push(`#${t.id} ${t.status}, for the planner or approver`);
+    else if (t.status === "approved") left.push(`#${t.id} to build${waiting.length ? ` after ${ids(waiting)}` : ""}: ${t.title}`);
+    else left.push(`#${t.id} ${t.status}, for the planner or approver: ${t.title}`);
   }
   if (hold.scope === "journeys")
     for (const id of hold.journeys) {
