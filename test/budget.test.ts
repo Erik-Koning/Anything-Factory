@@ -9,6 +9,7 @@ import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "
 import { fileStore } from "../lib/tasks/files.ts";
 import { newTask, type Task } from "../lib/tasks/model.ts";
 import type { Spend } from "../lib/tasks/spend.ts";
+import { encodePath } from "../lib/usage.ts";
 
 const limits = (fields: Partial<Limits> = {}): Limits => ({
   daily: 10,
@@ -44,7 +45,7 @@ describe("the budget's rules", () => {
     const near = budgetCheck("app", limits(), spend({ today: 8, total: 85 }), [], graph, false);
     assert.deepEqual(
       near.warn.map((w) => w.key),
-      ["budget-daily:2026-11-04", "budget-total:2026-10-01"]
+      ["budget-daily:2026-11-04-10", "budget-total:2026-10-01-100"]
     );
     assert.match(near.warn[0]?.text ?? "", /spent \$8\.00 of the \$10 a day budget/);
     assert.equal(near.control, null);
@@ -84,6 +85,33 @@ describe("the budget's rules", () => {
     assert.equal(budgetCheck("app", limits(), spend({ today: 15, total: 100 }), [paused, resumed], graph, false).control?.trigger, "total:2026-10-01");
   });
 
+  test("changing the budget after a resume makes its limits count again, and warn again", () => {
+    const paused = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "total:2026-10-01" });
+    const resumed = control(resumeControl("app", "operator"));
+    assert.equal(budgetCheck("app", limits({ daily: null }), spend({ total: 250 }), [paused, resumed], graph, false).control, null);
+    const raised = control({ ...paused, kind: "budget", by: "operator", trigger: null, limits: limits({ daily: null, total: 200 }) });
+    const after = budgetCheck("app", limits({ daily: null, total: 200 }), spend({ total: 250 }), [paused, resumed, raised], graph, false);
+    assert.equal(after.control?.scope, "now");
+    assert.deepEqual(
+      after.warn.map((w) => w.key),
+      ["budget-total:2026-10-01-200"]
+    );
+  });
+
+  test("auto-resume never ends a pause of the operator's, even one the budget went on to tighten", () => {
+    const auto = limits({ autoResume: true });
+    const mine = control(pauseControl(graph, "app", { scope: "tasks", by: "operator" }));
+    const hard = control({ ...pauseControl(graph, "app", { scope: "now", by: "budget" }), trigger: "daily:2026-11-04:hard" });
+    assert.equal(budgetCheck("app", auto, spend({ day: "2026-11-05" }), [mine, hard], graph, true).control, null);
+    // A daily pause and then a weekly one: a new day isn't a new week.
+    const daily = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "daily:2026-11-04" });
+    const weekly = control({ ...pauseControl(graph, "app", { scope: "now", by: "budget" }), trigger: "weekly:2026-11-02" });
+    assert.equal(budgetCheck("app", { ...auto, weekly: 1000 }, spend({ day: "2026-11-05" }), [daily, weekly], graph, true).control, null);
+    // The watchdog's record of the settled hold doesn't count against it.
+    const settled = control({ ...pauseControl(graph, "app", { scope: "now", by: "watchdog" }) });
+    assert.equal(budgetCheck("app", auto, spend({ day: "2026-11-05" }), [daily, settled], graph, true).control?.kind, "resume");
+  });
+
   test("with autoResume, a new day starts a team the daily budget paused; not while another limit is over, nor one the operator paused", () => {
     const paused = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "daily:2026-11-04" });
     const auto = limits({ autoResume: true });
@@ -105,7 +133,7 @@ describe("the budget's rules", () => {
 
 // A Claude Code transcript with one request of the planner's, today: $4 in, $20 out per million on Claude Opus 5.5.
 function transcript(root: string, home: string, dollars: number) {
-  const dir = join(root, "home", ".claude", "projects", home.replace(/[/.]/g, "-"));
+  const dir = join(root, "home", ".claude", "projects", encodePath(home));
   mkdirSync(dir, { recursive: true });
   const lines = [
     JSON.stringify({ type: "agent-setting", agentSetting: "e9g:planner" }),

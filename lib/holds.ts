@@ -1,7 +1,8 @@
 // The operator's controls (lib/tasks/controls.ts), applied in a team's run folder, where the guard and the watchdog
 // read them: `paused` (nothing starts or merges, as e9g pause always did), hold.json (a pause and how far it has got),
-// budget.json (the limits in force) and controls-applied (the newest control applied, so each applies once). The
-// watchdog applies new ones on every run, and e9g pause, resume and budget at once.
+// budget.json (the limits in force), controls-applied (the ids applied, so each applies once, whatever order they
+// reach the store in) and planner-notes.json (what the planner should hear and couldn't yet). The watchdog applies new
+// ones on every run, and e9g pause, resume and budget at once.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
@@ -12,6 +13,35 @@ import { readJson, writeJson } from "./util.ts";
 const holdFile = (run: string): string => join(run, "hold.json");
 const budgetFile = (run: string): string => join(run, "budget.json");
 const pausedFile = (run: string): string => join(run, "paused");
+const appliedFile = (run: string): string => join(run, "controls-applied");
+const notesFile = (run: string): string => join(run, "planner-notes.json");
+
+// The controls applied: a list of ids, or (written by an earlier version) the newest id, every one up to it applied.
+function applied(run: string): (id: string) => boolean {
+  if (!existsSync(appliedFile(run))) return () => false;
+  const text = readFileSync(appliedFile(run), "utf8").trim();
+  if (/^\d+$/.test(text)) return (id) => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0) <= Number(text);
+  const ids = new Set(JSON.parse(text) as string[]);
+  return (id) => ids.has(id);
+}
+export function markApplied(run: string, ids: string[]): void {
+  const was = applied(run);
+  const text = existsSync(appliedFile(run)) ? readFileSync(appliedFile(run), "utf8").trim() : "[]";
+  const list = /^\d+$/.test(text) ? Array.from({ length: Number(text) }, (_, i) => `k${i + 1}`) : (JSON.parse(text) as string[]);
+  writeJson(appliedFile(run), [...list, ...ids.filter((id) => !was(id))]);
+}
+
+// Messages for the planner that couldn't be sent (no planner yet, or T3 Code not answering), oldest first: the watchdog
+// sends them once there's a planner to take them.
+export const pendingNotes = (run: string): string[] => readJson<string[]>(notesFile(run), []);
+export function queueNote(run: string, text: string): void {
+  writeJson(notesFile(run), [...pendingNotes(run), text]);
+}
+export function clearNotes(run: string, sent: number): void {
+  const left = pendingNotes(run).slice(sent);
+  if (left.length) writeJson(notesFile(run), left);
+  else rmSync(notesFile(run), { force: true });
+}
 
 export function readHold(run: string): HoldState | null {
   try {
@@ -32,21 +62,24 @@ export function readLimits(run: string): Limits | null {
 const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
 const money = (n: number | null): string => (n === null ? "none" : dollars(n));
 
-// Applies the controls newer than the last applied, in order. Resolves to lines for the team's log, and messages for
-// the planner, which the caller sends when there's a planner: those that `wake` it start a turn; the rest only matter
-// to a planner in the middle of one.
+// Applies the controls not applied yet, in order. Resolves to lines for the team's log, and messages for the planner,
+// which the caller sends when there's a planner (and queues when there isn't): those that `wake` it start a turn; the
+// rest only matter to a planner in the middle of one.
 export function applyControls(run: string, controls: Control[]): { log: string[]; tell: { text: string; wake: boolean }[] } {
-  const appliedFile = join(run, "controls-applied");
-  const last = existsSync(appliedFile) ? Number(readFileSync(appliedFile, "utf8")) || 0 : 0;
+  const done = applied(run);
   const log: string[] = [];
   const tell: { text: string; wake: boolean }[] = [];
+  const now: string[] = [];
   for (const control of controls) {
-    const n = Number(/^k(\d+)$/.exec(control.id)?.[1] ?? 0);
-    if (n <= last) continue;
+    if (done(control.id)) continue;
+    now.push(control.id);
     const hold = control.kind === "pause" ? holdOf([control]) : null;
     const budget = control.by === "budget";
-    if (hold && hold.scope !== "now" && existsSync(pausedFile(run))) {
-      log.push(`${whoAsked(control.by)} asked to pause after ${describeHold(hold)}, but the team is paused already`);
+    // The watchdog's own record of a hold that settled: the run folder has it already.
+    if (control.by === "watchdog") continue;
+    if (hold && existsSync(pausedFile(run))) {
+      // Stopped already: what it stopped after, and its report, stay as they are.
+      log.push(`${whoAsked(control.by)} asked to pause ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}, but the team is paused already`);
     } else if (hold) {
       const state: HoldState = { ...hold, settledAt: hold.scope === "now" ? control.at : null, left: [], stuck: [], report: null };
       writeJson(holdFile(run), state);
@@ -84,8 +117,8 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
       const l = control.limits;
       log.push(l ? `the budget is now ${money(l.daily)} a day, ${money(l.weekly)} a week, ${money(l.total)} in all` : "the budget was cleared");
     }
-    writeFileSync(appliedFile, String(n));
   }
+  if (now.length) markApplied(run, now);
   return { log, tell };
 }
 

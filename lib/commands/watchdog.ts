@@ -18,13 +18,13 @@ import { type Channel, channels, failingSend, outboxMessage, recordSend, type Re
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
 import { budgetCheck } from "../budget.ts";
-import { applyControls, holdNote, progressHold, readHold, readLimits } from "../holds.ts";
+import { applyControls, clearNotes, holdNote, markApplied, pendingNotes, progressHold, queueNote, readHold, readLimits } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { E9G_HOME, entryOf, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import { machineName } from "../machine.ts";
-import { type Control, describeHold, holdOf } from "../tasks/controls.ts";
+import { type Control, describeHold, holdOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
 import { dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { collectUsage, transcriptDirs } from "../usage.ts";
@@ -517,6 +517,14 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   const status = thread.status ?? "unknown";
   const pending = thread.pendingRequestCount ?? 0;
   passReplies(replies, run, (text) => t3.threadSend(planner, text), seen, log);
+  // What the planner should have heard and couldn't (a resume's note while there was no planner, or T3 Code was down).
+  const notes = pendingNotes(run);
+  let delivered = 0;
+  while (delivered < notes.length && t3.threadSend(planner, notes[delivered] ?? "")) delivered++;
+  if (delivered) {
+    clearNotes(run, delivered);
+    log(`passed ${delivered} held message${delivered === 1 ? "" : "s"} on to the planner`);
+  }
 
   // The environment: only the planner can restart it (it lives in the checkout), so tell it.
   let envNote = "";
@@ -548,6 +556,17 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   if (progressed?.settled) {
     const { hold } = progressed;
     log(`the hold after ${describeHold(hold)} settled: the team is paused until the operator resumes it`);
+    // In the store too, as a pause now: claims on every machine see the team stopped, not only this one's guard.
+    try {
+      const store = await openStore({ name: entry.name, tasks: entry.tasks as NonNullable<RegistryEntry["tasks"]> }, run);
+      try {
+        markApplied(run, [(await store.controls.create(settledControl(entry.name, hold))).id]);
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      log(`couldn't record the settled pause in the task graph: ${(error as Error).message.split("\n")[0]}`);
+    }
     notify(title, "The team has paused: the work you let finish is merged. The report is on the web app and in your email.");
     for (const said of await alertChannels(
       reach,
@@ -633,10 +652,13 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   for (const line of applied.log) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
-  if (planner && applied.tell.length) {
-    const busy = BUSY.includes(t3.threadShow(planner)?.status ?? "");
-    for (const { text, wake } of applied.tell)
-      if ((wake || busy) && !t3.threadSend(planner, text)) log("couldn't pass the operator's control on to the planner");
+  const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
+  for (const { text, wake } of applied.tell) {
+    if (!wake && !busy) continue;
+    if (planner && t3.threadSend(planner, text)) continue;
+    // Kept for when there's a planner to take it (the watchdog passes it on); a pause now matters only mid-turn.
+    if (wake) queueNote(entry.run, text);
+    log(planner ? "couldn't pass the operator's control on to the planner yet; it waits for the next run" : "no planner yet: the control waits for one");
   }
   return applied.log.length > 0;
 }
@@ -665,11 +687,14 @@ async function applyControlsOnce(): Promise<void> {
 async function trackUsage(entry: RegistryEntry, problem: (text: string) => void): Promise<Spend | null> {
   if (!entry.tasks) return null;
   try {
+    const worktrees = t3.worktreesDir(entry.home);
     const days = collectUsage({
       run: entry.run,
       team: entry.name,
       machine: machineName(),
-      dirs: transcriptDirs(entry.home, t3.worktreesDir(entry.home)),
+      dirs: transcriptDirs(entry.home, worktrees),
+      home: entry.home,
+      worktrees,
     });
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
@@ -725,6 +750,11 @@ async function enforceBudget(
     await applyTeamControls(entry, log, log);
     await alert(`budget-${made.id}`, move.why);
   }
+}
+
+// The web app's view of a Mongo team, now (e9g pause, resume and budget call it after applying a control).
+export async function reportTeamState(entry: RegistryEntry): Promise<void> {
+  if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, entry.run, () => {});
 }
 
 // The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).

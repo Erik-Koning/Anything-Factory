@@ -26,10 +26,21 @@ import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, readJson, writeJson } from "../util.ts";
-import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
+import { acquireSlot } from "../lock.ts";
+import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
-import { budgetControl, type Control, describeHold, type HoldScope, holdOf, type Limits, pauseControl, resumeControl } from "../tasks/controls.ts";
+import {
+  budgetControl,
+  type Control,
+  describeHold,
+  type HoldScope,
+  holdOf,
+  type Limits,
+  limitsOf,
+  pauseControl,
+  resumeControl,
+} from "../tasks/controls.ts";
 import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
@@ -203,19 +214,26 @@ export const teamNames = (): string[] =>
 export async function start(argv: string[]): Promise<number> {
   operatorOnly("start");
   const entry = entryFor(argv[0] ?? die("usage: e9g start <team>"));
-  // Starting a paused team resumes it: in the store too, so claims stop refusing.
+  // A pause the operator or the budget recorded stays until e9g resume, which is the operator's alone: start only starts
+  // the watch (the setup agent runs it too). A paused file with no pause recorded (an earlier version's) it lifts.
   if (entry.tasks && !entry.worker) {
-    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    let hold: ReturnType<typeof holdOf> = null;
     try {
-      if (holdOf(await store.controls.all())) await store.controls.create(resumeControl(entry.name, OPERATOR));
-    } finally {
-      await store.close();
+      const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+      try {
+        hold = holdOf(await store.controls.all());
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      console.error(`e9g: couldn't read the team's controls (${(error as Error).message.split("\n")[0]}); a pause recorded there still holds`);
     }
-    await applyTeamControls(
-      entry,
-      (text) => console.info(`e9g: ${text}`),
-      (text) => console.error(`e9g: ${text}`)
-    );
+    if (hold) {
+      console.info(
+        `e9g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): e9g resume ${entry.name} starts it again`
+      );
+      return status([entry.name]);
+    }
   }
   rmSync(join(entry.run, "paused"), { force: true });
   ensureWatchdog();
@@ -245,12 +263,31 @@ async function recordControl(entry: RegistryEntry, make: (store: Store) => Promi
     await store.close();
   }
   mkdirSync(entry.run, { recursive: true });
-  await applyTeamControls(
-    entry,
-    (text) => appendFileSync(join(entry.run, "watchdog.log"), `${new Date().toISOString().replace(/\.\d+Z$/, "Z")} ${text}\n`),
-    (text) => console.error(`e9g: ${text}`)
-  );
+  // Under the watchdog's lock, so a run applying the same control at the same moment doesn't tell the planner twice;
+  // then the web app's view of the team, at once. Busy for a minute, it's left to the watchdog's next minute.
+  const release = await acquireSlot([join(entry.run, ".watch.lock")], { waitMin: 1, holder: "e9g" });
+  if (!release) {
+    console.info("e9g: the watchdog is busy with the team; it applies this within a minute");
+    return control;
+  }
+  try {
+    await applyTeamControls(
+      entry,
+      (text) => appendFileSync(join(entry.run, "watchdog.log"), `${new Date().toISOString().replace(/\.\d+Z$/, "Z")} ${text}\n`),
+      (text) => console.error(`e9g: ${text}`)
+    );
+    await reportTeamState(entry);
+  } finally {
+    release();
+  }
   return control;
+}
+
+// This machine alone: a worker's own pause (its builders), or the operator's when the task graph can't be reached.
+function pauseHere(entry: RegistryEntry, paused: boolean): void {
+  mkdirSync(entry.run, { recursive: true });
+  if (paused) writeFileSync(join(entry.run, "paused"), new Date().toISOString());
+  else rmSync(join(entry.run, "paused"), { force: true });
 }
 
 // e9g pause <team>: nothing starts or merges from now; running members finish their turn. --after tasks: the work under
@@ -273,11 +310,29 @@ export async function pause(argv: string[]): Promise<number> {
       : undefined;
   if (journeys && scope !== "journeys") die("--journeys goes with --after journeys");
   const note = typeof options["note"] === "string" ? options["note"] : "";
-  if (!entry.tasks) {
-    if (scope !== "now") die(`${entry.name} keeps its tickets on a GitHub board, so it can only pause now (e9g pause ${entry.name})`);
-    mkdirSync(entry.run, { recursive: true });
-    writeFileSync(join(entry.run, "paused"), new Date().toISOString());
-  } else await recordControl(entry, async (store) => pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note }));
+  if (!entry.tasks || entry.worker) {
+    if (scope !== "now")
+      die(
+        entry.worker
+          ? `pause the team after its work from its lead; here, e9g pause ${entry.name} stops this machine's members`
+          : `${entry.name} keeps its tickets on a GitHub board, so it can only pause now (e9g pause ${entry.name})`
+      );
+    pauseHere(entry, true);
+    if (entry.worker) {
+      console.info(`e9g: this machine's members of ${entry.name} are paused; the rest of the team isn't (e9g pause on its lead pauses it all)`);
+      return 0;
+    }
+  } else
+    try {
+      await recordControl(entry, async (store) => pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note }));
+    } catch (error) {
+      // Stopping must work whatever else doesn't: now is a file on this machine, recorded once the graph is reachable.
+      if (scope !== "now") throw error;
+      pauseHere(entry, true);
+      console.error(
+        `e9g: couldn't record the pause in the task graph (${(error as Error).message.split("\n")[0]}): paused on this machine; run e9g pause ${entry.name} again once it's reachable, so the web app and other machines know`
+      );
+    }
   const hold = readHold(entry.run);
   console.info(
     scope === "now"
@@ -298,7 +353,19 @@ export async function budget(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["auto-resume", "no-auto-resume", "restart", "clear"] });
   const entry = entryFor(positional[0] ?? die(BUDGET_USAGE));
   if (!entry.tasks) die(`${entry.name} keeps its tickets on a GitHub board, which has no budget`);
-  const current = readLimits(entry.run);
+  // The limits in force are the store's (the web app may have changed them a moment ago, and a worker never applies
+  // them); the run folder's copy only when the store can't be reached.
+  let current = readLimits(entry.run);
+  try {
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      current = limitsOf(await store.controls.all());
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    console.error(`e9g: couldn't read the budget from the task graph (${(error as Error).message.split("\n")[0]}); showing this machine's copy`);
+  }
   const amount = (key: "daily" | "weekly" | "total"): number | null => {
     const given = options[key];
     if (typeof given !== "string") return current?.[key] ?? null;
@@ -345,8 +412,18 @@ export async function resume(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv);
   const entry = entryFor(positional[0] ?? die('usage: e9g resume <team> [--note "…"]'));
   const note = typeof options["note"] === "string" ? options["note"] : "";
-  if (entry.tasks) await recordControl(entry, async () => resumeControl(entry.name, OPERATOR, note));
-  else rmSync(join(entry.run, "paused"), { force: true });
+  if (!entry.tasks || entry.worker) pauseHere(entry, false);
+  else
+    try {
+      await recordControl(entry, async () => resumeControl(entry.name, OPERATOR, note));
+    } catch (error) {
+      pauseHere(entry, false);
+      rmSync(join(entry.run, "hold.json"), { force: true });
+      console.error(
+        `e9g: couldn't record the resume in the task graph (${(error as Error).message.split("\n")[0]}): this machine carries on, but claims still see the pause there until e9g resume ${entry.name} reaches it`
+      );
+      return 1;
+    }
   console.info(`e9g: ${entry.name} resumed${note && entry.tasks ? "; the planner has your note" : ""}`);
   return 0;
 }

@@ -117,12 +117,26 @@ export const budgetControl = (team: string, by: string, limits: Limits | null, a
   limits,
 });
 
-// The pause in force: the latest pause, unless a resume came after it. Controls come oldest first, as the store lists them.
+// The pause in force, of those since the last resume: a pause now outranks a graceful one (a stopped team isn't
+// reopened by asking it to finish something; the watchdog records one when a hold settles), otherwise the latest.
+// Controls come oldest first, as the store lists them.
 export function holdOf(controls: Control[]): Hold | null {
-  const last = controls.findLast((c) => c.kind === "pause" || c.kind === "resume");
-  if (!last || last.kind !== "pause" || !last.scope) return null;
-  return { control: last.id, scope: last.scope, tasks: last.tasks, journeys: last.journeys, since: last.at, by: last.by, note: last.note };
+  const pauses = controls.slice(controls.findLastIndex((c) => c.kind === "resume") + 1).filter((c) => c.kind === "pause" && c.scope);
+  const chosen = pauses.findLast((c) => c.scope === "now") ?? pauses.at(-1);
+  if (!chosen?.scope) return null;
+  return { control: chosen.id, scope: chosen.scope, tasks: chosen.tasks, journeys: chosen.journeys, since: chosen.at, by: chosen.by, note: chosen.note };
 }
+
+// The pause the watchdog records once a graceful hold has settled, so every machine's claims see the team stopped.
+export const settledControl = (team: string, hold: Hold, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "pause",
+  by: "watchdog",
+  at,
+  note: `the pause after ${describeHold(hold)} settled`,
+  scope: "now",
+});
 
 // The limits in force: the latest budget's.
 export const limitsOf = (controls: Control[]): Limits | null => controls.findLast((c) => c.kind === "budget")?.limits ?? null;
@@ -146,15 +160,28 @@ export function holdRefusal(task: Task, hold: Hold | null): string | null {
 const inScope = (t: Task, hold: Hold): boolean =>
   hold.tasks.includes(t.id) || (hold.scope === "journeys" && t.parent !== null && hold.journeys.includes(t.parent));
 
+// A proposal no one has decided on for this long is waiting for the operator, as far as a hold is concerned.
+export const UNDECIDED_MIN = 30;
+
+// When a task was last claimed: its claim, or the latest move to building in its history.
+const claimedAt = (t: Task): string | null => t.claim?.at ?? t.history.findLast((e) => e.to === "building")?.at ?? null;
+
 // Where a graceful hold stands: `left` is what can still move (work, or the planner's and members' turns), `stuck` what
 // can't without the operator. It has settled when nothing's left and no member is at work.
-export function settling(hold: Hold, all: Task[], membersAtWork: number): { settled: boolean; left: string[]; stuck: string[] } {
+export function settling(hold: Hold, all: Task[], membersAtWork: number, now = Date.now()): { settled: boolean; left: string[]; stuck: string[] } {
   const left: string[] = [];
   const stuck: string[] = [];
   const byId = new Map(all.map((t) => [t.id, t]));
-  // Anything being built or in review finishes first, in the hold's scope or not (a claim made as the hold was asked).
-  for (const t of all)
-    if (t.status === "building" || t.status === "review") left.push(`#${t.id} ${t.status === "building" ? "being built" : "in review"}: ${t.title}`);
+  // What's being built or in review finishes first; but work outside the hold claimed after it was asked for (by a
+  // member on a factory version older than holds, or a claim that crossed it) isn't waited for: it waits for the resume.
+  for (const t of all) {
+    if (t.status !== "building" && t.status !== "review") continue;
+    const line = `#${t.id} ${t.status === "building" ? "being built" : "in review"}: ${t.title}`;
+    const at = claimedAt(t);
+    if (!inScope(t, hold) && at !== null && at > hold.since)
+      stuck.push(`${line} (started after the pause was asked, outside it: it waits for the resume)`);
+    else left.push(line);
+  }
   const scoped = all.filter((t) => t.kind !== "journey" && inScope(t, hold) && !finished(t) && t.status !== "building" && t.status !== "review");
   for (const t of scoped) {
     const waiting = t.after.filter((id) => byId.get(id)?.status !== "done");
@@ -165,6 +192,7 @@ export function settling(hold: Hold, all: Task[], membersAtWork: number): { sett
     if (t.status === "blocked" || t.status === "question") stuck.push(`#${t.id} ${t.status}: ${t.title}`);
     else if (outside.length) stuck.push(`#${t.id} waits for ${ids(outside)}, which can't finish in this hold`);
     else if (t.status === "approved") left.push(`#${t.id} to build${waiting.length ? ` after ${ids(waiting)}` : ""}: ${t.title}`);
+    else if (now - Date.parse(t.updatedAt) >= UNDECIDED_MIN * 60_000) stuck.push(`#${t.id} ${t.status}, waiting for a decision: ${t.title}`);
     else left.push(`#${t.id} ${t.status}, for the planner or approver: ${t.title}`);
   }
   if (hold.scope === "journeys")

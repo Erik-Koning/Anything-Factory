@@ -1,10 +1,21 @@
-import { tmp, write } from "./helpers.ts";
+import { fakeKeychain, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { applyControls, holdNote, progressHold, readHold } from "../lib/holds.ts";
-import { budgetControl, type Control, holdOf, holdReport, journeysUnderWay, pauseControl, resumeControl, settling } from "../lib/tasks/controls.ts";
+import { applyControls, clearNotes, holdNote, pendingNotes, progressHold, queueNote, readHold } from "../lib/holds.ts";
+import {
+  budgetControl,
+  type Control,
+  type Hold,
+  holdOf,
+  holdReport,
+  journeysUnderWay,
+  pauseControl,
+  resumeControl,
+  settledControl,
+  settling,
+} from "../lib/tasks/controls.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 import { claimRefusal, newTask, nextClaim, Refused, type Task } from "../lib/tasks/model.ts";
 
@@ -126,7 +137,82 @@ describe("graceful pauses", () => {
   });
 });
 
+describe("holds that can't reopen or hang", () => {
+  test("a pause now outranks a graceful one asked after it, and the watchdog's record of a settled hold is a pause now", () => {
+    const all = graph();
+    const now = control(pauseControl(all, "fixture", { scope: "now", by: "operator" }));
+    const after = control(pauseControl(all, "fixture", { scope: "tasks", by: "operator" }));
+    assert.equal(holdOf([now, after])?.scope, "now");
+    assert.match(claimRefusal(all.find((t) => t.id === "14") as Task, "builder", all, holdOf([now, after])) ?? "", /paused the team/);
+    const graceful = control(pauseControl(all, "fixture", { scope: "tasks", by: "operator" }));
+    const hold = holdOf([graceful]);
+    if (!hold) throw new Error("no hold");
+    const settled = control(settledControl("fixture", hold));
+    assert.equal(holdOf([graceful, settled])?.scope, "now");
+    assert.equal(holdOf([graceful, settled, control(pauseControl(all, "fixture", { scope: "journeys", by: "operator" }))])?.scope, "now");
+    assert.equal(holdOf([graceful, settled, control(resumeControl("fixture", "operator"))]), null);
+  });
+
+  test("work claimed after the hold, outside it, isn't waited for; nor is a proposal nobody has decided on for half an hour", () => {
+    const since = "2026-11-04T10:00:00.000Z";
+    const later = "2026-11-04T10:05:00.000Z";
+    const all = [
+      ...graph().filter((t) => t.id !== "11" && t.id !== "12"),
+      task({ id: "40", status: "building", claim: { role: "builder", machine: "m", worktree: "/w", at: later, until: later } }),
+      task({ id: "41", parent: "1", status: "proposed", updatedAt: "2026-11-04T09:00:00.000Z" }),
+      task({ id: "42", parent: "1", status: "proposed", updatedAt: "2026-11-04T10:20:00.000Z" }),
+    ];
+    // Asked of the graph as it was, before #40 was claimed.
+    const hold = { ...holdOf([control(pauseControl(graph(), "fixture", { scope: "journeys", journeys: ["1"], by: "operator" }))]), since } as Hold;
+    const now = settling(hold, all, 0, Date.parse("2026-11-04T10:30:00.000Z"));
+    assert.match(now.stuck.join("\n"), /#40 being built: task 40 \(started after the pause was asked, outside it/);
+    assert.match(now.stuck.join("\n"), /#41 proposed, waiting for a decision/);
+    assert.deepEqual(now.left, ["#13 to build: task 13", "#14 to build: task 14", "#42 proposed, for the planner or approver: task 42"]);
+  });
+});
+
 describe("controls in the run folder", () => {
+  test("controls apply whatever order they reach the store in; an earlier version's record still counts", () => {
+    const run = tmp("e9g-holds-");
+    write(run, { "controls-applied": "2" });
+    const k = (id: string, c: Omit<Control, "id" | "version">): Control => ({ ...c, id, version: 1 });
+    const r = (id: string) => k(id, resumeControl("fixture", "operator", `note ${id}`));
+    assert.deepEqual(
+      applyControls(run, [r("k1"), r("k2"), r("k4")]).tell.map((t) => t.text.match(/note k\d/)?.[0]),
+      ["note k4"]
+    );
+    // k3 lands in the store after k4 was applied: it's applied all the same.
+    assert.deepEqual(
+      applyControls(run, [r("k1"), r("k2"), r("k3"), r("k4")]).tell.map((t) => t.text.match(/note k\d/)?.[0]),
+      ["note k3"]
+    );
+    assert.deepEqual(applyControls(run, [r("k1"), r("k2"), r("k3"), r("k4")]).tell, []);
+  });
+
+  test("a pause asked of a paused team keeps the settled one and its report", () => {
+    const run = tmp("e9g-holds-");
+    let all = graph();
+    applyControls(run, [control(pauseControl(all, "fixture", { scope: "tasks", by: "operator" }))]);
+    all = all.map((t) => (["11", "12", "14"].includes(t.id) ? { ...t, status: "done" as const } : t));
+    progressHold(run, all, 0);
+    const report = readHold(run)?.report;
+    assert.ok(report);
+    const { log } = applyControls(run, [control(pauseControl(all, "fixture", { scope: "now", by: "operator" }))]);
+    assert.match(log[0] ?? "", /paused already/);
+    assert.equal(readHold(run)?.report, report);
+  });
+
+  test("messages the planner couldn't take wait, in order, and go once taken", () => {
+    const run = tmp("e9g-holds-");
+    queueNote(run, "one");
+    queueNote(run, "two");
+    assert.deepEqual(pendingNotes(run), ["one", "two"]);
+    clearNotes(run, 1);
+    assert.deepEqual(pendingNotes(run), ["two"]);
+    clearNotes(run, 1);
+    assert.deepEqual(pendingNotes(run), []);
+  });
+
   test("each control applies once, in order: a pause now, a graceful one, a resume, a budget", () => {
     const run = tmp("e9g-holds-");
     const all = graph();
@@ -157,7 +243,7 @@ describe("controls in the run folder", () => {
     assert.equal(applied.tell[0]?.wake, true);
     assert.match(applied.log[1] ?? "", /\$40 a day, none a week, \$500 in all/);
     assert.match(holdNote(run), /pausing the team after the work under way \(#11, #12, #14\)/);
-    assert.equal(readFileSync(join(run, "controls-applied"), "utf8"), budget.id.slice(1));
+    assert.deepEqual(JSON.parse(readFileSync(join(run, "controls-applied"), "utf8")), [now.id, resume.id, graceful.id, budget.id]);
   });
 
   test("a graceful hold records what's left, then pauses the team with its report", () => {
@@ -247,22 +333,62 @@ describe("e9g pause and resume, and the watchdog", () => {
       assert.match(w.calls().join("\n"), /thread send mcp:planner The operator resumed the team, and wrote:\nGood\. Start J2 next\.\n/);
       assert.deepEqual(
         (await store.controls.all()).map((c) => `${c.kind} ${c.by}`),
-        ["pause operator", "resume operator"]
+        ["pause operator", "pause watchdog", "resume operator"]
       );
     } finally {
       await w.close();
     }
   });
 
-  test("pause now stops the team at once; start resumes it in the store too", async () => {
+  test("pause now stops the team at once; start leaves a recorded pause alone, resume lifts it", async () => {
     const { w, store } = await world();
     try {
       assert.equal((await w.e9g("pause", "fixture")).code, 0);
       assert.ok(existsSync(join(w.run, "paused")));
       assert.equal(holdOf(await store.controls.all())?.scope, "now");
-      await w.e9g("start", "fixture");
+      assert.match((await w.e9g("start", "fixture")).out, /fixture is paused \(by the operator, now\): e9g resume fixture starts it again/);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.equal((await w.e9g("resume", "fixture")).code, 0);
       assert.ok(!existsSync(join(w.run, "paused")));
       assert.equal(holdOf(await store.controls.all()), null);
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("with the task graph out of reach, pause now still stops this machine, and resume still starts it", async () => {
+    fakeKeychain();
+    const { fakeWorld } = await import("./fake-t3.ts");
+    const w = await fakeWorld();
+    try {
+      const file = join(w.e9gHome, "teams", "fixture.json");
+      write(join(w.e9gHome, "teams"), {
+        "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), tasks: { store: "mongo", database: "e9g", lead: null } },
+      });
+      const paused = await w.e9g("pause", "fixture");
+      assert.equal(paused.code, 0, paused.out);
+      assert.match(paused.out, /couldn't record the pause in the task graph .*paused on this machine/);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.notEqual((await w.e9g("pause", "fixture", "--after", "tasks")).code, 0, "a graceful pause needs the graph");
+      const resumed = await w.e9g("resume", "fixture");
+      assert.match(resumed.out, /couldn't record the resume/);
+      assert.ok(!existsSync(join(w.run, "paused")));
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("on a worker machine, pause and resume are that machine's alone", async () => {
+    const { w, store } = await world();
+    try {
+      const file = join(w.e9gHome, "teams", "fixture.json");
+      write(join(w.e9gHome, "teams"), { "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), worker: true } });
+      assert.match((await w.e9g("pause", "fixture")).out, /this machine's members of fixture are paused/);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.deepEqual(await store.controls.all(), [], "the team isn't paused");
+      assert.notEqual((await w.e9g("pause", "fixture", "--after", "tasks")).code, 0);
+      assert.equal((await w.e9g("resume", "fixture")).code, 0);
+      assert.ok(!existsSync(join(w.run, "paused")));
     } finally {
       await w.close();
     }

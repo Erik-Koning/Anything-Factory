@@ -51,8 +51,10 @@ shows today, this week and in all; the web app adds each day and the costliest j
 To hold a team to a budget: `e9g budget my-app --daily 40 --weekly 200 --total 1500` (dollars, API-equivalent; a limit
 left out keeps its value, 0 removes it; `e9g budget my-app` shows them). At 80% of a limit you're warned, once per day,
 week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now. Resume it
-and the budget leaves it alone for the rest of that day or week: you chose to carry on. With `--auto-resume`, a team
-the daily or weekly budget paused starts again when the next day or week does.
+and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the budget):
+you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when the next
+day or week does. `e9g start` never lifts a pause; `e9g resume` does. With the task graph out of reach, `e9g pause`
+still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
 
 To stop a team gracefully, let what it's doing finish first: `e9g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets

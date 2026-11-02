@@ -7,7 +7,7 @@ import { costOf, modelKey } from "../lib/prices.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 import { newTask, type Task } from "../lib/tasks/model.ts";
 import { dayOf, spendByWork, spendOf, type UsageDay, weekOf } from "../lib/tasks/spend.ts";
-import { collectUsage, countedDays, transcriptDirs } from "../lib/usage.ts";
+import { collectUsage, countedDays, encodePath, transcriptDirs } from "../lib/usage.ts";
 
 const close = (actual: number | null, expected: number) => assert.ok(actual !== null && Math.abs(actual - expected) < 1e-9, `${actual} ≠ ${expected}`);
 const none = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
@@ -148,6 +148,35 @@ describe("counting what a team used", () => {
     assert.deepEqual(countedDays(tmp("e9g-empty-"), "app", "studio"), []);
   });
 
+  test("folders named as Claude Code names them; a sibling team's worktrees, alike in name, aren't counted", () => {
+    const root = tmp("e9g-usage-");
+    const projects = join(root, "projects");
+    const home = "/Users/x/My Code/shop_app";
+    const worktrees = "/Users/x/.t3/worktrees/shop_app";
+    const ours = join(projects, "-Users-x-My-Code-shop-app");
+    const tree = join(projects, "-Users-x--t3-worktrees-shop-app-t3-1");
+    const sibling = join(projects, "-Users-x--t3-worktrees-shop-app-admin-t3-2");
+    for (const dir of [ours, tree, sibling]) mkdirSync(dir, { recursive: true });
+    const line = (id: string, cwd: string) =>
+      JSON.stringify({
+        type: "assistant",
+        timestamp: at("2026-11-02"),
+        cwd,
+        gitBranch: "e9g/next",
+        message: { id, model: "claude-opus-5-5", usage: { input_tokens: 1 } },
+      });
+    writeFileSync(join(ours, "a.jsonl"), [agent("e9g:planner"), line("a", home), ""].join("\n"));
+    writeFileSync(join(tree, "b.jsonl"), [agent("e9g:builder"), line("b", `${worktrees}/t3-1`), ""].join("\n"));
+    writeFileSync(join(sibling, "c.jsonl"), [agent("e9g:builder"), line("c", "/Users/x/.t3/worktrees/shop_app-admin/t3-2"), ""].join("\n"));
+    const dirs = transcriptDirs(home, worktrees, projects);
+    assert.equal(dirs.length, 3, "the sibling's folder looks like ours by name");
+    const [day] = collectUsage({ run: join(root, "run"), team: "shop", machine: "studio", dirs, home, worktrees });
+    assert.deepEqual(day?.rows.map((r) => [r.role, r.requests]).sort(), [
+      ["builder", 1],
+      ["planner", 1],
+    ]);
+  });
+
   test("an unknown model's requests are counted, not priced", () => {
     const w = world();
     writeFileSync(
@@ -243,7 +272,7 @@ describe("the watchdog counts what a team used", () => {
         "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), tasks: { store: "files", database: "e9g", lead: null } },
       });
       write(w.run, { "planner-thread": "mcp:planner\n" });
-      const transcripts = join(w.root, "home", ".claude", "projects", w.home.replace(/[/.]/g, "-"));
+      const transcripts = join(w.root, "home", ".claude", "projects", encodePath(w.home));
       mkdirSync(transcripts, { recursive: true });
       const now = new Date().toISOString();
       writeFileSync(

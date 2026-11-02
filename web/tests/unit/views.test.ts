@@ -201,6 +201,7 @@ test("the pause panel shows a pause or resume as waiting until the team's Mac ha
   assert.equal(askedBy("web:s1"), "an admin, here");
   assert.equal(askedBy("operator"), "the operator, in the terminal");
   assert.equal(askedBy("budget"), "the budget");
+  assert.equal(askedBy("watchdog"), "the team's Mac, as the pause settled");
 });
 
 test("the spend chart: 14 days ending on the lead's day, every machine added, empty days at $0; clean axis steps", () => {

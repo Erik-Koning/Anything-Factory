@@ -33,6 +33,7 @@ interface Line {
   agentSetting?: string;
   timestamp?: string;
   gitBranch?: string;
+  cwd?: string;
   message?: {
     id?: string;
     model?: string;
@@ -48,9 +49,12 @@ interface Line {
 }
 
 const stateFile = (run: string): string => join(run, "usage.json");
-const encode = (path: string): string => path.replace(/[/.]/g, "-");
+// How Claude Code names a folder's transcripts: every character that isn't a letter or a digit becomes "-".
+export const encodePath = (path: string): string => path.replace(/[^a-zA-Z0-9]/g, "-");
+const encode = encodePath;
 
-// The transcript folders of a checkout and its worktrees, removed ones included (their transcripts stay).
+// The transcript folders of a checkout and its worktrees, removed ones included (their transcripts stay). The names
+// can't tell a worktree of "app" from one of "app-admin": collectUsage keeps only lines that ran in the team's own.
 export function transcriptDirs(home: string, worktrees: string, projects = join(homedir(), ".claude", "projects")): string[] {
   if (!existsSync(projects)) return [];
   const prefix = `${encode(worktrees)}-`;
@@ -61,8 +65,19 @@ export function transcriptDirs(home: string, worktrees: string, projects = join(
 
 // Reads what the transcripts added since the last call, adds it to the run folder's totals, and resolves to the days
 // that changed (this machine's, whole), for the store.
-export function collectUsage(opts: { run: string; team: string; machine: string; dirs: string[]; now?: Date }): UsageDay[] {
+export function collectUsage(opts: {
+  run: string;
+  team: string;
+  machine: string;
+  dirs: string[];
+  home?: string;
+  worktrees?: string;
+  now?: Date;
+}): UsageDay[] {
   const state = readJson<State>(stateFile(opts.run), { cursors: {}, days: {} });
+  // A line that says where it ran must have run in the checkout or one of its worktrees.
+  const ours = (cwd: string | undefined): boolean =>
+    !cwd || !opts.home || cwd === opts.home || cwd.startsWith(`${opts.home}/`) || (opts.worktrees !== undefined && cwd.startsWith(`${opts.worktrees}/`));
   const changed = new Set<string>();
   for (const dir of opts.dirs) {
     let names: string[];
@@ -91,7 +106,7 @@ export function collectUsage(opts: { run: string; team: string; machine: string;
         }
         if (line.type === "agent-setting") cursor.role = roleOfAgent(line.agentSetting) ?? cursor.role;
         const message = line.message;
-        if (line.type !== "assistant" || !message?.id || seen.has(message.id)) continue;
+        if (line.type !== "assistant" || !message?.id || seen.has(message.id) || !ours(line.cwd)) continue;
         seen.add(message.id);
         cursor.seen = [...cursor.seen, message.id].slice(-50);
         // Not one of the team's agents (no --agent), or a line Claude Code made up itself.

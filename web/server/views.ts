@@ -156,7 +156,13 @@ export function controlsView(status: TeamState | null, controls: Control[], limi
 
 // Who asked for a control, in words.
 export const askedBy = (by: string): string =>
-  by === "budget" ? "the budget" : by.startsWith("web:") ? "an admin, here" : "the operator, in the terminal";
+  by === "budget"
+    ? "the budget"
+    : by === "watchdog"
+      ? "the team's Mac, as the pause settled"
+      : by.startsWith("web:")
+        ? "an admin, here"
+        : "the operator, in the terminal";
 
 // Spend each day for the `n` days ending `last` (the lead's day, YYYY-MM-DD), every machine's added up; a day with
 // nothing counted is $0.

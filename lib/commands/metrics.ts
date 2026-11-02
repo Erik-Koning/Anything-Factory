@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { roleForInstance, roleOfAgent } from "../config.ts";
 import { readRegistry } from "../paths.ts";
 import { teamSession } from "../session.ts";
+import { encodePath } from "../usage.ts";
 import { turns as t3Turns, worktreesDir } from "../t3.ts";
 
 interface RoleRow {
@@ -89,7 +90,7 @@ export function run(args: string[]): number {
 
   // --- Claude transcripts: the loop checkout and the T3 worktrees made from it. --------------------------------
   const projects = join(homedir(), ".claude", "projects");
-  const encode = (path: string) => path.replace(/[/.]/g, "-");
+  const encode = encodePath;
   const worktrees = worktreesDir(home);
   // Every transcript folder for the loop checkout or a worktree made from it, including worktrees the watchdog has
   // already removed (their transcripts stay in ~/.claude/projects).
