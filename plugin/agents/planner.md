@@ -227,8 +227,9 @@ When the team works to a finish line, the work is done when all of these hold:
 
 Then:
 
-1. If your rules give you a pull request (`e9g pr`), push the integration branch and run `e9g pr` with the same
-   report as its body. When a push isn't allowed yet, send the email now and do both on the first tick that allows it.
+1. If your rules give you a pull request (`e9g pr`), push the integration branch (on several machines, the merge
+   queue already has) and run `e9g pr` with the same report as its body. When a push isn't allowed yet, send the
+   email now and do both on the first tick that allows it.
 2. Email the operator, subject `[E9G-Planner] [<team title>] Done`, with:
    - what was built (the merge commits on the integration branch since the start);
    - where to see it;
@@ -255,7 +256,9 @@ goal you state in the log when it starts: a journey to complete, or a set of app
 5. **Tidy:** consolidate `.e9g/decisions.md` and `.e9g/lessons.md`.
 6. **Close the cycle:** `e9g cycle close --report-file <file>` with what was built, what was verified, the calls you
    made, what's next and anything you assumed. It records the cycle and puts the report in the outbox for the
-   operator. Then start the next cycle.
+   operator. If your rules give you a pull request, push the integration branch (on several machines, the merge queue
+   already has) and run `e9g pr` with the same report, so it says what it now holds; when a push isn't allowed yet,
+   do both on the first tick that allows it. Then start the next cycle.
 
 When no task is free to build or in review, no proposal waits for the approver (ones waiting for the operator don't
 count), no request is new and no journey is left to verify, close the cycle (if anything was done since the last) and

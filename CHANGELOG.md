@@ -79,14 +79,18 @@ add`), which opens only the form and their own requests and attributes what they
   ends with the commit it holds (read from the remote, with any newer commits not yet pushed), and with the
   planner's thread. The factory runs `gh` for it, so the `github` policy stays denied: `gh pr create` and
   everything else gh does beyond issues stay refused. Only the planner runs it (the guard, and the command itself).
-  Its rules describe it, the Done report links it, and `e9g check` proves who may run it, and warns when the remote
-  isn't GitHub or `gh` is missing.
+  Its rules describe it, the Done report links it, each cycle's close updates it, and `e9g check` proves who may run
+  it, and warns when the remote isn't GitHub or `gh` is missing. A pull request the operator opened (no
+  `[E9G-Planner]` in its title) keeps their title and description, and the planner's report goes in a comment; a
+  fork's pull request from a branch of the same name is left alone. On several machines, where the lead pushes after
+  every merge, its footer says when it was written, and `push.branch` must be the integration branch.
 - **A heartbeat, for when the Mac itself stops.** `e9g connect heartbeat <url>` keeps a check's ping URL
   (healthchecks.io, or any service like it) once a test ping goes through. The watchdog pings it at the end of every
   run of every team in which T3 Code answers. When the pings stop, because the Mac is off, asleep or at the login
   screen, the watchdog stopped, or T3 Code won't start, the service alerts the operator: the one alert the factory
   can't send itself. A failing ping is logged at most hourly. `e9g connect` and `e9g doctor` show when it last
-  went through, and `e9g disconnect heartbeat` turns it off.
+  went through, and `e9g disconnect heartbeat` turns it off. It says the Mac's watchdog runs, not that every team is
+  well, and each machine needs a check of its own.
 
 ## 0.3.1: The planner decides from direction, and writes less often
 

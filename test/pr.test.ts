@@ -12,10 +12,12 @@ import { compile } from "../lib/prompts.ts";
 import { validator } from "./jsonschema.ts";
 
 const ADDRESS = "git@github.com:acme/app.git";
+// How e9g pr asks gh for the open pull request.
+const LIST = "pr list --repo acme/app --head e9g/next --base main --state open --json number,url,title,isCrossRepository --limit 20";
 
 // A team's checkout whose origin is acme/app on GitHub, as far as anything but git's transport can tell.
-function checkout(push: RawTeam["push"] = { remote: "origin", pullRequest: true }): { home: string; run: string } {
-  const home = makeRepo(baseTeam({ push }));
+function checkout(push: RawTeam["push"] = { remote: "origin", pullRequest: true }, more: RawTeam = {}): { home: string; run: string } {
+  const home = makeRepo(baseTeam({ push, ...more }));
   const bare = tmp("e9g-remote-");
   git(bare, "init", "-q", "--bare");
   git(home, "remote", "add", "origin", ADDRESS);
@@ -36,7 +38,7 @@ printf '%s\\n' "$*" >> "${dir}/calls"
 case "$1 $2" in
   "pr list") cat "${dir}/list" 2>/dev/null || echo "[]" ;;
   "pr create") cat > "${dir}/body"; echo "https://github.com/acme/app/pull/12" ;;
-  "pr edit") cat > "${dir}/body" ;;
+  "pr edit"|"pr comment") cat > "${dir}/body" ;;
   *) exit 1 ;;
 esac
 `,
@@ -123,7 +125,7 @@ describe("e9g pr", { concurrency: true }, () => {
     assert.equal(opened.code, 0, opened.out);
     assert.match(opened.out, /opened e9g\/next into main: https:\/\/github\.com\/acme\/app\/pull\/12/);
     assert.deepEqual(gh.calls(), [
-      "pr list --repo acme/app --head e9g/next --base main --state open --json number,url --limit 1",
+      LIST,
       "pr create --repo acme/app --head e9g/next --base main --title [E9G-Planner] [Fixture team] Sprint one --body-file -",
     ]);
     assert.match(gh.body(), /^## What's in it\n\nThe charity approval journey, end to end\.\n\n---\n/);
@@ -133,12 +135,65 @@ describe("e9g pr", { concurrency: true }, () => {
     // Work merged since the push: the open one is updated, and says what isn't in it yet. A title that already
     // carries the labels doesn't get them twice.
     commit(team.home, { "src/next.ts": "export const next = 1;\n" }, "merge 13");
-    gh.list('[{"number":12,"url":"https://github.com/acme/app/pull/12"}]');
+    gh.list('[{"number":12,"url":"https://github.com/acme/app/pull/12","title":"[E9G-Planner] [Fixture team] Sprint one","isCrossRepository":false}]');
     const updated = await prAs("planner", team, gh, "--title", "[E9G-Planner] [Fixture team] Sprint two", "--body", "More of it.");
     assert.equal(updated.code, 0, updated.out);
     assert.match(updated.out, /updated #12, e9g\/next into main: https:\/\/github\.com\/acme\/app\/pull\/12/);
     assert.equal(gh.calls().at(-1), "pr edit 12 --repo acme/app --title [E9G-Planner] [Fixture team] Sprint two --body-file -");
     assert.match(gh.body(), new RegExp(`Holds \`e9g/next\` at ${pushed.slice(0, 9)}; 1 newer commit\\(s\\) on the team's machine aren't pushed yet\\.`));
+  });
+
+  test("leaves a fork's pull request alone, and comments on one the operator opened instead of rewriting it", async () => {
+    const team = checkout();
+    git(team.home, "push", "-q", "origin", "e9g/next");
+    const gh = fakeGh();
+    gh.list('[{"number":7,"url":"https://github.com/acme/app/pull/7","title":"[E9G-Planner] mine now","isCrossRepository":true}]');
+    const beside = await prAs("planner", team, gh, "--title", "Sprint one", "--body-file", bodyFile(team.home));
+    assert.equal(beside.code, 0, beside.out);
+    assert.match(gh.calls().at(-1) ?? "", /^pr create /, "a fork's e9g/next isn't the team's");
+
+    gh.list('[{"number":9,"url":"https://github.com/acme/app/pull/9","title":"Promote the approval journey","isCrossRepository":false}]');
+    const theirs = await prAs("planner", team, gh, "--title", "Sprint two", "--body", "More of it.");
+    assert.equal(theirs.code, 0, theirs.out);
+    assert.match(theirs.out, /commented on #9, e9g\/next into main, which the operator opened \(no \[E9G-Planner\] in its title\)/);
+    assert.equal(gh.calls().at(-1), "pr comment 9 --repo acme/app --body-file -");
+    assert.ok(!gh.calls().some((call) => call.startsWith("pr edit")), "their title and description stay theirs");
+    assert.match(gh.body(), /^\*\*\[E9G-Planner\] \[Fixture team\] Sprint two\*\*\n\nMore of it\.\n\n---\n/);
+  });
+
+  test("on several machines, says when it was written, since the lead pushes after every merge", async () => {
+    const several = { tasks: { store: "mongo" as const, lead: "studio" } };
+    const team = checkout({ remote: "origin", pullRequest: true }, several);
+    git(team.home, "push", "-q", "origin", "e9g/next");
+    const gh = fakeGh();
+    const opened = await prAs("planner", team, gh, "--title", "Sprint one", "--body-file", bodyFile(team.home));
+    assert.equal(opened.code, 0, opened.out);
+    assert.match(gh.body(), /Written when `e9g\/next` was at [0-9a-f]{9}; the lead pushes it after every merge/);
+
+    const rules = compile(loadTeam(team.home), "builder");
+    assert.match(rules, /a builder's `e9g task submit` pushes its task's branch, and the lead's merge queue pushes `e9g\/next` after every merge/);
+    assert.match(rules, /The planner's `e9g pr` opens the pull request/);
+    assert.match(rules, /Nothing else leaves these machines\./);
+    assert.doesNotMatch(compile(loadTeam(checkout().home), "builder"), /these machines/);
+
+    const elsewhere = normalize({ name: "app", branch: "e9g/next", ...several, push: { branch: "e9g/out" } }, "/tmp/app").problems.join("; ");
+    assert.match(elsewhere, /push\.branch: a team on several machines pushes its integration branch, e9g\/next, after every merge/);
+  });
+
+  test("closing a cycle points the planner at the pull request", async () => {
+    const team = checkout({ remote: "origin", pullRequest: true }, { mode: "cycles" });
+    write(team.home, {
+      ".e9g/run/scratch/cycle.md": "Approval journey verified\n\nBuilt and verified the charity approval journey on phone and desktop.\n",
+    });
+    const closed = await e9g(["cycle", "close", "--report-file", join(team.home, ".e9g/run/scratch/cycle.md")], {
+      cwd: team.home,
+      env: { E9G_TEAM: "fixture", E9G_HOME_DIR: team.home, E9G_RUN: team.run, E9G_ROLE: "planner" },
+    });
+    assert.equal(closed.code, 0, closed.out);
+    assert.match(
+      closed.out,
+      /then the pull request: push e9g\/next if it isn't pushed \(git push origin e9g\/next\), and e9g pr --title "Cycle 1: …" --body-file /
+    );
   });
 
   test("refuses a team without a pull request, a remote that isn't GitHub, and a call without a title or body", async () => {
