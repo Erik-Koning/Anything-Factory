@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
+import { SpendPanel } from "../../../components/spend-panel.tsx";
 import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { controlsOf, storeFor } from "../../../server/factory.ts";
+import { controlsOf, limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
 import { journeys, merges, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
@@ -20,6 +21,10 @@ export default async function OverviewPage({ params, searchParams }: { params: P
     team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
     control ? controlsOf(team.name) : Promise.resolve([]),
   ]);
+  const limits = limitsOf(controls);
+  // Every day counted since the budget began (or ever), and at least the chart's last 14.
+  const from = limits ? [limits.since.slice(0, 10), new Date(Date.now() - 15 * 86_400_000).toISOString().slice(0, 10)].sort()[0] : undefined;
+  const usage = control ? await usageOf(team.name, from ?? "0000-00-00") : [];
   const status = team.status;
   const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
   const details = can(viewer, "team:board", team.name);
@@ -66,6 +71,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
       </div>
 
       {control ? <TeamControls team={team} controls={controls} tasks={tasks} /> : null}
+      {control ? <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} /> : null}
 
       <section className="panel" aria-labelledby="journeys">
         <h2 id="journeys">Journeys</h2>

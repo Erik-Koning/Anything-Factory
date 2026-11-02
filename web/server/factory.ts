@@ -2,10 +2,11 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, add.ts, teams.ts, graph.ts and controls.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
+// decide.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
 import { type Control, type HoldScope, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
+import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../lib/tasks/mongo.ts";
@@ -18,8 +19,9 @@ import { graphDb, mongo } from "./db.ts";
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc } from "../../lib/tasks/teams.ts";
-export type { Control, HoldScope, HoldState } from "../../lib/tasks/controls.ts";
-export { describeHold, isHoldScope, journeysUnderWay } from "../../lib/tasks/controls.ts";
+export type { Control, HoldScope, HoldState, Limits } from "../../lib/tasks/controls.ts";
+export { describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
+export { spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
 
 const stores = new Map<string, Store>();
 
@@ -101,3 +103,6 @@ export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journe
 // A resume from the web; the note goes to the planner as the operator's feedback.
 export const resumeFromWeb = (team: string, { note, from }: { note: string; from: string }): Promise<Control> =>
   storeFor(team).controls.create(resumeControl(team, `web:${from}`, note));
+
+// What the team used, day by day and machine by machine, from `from` (YYYY-MM-DD) on (lib/usage.ts publishes it).
+export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);

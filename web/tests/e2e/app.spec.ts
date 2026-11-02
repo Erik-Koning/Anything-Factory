@@ -509,6 +509,80 @@ test("the admin pauses the team after the work under way, reads where it stands,
   await report({ state: "active", hold: null });
 });
 
+test("the admin sees what the team spent: today, this week and in all against the budget, each day, and the costliest work", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const day = (ago: number) => new Date(Date.now() - ago * 86_400_000).toLocaleDateString("sv-SE");
+  const tasks = (await graph.collection("tasks").find({ team: "shop" }).toArray()) as unknown as Task[];
+  const journey = tasks.find((t) => t.kind === "journey");
+  const child = tasks.find((t) => t.parent === journey?.id);
+  const row = (role: string, task: string | null, cost: number) => ({
+    role,
+    model: "claude-opus-5-5",
+    task,
+    requests: 3,
+    input: 1,
+    output: 1,
+    cacheRead: 1,
+    cacheWrite: 1,
+    cost,
+    unpriced: 0,
+  });
+  const usage = [
+    { day: day(9), machine: "studio", rows: [row("planner", null, 4.5)] },
+    { day: day(1), machine: "studio", rows: [row("builder", child?.id ?? null, 12.25), row("planner", null, 3)] },
+    { day: day(0), machine: "studio", rows: [row("builder", child?.id ?? null, 6)] },
+    { day: day(0), machine: "worker", rows: [row("reviewer", child?.id ?? null, 2)] },
+  ];
+  for (const u of usage)
+    await graph
+      .collection("usage")
+      .updateOne({ _id: `shop:${u.day}:${u.machine}` as never }, { $set: { team: "shop", updatedAt: new Date().toISOString(), ...u } }, { upsert: true });
+  await graph.collection("controls").insertOne({
+    _id: "shop:k900" as never,
+    team: "shop",
+    id: "k900",
+    version: 1,
+    kind: "budget",
+    by: "operator",
+    at: new Date().toISOString(),
+    note: "",
+    scope: null,
+    tasks: [],
+    journeys: [],
+    limits: { daily: 10, weekly: null, total: 100, since: new Date(Date.now() - 30 * 86_400_000).toISOString() },
+  });
+  await graph
+    .collection("teams")
+    .updateOne(
+      { _id: "shop" as never },
+      { $set: { "status.spend": { day: day(0), today: 8, week: 21.25, total: 27.75, since: day(30), unpriced: 0, at: new Date().toISOString() } } }
+    );
+
+  await page.goto("/t/shop");
+  const panel = page.getByRole("region", { name: "Spend" });
+  const tiles = panel.locator(".tiles li");
+  await expect(tiles.nth(0)).toContainText("Today$8.00");
+  await expect(tiles.nth(0)).toContainText("of $10 a day · near the budget");
+  await expect(tiles.nth(1)).toContainText("This week$21");
+  const since = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${day(30)}T12:00:00Z`));
+  await expect(tiles.nth(2)).toContainText(`Since ${since}$28`);
+  await expect(panel.locator(".chart .columns li")).toHaveCount(14);
+  await expect(panel.locator(".chart")).toContainText("daily budget $10");
+  // The tallest day is labelled; each day's value is in its tooltip and the table.
+  await expect(panel.locator(".chart .value")).toHaveText("$15");
+  await panel.getByText("Each day, as a table").click();
+  await expect(panel.locator("table.figures tbody tr")).toHaveCount(14);
+  await expect(panel.locator("table.figures tbody tr").last()).toContainText("$8.00");
+  await expect(panel.locator(".ranked").first()).toContainText(`#${journey?.id} ${journey?.title}`);
+  await expect(panel.locator(".ranked").first().locator("li").first()).toContainText("$20");
+  await panel.locator(".chart .columns li").nth(12).focus();
+  await expect(panel.locator(".chart .columns li").nth(12).locator(".tip")).toBeVisible();
+  await panel.screenshot({ path: "test-results/spend-panel.png" });
+
+  await graph.collection("controls").deleteOne({ _id: "shop:k900" as never });
+});
+
 test("the admin switches between teams, staying on the same page", async () => {
   const { page } = admin;
   await page.goto("/");

@@ -4,6 +4,7 @@
 // both win.
 import type { Team } from "../config.ts";
 import { type Cycle, type Doc, type FeatureRequest, Refused, type Stakeholder, type Task } from "./model.ts";
+import type { UsageDay } from "./spend.ts";
 import type { Control } from "./controls.ts";
 import type { TeamDoc, TeamSettings, TeamState } from "./teams.ts";
 
@@ -28,6 +29,8 @@ export interface Store {
   cycles: Collection<Cycle>;
   // The operator's pauses, resumes and budgets, oldest first (controls.ts); only ever created, never replaced.
   controls: Collection<Control>;
+  // What the team used, by day and machine (lib/usage.ts): each machine replaces its own documents; readers add them up.
+  usage: { publish(days: UsageDay[]): Promise<void>; since(day: string): Promise<UsageDay[]> };
   // The team's settings and state for the web app (teams.ts); a file store has no web app, so it keeps neither.
   publish(settings: TeamSettings): Promise<void>;
   report(state: TeamState): Promise<void>;

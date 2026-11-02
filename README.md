@@ -39,10 +39,14 @@ To watch a team:
 
 ```bash
 e9g teams                  # every team on this Mac, its version, and whether it's active, pausing, paused or complete
-e9g status                 # each team: planner, members running, whether its environment answers, what's drained
+e9g status                 # each team: planner, members running, its environment, what it spent, what's drained
 e9g metrics --team my-app  # agents, runs, model requests, tokens and time per role
 e9g pause my-app           # and e9g resume my-app; e9g rotate my-app for a fresh planner
 ```
+
+What a team spends is counted from its agents' Claude transcripts each watchdog run: tokens by day, role, model and
+task, priced at the API-equivalent rate (`lib/prices.ts`; on a subscription, how fast it uses your limits). `e9g status`
+shows today, this week and in all; the web app adds each day and the costliest journeys and tasks.
 
 To stop a team gracefully, let what it's doing finish first: `e9g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets

@@ -17,7 +17,7 @@ import { basename, dirname, join } from "node:path";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
-import { applyControls, holdNote, progressHold, readHold } from "../holds.ts";
+import { applyControls, holdNote, progressHold, readHold, readLimits } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { E9G_HOME, entryOf, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
@@ -25,6 +25,8 @@ import { operatorOnly } from "../session.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
+import { dayOf, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
+import { collectUsage, transcriptDirs } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
@@ -412,6 +414,8 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   mkdirSync(join(run, "outbox"), { recursive: true });
   // The operator's new pauses, resumes and budgets first (lib/holds.ts), so the rest of the run sees them.
   await applyTeamControls(entry, log, (text) => oncePer("controls-unread", 60) && log(text));
+  // What the team used since the last run, from this machine's transcripts, and what it has spent.
+  await trackUsage(entry, (text) => oncePer("usage-untracked", 60) && log(text));
   // Where the team stands, for the web app (lib/tasks/teams.ts): the lead reports it every run, paused or not.
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
   if (existsSync(join(run, "paused"))) return;
@@ -648,6 +652,37 @@ async function applyControlsOnce(): Promise<void> {
   }
 }
 
+// What the team used since the last run (lib/usage.ts): this machine's new transcript lines, counted and published to
+// the store; then, on the lead, what every machine has spent, kept in the run folder (spend.json) for the state report
+// and the budget. Resolves to that, or null on a worker or when the store can't be read.
+async function trackUsage(entry: RegistryEntry, problem: (text: string) => void): Promise<Spend | null> {
+  if (!entry.tasks) return null;
+  try {
+    const days = collectUsage({
+      run: entry.run,
+      team: entry.name,
+      machine: machineName(),
+      dirs: transcriptDirs(entry.home, t3.worktreesDir(entry.home)),
+    });
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      if (days.length) await store.usage.publish(days);
+      if (entry.worker) return null;
+      const now = new Date();
+      const limits = readLimits(entry.run);
+      const from = limits ? [dayOf(new Date(limits.since)), weekOf(now)].sort()[0] : "0000-00-00";
+      const spend = spendOf(await store.usage.since(from ?? "0000-00-00"), now, limits?.since ?? null);
+      writeJson(join(entry.run, "spend.json"), spend);
+      return spend;
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    problem(`couldn't count what the team used: ${(error as Error).message.split("\n")[0]}`);
+    return null;
+  }
+}
+
 // The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).
 async function reportState(entry: RegistryEntry, run: string, log: (text: string) => void): Promise<void> {
   const flag = (name: string): boolean => existsSync(join(run, name));
@@ -661,6 +696,7 @@ async function reportState(entry: RegistryEntry, run: string, log: (text: string
   const state: TeamState = {
     state: flag("paused") ? "paused" : hold ? "pausing" : flag("complete") ? "complete" : flag("idle") ? "idle" : "active",
     hold: readHold(run),
+    spend: readJson<Spend | null>(join(run, "spend.json"), null),
     planner: planner ? (t3.threadShow(planner)?.status ?? null) : null,
     members,
     at: new Date().toISOString(),

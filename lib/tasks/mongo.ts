@@ -5,6 +5,7 @@
 import type { Team } from "../config.ts";
 import type { Doc } from "./model.ts";
 import type { Collection, Store } from "./store.ts";
+import type { UsageDay } from "./spend.ts";
 import type { TeamDoc } from "./teams.ts";
 
 // The connection string comes from the caller: the factory's commands read it from the Keychain (mongoUri.ts), the web
@@ -124,6 +125,17 @@ export function storeOver(client: MongoClientLike, team: Pick<Team, "name" | "ta
     stakeholders: collection(db, team.name, "stakeholders"),
     cycles: collection(db, team.name, "cycles"),
     controls: collection(db, team.name, "controls"),
+    // One document per team, day and machine in "usage", replaced whole: publishing again never counts twice.
+    usage: {
+      publish: async (days) => {
+        for (const day of days) await db.collection("usage").updateOne({ _id: `${team.name}:${day.day}:${day.machine}` }, { $set: day }, { upsert: true });
+      },
+      since: async (from) =>
+        (await db.collection("usage").find({ team: team.name }).toArray())
+          .map(({ _id: _ignored, ...doc }) => doc as unknown as UsageDay)
+          .filter((day) => day.day >= from)
+          .sort((a, b) => a.day.localeCompare(b.day) || a.machine.localeCompare(b.machine)),
+    },
     // One document per team in "teams", by its name: the settings the lead publishes and the state it reports.
     publish: async (settings) => {
       await db.collection("teams").updateOne({ _id: team.name }, { $set: settings }, { upsert: true });

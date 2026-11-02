@@ -5,7 +5,8 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { acquireSlot } from "../lock.ts";
-import { writeJson } from "../util.ts";
+import type { UsageDay } from "./spend.ts";
+import { readJson, writeJson } from "../util.ts";
 import type { Doc } from "./model.ts";
 import type { Collection, Store } from "./store.ts";
 
@@ -93,6 +94,21 @@ export function fileStore(run: string, _team: string): Store {
     stakeholders: collection(join(privateDir(run), "stakeholders"), PREFIX.stakeholders),
     cycles: collection(join(run, "cycles"), PREFIX.cycles),
     controls: collection(join(run, "controls"), PREFIX.controls),
+    // usage-days/<day>.<machine>.json, replaced whole.
+    usage: {
+      publish: async (days) => {
+        for (const day of days) writeJson(join(run, "usage-days", `${day.day}.${day.machine}.json`), day);
+      },
+      since: async (from) => {
+        const dir = join(run, "usage-days");
+        return existsSync(dir)
+          ? readdirSync(dir)
+              .filter((name) => name.endsWith(".json") && name.slice(0, 10) >= from)
+              .sort()
+              .flatMap((name) => readJson<UsageDay>(join(dir, name)) ?? [])
+          : [];
+      },
+    },
     publish: async () => {},
     report: async () => {},
     team: async () => null,

@@ -1,6 +1,7 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
 import { claimOrder, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
 import type { Control } from "../../lib/tasks/controls.ts";
+import type { UsageDay } from "../../lib/tasks/spend.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
 
 // How many tasks are where, in words a contributor reads (journeys aren't counted: they group tasks).
@@ -156,3 +157,29 @@ export function controlsView(status: TeamState | null, controls: Control[], limi
 // Who asked for a control, in words.
 export const askedBy = (by: string): string =>
   by === "budget" ? "the budget" : by.startsWith("web:") ? "an admin, here" : "the operator, in the terminal";
+
+// Spend each day for the `n` days ending `last` (the lead's day, YYYY-MM-DD), every machine's added up; a day with
+// nothing counted is $0.
+export function dailySpend(days: UsageDay[], last: string, n = 14): { day: string; cost: number }[] {
+  const end = Date.parse(`${last}T12:00:00Z`);
+  const keys = Array.from({ length: n }, (_, i) => new Date(end - (n - 1 - i) * 86_400_000).toISOString().slice(0, 10));
+  const sums = new Map(keys.map((day) => [day, 0]));
+  for (const d of days) if (sums.has(d.day)) sums.set(d.day, (sums.get(d.day) ?? 0) + d.rows.reduce((sum, r) => sum + r.cost, 0));
+  return keys.map((day) => ({ day, cost: Math.round((sums.get(day) ?? 0) * 100) / 100 }));
+}
+
+// A chart's top and its ticks: clean steps (1, 2, 2.5 or 5 of a power of ten), three or four of them, covering `max`.
+export function axis(max: number): { top: number; ticks: number[] } {
+  if (!(max > 0)) return { top: 1, ticks: [0, 1] };
+  const raw = max / 3;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= raw) ?? 10 * power;
+  const top = Math.ceil(max / step) * step;
+  return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => Math.round(i * step * 1e6) / 1e6) };
+}
+
+// Dollars in words a tile or axis reads: cents under $10, whole dollars to $1,000, then compact.
+export function dollars(n: number): string {
+  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
+}

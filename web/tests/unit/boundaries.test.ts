@@ -16,6 +16,7 @@ const ALLOWED = new Set([
   "lib/tasks/teams.ts",
   "lib/tasks/graph.ts",
   "lib/tasks/controls.ts",
+  "lib/tasks/spend.ts",
 ]);
 
 function sources(dir: string): string[] {

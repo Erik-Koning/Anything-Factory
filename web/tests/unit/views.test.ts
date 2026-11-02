@@ -5,7 +5,20 @@ import { test } from "node:test";
 import { type FeatureRequest, MERGE, newTask, type Status, type Task } from "../../../lib/tasks/model.ts";
 import { budgetControl, type Control, pauseControl, resumeControl } from "../../../lib/tasks/controls.ts";
 import type { TeamState } from "../../../lib/tasks/teams.ts";
-import { askedBy, controlsView, journeys, kanban, merges, progress, proposals, rejectionOf, requestState } from "../../server/views.ts";
+import {
+  askedBy,
+  axis,
+  controlsView,
+  dailySpend,
+  dollars,
+  journeys,
+  kanban,
+  merges,
+  progress,
+  proposals,
+  rejectionOf,
+  requestState,
+} from "../../server/views.ts";
 
 let next = 1;
 const task = (status: Status, fields: Partial<Task> = {}): Task => ({
@@ -188,4 +201,38 @@ test("the pause panel shows a pause or resume as waiting until the team's Mac ha
   assert.equal(askedBy("web:s1"), "an admin, here");
   assert.equal(askedBy("operator"), "the operator, in the terminal");
   assert.equal(askedBy("budget"), "the budget");
+});
+
+test("the spend chart: 14 days ending on the lead's day, every machine added, empty days at $0; clean axis steps", () => {
+  const row = (cost: number) => ({
+    role: "builder",
+    model: "m",
+    task: null,
+    requests: 1,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost,
+    unpriced: 0,
+  });
+  const day = (d: string, machine: string, cost: number) => ({ team: "shop", day: d, machine, rows: [row(cost), row(cost / 2)], updatedAt: "" });
+  const days = dailySpend(
+    [day("2026-10-31", "studio", 2), day("2026-11-01", "studio", 1), day("2026-11-01", "worker", 1), day("2026-10-01", "studio", 99)],
+    "2026-11-01",
+    3
+  );
+  assert.deepEqual(days, [
+    { day: "2026-10-30", cost: 0 },
+    { day: "2026-10-31", cost: 3 },
+    { day: "2026-11-01", cost: 3 },
+  ]);
+  assert.deepEqual(axis(7.2), { top: 7.5, ticks: [0, 2.5, 5, 7.5] });
+  assert.deepEqual(axis(40), { top: 40, ticks: [0, 20, 40] });
+  assert.equal(axis(0).top, 1);
+  assert.deepEqual(axis(130).ticks, [0, 50, 100, 150]);
+  assert.equal(dollars(3.456), "$3.46");
+  assert.equal(dollars(42.4), "$42");
+  assert.equal(dollars(12_345), "$12K");
+  assert.equal(dollars(1_250), "$1.3K");
 });

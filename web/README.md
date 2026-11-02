@@ -36,7 +36,9 @@ request (Article 8).
   after the work under way, or after chosen journeys (they finish, verification and polish included, and nothing else
   starts); while it's pausing, what's still going and what can't move without you; once paused, the report of where it
   stands; and Resume, with feedback for the planner. Each asks for an authenticator code and goes in the audit log; the
-  lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac).
+  lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac). Then
+  **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
+  is one), each of the last 14 days, and the journeys and tasks that cost the most.
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked

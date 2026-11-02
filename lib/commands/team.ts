@@ -20,11 +20,12 @@ import {
   teamsDir,
   versionDir,
 } from "../paths.ts";
-import { readHold } from "../holds.ts";
+import { readHold, readLimits } from "../holds.ts";
+import type { Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, parseArgs, writeJson } from "../util.ts";
+import { die, parseArgs, readJson, writeJson } from "../util.ts";
 import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
@@ -365,6 +366,14 @@ export async function status(argv: string[]): Promise<number> {
       );
     else if (hold?.settledAt && hold.scope !== "now")
       console.info(`   paused after ${describeHold(hold)} at ${hold.settledAt.slice(0, 16)}: e9g resume ${name} carries on`);
+    const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
+    if (spend) {
+      const limits = readLimits(entry.run);
+      const of = (n: number | null | undefined) => (n ? ` of $${n}` : "");
+      console.info(
+        `   spent (API-equivalent): $${spend.today.toFixed(2)} today${of(limits?.daily)}, $${spend.week.toFixed(2)} this week${of(limits?.weekly)}, $${spend.total.toFixed(2)} ${spend.since ? `since ${spend.since}` : "in all"}${of(limits?.total)}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}`
+      );
+    }
     const drain = join(entry.home, ".e9g", "run", "state", "drain");
     if (existsSync(drain)) console.info(`   draining: ${readFileSync(drain, "utf8").trim()} (e9g drain off, from the team's checkout)`);
     const kept = keptWorktrees(entry.run);
