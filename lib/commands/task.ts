@@ -8,6 +8,7 @@ import type { Team } from "../config.ts";
 import { machineName } from "../machine.ts";
 import { boardDir, readRegistry } from "../paths.ts";
 import { asOperator, teamSession } from "../session.ts";
+import { describeHold, holdOf } from "../tasks/controls.ts";
 import { betterDiagram } from "../tasks/graph.ts";
 import {
   branchFor,
@@ -190,7 +191,8 @@ const listTasks: Handler = async ({ store, who }, _positional, options) => {
   if (kind) all = all.filter((t) => t.kind === kind);
   if (options["claimable"]) {
     const role = CLAIMS[who] ? who : "builder";
-    all = all.filter((t) => claimRefusal(t, role, everything) === null);
+    const hold = holdOf(await store.controls.all());
+    all = all.filter((t) => claimRefusal(t, role, everything, hold) === null);
   }
   if (options["json"]) console.info(JSON.stringify(all, null, 2));
   else console.info(all.length ? all.map((t) => line(t, everything)).join("\n") : "no tasks");
@@ -376,15 +378,18 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") as Kind | undefined;
   for (let attempt = 0; attempt < 8; attempt++) {
     const all = await store.tasks.all();
+    // The operator's pause in force, read each time: one asked for a moment ago stops this claim too.
+    const hold = holdOf(await store.controls.all());
     const held = all.find((t) => t.status === "building" && heldHere(t.claim, worktree, machineName()));
     if (held) throw new Refused(`this worktree holds task ${held.id} already; submit it (e9g task submit ${held.id}) or release it first`);
-    const target = id ? all.find((t) => t.id === id.replace(/^#/, "")) : nextClaim(all, who, kind);
+    const target = id ? all.find((t) => t.id === id.replace(/^#/, "")) : nextClaim(all, who, kind, hold);
     if (!target) {
       if (id) throw new Refused(`no task ${id}`);
-      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free. Say so in your report and stop.`);
+      const why = hold ? ` the operator is pausing the team after ${describeHold(hold)}, and nothing in that is free.` : "";
+      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why} Say so in your report and stop.`);
       return 3;
     }
-    const refusal = claimRefusal(target, who, all);
+    const refusal = claimRefusal(target, who, all, hold);
     if (refusal) {
       if (id) throw new Refused(refusal);
       continue;

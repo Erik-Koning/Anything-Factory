@@ -38,11 +38,18 @@ e9g init ~/code/my-app                           # detect, make the team's check
 To watch a team:
 
 ```bash
-e9g teams                  # every team on this Mac, its version, and whether it's active, paused or complete
+e9g teams                  # every team on this Mac, its version, and whether it's active, pausing, paused or complete
 e9g status                 # each team: planner, members running, whether its environment answers, what's drained
 e9g metrics --team my-app  # agents, runs, model requests, tokens and time per role
 e9g pause my-app           # and e9g resume my-app; e9g rotate my-app for a fresh planner
 ```
+
+To stop a team gracefully, let what it's doing finish first: `e9g pause my-app --after tasks` lets the work under way
+(being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets
+the journeys under way (or `--journeys 3,7`) finish, their verification and polish included. Once nothing in it can
+move, the team pauses and you get a report (email, and the web app): what was done, each journey, what waits for you.
+It stays paused until `e9g resume my-app --note "…"`, whose note goes to the planner as your feedback. The web app's
+team page does the same for admins, each time with an authenticator code; the watchdog applies it within a minute.
 
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 

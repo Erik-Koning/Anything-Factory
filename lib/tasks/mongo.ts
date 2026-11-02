@@ -1,6 +1,6 @@
 // The task graph in MongoDB, for a team that runs on several machines (team.json tasks.store "mongo"). Each machine
 // connects with `e9g connect mongo`, which keeps the connection string in the Keychain; agents never see it. One
-// document per task, request, stakeholder and cycle, keyed "<team>:<id>", with a counter per collection. The driver
+// document per task, request, stakeholder, cycle and control, keyed "<team>:<id>", with a counter per collection. The driver
 // (the optional mongodb package) loads only here, and only the few calls below are used, so tests run on a fake.
 import type { Team } from "../config.ts";
 import type { Doc } from "./model.ts";
@@ -37,7 +37,7 @@ export interface MongoClientLike {
   close(): Promise<void>;
 }
 
-const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c" } as const;
+const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c", controls: "k" } as const;
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 
 function collection<T extends Doc>(db: ReturnType<MongoClientLike["db"]>, team: string, name: keyof typeof PREFIX): Collection<T> {
@@ -123,6 +123,7 @@ export function storeOver(client: MongoClientLike, team: Pick<Team, "name" | "ta
     requests: collection(db, team.name, "requests"),
     stakeholders: collection(db, team.name, "stakeholders"),
     cycles: collection(db, team.name, "cycles"),
+    controls: collection(db, team.name, "controls"),
     // One document per team in "teams", by its name: the settings the lead publishes and the state it reports.
     publish: async (settings) => {
       await db.collection("teams").updateOne({ _id: team.name }, { $set: settings }, { upsert: true });

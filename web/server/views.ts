@@ -1,5 +1,7 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
 import { claimOrder, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
+import type { Control } from "../../lib/tasks/controls.ts";
+import type { TeamState } from "../../lib/tasks/teams.ts";
 
 // How many tasks are where, in words a contributor reads (journeys aren't counted: they group tasks).
 export const PROGRESS: { label: string; statuses: Status[] }[] = [
@@ -143,3 +145,14 @@ export function kanban(tasks: Task[], { now = Date.now(), doneLimit = 8, rejecte
   }).filter((c) => (c.lane === "blocked" ? c.cards.length > 0 : c.lane === "rejected" ? rejected : true));
   return { columns, rejected: rejected ? 0 : work.filter((t) => t.status === "rejected").length };
 }
+
+// The pause and resume panel: the latest pause or resume asked for since the team's Mac last reported (it hasn't been
+// applied yet), and the latest controls, newest first.
+export function controlsView(status: TeamState | null, controls: Control[], limit = 6): { pending: Control | null; recent: Control[] } {
+  const last = controls.findLast((c) => c.kind === "pause" || c.kind === "resume") ?? null;
+  return { pending: last && (!status || last.at > status.at) ? last : null, recent: controls.slice(-limit).reverse() };
+}
+
+// Who asked for a control, in words.
+export const askedBy = (by: string): string =>
+  by === "budget" ? "the budget" : by.startsWith("web:") ? "an admin, here" : "the operator, in the terminal";

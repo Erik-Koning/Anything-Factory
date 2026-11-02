@@ -2,9 +2,10 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, add.ts, teams.ts and graph.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
+// decide.ts, add.ts, teams.ts, graph.ts and controls.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
+import { type Control, type HoldScope, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../lib/tasks/mongo.ts";
@@ -17,6 +18,8 @@ import { graphDb, mongo } from "./db.ts";
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc } from "../../lib/tasks/teams.ts";
+export type { Control, HoldScope, HoldState } from "../../lib/tasks/controls.ts";
+export { describeHold, isHoldScope, journeysUnderWay } from "../../lib/tasks/controls.ts";
 
 const stores = new Map<string, Store>();
 
@@ -83,3 +86,18 @@ export function addTaskFromWeb(team: string, input: Omit<TaskInput, "from">, { a
   const fields: TaskInput = { ...input, title: input.title.trim(), body: input.body?.trim() ?? "", from };
   return admin ? addTask(storeFor(team), team, fields, OPERATOR) : addTask(storeFor(team), team, { ...fields, approved: false }, "stakeholder");
 }
+
+// The operator's controls on `team`, oldest first: what was asked for, and when (the lead's watchdog applies each within
+// a minute, and reports where the team stands in its status).
+export const controlsOf = (team: string): Promise<Control[]> => storeFor(team).controls.all();
+
+// A pause from the web, by an admin's stakeholder id: its scope fixed against the graph as it is now (controls.ts).
+export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journeys: string[]; note: string; from: string }): Promise<Control> {
+  const store = storeFor(team);
+  const journeys = ask.scope === "journeys" && ask.journeys.length ? ask.journeys : undefined;
+  return store.controls.create(pauseControl(await store.tasks.all(), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
+}
+
+// A resume from the web; the note goes to the planner as the operator's feedback.
+export const resumeFromWeb = (team: string, { note, from }: { note: string; from: string }): Promise<Control> =>
+  storeFor(team).controls.create(resumeControl(team, `web:${from}`, note));

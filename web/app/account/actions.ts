@@ -6,8 +6,8 @@ import QRCode from "qrcode";
 import { withNotice } from "../../components/ui.tsx";
 import { pendingStep } from "../../server/access.ts";
 import { auth } from "../../server/auth.ts";
-import { CODE_TRIES, clearCodeAttempts, takeCodeAttempt } from "../../server/code-attempts.ts";
 import { forgetIp } from "../../server/known-ips.ts";
+import { checkCode } from "../../server/step-up.ts";
 import { authHeaders as headers, getViewer, record, STEP_PAGE } from "../../server/viewer.ts";
 
 const BACK = "/account";
@@ -65,19 +65,6 @@ async function qrFor(key: string, email: string): Promise<string | null> {
 }
 const codesOf = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((c): c is string => typeof c === "string" && /^[\w-]{4,40}$/.test(c)).slice(0, 20) : [];
-
-// A code from the person's authenticator, counted against their tries (code-attempts.ts); why not, or null when right.
-async function checkCode(userId: string, code: string, requestHeaders: Headers): Promise<string | null> {
-  if (!/^\d{6}$/.test(code)) return "Enter the 6-digit code the app shows.";
-  if (!(await takeCodeAttempt(userId))) return `That's ${CODE_TRIES} wrong codes: wait 15 minutes, then try again.`;
-  try {
-    await auth().api.verifyTOTP({ body: { code }, headers: requestHeaders });
-  } catch {
-    return "That code isn't right. Check the app's clock, and use the code it shows now.";
-  }
-  await clearCodeAttempts(userId);
-  return null;
-}
 
 // Turning on an authenticator, in two steps: "start" makes its secret (Better Auth, unconfirmed until a code proves the
 // app has it), "confirm" checks a code from the app, which turns it on.

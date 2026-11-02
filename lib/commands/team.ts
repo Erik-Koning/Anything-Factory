@@ -1,7 +1,7 @@
 // The operator's commands for a team's life: register (alias sync), unregister, start, pause, resume, rotate,
 // status, teams, prompt and upgrade.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { instanceId, loadTeam, type RawTeam, type Team } from "../config.ts";
@@ -20,14 +20,17 @@ import {
   teamsDir,
   versionDir,
 } from "../paths.ts";
+import { readHold } from "../holds.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, writeJson } from "../util.ts";
-import { answers, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
+import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
-import { openStore } from "../tasks/store.ts";
+import { type Control, describeHold, type HoldScope, holdOf, pauseControl, resumeControl } from "../tasks/controls.ts";
+import { OPERATOR, Refused } from "../tasks/model.ts";
+import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
@@ -199,6 +202,20 @@ export const teamNames = (): string[] =>
 export async function start(argv: string[]): Promise<number> {
   operatorOnly("start");
   const entry = entryFor(argv[0] ?? die("usage: e9g start <team>"));
+  // Starting a paused team resumes it: in the store too, so claims stop refusing.
+  if (entry.tasks && !entry.worker) {
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      if (holdOf(await store.controls.all())) await store.controls.create(resumeControl(entry.name, OPERATOR));
+    } finally {
+      await store.close();
+    }
+    await applyTeamControls(
+      entry,
+      (text) => console.info(`e9g: ${text}`),
+      (text) => console.error(`e9g: ${text}`)
+    );
+  }
   rmSync(join(entry.run, "paused"), { force: true });
   ensureWatchdog();
   const why = await watchOnce(entry.name);
@@ -210,22 +227,74 @@ export async function start(argv: string[]): Promise<number> {
   return status([entry.name]);
 }
 
-export function pause(argv: string[]): number {
-  operatorOnly("pause");
-  const entry = entryFor(argv[0] ?? die("usage: e9g pause <team>"));
+const PAUSE_USAGE = 'usage: e9g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]';
+
+// The operator's control, recorded in the team's store and applied in its run folder at once (the web app's wait for
+// the watchdog's next minute). On a worker machine it's recorded only: the lead applies it.
+async function recordControl(entry: RegistryEntry, make: (store: Store) => Promise<Omit<Control, "id" | "version">>): Promise<Control> {
+  const tasks = entry.tasks ?? die(`${entry.name} keeps its tickets on a GitHub board, which has no controls`);
+  const store = await openStore({ name: entry.name, tasks }, entry.run);
+  let control: Control;
+  try {
+    control = await store.controls.create(await make(store));
+  } catch (error) {
+    if (error instanceof Refused) die(error.message);
+    throw error;
+  } finally {
+    await store.close();
+  }
   mkdirSync(entry.run, { recursive: true });
-  writeFileSync(join(entry.run, "paused"), new Date().toISOString());
+  await applyTeamControls(
+    entry,
+    (text) => appendFileSync(join(entry.run, "watchdog.log"), `${new Date().toISOString().replace(/\.\d+Z$/, "Z")} ${text}\n`),
+    (text) => console.error(`e9g: ${text}`)
+  );
+  return control;
+}
+
+// e9g pause <team>: nothing starts or merges from now; running members finish their turn. --after tasks: the work under
+// way finishes, reviewed and merged, then the team pauses; --after journeys: the journeys under way (or --journeys)
+// finish, verification and polish included, then it pauses. Either way the operator gets a report when it does, and
+// work stays stopped until e9g resume. A team whose tickets are on a GitHub board can only pause now.
+export async function pause(argv: string[]): Promise<number> {
+  operatorOnly("pause");
+  const { positional, options } = parseArgs(argv);
+  const entry = entryFor(positional[0] ?? die(PAUSE_USAGE));
+  const after = typeof options["after"] === "string" ? options["after"].replace(/s$/, "") : undefined;
+  if (after !== undefined && after !== "task" && after !== "journey") die(PAUSE_USAGE);
+  const scope: HoldScope = after === "task" ? "tasks" : after === "journey" ? "journeys" : "now";
+  const journeys =
+    typeof options["journeys"] === "string"
+      ? options["journeys"]
+          .split(",")
+          .map((id) => id.trim().replace(/^#/, ""))
+          .filter(Boolean)
+      : undefined;
+  if (journeys && scope !== "journeys") die("--journeys goes with --after journeys");
+  const note = typeof options["note"] === "string" ? options["note"] : "";
+  if (!entry.tasks) {
+    if (scope !== "now") die(`${entry.name} keeps its tickets on a GitHub board, so it can only pause now (e9g pause ${entry.name})`);
+    mkdirSync(entry.run, { recursive: true });
+    writeFileSync(join(entry.run, "paused"), new Date().toISOString());
+  } else await recordControl(entry, async (store) => pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note }));
+  const hold = readHold(entry.run);
   console.info(
-    `e9g: ${entry.name} paused: the watchdog sends no ticks and starts nothing, and the planner can't start members or merge. Running members finish what they're doing.`
+    scope === "now"
+      ? `e9g: ${entry.name} paused: the watchdog sends no ticks and starts nothing, and the planner can't start members or merge. Running members finish what they're doing.`
+      : `e9g: ${entry.name} is pausing after ${hold ? describeHold(hold) : scope}: that work finishes and merges, nothing else is claimed, and once nothing in it can move the team pauses and you get a report. e9g status ${entry.name} shows what's left.`
   );
   return 0;
 }
 
-export function resume(argv: string[]): number {
+// e9g resume <team> [--note "…"]: work starts again; the note goes to the planner, as the operator's feedback.
+export async function resume(argv: string[]): Promise<number> {
   operatorOnly("resume");
-  const entry = entryFor(argv[0] ?? die("usage: e9g resume <team>"));
-  rmSync(join(entry.run, "paused"), { force: true });
-  console.info(`e9g: ${entry.name} resumed`);
+  const { positional, options } = parseArgs(argv);
+  const entry = entryFor(positional[0] ?? die('usage: e9g resume <team> [--note "…"]'));
+  const note = typeof options["note"] === "string" ? options["note"] : "";
+  if (entry.tasks) await recordControl(entry, async () => resumeControl(entry.name, OPERATOR, note));
+  else rmSync(join(entry.run, "paused"), { force: true });
+  console.info(`e9g: ${entry.name} resumed${note && entry.tasks ? "; the planner has your note" : ""}`);
   return 0;
 }
 
@@ -270,9 +339,12 @@ export async function status(argv: string[]): Promise<number> {
     const entry = entryFor(name);
     const planner = existsSync(join(entry.run, "planner-thread")) ? readFileSync(join(entry.run, "planner-thread"), "utf8").trim() : null;
     const thread = planner ? t3.threadShow(planner) : null;
-    const flags = [existsSync(join(entry.run, "paused")) ? "paused" : null, existsSync(join(entry.run, "complete")) ? "complete" : null].filter(
-      (flag) => flag !== null
-    );
+    const hold = readHold(entry.run);
+    const pausing = hold !== null && !hold.settledAt && hold.scope !== "now";
+    const flags = [
+      existsSync(join(entry.run, "paused")) ? "paused" : pausing ? "pausing" : null,
+      existsSync(join(entry.run, "complete")) ? "complete" : null,
+    ].filter((flag) => flag !== null);
     console.info(`== ${name} (${entry.title}) ${flags.length ? flags.join(", ") : "active"} · factory ${entry.version} · ${entry.home}`);
     console.info(`   planner ${planner ?? "none"}${thread ? ` (${thread.status})` : ""}`);
     const counts = planner ? t3.childCounts(planner) : [];
@@ -287,6 +359,12 @@ export async function status(argv: string[]): Promise<number> {
         `   environment: ${state} (${health.map((target, i) => `${target.replace(/^any:/, "")} ${up[i] ? "answers" : "doesn't answer"}`).join(", ")})`
       );
     } else console.info("   environment: no health URLs in team.json, so not checked");
+    if (hold && pausing)
+      console.info(
+        `   pausing after ${describeHold(hold)} (asked ${hold.since.slice(0, 16)}): left ${hold.left.join("; ") || "nothing, so it pauses at the watchdog's next run"}${hold.stuck.length ? `; stopped: ${hold.stuck.join("; ")}` : ""}`
+      );
+    else if (hold?.settledAt && hold.scope !== "now")
+      console.info(`   paused after ${describeHold(hold)} at ${hold.settledAt.slice(0, 16)}: e9g resume ${name} carries on`);
     const drain = join(entry.home, ".e9g", "run", "state", "drain");
     if (existsSync(drain)) console.info(`   draining: ${readFileSync(drain, "utf8").trim()} (e9g drain off, from the team's checkout)`);
     const kept = keptWorktrees(entry.run);
@@ -305,7 +383,14 @@ export function teams(): number {
   for (const name of teamNames()) {
     const entry = readRegistry(name);
     if (!entry) continue;
-    const state = existsSync(join(entry.run, "paused")) ? "paused" : existsSync(join(entry.run, "complete")) ? "complete" : "active";
+    const hold = readHold(entry.run);
+    const state = existsSync(join(entry.run, "paused"))
+      ? "paused"
+      : hold && !hold.settledAt && hold.scope !== "now"
+        ? "pausing"
+        : existsSync(join(entry.run, "complete"))
+          ? "complete"
+          : "active";
     console.info(`${name.padEnd(20)} ${String(entry.version).padEnd(8)} ${state.padEnd(9)} ${entry.home}`);
   }
   return 0;

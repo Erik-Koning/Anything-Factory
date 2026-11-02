@@ -1,6 +1,7 @@
 // The task graph's model: what a task and a feature request are, which statuses a task moves between and who may move
 // it, how a task is scored, and which task a member claims. Pure: the stores (files.ts, mongo.ts) keep the documents
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
+import { type Hold, holdRefusal } from "./controls.ts";
 
 export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "chore", "research", "journey"] as const;
 export type Kind = (typeof KINDS)[number];
@@ -449,8 +450,9 @@ export function conflictOf(task: Task, building: Task[]): Task | null {
   );
 }
 
-// Why `task` can't be claimed by `role` now, or null when it can.
-export function claimRefusal(task: Task, role: string, all: Task[]): string | null {
+// Why `task` can't be claimed by `role` now, or null when it can; `hold` is the operator's pause in force, if any
+// (controls.ts), which lets only the work it finishes be claimed.
+export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold | null = null): string | null {
   const kinds = CLAIMS[role];
   if (!kinds) return `the ${role} doesn't claim tasks; builders and testers do`;
   if (task.status !== "approved") return `task ${task.id} is ${task.status}, not approved`;
@@ -463,12 +465,12 @@ export function claimRefusal(task: Task, role: string, all: Task[]): string | nu
     all.filter((t) => t.status === "building")
   );
   if (conflict) return `task ${conflict.id} is being built on the same ${conflict.area === task.area && task.area ? `area (${task.area})` : "files"}`;
-  return null;
+  return holdRefusal(task, hold);
 }
 
 // The task `role` should claim next, of those it may: the first in claim order.
-export function nextClaim(all: Task[], role: string, kind?: Kind): Task | null {
-  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all) === null).sort(claimOrder)[0] ?? null;
+export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
+  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null).sort(claimOrder)[0] ?? null;
 }
 
 // The branch name a claimant uses, matching its role's pattern (e9g/b142-resume-a-recording, e9g/t-142-…).

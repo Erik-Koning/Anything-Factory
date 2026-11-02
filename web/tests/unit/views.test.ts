@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type FeatureRequest, MERGE, newTask, type Status, type Task } from "../../../lib/tasks/model.ts";
-import { journeys, kanban, merges, progress, proposals, rejectionOf, requestState } from "../../server/views.ts";
+import { budgetControl, type Control, pauseControl, resumeControl } from "../../../lib/tasks/controls.ts";
+import type { TeamState } from "../../../lib/tasks/teams.ts";
+import { askedBy, controlsView, journeys, kanban, merges, progress, proposals, rejectionOf, requestState } from "../../server/views.ts";
 
 let next = 1;
 const task = (status: Status, fields: Partial<Task> = {}): Task => ({
@@ -167,4 +169,23 @@ test("the board: a lane per step, journeys aside, each in its order, and rejecte
   const everything = kanban(all, { now, doneLimit: Infinity, rejected: true });
   assert.deepEqual([everything.columns.at(-2)?.cards.length, everything.columns.at(-2)?.more], [10, 0]);
   assert.deepEqual([everything.columns.at(-1)?.lane, everything.columns.at(-1)?.cards.length, everything.rejected], ["rejected", 1, 0]);
+});
+
+test("the pause panel shows a pause or resume as waiting until the team's Mac has reported since; budgets don't wait", () => {
+  let k = 0;
+  const control = (fields: Omit<Control, "id" | "version">, at: string): Control => ({ ...fields, at, id: `k${++k}`, version: 1 });
+  const pause = control(pauseControl([], "shop", { scope: "now", by: "web:s1" }), "2026-11-01T10:00:00.000Z");
+  const resume = control(resumeControl("shop", "operator", "go on"), "2026-11-01T10:05:00.000Z");
+  const budget = control(budgetControl("shop", "web:s1", null), "2026-11-01T10:06:00.000Z");
+  const status = (at: string): TeamState => ({ state: "paused", planner: null, members: {}, at });
+  assert.equal(controlsView(null, [pause]).pending?.id, pause.id);
+  assert.equal(controlsView(status("2026-11-01T10:00:30.000Z"), [pause]).pending, null);
+  assert.equal(controlsView(status("2026-11-01T10:00:30.000Z"), [pause, resume, budget]).pending?.id, resume.id);
+  assert.deepEqual(
+    controlsView(status("2026-11-01T10:07:00.000Z"), [pause, resume, budget], 2).recent.map((c) => c.id),
+    [budget.id, resume.id]
+  );
+  assert.equal(askedBy("web:s1"), "an admin, here");
+  assert.equal(askedBy("operator"), "the operator, in the terminal");
+  assert.equal(askedBy("budget"), "the budget");
 });

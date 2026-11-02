@@ -16,7 +16,9 @@ Set up and run a team (the operator)
   e9g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);
                                       --worker on a machine other than a Mongo team's lead: builders and testers only
   e9g start <team>                    resume it and run the watchdog now (it starts the planner)
-  e9g pause | resume <team>           stop or restart the watchdog's ticks for one team
+  e9g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
+                                      stop a team now, or once the work (or journeys) under way is merged
+  e9g resume <team> [--note "…"]      start it again; the note goes to the planner
   e9g rotate <team>                   a fresh planner thread (refused while members run)
   e9g status [<team>]  ·  e9g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   e9g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role

@@ -16,9 +16,22 @@ import {
   taskProblem,
   TEAM_PARAM,
 } from "../../../server/access.ts";
-import { addTaskFromWeb, decideAsOperator, Refused, sendRequest, stakeholderOf, storeFor, teamDoc } from "../../../server/factory.ts";
+import {
+  addTaskFromWeb,
+  decideAsOperator,
+  describeHold,
+  isHoldScope,
+  pauseFromWeb,
+  Refused,
+  resumeFromWeb,
+  sendRequest,
+  stakeholderOf,
+  storeFor,
+  teamDoc,
+} from "../../../server/factory.ts";
 import { memberships, takeRequestAllowance } from "../../../server/people.ts";
-import { allowed, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
+import { checkCode } from "../../../server/step-up.ts";
+import { allowed, authHeaders, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
 
 const text = (form: FormData, key: string): string => {
   const value = form.get(key);
@@ -178,4 +191,42 @@ export async function decideAction(form: FormData): Promise<void> {
     });
   }
   redirect(withNotice(back, notice));
+}
+
+// An admin pauses or resumes the team, as the operator, with a code from their authenticator: how a team runs changes
+// only for someone holding their second factor at that moment. The lead's watchdog applies it within a minute.
+export async function controlAction(form: FormData): Promise<void> {
+  const team = text(form, "team");
+  const kind = text(form, "kind");
+  const scope = text(form, "scope");
+  const note = text(form, "note").trim();
+  const journeys = form.getAll("journey").filter((value): value is string => typeof value === "string" && TASK_ID.test(value));
+  if (!TEAM_PARAM.test(team)) redirect("/");
+  const action = kind === "resume" ? "team.resumed" : "team.paused";
+  let notice: { ok?: string; error?: string };
+  let viewer = null;
+  try {
+    viewer = await allowed("team:control", team);
+    if (kind !== "pause" && kind !== "resume") throw new Refused("That isn't a pause or a resume.");
+    if (kind === "pause" && !isHoldScope(scope)) throw new Refused("Choose when the team pauses.");
+    if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+    if (wrong) throw new Refused(wrong);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const control =
+      kind === "pause" && isHoldScope(scope) ? await pauseFromWeb(team, { scope, journeys, note, from }) : await resumeFromWeb(team, { note, from });
+    const what =
+      control.kind === "resume"
+        ? "resume"
+        : control.scope === "now"
+          ? "pause now"
+          : `pause after ${describeHold({ scope: control.scope ?? "now", tasks: control.tasks, journeys: control.journeys })}`;
+    notice = { ok: `Asked to ${what}. The team's Mac applies it within a minute; this page shows when it has.` };
+    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });
+  } catch (error) {
+    notice = { error: reasonOf(error) };
+    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${notice.error}`.trim() });
+  }
+  redirect(withNotice(`/t/${team}`, notice));
 }

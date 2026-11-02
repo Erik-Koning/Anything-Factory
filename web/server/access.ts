@@ -46,7 +46,9 @@ export type Ability =
   // Read the audit log: everyone's sign-ins and changes.
   | "audit:read"
   // Invite people, set their roles, remove and ban them.
-  | "people:manage";
+  | "people:manage"
+  // Pause and resume a team, and set its budget: how it runs, the operator's alone, each time with an authenticator code.
+  | "team:control";
 
 const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
   member: ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest"],

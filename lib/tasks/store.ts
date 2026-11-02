@@ -4,6 +4,7 @@
 // both win.
 import type { Team } from "../config.ts";
 import { type Cycle, type Doc, type FeatureRequest, Refused, type Stakeholder, type Task } from "./model.ts";
+import type { Control } from "./controls.ts";
 import type { TeamDoc, TeamSettings, TeamState } from "./teams.ts";
 
 export interface Collection<T extends Doc> {
@@ -25,6 +26,8 @@ export interface Store {
   requests: Collection<FeatureRequest>;
   stakeholders: Collection<Stakeholder>;
   cycles: Collection<Cycle>;
+  // The operator's pauses, resumes and budgets, oldest first (controls.ts); only ever created, never replaced.
+  controls: Collection<Control>;
   // The team's settings and state for the web app (teams.ts); a file store has no web app, so it keeps neither.
   publish(settings: TeamSettings): Promise<void>;
   report(state: TeamState): Promise<void>;

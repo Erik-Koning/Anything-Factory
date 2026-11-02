@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
+import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { storeFor } from "../../../server/factory.ts";
+import { controlsOf, storeFor } from "../../../server/factory.ts";
 import { journeys, merges, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
@@ -13,7 +14,12 @@ export default async function OverviewPage({ params, searchParams }: { params: P
   const { team: name } = await params;
   const { viewer, team } = await teamFor(name);
   const store = storeFor(team.name);
-  const [tasks, cycles] = await Promise.all([store.tasks.all(), team.mode === "cycles" ? store.cycles.all() : Promise.resolve([])]);
+  const control = can(viewer, "team:control", team.name);
+  const [tasks, cycles, controls] = await Promise.all([
+    store.tasks.all(),
+    team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
+    control ? controlsOf(team.name) : Promise.resolve([]),
+  ]);
   const status = team.status;
   const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
   const details = can(viewer, "team:board", team.name);
@@ -58,6 +64,8 @@ export default async function OverviewPage({ params, searchParams }: { params: P
           ) : null}
         </section>
       </div>
+
+      {control ? <TeamControls team={team} controls={controls} tasks={tasks} /> : null}
 
       <section className="panel" aria-labelledby="journeys">
         <h2 id="journeys">Journeys</h2>

@@ -1,7 +1,9 @@
 // The app end to end, against a local MongoDB seeded with the factory's own functions (seed.ts): one story, in order.
 import { readFileSync } from "node:fs";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { actionIdOn, closeDatabases, databases, errorOf, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
+import { type Control, holdOf, holdReport } from "../../../lib/tasks/controls.ts";
+import type { Task } from "../../../lib/tasks/model.ts";
+import { actionIdOn, closeDatabases, databases, errorOf, freshCode, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -420,6 +422,91 @@ test("a contributor neither sees the work nor adds to it, by page or by calling 
     by: "operator",
   });
   expect(await graph.collection("tasks").findOne({ team: "shop", title: "Sneaky task" })).toBeNull();
+});
+
+test("the admin pauses the team after the work under way, reads where it stands, and resumes it with feedback", async () => {
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  const controls = async (): Promise<Control[]> =>
+    (await graph.collection("controls").find({ team: "shop" }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+  const tasks = async (): Promise<Task[]> =>
+    (await graph.collection("tasks").find({ team: "shop" }).toArray()).map(({ _id, ...t }) => t as unknown as Task);
+  // The lead's watchdog isn't running here: the test reports what it would, from the same functions.
+  const report = (status: Record<string, unknown>) =>
+    graph
+      .collection("teams")
+      .updateOne({ _id: "shop" as never }, { $set: { status: { members: {}, planner: "running", at: new Date().toISOString(), ...status } } });
+  const panel = page.getByRole("region", { name: "Pause and resume" });
+
+  await page.goto("/t/shop");
+  await expect(panel.getByText("After the work under way")).toBeVisible();
+  // A wrong code changes nothing.
+  await panel.getByLabel("Code from your authenticator").first().fill("000000");
+  await panel.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.locator("main").getByRole("alert")).toContainText("That code isn't right");
+  expect(await controls()).toEqual([]);
+
+  await panel.getByLabel("Note (optional, for the record and the report)").fill("Let me check the board");
+  await panel
+    .getByLabel("Code from your authenticator")
+    .first()
+    .fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to pause after the work under way");
+  await expect(panel.getByText("waiting for the team's Mac")).toBeVisible();
+  const [pause] = await controls();
+  const building = (await tasks()).filter((t) => t.status === "building").map((t) => t.id);
+  expect(pause).toMatchObject({ kind: "pause", scope: "tasks", tasks: building, note: "Let me check the board", by: expect.stringMatching(/^web:s\d+$/) });
+
+  // The watchdog applies it: pausing, with what's left.
+  const hold = holdOf(await controls());
+  if (!hold) throw new Error("no hold");
+  await report({ state: "pausing", hold: { ...hold, settledAt: null, left: [`#${building[0]} being built`], stuck: [], report: null } });
+  await page.reload();
+  await expect(panel.getByText(/Pausing after the work under way/)).toBeVisible();
+  await expect(panel.getByText(`#${building[0]} being built`)).toBeVisible();
+  await expect(panel.getByText("waiting for the team's Mac")).toHaveCount(0);
+  await expect(panel.getByText("Pause now instead")).toBeVisible();
+
+  // It settles: paused, and the report says where the team stands.
+  const settledAt = new Date().toISOString();
+  await report({ state: "paused", hold: { ...hold, settledAt, left: [], stuck: [], report: holdReport(hold, await tasks(), []) } });
+  await page.reload();
+  await expect(panel.getByText("Where the team stands")).toBeVisible();
+  await expect(panel.locator("pre.report")).toContainText("Paused after the work under way");
+  await expect(panel.locator("pre.report")).toContainText('("Let me check the board")');
+
+  await panel.getByLabel("Feedback for the planner (optional)").fill("Looks right. Carry on with checkout.");
+  await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to resume");
+  expect((await controls()).map((c) => [c.kind, c.note])).toEqual([
+    ["pause", "Let me check the board"],
+    ["resume", "Looks right. Carry on with checkout."],
+  ]);
+  const audit = await accounts
+    .collection("audit")
+    .find({ team: "shop", action: { $in: ["team.paused", "team.resumed"] } })
+    .sort({ at: 1 })
+    .toArray();
+  expect(audit.map((e) => [e.action, e.outcome])).toEqual([
+    ["team.paused", "refused"],
+    ["team.paused", "ok"],
+    ["team.resumed", "ok"],
+  ]);
+
+  // A contributor posting the same action is refused, and nothing is recorded.
+  // Read as the page loads: React drops the fields a browser without scripts posts once it hydrates.
+  await page.goto("/t/shop");
+  const action = await panel.locator('input[name^="$ACTION_ID_"]').first().getAttribute("name");
+  const refused = await contributor.page.request.post("/t/shop", {
+    multipart: { [action ?? ""]: "", team: "shop", kind: "pause", scope: "now", code: "123456" },
+    headers: { origin: state().baseURL },
+    maxRedirects: 0,
+  });
+  expect(errorOf(refused)).toContain("You can't do that here.");
+  expect(await controls()).toHaveLength(2);
+  await report({ state: "active", hold: null });
 });
 
 test("the admin switches between teams, staying on the same page", async () => {

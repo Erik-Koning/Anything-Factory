@@ -191,7 +191,7 @@ describe("moving a task graph to Mongo", () => {
     });
     await files.stakeholders.create({ team: "fixture", name: "Dana", email: "d@example.com", role: "customer", createdAt: "x" });
     const mongo = storeOver(fakeMongo(), { name: "fixture", tasks: { store: "mongo", database: "e9g", lead: null } });
-    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0 });
+    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0, controls: 0 });
     assert.deepEqual(
       (await mongo.tasks.all()).map((t) => [t.id, t.title]),
       [

@@ -32,7 +32,11 @@ request (Article 8).
 - `/` Teams: the teams you can see, each with its state, planner, members at work by role, aim, last merge, and links
   to its pages.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
-  graph (the factory's own `layout`, as SVG) and recent merges.
+  graph (the factory's own `layout`, as SVG) and recent merges. For admins, **Pause and resume**: pause the team now,
+  after the work under way, or after chosen journeys (they finish, verification and polish included, and nothing else
+  starts); while it's pausing, what's still going and what can't move without you; once paused, the report of where it
+  stands; and Resume, with feedback for the planner. Each asks for an authenticator code and goes in the audit log; the
+  lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac).
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked
@@ -284,8 +288,10 @@ Things to know:
      decisions; the app's code changes only a task's status, approval and notes, through the factory's move table).
      MongoDB can't scope a role to fields, so whoever holds this user's password can add and rewrite any team's tasks,
      which agents then act on: keep it only in the deployment's environment, and rotate it if it leaks;
-   - `createIndex` on `tasks`, `requests`, `stakeholders` and `cycles` (the store asks for its index; refused, it
-     carries on).
+   - `insert` on `controls` (an admin's pause, resume or budget: the app only adds them, never changes one, so they're
+     also the record; the watchdog applies them);
+   - `createIndex` on `tasks`, `requests`, `stakeholders`, `cycles` and `controls` (the store asks for its index;
+     refused, it carries on).
 
    On the accounts database (`e9g_web`): `find`, `insert`, `update` and `remove` on each of Better Auth's collections
    and the app's own (`user`, `session`, `account`, `verification`, `twoFactor`, `passkey`, `rateLimit`, `memberships`,

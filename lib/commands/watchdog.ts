@@ -1,12 +1,13 @@
-// The watchdog: one launchd job (ca.e9g.watchdog) that looks after every registered team every 5 minutes. It uses
-// no model. macOS doesn't let launchd jobs read ~/Documents, so it runs the installed copy in ~/.e9g and never
+// The watchdog: one launchd job (ca.e9g.watchdog) that looks after every registered team every 5 minutes, and applies
+// the operator's new pauses, resumes and budgets every minute between (lib/holds.ts). It uses no model. macOS doesn't let launchd jobs read ~/Documents, so it runs the installed copy in ~/.e9g and never
 // touches a checkout (E9G_LAUNCHD tells it it's that job). It reads T3 Code (its CLI and database), Docker, each
 // team's health URLs and its run folder, and sends anything that needs a checkout to the team's planner as a
 // message. What needs the operator also goes through every channel they've connected (e9g connect,
 // lib/channels.ts), and their replies go to the planner. Run from a terminal (e9g watchdog run, e9g start) it also
 // clears finished worktrees. A run of every team ends by pinging the heartbeat, if one is connected (lib/heartbeat.ts).
 //
-// Per team, in its run folder: watchdog.log, planner-thread, heartbeat/, outbox/, replies/, paused, complete.
+// Per team, in its run folder: watchdog.log, planner-thread, heartbeat/, outbox/, replies/, paused, hold.json,
+// budget.json, controls-applied, complete.
 //
 //   e9g watchdog install | remove | run [<team>]
 import { spawnSync } from "node:child_process";
@@ -16,13 +17,14 @@ import { basename, dirname, join } from "node:path";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
+import { applyControls, holdNote, progressHold, readHold } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { E9G_HOME, entryOf, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import { machineName } from "../machine.ts";
-import { claimRefusal } from "../tasks/model.ts";
-import { journeyDue } from "../tasks/model.ts";
+import { type Control, describeHold, holdOf } from "../tasks/controls.ts";
+import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
@@ -32,6 +34,9 @@ import { die, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
 const LABEL = "ca.e9g.watchdog";
 const PLIST = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 const GLOBAL_LOG = join(E9G_HOME, "watchdog.log");
+// When the last full run started; the minute-by-minute runs between full ones apply controls only.
+const FULL_RUN = join(E9G_HOME, ".stamp-full-run");
+const FULL_EVERY_MIN = 4.5;
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
 function notify(title: string, text: string): void {
@@ -405,6 +410,8 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   };
   mkdirSync(join(run, "heartbeat"), { recursive: true });
   mkdirSync(join(run, "outbox"), { recursive: true });
+  // The operator's new pauses, resumes and budgets first (lib/holds.ts), so the rest of the run sees them.
+  await applyTeamControls(entry, log, (text) => oncePer("controls-unread", 60) && log(text));
   // Where the team stands, for the web app (lib/tasks/teams.ts): the lead reports it every run, paused or not.
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
   if (existsSync(join(run, "paused"))) return;
@@ -412,6 +419,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // Claims whose lease ran out go back to approved, for another member (lib/tasks/ops.ts); and what's waiting, which
   // wakes an idle cycles team.
   let arrived = "";
+  let graph: Task[] | null = null;
   if (entry.tasks)
     try {
       const store = await openStore({ name: entry.name, tasks: entry.tasks }, run);
@@ -425,6 +433,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
         // Anything the planner acts on: a finding or proposal, approved work, a hand-in to review, and a journey whose
         // last task just finished (it's due its verification).
         const all = await store.tasks.all();
+        graph = all;
         const tasks = all.filter(
           (t) =>
             t.updatedAt > since &&
@@ -517,12 +526,36 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   const updated = thread.updatedAt ? (Date.now() - Date.parse(thread.updatedAt)) / 60_000 : Number.POSITIVE_INFINITY;
   const quiet = Math.round(Math.min(updated, ...beats));
   const members = t3.childCounts(planner);
+  // A graceful hold: once nothing it lets finish can move, the team pauses and the operator gets the report.
+  const progressed = graph
+    ? progressHold(
+        run,
+        graph,
+        members.reduce((n, r) => n + r.n, 0)
+      )
+    : null;
+  if (progressed?.settled) {
+    const { hold } = progressed;
+    log(`the hold after ${describeHold(hold)} settled: the team is paused until the operator resumes it`);
+    notify(title, "The team has paused: the work you let finish is merged. The report is on the web app and in your email.");
+    for (const said of await alertChannels(
+      reach,
+      run,
+      `hold-${hold.control}`,
+      `[${title}] Paused after ${describeHold(hold)}`,
+      hold.report ?? "",
+      entry.name
+    ))
+      log(said);
+    if (entry.tasks?.store === "mongo") await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
+    return;
+  }
   const quietMembers = t3.quietChildren(planner, w.stuckAfterMin ?? 45);
   log(
     `planner ${status} (quiet ${quiet} min); members ${members.map((r) => `${r.instance}:${r.n}`).join(" ") || "none"}${quietMembers.length ? `; quiet members: ${quietMembers.join("; ")}` : ""}`
   );
 
-  const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}`;
+  const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}`;
   if (BUSY.includes(status)) {
     if (quiet >= (w.stuckAfterMin ?? 45) && oncePer("stuck", 60)) {
       log(`planner ${planner} has been ${status} with nothing happening for ${quiet} min`);
@@ -568,16 +601,66 @@ function trimLog(run: string): void {
   if (lines.length > 5000) writeFileSync(logFile, lines.slice(-2000).join("\n"));
 }
 
+// The operator's controls the run folder hasn't applied yet (lib/holds.ts), passed on to the planner: a resume or a
+// graceful pause wakes it; a pause "now" only reaches one in the middle of a turn. A team whose tickets live on a
+// GitHub board has no controls (e9g pause still pauses it). Resolves to whether any was applied.
+export async function applyTeamControls(entry: RegistryEntry, log: (text: string) => void, problem: (text: string) => void): Promise<boolean> {
+  if (!entry.tasks || entry.worker) return false;
+  let controls: Control[];
+  try {
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      controls = await store.controls.all();
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    problem(`couldn't read the operator's controls: ${(error as Error).message.split("\n")[0]}`);
+    return false;
+  }
+  const applied = applyControls(entry.run, controls);
+  for (const line of applied.log) log(line);
+  const file = join(entry.run, "planner-thread");
+  const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+  if (planner && applied.tell.length) {
+    const busy = BUSY.includes(t3.threadShow(planner)?.status ?? "");
+    for (const { text, wake } of applied.tell)
+      if ((wake || busy) && !t3.threadSend(planner, text)) log("couldn't pass the operator's control on to the planner");
+  }
+  return applied.log.length > 0;
+}
+
+// Between full runs, every minute: only the operator's new controls, so a pause or resume from the web app takes
+// effect within a minute, not at the next full run. A team another run is busy with waits for it.
+async function applyControlsOnce(): Promise<void> {
+  const names = existsSync(teamsDir) ? readdirSync(teamsDir).filter((f) => f.endsWith(".json")) : [];
+  for (const name of names.map((f) => f.replace(/\.json$/, ""))) {
+    const entry = readRegistry(name);
+    if (!entry?.tasks || entry.worker || !existsSync(entry.run)) continue;
+    const release = await acquireSlot([join(entry.run, ".watch.lock")], { waitMin: 0, holder: "watchdog" });
+    if (!release) continue;
+    try {
+      const log = (text: string) => appendFileSync(join(entry.run, "watchdog.log"), `${stamp()} ${text}\n`);
+      if ((await applyTeamControls(entry, log, () => {})) && entry.tasks.store === "mongo") await reportState(entry, entry.run, () => {});
+    } finally {
+      release();
+    }
+  }
+}
+
 // The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).
 async function reportState(entry: RegistryEntry, run: string, log: (text: string) => void): Promise<void> {
   const flag = (name: string): boolean => existsSync(join(run, name));
   const file = join(run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const prefix = `e9g-${entry.name}-`;
+  const pending = readHold(run);
+  const hold = pending && !pending.settledAt && pending.scope !== "now";
   const members: Record<string, number> = {};
   if (planner) for (const { instance, n } of t3.childCounts(planner)) members[instance.startsWith(prefix) ? instance.slice(prefix.length) : instance] = n;
   const state: TeamState = {
-    state: flag("paused") ? "paused" : flag("complete") ? "complete" : flag("idle") ? "idle" : "active",
+    state: flag("paused") ? "paused" : hold ? "pausing" : flag("complete") ? "complete" : flag("idle") ? "idle" : "active",
+    hold: readHold(run),
     planner: planner ? (t3.threadShow(planner)?.status ?? null) : null,
     members,
     at: new Date().toISOString(),
@@ -609,8 +692,10 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
   const started = readJson<WorkerThreads>(file, {});
   const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
   let all: Awaited<ReturnType<typeof store.tasks.all>>;
+  let hold: ReturnType<typeof holdOf> = null;
   try {
     all = await store.tasks.all();
+    hold = holdOf(await store.controls.all());
   } finally {
     await store.close();
   }
@@ -622,7 +707,7 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
     const recent = (started[role] ?? []).filter(({ at }) => Date.now() - Date.parse(at) < WORKER_WINDOW_MIN * 60_000);
     const running = (started[role] ?? []).filter(({ id }) => busy(id));
     const limit = entry.limits[role] ?? 0;
-    const claimable = all.filter((t) => claimRefusal(t, role, all) === null).length;
+    const claimable = all.filter((t) => claimRefusal(t, role, all, hold) === null).length;
     const n = Math.min(limit - running.length, limit - recent.length, claimable);
     const kept = [...new Map([...running, ...recent].map((thread) => [thread.id, thread])).values()];
     for (let i = 0; i < n; i++) {
@@ -758,7 +843,7 @@ function install(): void {
   <key>WorkingDirectory</key><string>${E9G_HOME}</string>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>${[...new Set(path)].join(":")}</string><key>E9G_HOME</key><string>${E9G_HOME}</string><key>NODE_COMPILE_CACHE</key><string>${join(E9G_HOME, "current", ".cache")}</string><key>E9G_NODE_CACHE</key><string>1</string><key>E9G_LAUNCHD</key><string>1</string></dict>
-  <key>StartInterval</key><integer>300</integer>
+  <key>StartInterval</key><integer>60</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${join(E9G_HOME, "watchdog.launchd.log")}</string>
   <key>StandardErrorPath</key><string>${join(E9G_HOME, "watchdog.launchd.log")}</string>
@@ -775,7 +860,7 @@ function install(): void {
     loaded = spawnSync("launchctl", ["bootstrap", domain, PLIST], { encoding: "utf8" });
   }
   if (loaded.status !== 0) die(`launchctl couldn't load ${PLIST}: ${loaded.stderr.trim()}`);
-  console.info(`e9g: watchdog installed (${LABEL}, every 5 minutes, runs ${entry})`);
+  console.info(`e9g: watchdog installed (${LABEL}, every minute for controls and every 5 for the rest, runs ${entry})`);
 }
 
 export const watchdogLoaded = (): boolean => spawnSync("launchctl", ["print", `gui/${process.getuid?.()}/${LABEL}`], { stdio: "ignore" }).status === 0;
@@ -793,6 +878,13 @@ export async function watchdog(argv: string[]): Promise<number> {
       console.info("e9g: watchdog removed");
       return 0;
     case "run":
+      // launchd runs this every minute: the full run every five, and only the operator's controls in between. Run from a
+      // terminal, it's always the full run.
+      if (!argv[1] && process.env["E9G_LAUNCHD"] === "1" && minutesSince(FULL_RUN) < FULL_EVERY_MIN) {
+        await applyControlsOnce();
+        return 0;
+      }
+      if (!argv[1]) writeFileSync(FULL_RUN, "");
       await watchOnce(argv[1]);
       return 0;
     default:

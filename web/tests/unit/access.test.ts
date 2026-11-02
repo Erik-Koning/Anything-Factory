@@ -50,6 +50,7 @@ const TEAM_ABILITIES: Ability[] = [
   "proposals:decide",
   "people:manage",
   "audit:read",
+  "team:control",
 ];
 const allowedOn = (viewer: Viewer | null, team?: string): Ability[] => TEAM_ABILITIES.filter((a) => can(viewer, a, team));
 
@@ -78,10 +79,10 @@ describe("a member", () => {
   test("sees the board, what's in progress, journeys, the graph and every request, sends requests and suggests tasks", () => {
     assert.deepEqual(allowedOn(member, "shop"), ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest"]);
   });
-  test("never adds tasks as the operator, sees names, decides proposals, manages people or reads the audit log", () => {
+  test("never adds tasks as the operator, sees names, decides proposals, manages people, pauses the team or reads the audit log", () => {
     assert.equal(can(member, "audit:read"), false);
     assert.equal(can(member, "audit:read", "shop"), false);
-    for (const ability of ["tasks:add", "senders:names", "proposals:decide", "people:manage"] as const)
+    for (const ability of ["tasks:add", "senders:names", "proposals:decide", "people:manage", "team:control"] as const)
       assert.equal(can(member, ability, "shop"), false, ability);
     assert.equal(can(member, "people:manage"), false);
   });

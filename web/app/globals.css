@@ -723,3 +723,32 @@ a.button.primary {
     margin-bottom: 6px;
   }
 }
+/* A group of choices (the pause panel's radios and journeys). */
+fieldset.choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+fieldset.choices > legend {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.choices.nested {
+  display: grid;
+  gap: 6px;
+  padding-left: 26px;
+}
+/* A plain-text report (a settled pause's), as written. */
+pre.report {
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13.5px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0 0;
+}

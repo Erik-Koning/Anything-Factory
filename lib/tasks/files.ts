@@ -9,7 +9,7 @@ import { writeJson } from "../util.ts";
 import type { Doc } from "./model.ts";
 import type { Collection, Store } from "./store.ts";
 
-const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c" } as const;
+const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c", controls: "k" } as const;
 
 function collection<T extends Doc>(dir: string, prefix: string): Collection<T> {
   const file = (id: string) => join(dir, `${id}.json`);
@@ -92,6 +92,7 @@ export function fileStore(run: string, _team: string): Store {
     // the guard refuses the private folder whatever path or glob names it (Article 8).
     stakeholders: collection(join(privateDir(run), "stakeholders"), PREFIX.stakeholders),
     cycles: collection(join(run, "cycles"), PREFIX.cycles),
+    controls: collection(join(run, "controls"), PREFIX.controls),
     publish: async () => {},
     report: async () => {},
     team: async () => null,
