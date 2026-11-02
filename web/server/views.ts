@@ -178,8 +178,4 @@ export function axis(max: number): { top: number; ticks: number[] } {
   return { top, ticks: Array.from({ length: Math.round(top / step) + 1 }, (_, i) => Math.round(i * step * 1e6) / 1e6) };
 }
 
-// Dollars in words a tile or axis reads: cents under $10, whole dollars to $1,000, then compact.
-export function dollars(n: number): string {
-  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
-  return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
-}
+export { dollars } from "../../lib/tasks/spend.ts";

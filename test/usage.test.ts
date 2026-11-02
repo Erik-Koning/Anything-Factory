@@ -230,7 +230,7 @@ describe("the watchdog counts what a team used", () => {
       const spend = JSON.parse(readFileSync(join(w.run, "spend.json"), "utf8"));
       assert.equal(spend.today, 6);
       assert.ok(existsSync(join(w.run, "usage-days")));
-      assert.match((await w.e9g("status", "fixture")).out, /spent \(API-equivalent\): \$6\.00 today, \$6\.00 this week, \$6\.00 in all/);
+      assert.match((await w.e9g("status", "fixture")).out, /Spent \(API-equivalent\): \$6\.00 today, \$6\.00 this week, \$6\.00 in all\./);
     } finally {
       await w.close();
     }

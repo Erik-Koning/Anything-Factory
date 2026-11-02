@@ -1,5 +1,6 @@
 // A team's use and spend as the store keeps them (lib/usage.ts collects them from the transcripts): the documents, and
 // the sums budgets and the web app read. Pure, for the CLI and the web app alike.
+import type { Limits } from "./controls.ts";
 import type { Task } from "./model.ts";
 
 // A day's use by one role, model and task.
@@ -81,4 +82,21 @@ export function spendByWork(days: UsageDay[], tasks: Task[]): { journeys: { id: 
     }
   const sorted = <K>(map: Map<K, number>) => [...map].map(([id, cost]) => ({ id, cost: round(cost) })).sort((a, b) => b.cost - a.cost);
   return { journeys: sorted(byJourney), tasks: sorted(byTask) };
+}
+
+// Dollars in words: cents under $10, whole dollars to $1,000, then compact.
+export function dollars(n: number): string {
+  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
+}
+
+// What a team spent, against its budget when it has one, in a line.
+export function describeSpend(spend: Spend, limits: Limits | null): string {
+  const of = (cap: number | null | undefined) => (cap ? ` of ${dollars(cap)}` : "");
+  const parts = [
+    `${dollars(spend.today)} today${of(limits?.daily)}`,
+    `${dollars(spend.week)} this week${of(limits?.weekly)}`,
+    `${dollars(spend.total)} ${spend.since ? `since ${spend.since}` : "in all"}${of(limits?.total)}`,
+  ];
+  return `Spent (API-equivalent): ${parts.join(", ")}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}.`;
 }

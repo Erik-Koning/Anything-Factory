@@ -2,8 +2,10 @@
 // one), each of the last 14 days, and the journeys and tasks that cost the most. API-equivalent dollars: what the
 // tokens would cost on the Claude API, which on a subscription says how much of its limits the team takes.
 import Link from "next/link";
+import { budgetAction } from "../app/t/[team]/actions.ts";
 import { type Limits, spendByWork, type Spend, type Task, type UsageDay } from "../server/factory.ts";
 import { axis, dailySpend, dollars } from "../server/views.ts";
+import { SubmitButton } from "./submit-button.tsx";
 import { Ago } from "./ui.tsx";
 
 const DAYS = 14;
@@ -188,6 +190,47 @@ export function SpendPanel({
           </div>
         </>
       )}
+      <details>
+        <summary>{limits ? "Change the budget" : "Set a budget"}</summary>
+        <form action={budgetAction} className="stack">
+          <input type="hidden" name="team" value={team} />
+          <p className="hint">
+            Dollars, API-equivalent; blank for no limit. At four fifths of a limit you get an email; at the limit the team pauses after the work under way;
+            a tenth past it, now.
+          </p>
+          <div className="inline">
+            <label htmlFor="budget-daily">
+              A day
+              <input id="budget-daily" name="daily" inputMode="decimal" defaultValue={limits?.daily ?? ""} autoComplete="off" />
+            </label>
+            <label htmlFor="budget-weekly">
+              A week
+              <input id="budget-weekly" name="weekly" inputMode="decimal" defaultValue={limits?.weekly ?? ""} autoComplete="off" />
+            </label>
+            <label htmlFor="budget-total">
+              In all
+              <input id="budget-total" name="total" inputMode="decimal" defaultValue={limits?.total ?? ""} autoComplete="off" />
+            </label>
+          </div>
+          <label className="check">
+            <input type="checkbox" name="autoResume" value="yes" defaultChecked={limits?.autoResume ?? false} />
+            <span>When the budget paused the team for a day or a week, start it again when the next one starts</span>
+          </label>
+          {limits ? (
+            <label className="check">
+              <input type="checkbox" name="restart" value="yes" />
+              <span>Count "in all" from now (it's counted since {dayMonth.format(new Date(limits.since))})</span>
+            </label>
+          ) : null}
+          <label htmlFor="budget-code">
+            Code from your authenticator
+            <input id="budget-code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required />
+          </label>
+          <div>
+            <SubmitButton>{limits ? "Change the budget" : "Set the budget"}</SubmitButton>
+          </div>
+        </form>
+      </details>
     </section>
   );
 }

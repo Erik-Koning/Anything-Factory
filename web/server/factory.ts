@@ -5,7 +5,7 @@
 // decide.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
-import { type Control, type HoldScope, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
+import { budgetControl, type Control, type HoldScope, type Limits, limitsOf, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
@@ -106,3 +106,19 @@ export const resumeFromWeb = (team: string, { note, from }: { note: string; from
 
 // What the team used, day by day and machine by machine, from `from` (YYYY-MM-DD) on (lib/usage.ts publishes it).
 export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);
+
+// A budget from the web, by an admin's stakeholder id: each limit in dollars, or null for none (all null clears it). The
+// total keeps counting from when the budget began, unless `restart`.
+export async function budgetFromWeb(
+  team: string,
+  ask: { daily: number | null; weekly: number | null; total: number | null; autoResume: boolean; restart: boolean; from: string }
+): Promise<Control> {
+  const store = storeFor(team);
+  const current = limitsOf(await store.controls.all());
+  const { daily, weekly, total } = ask;
+  const limits: Limits | null =
+    daily === null && weekly === null && total === null
+      ? null
+      : { daily, weekly, total, autoResume: ask.autoResume, since: ask.restart || !current ? new Date().toISOString() : current.since };
+  return store.controls.create(budgetControl(team, `web:${ask.from}`, limits));
+}

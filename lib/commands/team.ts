@@ -21,7 +21,7 @@ import {
   versionDir,
 } from "../paths.ts";
 import { readHold, readLimits } from "../holds.ts";
-import type { Spend } from "../tasks/spend.ts";
+import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
@@ -29,8 +29,8 @@ import { die, parseArgs, readJson, writeJson } from "../util.ts";
 import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
-import { type Control, describeHold, type HoldScope, holdOf, pauseControl, resumeControl } from "../tasks/controls.ts";
-import { OPERATOR, Refused } from "../tasks/model.ts";
+import { budgetControl, type Control, describeHold, type HoldScope, holdOf, type Limits, pauseControl, resumeControl } from "../tasks/controls.ts";
+import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
 
@@ -287,6 +287,58 @@ export async function pause(argv: string[]): Promise<number> {
   return 0;
 }
 
+const BUDGET_USAGE = "usage: e9g budget <team> [--daily <$>] [--weekly <$>] [--total <$>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
+
+// e9g budget <team>: the team's spending limits, in API-equivalent dollars (lib/budget.ts enforces them: a warning at
+// four fifths, a pause after the work under way at the limit, a pause now a tenth past it). With no limit given, what
+// they are and what's spent. A limit left out keeps its value and 0 removes it; --restart counts the total from now;
+// --auto-resume starts a team the budget paused for a day or week again when the next one starts; --clear removes all.
+export async function budget(argv: string[]): Promise<number> {
+  operatorOnly("budget");
+  const { positional, options } = parseArgs(argv, { booleans: ["auto-resume", "no-auto-resume", "restart", "clear"] });
+  const entry = entryFor(positional[0] ?? die(BUDGET_USAGE));
+  if (!entry.tasks) die(`${entry.name} keeps its tickets on a GitHub board, which has no budget`);
+  const current = readLimits(entry.run);
+  const amount = (key: "daily" | "weekly" | "total"): number | null => {
+    const given = options[key];
+    if (typeof given !== "string") return current?.[key] ?? null;
+    const n = Number(given.replace(/^\$/, ""));
+    if (!Number.isFinite(n) || n < 0 || n > 1_000_000) die(`--${key}: dollars, from 0 (none) to 1,000,000`);
+    return n === 0 ? null : Math.round(n * 100) / 100;
+  };
+  const asked = ["daily", "weekly", "total", "auto-resume", "no-auto-resume", "restart", "clear"].some((key) => options[key] !== undefined);
+  if (!asked) {
+    const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
+    const money = (n: number | null | undefined) => (n ? `$${n}` : "none");
+    console.info(
+      current
+        ? `${entry.name}'s budget: ${money(current.daily)} a day, ${money(current.weekly)} a week, ${money(current.total)} in all since ${current.since.slice(0, 10)}${current.autoResume ? "; a new day or week resumes a team it paused" : ""}`
+        : `${entry.name} has no budget (${BUDGET_USAGE.replace("usage: ", "")})`
+    );
+    if (spend) console.info(describeSpend(spend, current));
+    return 0;
+  }
+  let limits: Limits | null = null;
+  if (!options["clear"]) {
+    limits = {
+      daily: amount("daily"),
+      weekly: amount("weekly"),
+      total: amount("total"),
+      since: options["restart"] || !current ? nowIso() : current.since,
+      autoResume: options["auto-resume"] ? true : options["no-auto-resume"] ? false : (current?.autoResume ?? false),
+    };
+    if (limits.daily === null && limits.weekly === null && limits.total === null) limits = null;
+  }
+  await recordControl(entry, async () => budgetControl(entry.name, OPERATOR, limits));
+  const money = (n: number | null) => (n ? `$${n}` : "none");
+  console.info(
+    limits
+      ? `e9g: ${entry.name}'s budget is ${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all since ${limits.since.slice(0, 10)}; the watchdog holds the team to it from its next run`
+      : `e9g: ${entry.name} has no budget now`
+  );
+  return 0;
+}
+
 // e9g resume <team> [--note "…"]: work starts again; the note goes to the planner, as the operator's feedback.
 export async function resume(argv: string[]): Promise<number> {
   operatorOnly("resume");
@@ -367,13 +419,7 @@ export async function status(argv: string[]): Promise<number> {
     else if (hold?.settledAt && hold.scope !== "now")
       console.info(`   paused after ${describeHold(hold)} at ${hold.settledAt.slice(0, 16)}: e9g resume ${name} carries on`);
     const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
-    if (spend) {
-      const limits = readLimits(entry.run);
-      const of = (n: number | null | undefined) => (n ? ` of $${n}` : "");
-      console.info(
-        `   spent (API-equivalent): $${spend.today.toFixed(2)} today${of(limits?.daily)}, $${spend.week.toFixed(2)} this week${of(limits?.weekly)}, $${spend.total.toFixed(2)} ${spend.since ? `since ${spend.since}` : "in all"}${of(limits?.total)}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}`
-      );
-    }
+    if (spend) console.info(`   ${describeSpend(spend, readLimits(entry.run))}`);
     const drain = join(entry.home, ".e9g", "run", "state", "drain");
     if (existsSync(drain)) console.info(`   draining: ${readFileSync(drain, "utf8").trim()} (e9g drain off, from the team's checkout)`);
     const kept = keptWorktrees(entry.run);

@@ -68,7 +68,7 @@ describe("the guard review's findings stay fixed", { concurrency: true }, () => 
   test("2: the factory's operator commands and owned commands, however they're called", () => {
     const { home, b, inB } = monorepo(baseTeam({ environment: { script: ".e9g/adapters/env.sh" } as never }));
     return holds([
-      ...["pause", "resume", "unregister", "rotate"].map((sub) =>
+      ...["pause", "resume", "budget", "unregister", "rotate"].map((sub) =>
         bash(home, "builder", `node --no-warnings ~/.e9g/versions/0.3.0/bin/e9g.ts ${sub} fixture`, "refuse", inB)
       ),
       bash(home, "builder", "node --import tsx /Users/x/.e9g/versions/dev/bin/e9g.ts merge e9g/b2-x", "refuse", inB),

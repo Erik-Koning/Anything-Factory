@@ -176,6 +176,9 @@ test("admins read and filter the audit log; nobody else can", async ({ browser }
   await expect(admin.page.getByRole("heading", { name: "Audit log" })).toBeVisible();
   const events = admin.page.getByRole("region", { name: "Events" });
   await expect(events.getByText("New IP address confirmed").first()).toBeVisible();
+  // Changes to the work are there too, found by what they were (the newest page may be all sign-ins and controls).
+  await admin.page.getByLabel("What").selectOption("task.added");
+  await admin.page.getByRole("button", { name: "Filter" }).click();
   await expect(events.getByText("Task added").first()).toBeVisible();
 
   await admin.page.getByLabel("Who (email)").fill(state().member);

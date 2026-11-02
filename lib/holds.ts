@@ -6,6 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
+import { dollars } from "./tasks/spend.ts";
 import { readJson, writeJson } from "./util.ts";
 
 const holdFile = (run: string): string => join(run, "hold.json");
@@ -29,7 +30,7 @@ export function readLimits(run: string): Limits | null {
 }
 
 const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
-const money = (n: number | null): string => (n === null ? "none" : `$${n}`);
+const money = (n: number | null): string => (n === null ? "none" : dollars(n));
 
 // Applies the controls newer than the last applied, in order. Resolves to lines for the team's log, and messages for
 // the planner, which the caller sends when there's a planner: those that `wake` it start a turn; the rest only matter
@@ -43,19 +44,24 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
     const n = Number(/^k(\d+)$/.exec(control.id)?.[1] ?? 0);
     if (n <= last) continue;
     const hold = control.kind === "pause" ? holdOf([control]) : null;
+    const budget = control.by === "budget";
     if (hold && hold.scope !== "now" && existsSync(pausedFile(run))) {
       log.push(`${whoAsked(control.by)} asked to pause after ${describeHold(hold)}, but the team is paused already`);
     } else if (hold) {
       const state: HoldState = { ...hold, settledAt: hold.scope === "now" ? control.at : null, left: [], stuck: [], report: null };
       writeJson(holdFile(run), state);
       if (hold.scope === "now") writeFileSync(pausedFile(run), control.at);
-      log.push(`${whoAsked(control.by)} paused the team ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}`);
+      log.push(
+        `${whoAsked(control.by)} paused the team ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}${budget ? ` (${hold.note})` : ""}`
+      );
+      // The budget's own pauses say so, and why: the planner's next report should say what it got done.
+      const who = budget ? `The team's budget (${hold.note})` : "The operator";
       tell.push(
         hold.scope === "now"
-          ? { text: "The operator paused the team: merge nothing and start no members until they resume it. Finish your turn.", wake: false }
+          ? { text: `${who} paused the team: merge nothing and start no members until the operator resumes it. Finish your turn.`, wake: false }
           : {
               text:
-                `The operator is pausing the team after ${describeHold(hold)}${hold.note ? `, and wrote: "${hold.note}"` : ""}. ` +
+                `${who} is pausing the team after ${describeHold(hold)}${hold.note && !budget ? `, and wrote: "${hold.note}"` : ""}. ` +
                 "Finish that work and merge it, its verification and polish included; claim, start and plan nothing outside it. " +
                 "Once nothing in it can move, the team pauses until they resume it.",
               wake: true,
@@ -66,9 +72,10 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
       rmSync(holdFile(run), { force: true });
       log.push(`${whoAsked(control.by)} resumed the team`);
       tell.push({
-        text:
-          `The operator resumed the team${control.note ? `, and wrote:\n\n${control.note}\n\n` : ". "}` +
-          "Record what they said where it belongs (the tasks it concerns, decisions.md), then carry on.",
+        text: budget
+          ? `The team starts again: ${control.note}. Carry on.`
+          : `The operator resumed the team${control.note ? `, and wrote:\n\n${control.note}\n\n` : ". "}` +
+            "Record what they said where it belongs (the tasks it concerns, decisions.md), then carry on.",
         wake: true,
       });
     } else if (control.kind === "budget") {

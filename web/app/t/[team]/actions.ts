@@ -18,6 +18,7 @@ import {
 } from "../../../server/access.ts";
 import {
   addTaskFromWeb,
+  budgetFromWeb,
   decideAsOperator,
   describeHold,
   isHoldScope,
@@ -227,6 +228,45 @@ export async function controlAction(form: FormData): Promise<void> {
   } catch (error) {
     notice = { error: reasonOf(error) };
     await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${notice.error}`.trim() });
+  }
+  redirect(withNotice(`/t/${team}`, notice));
+}
+
+// An admin sets the team's budget, as the operator, with a code from their authenticator. Each limit is dollars
+// (API-equivalent), blank for none; the lead's watchdog holds the team to it from its next run.
+export async function budgetAction(form: FormData): Promise<void> {
+  const team = text(form, "team");
+  if (!TEAM_PARAM.test(team)) redirect("/");
+  let notice: { ok?: string; error?: string };
+  let viewer = null;
+  const amounts = { daily: text(form, "daily").trim(), weekly: text(form, "weekly").trim(), total: text(form, "total").trim() };
+  try {
+    viewer = await allowed("team:control", team);
+    const amount = (key: keyof typeof amounts): number | null => {
+      const value = amounts[key].replace(/^\$/, "");
+      if (!value) return null;
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0 || n > 1_000_000) throw new Refused(`The ${key} budget is dollars, from 0 to 1,000,000.`);
+      return n === 0 ? null : Math.round(n * 100) / 100;
+    };
+    const limits = { daily: amount("daily"), weekly: amount("weekly"), total: amount("total") };
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+    if (wrong) throw new Refused(wrong);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const control = await budgetFromWeb(team, {
+      ...limits,
+      autoResume: text(form, "autoResume") === "yes",
+      restart: text(form, "restart") === "yes",
+      from,
+    });
+    const money = (n: number | null) => (n === null ? "none" : `$${n}`);
+    const said = control.limits ? `${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all` : "no budget";
+    notice = { ok: `The budget is ${said}. The team's Mac holds it to that from its next run.` };
+    await record(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
+  } catch (error) {
+    notice = { error: reasonOf(error) };
+    await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: notice.error });
   }
   redirect(withNotice(`/t/${team}`, notice));
 }

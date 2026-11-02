@@ -19,6 +19,8 @@ Set up and run a team (the operator)
   e9g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
                                       stop a team now, or once the work (or journeys) under way is merged
   e9g resume <team> [--note "…"]      start it again; the note goes to the planner
+  e9g budget <team> [--daily <$>] [--weekly <$>] [--total <$>] [--auto-resume] [--restart] [--clear]
+                                      its spending limits (API-equivalent $): warned at 80%, paused at 100%
   e9g rotate <team>                   a fresh planner thread (refused while members run)
   e9g status [<team>]  ·  e9g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   e9g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role
@@ -105,6 +107,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   start: () => import("../lib/commands/team.ts").then((m) => m.start(args)),
   pause: () => import("../lib/commands/team.ts").then((m) => m.pause(args)),
   resume: () => import("../lib/commands/team.ts").then((m) => m.resume(args)),
+  budget: () => import("../lib/commands/team.ts").then((m) => m.budget(args)),
   rotate: () => import("../lib/commands/team.ts").then((m) => m.rotate(args)),
   status: () => import("../lib/commands/team.ts").then((m) => m.status(args)),
   teams: () => import("../lib/commands/team.ts").then((m) => m.teams()),

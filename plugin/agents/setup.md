@@ -84,8 +84,10 @@ about a dozen questions at most, in this order:
 | Critical     | Code whose every change gets the full review: auth, money, data, anything `CLAUDE.md` guards (`critical`)                                                                                                      | From `CLAUDE.md` and the docs                                                                                         |
 | Policies     | Show the deny list, with what you detected marked, and ask what to unlock                                                                                                                                      | Everything outward stays denied                                                                                       |
 
-Nothing enforces the budget. Say so when you ask: the planner reads it as guidance, and the operator watches
-`e9g metrics` and pauses the team (`e9g pause`) when it's spent.
+The budget can be enforced. Say so when you ask: the planner reads the brief's budget as guidance, and
+`e9g budget <team> --daily <$> --weekly <$> --total <$>` (the operator's, in API-equivalent dollars; on a
+subscription, how fast the team uses its limits) makes the watchdog warn at 80% of a limit, pause the team after the
+work under way at 100%, and pause it now at 110%. Offer to say which command sets what they told you; they run it.
 
 The policies are deploy, cloud, hosted-data, publish, github, messages and payments. Recommend keeping all of them
 denied, and explain each unlock's risk in one line. Unlocking is the operator's call (Article 3); don't argue,

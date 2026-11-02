@@ -583,6 +583,28 @@ test("the admin sees what the team spent: today, this week and in all against th
   await graph.collection("controls").deleteOne({ _id: "shop:k900" as never });
 });
 
+test("the admin sets the budget with a code; a limit left blank is none", async () => {
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  await page.goto("/t/shop");
+  const panel = page.getByRole("region", { name: "Spend" });
+  await panel.getByText("Set a budget").click();
+  await panel.getByLabel("A day", { exact: true }).fill("12");
+  await panel.getByLabel("In all", { exact: true }).fill("$300");
+  await panel.getByLabel(/start it again when the next one starts/).check();
+  await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Set the budget" }).click();
+  await expect(page.getByRole("status")).toContainText("The budget is $12 a day, none a week, $300 in all.");
+  const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  expect(budget).toMatchObject({ by: expect.stringMatching(/^web:s\d+$/), limits: { daily: 12, weekly: null, total: 300, autoResume: true } });
+  expect(await accounts.collection("audit").findOne({ team: "shop", action: "team.budget", outcome: "ok" })).toMatchObject({
+    detail: "$12 a day, none a week, $300 in all",
+  });
+  // The tiles measure against it at once.
+  await expect(panel.locator(".tiles li").first()).toContainText("of $12 a day");
+  await graph.collection("controls").deleteMany({ team: "shop", kind: "budget" });
+});
+
 test("the admin switches between teams, staying on the same page", async () => {
   const { page } = admin;
   await page.goto("/");

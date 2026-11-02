@@ -38,7 +38,8 @@ request (Article 8).
   stands; and Resume, with feedback for the planner. Each asks for an authenticator code and goes in the audit log; the
   lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac). Then
   **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
-  is one), each of the last 14 days, and the journeys and tasks that cost the most.
+  is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
+  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause.
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked

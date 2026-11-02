@@ -148,7 +148,9 @@ describe("controls in the run folder", () => {
     assert.match(applied.tell[0]?.text ?? "", /wrote:\n\nJ1 looks right; go on\n\n/);
 
     const graceful = control(pauseControl(all, "fixture", { scope: "tasks", by: "operator" }));
-    const budget = control(budgetControl("fixture", "operator", { daily: 40, weekly: null, total: 500, since: "2026-11-01T00:00:00Z" }));
+    const budget = control(
+      budgetControl("fixture", "operator", { daily: 40, weekly: null, total: 500, since: "2026-11-01T00:00:00Z", autoResume: false })
+    );
     applied = applyControls(run, [now, resume, graceful, budget]);
     assert.ok(!existsSync(join(run, "paused")), "a graceful pause doesn't stop the team yet");
     assert.equal(readHold(run)?.settledAt, null);

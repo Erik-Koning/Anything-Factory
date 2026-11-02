@@ -14,13 +14,15 @@ export const HOLD_SCOPES = ["now", "tasks", "journeys"] as const;
 export type HoldScope = (typeof HOLD_SCOPES)[number];
 export const isHoldScope = (value: unknown): value is HoldScope => typeof value === "string" && (HOLD_SCOPES as readonly string[]).includes(value);
 
-// A team's spending limits, in API-equivalent US dollars (lib/usage.ts prices the tokens), each optional: per calendar
-// day and week on the lead's clock, and in all since `since`.
+// A team's spending limits, in API-equivalent US dollars (lib/prices.ts), each optional: per calendar day and week on
+// the lead's clock, and in all since `since` (lib/budget.ts enforces them). With `autoResume`, a team the budget paused
+// for a day or a week starts again when the next one does.
 export interface Limits {
   daily: number | null;
   weekly: number | null;
   total: number | null;
   since: string;
+  autoResume: boolean;
 }
 
 export interface Control extends Doc {
@@ -37,6 +39,9 @@ export interface Control extends Doc {
   journeys: string[];
   // A budget: the limits from now on (null: none).
   limits: Limits | null;
+  // A pause or resume the budget made: which limit, for which period ("daily:2026-11-04", "weekly:2026-11-02",
+  // "total:2026-10-02"), and ":hard" for the pause past the limit's last tenth. Null for the operator's.
+  trigger?: string | null;
 }
 
 // The pause in force, from the latest pause or resume.

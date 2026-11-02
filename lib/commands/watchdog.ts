@@ -17,6 +17,7 @@ import { basename, dirname, join } from "node:path";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
+import { budgetCheck } from "../budget.ts";
 import { applyControls, holdNote, progressHold, readHold, readLimits } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
@@ -25,7 +26,7 @@ import { operatorOnly } from "../session.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
-import { dayOf, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
+import { dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { collectUsage, transcriptDirs } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
@@ -415,7 +416,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // The operator's new pauses, resumes and budgets first (lib/holds.ts), so the rest of the run sees them.
   await applyTeamControls(entry, log, (text) => oncePer("controls-unread", 60) && log(text));
   // What the team used since the last run, from this machine's transcripts, and what it has spent.
-  await trackUsage(entry, (text) => oncePer("usage-untracked", 60) && log(text));
+  const spend = await trackUsage(entry, (text) => oncePer("usage-untracked", 60) && log(text));
+  // The budget, against it (lib/budget.ts): a warning, a pause, or a new day's resume, applied at once.
+  if (spend) await enforceBudget(entry, spend, log, alert);
   // Where the team stands, for the web app (lib/tasks/teams.ts): the lead reports it every run, paused or not.
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
   if (existsSync(join(run, "paused"))) return;
@@ -535,7 +538,11 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     ? progressHold(
         run,
         graph,
-        members.reduce((n, r) => n + r.n, 0)
+        members.reduce((n, r) => n + r.n, 0),
+        () => {
+          const spent = readJson<Spend | null>(join(run, "spend.json"), null);
+          return spent ? [describeSpend(spent, readLimits(run))] : [];
+        }
       )
     : null;
   if (progressed?.settled) {
@@ -680,6 +687,43 @@ async function trackUsage(entry: RegistryEntry, problem: (text: string) => void)
   } catch (error) {
     problem(`couldn't count what the team used: ${(error as Error).message.split("\n")[0]}`);
     return null;
+  }
+}
+
+// The team's budget against what it spent (lib/budget.ts): each warning once per limit and period, and a pause or resume
+// recorded as a control by "budget" and applied at once, the operator told why.
+async function enforceBudget(
+  entry: RegistryEntry,
+  spend: Spend,
+  log: (text: string) => void,
+  alert: (kind: string, text: string) => Promise<void>
+): Promise<void> {
+  const limits = readLimits(entry.run);
+  if (!limits || !entry.tasks || entry.worker) return;
+  let made: Control | null = null;
+  let move: ReturnType<typeof budgetCheck>;
+  try {
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      move = budgetCheck(entry.name, limits, spend, await store.controls.all(), await store.tasks.all(), existsSync(join(entry.run, "paused")));
+      if (move.control) made = await store.controls.create(move.control);
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    log(`couldn't check the budget: ${(error as Error).message.split("\n")[0]}`);
+    return;
+  }
+  for (const { key, text } of move.warn) {
+    const mark = join(entry.run, `.${key.replace(/[^\w-]/g, "-")}`);
+    if (existsSync(mark)) continue;
+    writeFileSync(mark, "");
+    log(text);
+    await alert(key, text);
+  }
+  if (made && move.why) {
+    await applyTeamControls(entry, log, log);
+    await alert(`budget-${made.id}`, move.why);
   }
 }
 
