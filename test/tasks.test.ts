@@ -7,6 +7,7 @@ import { describe, test } from "node:test";
 import type { RawTeam } from "../lib/config.ts";
 import { machineName } from "../lib/machine.ts";
 import { fileStore } from "../lib/tasks/files.ts";
+import { levelDiagram, levels, NO_JOURNEY } from "../lib/tasks/graph.ts";
 import { addTask } from "../lib/tasks/add.ts";
 import { update } from "../lib/tasks/store.ts";
 import {
@@ -971,5 +972,83 @@ describe("the audit's findings stay fixed", () => {
     assert.equal(last.status, 0);
     assert.match(last.stderr, /Task 1 went back as blocked/);
     assert.equal((await store().tasks.get("1"))?.status, "blocked");
+  });
+});
+
+describe("the task graph by level", () => {
+  // Where each card is: the card it's inside, its column and row.
+  const where = (tasks: Task[]) => Object.fromEntries(levels(tasks).map((c) => [c.id, `${c.inside ?? "top"} ${c.col},${c.row}`]));
+
+  test("journeys on the top level, their tasks inside, journeys in journeys deeper, and work in none behind its own card", () => {
+    const tasks = [
+      task({ id: "1", kind: "journey" }),
+      task({ id: "2", parent: "1", status: "done" }),
+      task({ id: "3", parent: "1", after: ["2"] }),
+      task({ id: "4", kind: "journey", parent: "1" }),
+      task({ id: "5", parent: "4", after: ["3"] }),
+      task({ id: "6", kind: "journey" }),
+      task({ id: "7", parent: "6", after: ["5"] }),
+      task({ id: "8", kind: "bug", severity: "major" }),
+      task({ id: "9", parent: "6", status: "rejected" }),
+    ];
+    // Journey 6 comes after 1, since its task waits on one two levels down in 1; inside 1, the journey in it comes
+    // after the task its own task waits on. Rejected work isn't drawn unless asked for.
+    assert.deepEqual(where(tasks), {
+      "1": "top 0,0",
+      [NO_JOURNEY]: "top 0,1",
+      "6": "top 1,0",
+      "2": "1 0,0",
+      "3": "1 1,0",
+      "4": "1 2,0",
+      "5": "4 0,0",
+      "7": "6 0,0",
+      "8": `${NO_JOURNEY} 0,0`,
+    });
+    assert.ok(levels(tasks, { all: true }).some((c) => c.id === "9"));
+  });
+
+  test("journeys whose parents loop go on the top level, and a long column wraps", () => {
+    assert.deepEqual(
+      where([task({ id: "1", kind: "journey", parent: "2" }), task({ id: "2", kind: "journey", parent: "1" }), task({ id: "3", parent: "1" })]),
+      {
+        "1": "top 0,0",
+        "2": "top 0,1",
+        "3": "1 0,0",
+      }
+    );
+    const many = Array.from({ length: 7 }, (_, i) => task({ id: String(i + 1), kind: "journey" }));
+    assert.deepEqual(Object.values(where(many)), ["top 0,0", "top 0,1", "top 0,2", "top 0,3", "top 1,0", "top 1,1", "top 1,2"]);
+  });
+
+  test("the document: a card per journey, a task card each, and a line between tasks, never between a card and its own", () => {
+    const tasks = [
+      task({ id: "1", kind: "journey" }),
+      task({ id: "2", parent: "1", status: "done" }),
+      task({
+        id: "3",
+        parent: "1",
+        status: "building",
+        after: ["2", "1"],
+        claim: { role: "builder", machine: "studio", worktree: "/w", at: "", until: "" },
+      }),
+      task({ id: "4", status: "proposed", after: ["3"] }),
+    ];
+    const doc = levelDiagram(tasks, { title: "Shop", href: (t) => `/t/shop/tasks/${t.id}` }) as {
+      nodes: Record<string, unknown>[];
+      edges: { source: string; target: string }[];
+    };
+    const node = (id: string) => doc.nodes.find((n) => n["id"] === id)!;
+    assert.deepEqual(
+      { kind: node("t1")["kind"], parentId: node("t1")["parentId"], description: node("t1")["description"], url: node("t1")["url"] },
+      { kind: "journey", parentId: null, description: "approved · 1 of 2 done", url: "/t/shop/tasks/1" }
+    );
+    assert.deepEqual([node("t2")["kind"], node("t2")["parentId"], node("t2")["done"]], ["task", "t1", true]);
+    assert.deepEqual([node("t3")["stage"], node("t3")["assignees"]], ["in-progress", ["builder@studio"]]);
+    assert.deepEqual([node("t4")["parentId"], node("t4")["status"]], [NO_JOURNEY, "proposed"]);
+    assert.deepEqual([node(NO_JOURNEY)["kind"], node(NO_JOURNEY)["parentId"]], ["no-journey", null]);
+    assert.deepEqual(
+      doc.edges.map((e) => `${e.source}->${e.target}`),
+      ["t2->t3", "t3->t4"]
+    );
   });
 });

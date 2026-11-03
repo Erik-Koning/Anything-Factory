@@ -13,6 +13,7 @@ const SECTIONS: [string, (viewer: Viewer, team: string) => boolean][] = [
   ["", () => true],
   ["inbox", (v, t) => can(v, "proposals:decide", t)],
   ["board", (v, t) => can(v, "team:board", t)],
+  ["graph", (v, t) => can(v, "team:board", t)],
   ["requests", () => true],
   ["add", (v, t) => can(v, "tasks:add", t) || can(v, "tasks:suggest", t)],
   ["proposals", (v, t) => can(v, "proposals:decide", t)],
@@ -32,6 +33,7 @@ export default async function TeamLayout({ children, params }: { children: React
     "": "Overview",
     inbox: "Waiting on you",
     board: "Board",
+    graph: "Graph",
     requests: "Requests",
     proposals: "Decisions",
   };

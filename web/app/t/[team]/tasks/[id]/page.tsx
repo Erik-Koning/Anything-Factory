@@ -38,7 +38,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   return (
     <>
       <p className="small">
-        <Link href={`${base}/board`}>← Board</Link>
+        <Link href={`${base}/board`}>← Board</Link> · <Link href={`${base}/graph?at=${task.id}`}>In the graph</Link>
       </p>
       <Notice searchParams={searchParams} />
       <article className="panel" aria-labelledby="task-title">

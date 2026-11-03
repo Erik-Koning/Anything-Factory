@@ -62,6 +62,14 @@ request (Article 8).
   cards. The lanes run to the window's edge and scroll sideways when they don't fit. A team with no tasks yet gets one
   empty state. The board shows the work; moves stay with the team (claims, review, the merge queue) and the Decisions
   page.
+- `/t/<team>/graph` Graph (members and admins): the task graph by level, in BetterDiagrams' own editor
+  (`@mosphere/better-diagrams`, read-only), from the factory's `levelDiagram` (`lib/tasks/graph.ts`). The journeys are on
+  the top level (C1), with a card for the work in no journey; double-click one to open its tasks a level down (C2), and
+  a journey inside it a level further (C3, and so on: a level for every `parent`). Each level puts a card after the cards
+  beside it that it waits on, a dependency between tasks in two journeys showing as one between the journeys, and a
+  task's card is done once merged, in progress or in review, held by the member's role on its machine, and links (↗) to
+  the task's page. The level is in the address (`?at=<id>`), which a task's page links to ("In the graph"); the
+  breadcrumbs and Esc come back out. The overview's graph links here.
 - `/t/<team>/add`, from the board's button: Add a task (admins: a proposal, or approved as it's added, under a
   journey, after other tasks) or Suggest a task (members: title, kind, how bad it is for a bug or a UX problem, and
   what's needed, at least 20 characters; it goes to triage, and the planner never approves it itself: it makes it its
@@ -192,8 +200,8 @@ The end-to-end tests start a MongoDB replica set with `mongodb-memory-server` fr
 machine (`MONGOMS_SYSTEM_BINARY`, by default `~/.cache/mongodb-binaries/mongod-arm64-darwin-8.2.6`; nothing is
 downloaded), seed it with the factory's own functions (`tests/e2e/seed.ts`), run `next start` against it with
 `MAIL_LOG=1`, and read sign-in links from its log. They cover an admin's sign-in with the authenticator and with a
-backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board and
-requests (senders by role); approving and rejecting (checked in the task documents); a contributor and an admin
+backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board,
+graph by level and requests (senders by role); approving and rejecting (checked in the task documents); a contributor and an admin
 session without its second factor calling admin server actions directly (refused, nothing changes); passkeys with and
 without user verification; the daily limit; phone width; and the sign-in rate limit. Its browsers send a viewer IP
 address and the origin secret as CloudFront does (`playwright.config.ts`), and `security.spec.ts` covers the rest of
@@ -359,6 +367,8 @@ changing the domain means adding passkeys again.
 - `server/audit.ts`: the audit log; `server/known-ips.ts`: confirmed addresses and the emails that confirm new ones;
   `server/origin-check.ts`: the CDN's secret; `server/device.ts`: a browser's name from its user agent.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
+- `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and
+  no-journey kinds registered and the level kept in the address.
 - `app/`: the pages; `app/t/[team]/actions.ts`, `app/admin/people/actions.ts`, `app/account/actions.ts`: every write.
 - `proxy.ts`: requests without the CDN's secret refused, a nonce-based Content Security Policy, and anyone without a
   session cookie off to sign in.

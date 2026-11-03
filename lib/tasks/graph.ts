@@ -1,6 +1,7 @@
 // The task graph as a BetterDiagrams document, generated from the tasks and never edited: a band per journey with its
 // tasks inside, a band for the tasks in no journey, columns by how many tasks must come first, and an edge for each
-// dependency. Open it with `npx @mosphere/better-diagrams <file>`; e9g serve draws the same layout itself.
+// dependency. Open it with `npx @mosphere/better-diagrams <file>`; e9g serve draws the same layout itself. The web app
+// also draws it by level (levelDiagram, below): the journeys on the top level, their tasks drilled into.
 import { claimOrder, journeyDue, type Kind, type Task } from "./model.ts";
 
 const W = 220;
@@ -114,4 +115,160 @@ export function betterDiagram(tasks: Task[], { title, all = false }: { title: st
     task.after.filter((id) => ids.has(id)).map((id) => ({ id: `e${++k}`, source: `t${id}`, target: `t${task.id}`, label: "first", style: "dashed" }))
   );
   return { version: 1, meta: { title: `${title}: task graph`, routing: "orthogonal", versionTag: new Date().toISOString().slice(0, 10) }, nodes, edges };
+}
+
+// --- By level -------------------------------------------------------------------------------------------------------
+// The same graph as BetterDiagrams' C1–C4 levels, drilled into rather than laid out at once: the journeys on the top
+// level (C1), with a card for the tasks in none; a journey's tasks a level down (C2); and whatever sits inside those
+// further down, a level for every `parent`. Each card is placed on its own level, among the cards beside it.
+
+// The card on the top level that holds the tasks in no journey (task ids are numbers).
+export const NO_JOURNEY = "none";
+
+export interface Card {
+  // The task's id, or NO_JOURNEY.
+  id: string;
+  task: Task | null;
+  // The card it's inside (an id, as above), or null on the top level.
+  inside: string | null;
+  col: number;
+  row: number;
+}
+
+// Where each card goes: inside its parent's card when its parent is shown, a journey in none on the top level, other
+// work in none inside NO_JOURNEY. Its column is the longest chain of cards beside it that must come first (one does
+// when something in it is waited on by something in the other), its row the order members claim them in; a column
+// with more cards than the level should be tall goes on in the next.
+export function levels(tasks: Task[], { all = false } = {}): Card[] {
+  const shown = tasks.filter((t) => all || t.status !== "rejected");
+  const byId = new Map(shown.map((t) => [t.id, t]));
+  const parentOf = (t: Task): string | null => (t.parent && t.parent !== t.id && byId.has(t.parent) ? t.parent : null);
+  // A task whose parents lead back to it goes on the top level, which breaks the loop for the rest.
+  const looped = (t: Task): boolean => {
+    const seen = new Set<string>();
+    for (let p = parentOf(t); p && !seen.has(p); p = parentOf(byId.get(p)!)) {
+      if (p === t.id) return true;
+      seen.add(p);
+    }
+    return false;
+  };
+  const insideOf = new Map<string, string | null>();
+  for (const t of shown) insideOf.set(t.id, parentOf(t) && !looped(t) ? parentOf(t) : t.kind === "journey" ? null : NO_JOURNEY);
+  const ids = [...byId.keys(), ...([...insideOf.values()].includes(NO_JOURNEY) ? [NO_JOURNEY] : [])];
+  // The cards from the top level down to a task's own.
+  const pathOf = (id: string): string[] => {
+    const path = [id];
+    for (let at = insideOf.get(id) ?? null; at; at = insideOf.get(at) ?? null) path.unshift(at);
+    return path;
+  };
+  // A dependency, on the level where the two paths part: the card holding the task first waits on the one holding
+  // what it's after. None between a card and what's inside it.
+  const before = new Map<string, Set<string>>();
+  for (const t of shown)
+    for (const dep of t.after.filter((d) => byId.has(d))) {
+      const [to, from] = [pathOf(t.id), pathOf(dep)];
+      let i = 0;
+      while (i < to.length && i < from.length && to[i] === from[i]) i++;
+      if (i < to.length && i < from.length) before.set(to[i]!, (before.get(to[i]!) ?? new Set()).add(from[i]!));
+    }
+  const col = new Map<string, number>();
+  const colOf = (id: string, seen = new Set<string>()): number => {
+    const known = col.get(id);
+    if (known !== undefined) return known;
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const first = [...(before.get(id) ?? [])];
+    const c = first.length ? 1 + Math.max(...first.map((b) => colOf(b, seen))) : 0;
+    col.set(id, c);
+    return c;
+  };
+  const order = (a: string, b: string) => (a === NO_JOURNEY ? 1 : b === NO_JOURNEY ? -1 : claimOrder(byId.get(a)!, byId.get(b)!));
+  const onLevel = new Map<string, string[]>();
+  for (const id of ids) onLevel.set(insideOf.get(id) ?? "", [...(onLevel.get(insideOf.get(id) ?? "") ?? []), id]);
+  const cards: Card[] = [];
+  for (const members of onLevel.values()) {
+    // A level tends to half again as many rows as columns (about 1.6:1 on a screen): a taller column wraps into columns
+    // side by side, so twenty journeys with nothing between them aren't one strip too long to read.
+    const most = Math.ceil(Math.sqrt(1.5 * members.length));
+    let x = 0;
+    for (const c of [...new Set(members.map((id) => colOf(id)))].sort((a, b) => a - b)) {
+      const column = members.filter((id) => colOf(id) === c).sort(order);
+      column.forEach((id, i) =>
+        cards.push({ id, task: byId.get(id) ?? null, inside: insideOf.get(id) ?? null, col: x + Math.floor(i / most), row: i % most })
+      );
+      x += Math.ceil(column.length / most);
+    }
+  }
+  return cards;
+}
+
+const CARD_W = 280;
+const CARD_H = 88;
+const CARD_COL = CARD_W + 80;
+const CARD_ROW = CARD_H + 44;
+
+// What a task's status reads as on a card: not yet approved is planned work, rejected is gone.
+const LIFECYCLE: Partial<Record<Task["status"], string>> = {
+  triage: "proposed",
+  proposed: "proposed",
+  researching: "proposed",
+  question: "proposed",
+  rejected: "retired",
+};
+
+// The kinds of card a journey and the tasks in none are, which the editor is told about
+// (web/components/level-graph.tsx); a task is BetterDiagrams' own `task`.
+export const LEVEL_KINDS = { journey: "journey", none: "no-journey" } as const;
+
+// The graph by level as a BetterDiagrams document: a journey is a card its tasks are drilled into, a task a `task`
+// card (done when merged; in progress while it's built and in review; held by the member that claimed it), and a
+// dependency an arrow from what comes first, drawn between the tasks themselves (the editor lifts it onto the cards
+// that hold them on the levels above). `href` links each card to the task's own page.
+export function levelDiagram(
+  tasks: Task[],
+  { title, all = false, href }: { title: string; all?: boolean; href?: (task: Task) => string }
+): Record<string, unknown> {
+  const cards = levels(tasks, { all });
+  const nodeId = (id: string) => (id === NO_JOURNEY ? NO_JOURNEY : `t${id}`);
+  const inside = (id: string) => cards.filter((c) => c.inside === id && c.task).map((c) => c.task!);
+  const doneOf = (list: Task[]) => `${list.filter((k) => k.status === "done").length} of ${list.length} done`;
+  const nodes = cards.map(({ id, task: t, inside: parent, col, row }) => {
+    const at = { parentId: parent === null ? null : nodeId(parent), x: col * CARD_COL, y: row * CARD_ROW, w: CARD_W, h: CARD_H };
+    if (!t) return { id: NO_JOURNEY, label: "Not in a journey", kind: LEVEL_KINDS.none, icon: "folder", description: doneOf(inside(NO_JOURNEY)), ...at };
+    const common = { id: nodeId(id), label: label(`#${t.id} ${t.title}`, 60), ...(href ? { url: href(t) } : {}), ...at };
+    const status = LIFECYCLE[t.status];
+    if (t.kind === "journey") {
+      const kids = inside(t.id);
+      return {
+        ...common,
+        kind: LEVEL_KINDS.journey,
+        icon: ICON.journey,
+        description: [journeyDue(t, tasks) ? "due its verification" : t.status, kids.length ? doneOf(kids) : "no tasks yet"].join(" · "),
+        ...(status ? { status } : {}),
+      };
+    }
+    return {
+      ...common,
+      kind: "task",
+      icon: ICON[t.kind],
+      description: [t.kind, t.status, t.severity, t.priority === null ? null : `p${t.priority}`].filter(Boolean).join(" · "),
+      ...(t.status === "done" ? { done: true } : {}),
+      ...(t.status === "building" ? { stage: "in-progress" } : t.status === "review" ? { stage: "in-review" } : {}),
+      ...(t.claim ? { assignees: [`${t.claim.role}@${t.claim.machine}`] } : {}),
+      ...(status ? { status } : {}),
+    };
+  });
+  // Only between two tasks neither of which holds the other.
+  const holds = new Map(cards.map((c) => [c.id, c.inside]));
+  const within = (id: string, outer: string): boolean => {
+    for (let at = holds.get(id) ?? null; at; at = holds.get(at) ?? null) if (at === outer) return true;
+    return false;
+  };
+  let k = 0;
+  const edges = cards.flatMap(({ id, task }) =>
+    (task?.after ?? [])
+      .filter((dep) => holds.has(dep) && !within(id, dep) && !within(dep, id))
+      .map((dep) => ({ id: `e${++k}`, source: nodeId(dep), target: nodeId(id), label: "", style: "solid", color: "slate" }))
+  );
+  return { version: 1, meta: { title: `${title}: task graph`, routing: "orthogonal" }, nodes, edges };
 }

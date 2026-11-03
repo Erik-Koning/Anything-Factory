@@ -705,6 +705,13 @@ a.button.primary {
 .graph .arrowhead {
   fill: var(--muted);
 }
+/* The graph by level: BetterDiagrams' editor fills this box, and pans and zooms inside it. */
+.level-graph {
+  height: clamp(420px, 72vh, 900px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
 
 @media (max-width: 560px) {
   .kanban {
