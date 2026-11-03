@@ -317,7 +317,8 @@ Things to know:
 
    On the accounts database (`e9g_web`): `find`, `insert`, `update` and `remove` on each of Better Auth's collections
    and the app's own (`user`, `session`, `account`, `verification`, `twoFactor`, `passkey`, `rateLimit`, `memberships`,
-   `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`), and only `find` and `insert`
+   `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`, and the notifier's
+   `notification_prefs`, `notification_queue`, `notification_tests` and `notifier`), and only `find` and `insert`
    on `audit`, so the app can't change or delete what it recorded, nor add an index that would expire it early
    (MongoDB's own expiry still removes old events). The indexes are an operator's to make (`npm run create-indexes`);
    the app tries its own too and carries on when refused. Nothing else: no `remove` on `e9g`, nothing on other
