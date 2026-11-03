@@ -235,5 +235,5 @@ test("the spend chart: 14 days ending on the lead's day, every machine added, em
   assert.equal(dollars(3.456), "$3.46");
   assert.equal(dollars(42.4), "$42");
   assert.equal(dollars(12_345), "$12K");
-  assert.equal(dollars(1_250), "$1.3K");
+  assert.equal(dollars(1_250), "$1,250");
 });

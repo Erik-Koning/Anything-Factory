@@ -14,15 +14,18 @@ export const HOLD_SCOPES = ["now", "tasks", "journeys"] as const;
 export type HoldScope = (typeof HOLD_SCOPES)[number];
 export const isHoldScope = (value: unknown): value is HoldScope => typeof value === "string" && (HOLD_SCOPES as readonly string[]).includes(value);
 
-// A team's spending limits, in API-equivalent US dollars (lib/prices.ts), each optional: per calendar day and week on
-// the lead's clock, and in all since `since` (lib/budget.ts enforces them). With `autoResume`, a team the budget paused
-// for a day or a week starts again when the next one does.
+// A team's spending limits, each optional: per calendar day and week on the lead's clock, and in all since `since`
+// (lib/budget.ts enforces them). In API-equivalent US dollars (lib/prices.ts), or with `unit` "subscription", in
+// percent of one Claude subscription's weekly limit (lib/subscriptions.ts measures what that comes to): 60 is three
+// fifths of a subscription's week, 150 one and a half subscriptions'. With `autoResume`, a team the budget paused for
+// a day or a week starts again when the next one does.
 export interface Limits {
   daily: number | null;
   weekly: number | null;
   total: number | null;
   since: string;
   autoResume: boolean;
+  unit?: "usd" | "subscription";
 }
 
 export interface Control extends Doc {

@@ -39,7 +39,10 @@ request (Article 8).
   lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac). Then
   **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
   is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
-  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause.
+  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause,
+  in dollars or in percent of a Claude subscription's week (over 100% for more than one subscription's worth). Once
+  the subscription is measured (`e9g subscriptions`), every figure also shows its share of a subscription's week, and
+  the panel what the subscription's own usage report says.
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked

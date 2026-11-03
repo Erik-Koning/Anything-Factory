@@ -50,6 +50,10 @@ export interface Spend {
   since: string | null;
   unpriced: number;
   at: string;
+  // One Claude subscription's week in API-equivalent dollars, as last measured (lib/subscriptions.ts); null before.
+  subscriptionWeek?: number | null;
+  // What each subscription's own usage report said, for the record.
+  subscriptions?: { account: string; percent: number; resetsAt: string }[];
 }
 export function spendOf(days: UsageDay[], now: Date, since: string | null = null): Spend {
   const today = dayOf(now);
@@ -84,19 +88,44 @@ export function spendByWork(days: UsageDay[], tasks: Task[]): { journeys: { id: 
   return { journeys: sorted(byJourney), tasks: sorted(byTask) };
 }
 
-// Dollars in words: cents under $10, whole dollars to $1,000, then compact.
+// Dollars in words: cents under $10, whole dollars to $10,000 (with a thousands comma), then compact.
 export function dollars(n: number): string {
-  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  if (n >= 10_000) return `$${Math.round(n / 1000)}K`;
+  if (n >= 1000) return `$${Math.round(n).toLocaleString("en-US")}`;
   return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
 }
 
 // What a team spent, against its budget when it has one, in a line.
 export function describeSpend(spend: Spend, limits: Limits | null): string {
-  const of = (cap: number | null | undefined) => (cap ? ` of ${dollars(cap)}` : "");
+  const week = spend.subscriptionWeek ?? null;
+  const sub = limits?.unit === "subscription";
+  const of = (cap: number | null | undefined) => (cap ? ` of ${sub ? `${cap}%` : dollars(cap)}` : "");
+  const figure = (n: number) => (sub && week ? `${percentOf(n, week)}%` : dollars(n));
   const parts = [
-    `${dollars(spend.today)} today${of(limits?.daily)}`,
-    `${dollars(spend.week)} this week${of(limits?.weekly)}`,
-    `${dollars(spend.total)} ${spend.since ? `since ${spend.since}` : "in all"}${of(limits?.total)}`,
+    `${figure(spend.today)} today${of(limits?.daily)}`,
+    `${figure(spend.week)} this week${of(limits?.weekly)}`,
+    `${figure(spend.total)} ${spend.since ? `since ${spend.since}` : "in all"}${of(limits?.total)}`,
   ];
-  return `Spent (API-equivalent): ${parts.join(", ")}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}.`;
+  const unit = sub
+    ? week
+      ? ` (shares of one subscription's week, about ${dollars(week)} API-equivalent)`
+      : " (API-equivalent dollars: no subscription reading yet, so the budget's shares aren't checked)"
+    : week
+      ? ` (this week is ${percentOf(spend.week, week)}% of a subscription's week)`
+      : "";
+  return `Spent${sub && week ? "" : " (API-equivalent)"}: ${parts.join(", ")}${unit}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}.`;
 }
+
+// `dollars` as a percentage of one subscription's week (`week` dollars), to one decimal below 10%.
+export const percentOf = (dollars: number, week: number): number => {
+  const p = (dollars / week) * 100;
+  return p < 10 ? Math.round(p * 10) / 10 : Math.round(p);
+};
+
+// A limit in dollars: as set, or a share of a subscription's week; null when that can't be known yet.
+export const limitDollars = (cap: number, limits: Pick<Limits, "unit">, week: number | null | undefined): number | null =>
+  limits.unit === "subscription" ? (week ? (cap / 100) * week : null) : cap;
+
+// A limit in words: "$40" or "60% of a subscription's week".
+export const limitWords = (cap: number, limits: Pick<Limits, "unit">): string =>
+  limits.unit === "subscription" ? `${cap}% of a subscription's week` : dollars(cap);

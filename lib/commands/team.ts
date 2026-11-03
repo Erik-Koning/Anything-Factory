@@ -21,6 +21,7 @@ import {
   versionDir,
 } from "../paths.ts";
 import { readHold, readLimits } from "../holds.ts";
+import { subscriptionWeek } from "../subscriptions.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
@@ -342,7 +343,7 @@ export async function pause(argv: string[]): Promise<number> {
   return 0;
 }
 
-const BUDGET_USAGE = "usage: e9g budget <team> [--daily <$>] [--weekly <$>] [--total <$>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
+const BUDGET_USAGE = "usage: e9g budget <team> [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
 
 // e9g budget <team>: the team's spending limits, in API-equivalent dollars (lib/budget.ts enforces them: a warning at
 // four fifths, a pause after the work under way at the limit, a pause now a tenth past it). With no limit given, what
@@ -366,20 +367,37 @@ export async function budget(argv: string[]): Promise<number> {
   } catch (error) {
     console.error(`e9g: couldn't read the budget from the task graph (${(error as Error).message.split("\n")[0]}); showing this machine's copy`);
   }
-  const amount = (key: "daily" | "weekly" | "total"): number | null => {
+  // Each limit in dollars ("40") or as a share of one subscription's week ("60%", over 100% for more than one
+  // subscription's worth). One unit for the whole budget: limits given in the other one drop those not given.
+  const keys = ["daily", "weekly", "total"] as const;
+  const units = new Set(
+    keys.flatMap((key) => (typeof options[key] === "string" ? [String(options[key]).trim().endsWith("%") ? "subscription" : "usd"] : []))
+  );
+  if (units.size > 1) die("give every limit in dollars, or every limit as a percentage of a subscription, not some of each");
+  const unit: "usd" | "subscription" = units.size ? ([...units][0] as "usd" | "subscription") : (current?.unit ?? "usd");
+  const switched = unit !== (current?.unit ?? "usd");
+  const amount = (key: (typeof keys)[number]): number | null => {
     const given = options[key];
-    if (typeof given !== "string") return current?.[key] ?? null;
-    const n = Number(given.replace(/^\$/, ""));
-    if (!Number.isFinite(n) || n < 0 || n > 1_000_000) die(`--${key}: dollars, from 0 (none) to 1,000,000`);
+    if (typeof given !== "string") return switched ? null : (current?.[key] ?? null);
+    const n = Number(given.trim().replace(/^\$/, "").replace(/%$/, ""));
+    const max = unit === "subscription" ? 10_000 : 1_000_000;
+    if (!Number.isFinite(n) || n < 0 || n > max)
+      die(
+        `--${key}: ${unit === "subscription" ? "a percentage of a subscription's week, from 0 (none) to 10,000" : "dollars, from 0 (none) to 1,000,000"}`
+      );
     return n === 0 ? null : Math.round(n * 100) / 100;
+  };
+  const words = (limits: Limits): string => {
+    const one = (n: number | null) => (n === null ? "none" : limits.unit === "subscription" ? `${n}%` : `$${n}`);
+    const shares = limits.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : "";
+    return `${one(limits.daily)} a day, ${one(limits.weekly)} a week, ${one(limits.total)} in all since ${limits.since.slice(0, 10)}${shares}`;
   };
   const asked = ["daily", "weekly", "total", "auto-resume", "no-auto-resume", "restart", "clear"].some((key) => options[key] !== undefined);
   if (!asked) {
     const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
-    const money = (n: number | null | undefined) => (n ? `$${n}` : "none");
     console.info(
       current
-        ? `${entry.name}'s budget: ${money(current.daily)} a day, ${money(current.weekly)} a week, ${money(current.total)} in all since ${current.since.slice(0, 10)}${current.autoResume ? "; a new day or week resumes a team it paused" : ""}`
+        ? `${entry.name}'s budget: ${words(current)}${current.autoResume ? "; a new day or week resumes a team it paused" : ""}`
         : `${entry.name} has no budget (${BUDGET_USAGE.replace("usage: ", "")})`
     );
     if (spend) console.info(describeSpend(spend, current));
@@ -393,16 +411,23 @@ export async function budget(argv: string[]): Promise<number> {
       total: amount("total"),
       since: options["restart"] || !current ? nowIso() : current.since,
       autoResume: options["auto-resume"] ? true : options["no-auto-resume"] ? false : (current?.autoResume ?? false),
+      unit,
     };
     if (limits.daily === null && limits.weekly === null && limits.total === null) limits = null;
   }
   await recordControl(entry, async () => budgetControl(entry.name, OPERATOR, limits));
-  const money = (n: number | null) => (n ? `$${n}` : "none");
+  const week = subscriptionWeek();
   console.info(
     limits
-      ? `e9g: ${entry.name}'s budget is ${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all since ${limits.since.slice(0, 10)}; the watchdog holds the team to it from its next run`
+      ? `e9g: ${entry.name}'s budget is ${words(limits)}; the watchdog holds the team to it from its next run${switched && current ? ` (the limits that were in ${current.unit === "subscription" ? "percent" : "dollars"} and weren't given again are dropped)` : ""}`
       : `e9g: ${entry.name} has no budget now`
   );
+  if (limits?.unit === "subscription")
+    console.info(
+      week
+        ? `e9g: one subscription's week is about $${Math.round(week).toLocaleString("en-US")} API-equivalent, as last measured (e9g subscriptions)`
+        : "e9g: the subscription hasn't been measured yet, so the budget isn't checked until it is (the watchdog reads it every quarter hour; e9g subscriptions check reads it now)"
+    );
   return 0;
 }
 

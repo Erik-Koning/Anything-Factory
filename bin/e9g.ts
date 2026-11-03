@@ -19,8 +19,11 @@ Set up and run a team (the operator)
   e9g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
                                       stop a team now, or once the work (or journeys) under way is merged
   e9g resume <team> [--note "…"]      start it again; the note goes to the planner
-  e9g budget <team> [--daily <$>] [--weekly <$>] [--total <$>] [--auto-resume] [--restart] [--clear]
-                                      its spending limits (API-equivalent $): warned at 80%, paused at 100%
+  e9g budget <team> [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
+                                      its spending limits, in API-equivalent $ or % of a subscription's week
+                                      (60%; over 100% for more than one): warned at 80%, paused at 100%
+  e9g subscriptions [check | add <name> --config-dir <dir> | remove <name>]
+                                      the Claude subscriptions, their usage, and what a subscription's week is in $
   e9g rotate <team>                   a fresh planner thread (refused while members run)
   e9g status [<team>]  ·  e9g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   e9g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role
@@ -69,9 +72,22 @@ function handOver(): void {
   if (!installed()) return;
   if (
     process.env.E9G_HANDED_OVER ||
-    ["help", "--help", "-h", "self-install", "versions", "doctor", "watchdog", "teams", "init", "upgrade", "connect", "disconnect", "--version"].includes(
-      command
-    )
+    [
+      "help",
+      "--help",
+      "-h",
+      "self-install",
+      "versions",
+      "doctor",
+      "watchdog",
+      "teams",
+      "subscriptions",
+      "init",
+      "upgrade",
+      "connect",
+      "disconnect",
+      "--version",
+    ].includes(command)
   )
     return;
   let home: string | null = null;
@@ -108,6 +124,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   pause: () => import("../lib/commands/team.ts").then((m) => m.pause(args)),
   resume: () => import("../lib/commands/team.ts").then((m) => m.resume(args)),
   budget: () => import("../lib/commands/team.ts").then((m) => m.budget(args)),
+  subscriptions: () => import("../lib/commands/subscriptions.ts").then((m) => m.subscriptions(args)),
   rotate: () => import("../lib/commands/team.ts").then((m) => m.rotate(args)),
   status: () => import("../lib/commands/team.ts").then((m) => m.status(args)),
   teams: () => import("../lib/commands/team.ts").then((m) => m.teams()),

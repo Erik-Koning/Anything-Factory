@@ -85,9 +85,10 @@ about a dozen questions at most, in this order:
 | Policies     | Show the deny list, with what you detected marked, and ask what to unlock                                                                                                                                      | Everything outward stays denied                                                                                       |
 
 The budget can be enforced. Say so when you ask: the planner reads the brief's budget as guidance, and
-`e9g budget <team> --daily <$> --weekly <$> --total <$>` (the operator's, in API-equivalent dollars; on a
-subscription, how fast the team uses its limits) makes the watchdog warn at 80% of a limit, pause the team after the
-work under way at 100%, and pause it now at 110%. Offer to say which command sets what they told you; they run it.
+`e9g budget <team> --daily <$> --weekly <$> --total <$>` (the operator's, in API-equivalent dollars) or, on a Claude
+subscription, in shares of one (`--weekly 60%`; over 100% for more than one subscription's worth, measured from
+Claude Code's own usage report) makes the watchdog warn at 80% of a limit, pause the team after the work under way at
+100%, and pause it now at 110%. Offer to say which command sets what they told you; they run it.
 
 The policies are deploy, cloud, hosted-data, publish, github, messages and payments. Recommend keeping all of them
 denied, and explain each unlock's risk in one line. Unlocking is the operator's call (Article 3); don't argue,

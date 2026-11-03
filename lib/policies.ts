@@ -299,7 +299,7 @@ export const POLICIES: Policy[] = [
 
 // The factory's own commands, which only a person (or the setup agent, for check, register and start) runs.
 export const OPERATOR_COMMANDS = new RegExp(
-  `${START}e9g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|rotate|stop|unregister|connect|disconnect|serve)${END}`
+  `${START}e9g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|subscriptions|rotate|stop|unregister|connect|disconnect|serve)${END}`
 );
 
 // An env file named in a command it reads or writes. Not in what only lists names (ls -la .env*), and not in what

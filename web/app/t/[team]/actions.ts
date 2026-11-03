@@ -243,11 +243,17 @@ export async function budgetAction(form: FormData): Promise<void> {
   const amounts = { daily: text(form, "daily").trim(), weekly: text(form, "weekly").trim(), total: text(form, "total").trim() };
   try {
     viewer = await allowed("team:control", team);
+    // Dollars, or percent of a subscription's week (over 100 for more than one subscription's worth).
+    const unit = text(form, "unit") === "subscription" ? "subscription" : "usd";
     const amount = (key: keyof typeof amounts): number | null => {
-      const value = amounts[key].replace(/^\$/, "");
+      const value = amounts[key].replace(/^\$/, "").replace(/%$/, "");
       if (!value) return null;
       const n = Number(value);
-      if (!Number.isFinite(n) || n < 0 || n > 1_000_000) throw new Refused(`The ${key} budget is dollars, from 0 to 1,000,000.`);
+      const max = unit === "subscription" ? 10_000 : 1_000_000;
+      if (!Number.isFinite(n) || n < 0 || n > max)
+        throw new Refused(
+          unit === "subscription" ? `The ${key} budget is a percentage, from 0 to 10,000.` : `The ${key} budget is dollars, from 0 to 1,000,000.`
+        );
       return n === 0 ? null : Math.round(n * 100) / 100;
     };
     const limits = { daily: amount("daily"), weekly: amount("weekly"), total: amount("total") };
@@ -257,12 +263,15 @@ export async function budgetAction(form: FormData): Promise<void> {
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const control = await budgetFromWeb(team, {
       ...limits,
+      unit,
       autoResume: text(form, "autoResume") === "yes",
       restart: text(form, "restart") === "yes",
       from,
     });
-    const money = (n: number | null) => (n === null ? "none" : `$${n}`);
-    const said = control.limits ? `${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all` : "no budget";
+    const money = (n: number | null) => (n === null ? "none" : unit === "subscription" ? `${n}%` : `$${n}`);
+    const said = control.limits
+      ? `${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all${unit === "subscription" ? " of a subscription's week" : ""}`
+      : "no budget";
     notice = { ok: `The budget is ${said}. The team's Mac holds it to that from its next run.` };
     await record(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
