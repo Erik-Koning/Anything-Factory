@@ -2,8 +2,12 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, teams.ts and graph.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
+// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
+import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
+import { answer } from "../../lib/tasks/answer.ts";
+import { budgetControl, type Control, type HoldScope, type Limits, limitsOf, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
+import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../lib/tasks/mongo.ts";
@@ -16,6 +20,9 @@ import { graphDb, mongo } from "./db.ts";
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc } from "../../lib/tasks/teams.ts";
+export type { Control, HoldScope, HoldState, Limits } from "../../lib/tasks/controls.ts";
+export { describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
+export { spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
 
 const stores = new Map<string, Store>();
 
@@ -73,4 +80,52 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
   const settings = await teamDoc(team);
   if (!settings?.approval) throw new Refused(`${team} hasn't published its approval rules (e9g register publishes them)`);
   return decide(storeFor(team), id, decision, { who: OPERATOR, approval: settings.approval, text: text.trim() });
+}
+
+// An admin's answer to what waits on them (a question, or blocked work), as the operator: a note marked as the answer,
+// which the lead's watchdog passes to the planner within a minute.
+export const answerAsOperator = (team: string, id: string, text: string): Promise<Task> => answer(storeFor(team), id, { who: OPERATOR, text });
+
+// A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
+// added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,
+// by their stakeholder id, never their name (Article 8).
+export function addTaskFromWeb(team: string, input: Omit<TaskInput, "from">, { admin, from }: { admin: boolean; from: string }): Promise<Task> {
+  const fields: TaskInput = { ...input, title: input.title.trim(), body: input.body?.trim() ?? "", from };
+  return admin ? addTask(storeFor(team), team, fields, OPERATOR) : addTask(storeFor(team), team, { ...fields, approved: false }, "stakeholder");
+}
+
+// The operator's controls on `team`, oldest first: what was asked for, and when (the lead's watchdog applies each within
+// a minute, and reports where the team stands in its status).
+export const controlsOf = (team: string): Promise<Control[]> => storeFor(team).controls.all();
+
+// A pause from the web, by an admin's stakeholder id: its scope fixed against the graph as it is now (controls.ts).
+export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journeys: string[]; note: string; from: string }): Promise<Control> {
+  const store = storeFor(team);
+  // On the web the journeys are ticked, those under way to start with: none ticked is a mistake, not "the default".
+  if (ask.scope === "journeys" && !ask.journeys.length) throw new Refused("Tick the journeys to finish before the team pauses.");
+  const journeys = ask.scope === "journeys" ? ask.journeys : undefined;
+  return store.controls.create(pauseControl(await store.tasks.all(), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
+}
+
+// A resume from the web; the note goes to the planner as the operator's feedback.
+export const resumeFromWeb = (team: string, { note, from }: { note: string; from: string }): Promise<Control> =>
+  storeFor(team).controls.create(resumeControl(team, `web:${from}`, note));
+
+// What the team used, day by day and machine by machine, from `from` (YYYY-MM-DD) on (lib/usage.ts publishes it).
+export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);
+
+// A budget from the web, by an admin's stakeholder id: each limit in dollars, or null for none (all null clears it). The
+// total keeps counting from when the budget began, unless `restart`.
+export async function budgetFromWeb(
+  team: string,
+  ask: { daily: number | null; weekly: number | null; total: number | null; autoResume: boolean; restart: boolean; from: string }
+): Promise<Control> {
+  const store = storeFor(team);
+  const current = limitsOf(await store.controls.all());
+  const { daily, weekly, total } = ask;
+  const limits: Limits | null =
+    daily === null && weekly === null && total === null
+      ? null
+      : { daily, weekly, total, autoResume: ask.autoResume, since: ask.restart || !current ? new Date().toISOString() : current.since };
+  return store.controls.create(budgetControl(team, `web:${ask.from}`, limits));
 }

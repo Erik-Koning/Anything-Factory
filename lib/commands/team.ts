@@ -1,7 +1,7 @@
 // The operator's commands for a team's life: register (alias sync), unregister, start, pause, resume, rotate,
 // status, teams, prompt and upgrade.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { instanceId, loadTeam, type RawTeam, type Team } from "../config.ts";
@@ -20,14 +20,29 @@ import {
   teamsDir,
   versionDir,
 } from "../paths.ts";
+import { readHold, readLimits } from "../holds.ts";
+import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, parseArgs, writeJson } from "../util.ts";
-import { answers, BUSY, ensureWatchdog, keptWorktrees, watchOnce } from "./watchdog.ts";
+import { die, parseArgs, readJson, writeJson } from "../util.ts";
+import { acquireSlot } from "../lock.ts";
+import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
-import { openStore } from "../tasks/store.ts";
+import {
+  budgetControl,
+  type Control,
+  describeHold,
+  type HoldScope,
+  holdOf,
+  type Limits,
+  limitsOf,
+  pauseControl,
+  resumeControl,
+} from "../tasks/controls.ts";
+import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
+import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
@@ -199,6 +214,27 @@ export const teamNames = (): string[] =>
 export async function start(argv: string[]): Promise<number> {
   operatorOnly("start");
   const entry = entryFor(argv[0] ?? die("usage: e9g start <team>"));
+  // A pause the operator or the budget recorded stays until e9g resume, which is the operator's alone: start only starts
+  // the watch (the setup agent runs it too). A paused file with no pause recorded (an earlier version's) it lifts.
+  if (entry.tasks && !entry.worker) {
+    let hold: ReturnType<typeof holdOf> = null;
+    try {
+      const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+      try {
+        hold = holdOf(await store.controls.all());
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      console.error(`e9g: couldn't read the team's controls (${(error as Error).message.split("\n")[0]}); a pause recorded there still holds`);
+    }
+    if (hold) {
+      console.info(
+        `e9g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): e9g resume ${entry.name} starts it again`
+      );
+      return status([entry.name]);
+    }
+  }
   rmSync(join(entry.run, "paused"), { force: true });
   ensureWatchdog();
   const why = await watchOnce(entry.name);
@@ -210,22 +246,185 @@ export async function start(argv: string[]): Promise<number> {
   return status([entry.name]);
 }
 
-export function pause(argv: string[]): number {
-  operatorOnly("pause");
-  const entry = entryFor(argv[0] ?? die("usage: e9g pause <team>"));
+const PAUSE_USAGE = 'usage: e9g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]';
+
+// The operator's control, recorded in the team's store and applied in its run folder at once (the web app's wait for
+// the watchdog's next minute). On a worker machine it's recorded only: the lead applies it.
+async function recordControl(entry: RegistryEntry, make: (store: Store) => Promise<Omit<Control, "id" | "version">>): Promise<Control> {
+  const tasks = entry.tasks ?? die(`${entry.name} keeps its tickets on a GitHub board, which has no controls`);
+  const store = await openStore({ name: entry.name, tasks }, entry.run);
+  let control: Control;
+  try {
+    control = await store.controls.create(await make(store));
+  } catch (error) {
+    if (error instanceof Refused) die(error.message);
+    throw error;
+  } finally {
+    await store.close();
+  }
   mkdirSync(entry.run, { recursive: true });
-  writeFileSync(join(entry.run, "paused"), new Date().toISOString());
+  // Under the watchdog's lock, so a run applying the same control at the same moment doesn't tell the planner twice;
+  // then the web app's view of the team, at once. Busy for a minute, it's left to the watchdog's next minute.
+  const release = await acquireSlot([join(entry.run, ".watch.lock")], { waitMin: 1, holder: "e9g" });
+  if (!release) {
+    console.info("e9g: the watchdog is busy with the team; it applies this within a minute");
+    return control;
+  }
+  try {
+    await applyTeamControls(
+      entry,
+      (text) => appendFileSync(join(entry.run, "watchdog.log"), `${new Date().toISOString().replace(/\.\d+Z$/, "Z")} ${text}\n`),
+      (text) => console.error(`e9g: ${text}`)
+    );
+    await reportTeamState(entry);
+  } finally {
+    release();
+  }
+  return control;
+}
+
+// This machine alone: a worker's own pause (its builders), or the operator's when the task graph can't be reached.
+function pauseHere(entry: RegistryEntry, paused: boolean): void {
+  mkdirSync(entry.run, { recursive: true });
+  if (paused) writeFileSync(join(entry.run, "paused"), new Date().toISOString());
+  else rmSync(join(entry.run, "paused"), { force: true });
+}
+
+// e9g pause <team>: nothing starts or merges from now; running members finish their turn. --after tasks: the work under
+// way finishes, reviewed and merged, then the team pauses; --after journeys: the journeys under way (or --journeys)
+// finish, verification and polish included, then it pauses. Either way the operator gets a report when it does, and
+// work stays stopped until e9g resume. A team whose tickets are on a GitHub board can only pause now.
+export async function pause(argv: string[]): Promise<number> {
+  operatorOnly("pause");
+  const { positional, options } = parseArgs(argv);
+  const entry = entryFor(positional[0] ?? die(PAUSE_USAGE));
+  const after = typeof options["after"] === "string" ? options["after"].replace(/s$/, "") : undefined;
+  if (after !== undefined && after !== "task" && after !== "journey") die(PAUSE_USAGE);
+  const scope: HoldScope = after === "task" ? "tasks" : after === "journey" ? "journeys" : "now";
+  const journeys =
+    typeof options["journeys"] === "string"
+      ? options["journeys"]
+          .split(",")
+          .map((id) => id.trim().replace(/^#/, ""))
+          .filter(Boolean)
+      : undefined;
+  if (journeys && scope !== "journeys") die("--journeys goes with --after journeys");
+  const note = typeof options["note"] === "string" ? options["note"] : "";
+  if (!entry.tasks || entry.worker) {
+    if (scope !== "now")
+      die(
+        entry.worker
+          ? `pause the team after its work from its lead; here, e9g pause ${entry.name} stops this machine's members`
+          : `${entry.name} keeps its tickets on a GitHub board, so it can only pause now (e9g pause ${entry.name})`
+      );
+    pauseHere(entry, true);
+    if (entry.worker) {
+      console.info(`e9g: this machine's members of ${entry.name} are paused; the rest of the team isn't (e9g pause on its lead pauses it all)`);
+      return 0;
+    }
+  } else
+    try {
+      await recordControl(entry, async (store) => pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note }));
+    } catch (error) {
+      // Stopping must work whatever else doesn't: now is a file on this machine, recorded once the graph is reachable.
+      if (scope !== "now") throw error;
+      pauseHere(entry, true);
+      console.error(
+        `e9g: couldn't record the pause in the task graph (${(error as Error).message.split("\n")[0]}): paused on this machine; run e9g pause ${entry.name} again once it's reachable, so the web app and other machines know`
+      );
+    }
+  const hold = readHold(entry.run);
   console.info(
-    `e9g: ${entry.name} paused: the watchdog sends no ticks and starts nothing, and the planner can't start members or merge. Running members finish what they're doing.`
+    scope === "now"
+      ? `e9g: ${entry.name} paused: the watchdog sends no ticks and starts nothing, and the planner can't start members or merge. Running members finish what they're doing.`
+      : `e9g: ${entry.name} is pausing after ${hold ? describeHold(hold) : scope}: that work finishes and merges, nothing else is claimed, and once nothing in it can move the team pauses and you get a report. e9g status ${entry.name} shows what's left.`
   );
   return 0;
 }
 
-export function resume(argv: string[]): number {
+const BUDGET_USAGE = "usage: e9g budget <team> [--daily <$>] [--weekly <$>] [--total <$>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
+
+// e9g budget <team>: the team's spending limits, in API-equivalent dollars (lib/budget.ts enforces them: a warning at
+// four fifths, a pause after the work under way at the limit, a pause now a tenth past it). With no limit given, what
+// they are and what's spent. A limit left out keeps its value and 0 removes it; --restart counts the total from now;
+// --auto-resume starts a team the budget paused for a day or week again when the next one starts; --clear removes all.
+export async function budget(argv: string[]): Promise<number> {
+  operatorOnly("budget");
+  const { positional, options } = parseArgs(argv, { booleans: ["auto-resume", "no-auto-resume", "restart", "clear"] });
+  const entry = entryFor(positional[0] ?? die(BUDGET_USAGE));
+  if (!entry.tasks) die(`${entry.name} keeps its tickets on a GitHub board, which has no budget`);
+  // The limits in force are the store's (the web app may have changed them a moment ago, and a worker never applies
+  // them); the run folder's copy only when the store can't be reached.
+  let current = readLimits(entry.run);
+  try {
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      current = limitsOf(await store.controls.all());
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    console.error(`e9g: couldn't read the budget from the task graph (${(error as Error).message.split("\n")[0]}); showing this machine's copy`);
+  }
+  const amount = (key: "daily" | "weekly" | "total"): number | null => {
+    const given = options[key];
+    if (typeof given !== "string") return current?.[key] ?? null;
+    const n = Number(given.replace(/^\$/, ""));
+    if (!Number.isFinite(n) || n < 0 || n > 1_000_000) die(`--${key}: dollars, from 0 (none) to 1,000,000`);
+    return n === 0 ? null : Math.round(n * 100) / 100;
+  };
+  const asked = ["daily", "weekly", "total", "auto-resume", "no-auto-resume", "restart", "clear"].some((key) => options[key] !== undefined);
+  if (!asked) {
+    const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
+    const money = (n: number | null | undefined) => (n ? `$${n}` : "none");
+    console.info(
+      current
+        ? `${entry.name}'s budget: ${money(current.daily)} a day, ${money(current.weekly)} a week, ${money(current.total)} in all since ${current.since.slice(0, 10)}${current.autoResume ? "; a new day or week resumes a team it paused" : ""}`
+        : `${entry.name} has no budget (${BUDGET_USAGE.replace("usage: ", "")})`
+    );
+    if (spend) console.info(describeSpend(spend, current));
+    return 0;
+  }
+  let limits: Limits | null = null;
+  if (!options["clear"]) {
+    limits = {
+      daily: amount("daily"),
+      weekly: amount("weekly"),
+      total: amount("total"),
+      since: options["restart"] || !current ? nowIso() : current.since,
+      autoResume: options["auto-resume"] ? true : options["no-auto-resume"] ? false : (current?.autoResume ?? false),
+    };
+    if (limits.daily === null && limits.weekly === null && limits.total === null) limits = null;
+  }
+  await recordControl(entry, async () => budgetControl(entry.name, OPERATOR, limits));
+  const money = (n: number | null) => (n ? `$${n}` : "none");
+  console.info(
+    limits
+      ? `e9g: ${entry.name}'s budget is ${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all since ${limits.since.slice(0, 10)}; the watchdog holds the team to it from its next run`
+      : `e9g: ${entry.name} has no budget now`
+  );
+  return 0;
+}
+
+// e9g resume <team> [--note "…"]: work starts again; the note goes to the planner, as the operator's feedback.
+export async function resume(argv: string[]): Promise<number> {
   operatorOnly("resume");
-  const entry = entryFor(argv[0] ?? die("usage: e9g resume <team>"));
-  rmSync(join(entry.run, "paused"), { force: true });
-  console.info(`e9g: ${entry.name} resumed`);
+  const { positional, options } = parseArgs(argv);
+  const entry = entryFor(positional[0] ?? die('usage: e9g resume <team> [--note "…"]'));
+  const note = typeof options["note"] === "string" ? options["note"] : "";
+  if (!entry.tasks || entry.worker) pauseHere(entry, false);
+  else
+    try {
+      await recordControl(entry, async () => resumeControl(entry.name, OPERATOR, note));
+    } catch (error) {
+      pauseHere(entry, false);
+      rmSync(join(entry.run, "hold.json"), { force: true });
+      console.error(
+        `e9g: couldn't record the resume in the task graph (${(error as Error).message.split("\n")[0]}): this machine carries on, but claims still see the pause there until e9g resume ${entry.name} reaches it`
+      );
+      return 1;
+    }
+  console.info(`e9g: ${entry.name} resumed${note && entry.tasks ? "; the planner has your note" : ""}`);
   return 0;
 }
 
@@ -270,9 +469,12 @@ export async function status(argv: string[]): Promise<number> {
     const entry = entryFor(name);
     const planner = existsSync(join(entry.run, "planner-thread")) ? readFileSync(join(entry.run, "planner-thread"), "utf8").trim() : null;
     const thread = planner ? t3.threadShow(planner) : null;
-    const flags = [existsSync(join(entry.run, "paused")) ? "paused" : null, existsSync(join(entry.run, "complete")) ? "complete" : null].filter(
-      (flag) => flag !== null
-    );
+    const hold = readHold(entry.run);
+    const pausing = hold !== null && !hold.settledAt && hold.scope !== "now";
+    const flags = [
+      existsSync(join(entry.run, "paused")) ? "paused" : pausing ? "pausing" : null,
+      existsSync(join(entry.run, "complete")) ? "complete" : null,
+    ].filter((flag) => flag !== null);
     console.info(`== ${name} (${entry.title}) ${flags.length ? flags.join(", ") : "active"} · factory ${entry.version} · ${entry.home}`);
     console.info(`   planner ${planner ?? "none"}${thread ? ` (${thread.status})` : ""}`);
     const counts = planner ? t3.childCounts(planner) : [];
@@ -287,6 +489,14 @@ export async function status(argv: string[]): Promise<number> {
         `   environment: ${state} (${health.map((target, i) => `${target.replace(/^any:/, "")} ${up[i] ? "answers" : "doesn't answer"}`).join(", ")})`
       );
     } else console.info("   environment: no health URLs in team.json, so not checked");
+    if (hold && pausing)
+      console.info(
+        `   pausing after ${describeHold(hold)} (asked ${hold.since.slice(0, 16)}): left ${hold.left.join("; ") || "nothing, so it pauses at the watchdog's next run"}${hold.stuck.length ? `; stopped: ${hold.stuck.join("; ")}` : ""}`
+      );
+    else if (hold?.settledAt && hold.scope !== "now")
+      console.info(`   paused after ${describeHold(hold)} at ${hold.settledAt.slice(0, 16)}: e9g resume ${name} carries on`);
+    const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
+    if (spend) console.info(`   ${describeSpend(spend, readLimits(entry.run))}`);
     const drain = join(entry.home, ".e9g", "run", "state", "drain");
     if (existsSync(drain)) console.info(`   draining: ${readFileSync(drain, "utf8").trim()} (e9g drain off, from the team's checkout)`);
     const kept = keptWorktrees(entry.run);
@@ -305,7 +515,14 @@ export function teams(): number {
   for (const name of teamNames()) {
     const entry = readRegistry(name);
     if (!entry) continue;
-    const state = existsSync(join(entry.run, "paused")) ? "paused" : existsSync(join(entry.run, "complete")) ? "complete" : "active";
+    const hold = readHold(entry.run);
+    const state = existsSync(join(entry.run, "paused"))
+      ? "paused"
+      : hold && !hold.settledAt && hold.scope !== "now"
+        ? "pausing"
+        : existsSync(join(entry.run, "complete"))
+          ? "complete"
+          : "active";
     console.info(`${name.padEnd(20)} ${String(entry.version).padEnd(8)} ${state.padEnd(9)} ${entry.home}`);
   }
   return 0;

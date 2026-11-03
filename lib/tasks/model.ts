@@ -1,6 +1,7 @@
 // The task graph's model: what a task and a feature request are, which statuses a task moves between and who may move
 // it, how a task is scored, and which task a member claims. Pure: the stores (files.ts, mongo.ts) keep the documents
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
+import { type Hold, holdRefusal } from "./controls.ts";
 
 export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "chore", "research", "journey"] as const;
 export type Kind = (typeof KINDS)[number];
@@ -42,6 +43,8 @@ export interface Note {
   at: string;
   by: string;
   text: string;
+  // "answer": the operator's answer to a task waiting on them (answer.ts), which the watchdog passes to the planner.
+  kind?: "answer";
 }
 // An event in a document's history: what happened, in words, and for a move the statuses it went between and the
 // commit it was at, which the commands read rather than the words.
@@ -88,6 +91,9 @@ export interface Task extends Doc {
   // How much could break, as the reviewer judged it when it approved (a high-risk change merges with its tests).
   risk: Risk | null;
   by: string;
+  // The person who added or suggested it from the web app, by stakeholder id (Article 8); none for the team's own work
+  // and what the operator adds with e9g task add.
+  from?: string | null;
   createdAt: string;
   updatedAt: string;
   history: Event[];
@@ -238,8 +244,12 @@ const withinThresholds: Check = (t, _to, _actor, { approval }) => {
 };
 // A finding the planner rewrote (its title, body or kind) is the planner's proposal now, not the member's finding.
 const rewrittenByPlanner = (t: Task): boolean => t.history.some((e) => e.by === "planner" && /\bedited\b[^;]*\b(title|body|kind)\b/.test(e.what));
-// The planner approves a finding another member filed, so nobody approves their own (team.json approval.findings).
+// The planner approves a finding another member filed, so nobody approves their own (team.json approval.findings). A
+// person's suggestion from the web app is never one: it's their words, which reach builders only through the planner's
+// own proposal, approved by the approver or the operator (Article 8).
 const othersFinding: Check = (t, _to, _actor, { approval }) => {
+  if (t.by === "stakeholder")
+    return `task ${t.id} was suggested from the web app: make it your own proposal (e9g task edit, score, then e9g task status ${t.id} proposed) for the approver or the operator`;
   if (!FINDINGS.includes(t.kind) || t.by === "planner" || rewrittenByPlanner(t))
     return `the planner doesn't approve its own proposals: the approver or the operator does (e9g task approve ${t.id})`;
   if (approval?.findings === "approver") return "this team's approver decides findings too (team.json approval.findings)";
@@ -442,8 +452,9 @@ export function conflictOf(task: Task, building: Task[]): Task | null {
   );
 }
 
-// Why `task` can't be claimed by `role` now, or null when it can.
-export function claimRefusal(task: Task, role: string, all: Task[]): string | null {
+// Why `task` can't be claimed by `role` now, or null when it can; `hold` is the operator's pause in force, if any
+// (controls.ts), which lets only the work it finishes be claimed.
+export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold | null = null): string | null {
   const kinds = CLAIMS[role];
   if (!kinds) return `the ${role} doesn't claim tasks; builders and testers do`;
   if (task.status !== "approved") return `task ${task.id} is ${task.status}, not approved`;
@@ -456,12 +467,12 @@ export function claimRefusal(task: Task, role: string, all: Task[]): string | nu
     all.filter((t) => t.status === "building")
   );
   if (conflict) return `task ${conflict.id} is being built on the same ${conflict.area === task.area && task.area ? `area (${task.area})` : "files"}`;
-  return null;
+  return holdRefusal(task, hold);
 }
 
 // The task `role` should claim next, of those it may: the first in claim order.
-export function nextClaim(all: Task[], role: string, kind?: Kind): Task | null {
-  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all) === null).sort(claimOrder)[0] ?? null;
+export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
+  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null).sort(claimOrder)[0] ?? null;
 }
 
 // The branch name a claimant uses, matching its role's pattern (e9g/b142-resume-a-recording, e9g/t-142-…).

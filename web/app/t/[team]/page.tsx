@@ -1,25 +1,52 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
-import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
+import { SpendPanel } from "../../../components/spend-panel.tsx";
+import { TeamControls } from "../../../components/team-controls.tsx";
+import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { storeFor, type Task } from "../../../server/factory.ts";
-import { board, journeys, merges, progress } from "../../../server/views.ts";
+import { controlsOf, limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
+import { waitingCount } from "../../../server/inbox.ts";
+import { journeys, merges, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
 export const metadata: Metadata = { title: "Overview" };
 
 export default async function OverviewPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  // Which form a refused control reopens (actions.ts).
+  const open = param((await searchParams)["open"]);
   const { viewer, team } = await teamFor(name);
   const store = storeFor(team.name);
-  const [tasks, cycles] = await Promise.all([store.tasks.all(), team.mode === "cycles" ? store.cycles.all() : Promise.resolve([])]);
+  const control = can(viewer, "team:control", team.name);
+  const [tasks, cycles, controls] = await Promise.all([
+    store.tasks.all(),
+    team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
+    control ? controlsOf(team.name) : Promise.resolve([]),
+  ]);
+  const limits = limitsOf(controls);
+  // Every day counted since the budget began (or ever), and at least the chart's last 14.
+  const from = limits ? [limits.since.slice(0, 10), new Date(Date.now() - 15 * 86_400_000).toISOString().slice(0, 10)].sort()[0] : undefined;
+  const usage = control ? await usageOf(team.name, from ?? "0000-00-00") : [];
   const status = team.status;
   const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
   const details = can(viewer, "team:board", team.name);
   const shownJourneys = journeys(tasks);
+  const waiting = can(viewer, "proposals:decide", team.name) ? waitingCount(tasks) : 0;
   return (
     <>
       <Notice searchParams={searchParams} />
+      {waiting ? (
+        <div className="notice attention inline">
+          <span>
+            <b>{waiting === 1 ? "One thing is" : `${waiting} things are`} waiting on you.</b> The team goes on with everything else, and settles{" "}
+            {waiting === 1 ? "it" : "them"} once you answer.
+          </span>
+          <Link className="button primary" href={`/t/${team.name}/inbox`}>
+            {waiting === 1 ? "Answer it" : "Answer them"}
+          </Link>
+        </div>
+      ) : null}
       <div className="grid">
         <section className="panel" aria-labelledby="status">
           <h2 id="status">Status</h2>
@@ -50,8 +77,18 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               </li>
             ))}
           </ul>
+          {details ? (
+            <p className="small">
+              <Link href={`/t/${team.name}/board`}>Open the board →</Link>
+            </p>
+          ) : null}
         </section>
       </div>
+
+      {control ? <TeamControls team={team} controls={controls} tasks={tasks} expanded={open === "pause"} /> : null}
+      {control ? (
+        <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
+      ) : null}
 
       <section className="panel" aria-labelledby="journeys">
         <h2 id="journeys">Journeys</h2>
@@ -61,7 +98,13 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               <li key={j.id}>
                 <div className="head">
                   <span className="id">#{j.id}</span>
-                  <span className="title">{j.title}</span>
+                  {details ? (
+                    <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
+                      {j.title}
+                    </Link>
+                  ) : (
+                    <span className="title">{j.title}</span>
+                  )}
                   <Chip>{j.status}</Chip>
                   {j.due ? <Chip tone="caution">due its verification</Chip> : null}
                 </div>
@@ -78,10 +121,6 @@ export default async function OverviewPage({ params, searchParams }: { params: P
 
       {details ? (
         <>
-          <section className="panel" aria-labelledby="board">
-            <h2 id="board">Board</h2>
-            <Board tasks={tasks} />
-          </section>
           <section className="panel" aria-labelledby="graph">
             <h2 id="graph">Graph</h2>
             <TaskGraph tasks={tasks} />
@@ -92,7 +131,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               <ul className="plain rows">
                 {merges(tasks).map(({ task, at }) => (
                   <li key={task.id}>
-                    <span className="id">#{task.id}</span> {task.title}{" "}
+                    <span className="id">#{task.id}</span> <Link href={`/t/${team.name}/tasks/${task.id}`}>{task.title}</Link>{" "}
                     <span className="muted small">
                       · <Ago at={at} />
                     </span>
@@ -106,48 +145,5 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </>
       ) : null}
     </>
-  );
-}
-
-function Board({ tasks }: { tasks: Task[] }) {
-  const columns = board(tasks);
-  if (!columns.length) return <p className="empty">No tasks yet.</p>;
-  return (
-    <div className="board">
-      {columns.map(({ status, tasks: list }) => {
-        const cards = (
-          <ul className="plain">
-            {list.map((t) => (
-              <li key={t.id} className={`card status-${t.status}`}>
-                <div>
-                  <span className="id">#{t.id}</span> {t.title}
-                </div>
-                <div className="small muted">{[t.kind, t.severity, t.priority === null ? null : `p${t.priority}`].filter(Boolean).join(" · ")}</div>
-                {t.claim ? (
-                  <div className="claim">
-                    {t.claim.role} on {t.claim.machine}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        );
-        return (
-          <div key={status} className="column">
-            <h3>
-              {status} <span className="muted">{list.length}</span>
-            </h3>
-            {status === "done" || status === "rejected" ? (
-              <details>
-                <summary>Show</summary>
-                {cards}
-              </details>
-            ) : (
-              cards
-            )}
-          </div>
-        );
-      })}
-    </div>
   );
 }

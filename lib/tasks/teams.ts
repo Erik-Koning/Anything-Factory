@@ -1,6 +1,8 @@
 // A team as the web app sees it, in the shared MongoDB beside its task graph: its settings, which the lead publishes
 // when it registers (the app has no team.json), and its state, which the lead's watchdog refreshes every run.
 import type { Team } from "../config.ts";
+import type { HoldState } from "./controls.ts";
+import type { Spend } from "./spend.ts";
 import type { ApprovalRules } from "./model.ts";
 
 export interface TeamSettings {
@@ -14,8 +16,13 @@ export interface TeamSettings {
   publishedAt: string;
 }
 export interface TeamState {
-  // paused by the operator, complete (the finish line held), idle (a cycles team waiting for work), or active.
-  state: "active" | "paused" | "idle" | "complete";
+  // paused (by the operator, or a hold that settled), pausing (a graceful hold under way), complete (the finish line
+  // held), idle (a cycles team waiting for work), or active.
+  state: "active" | "pausing" | "paused" | "idle" | "complete";
+  // The operator's latest pause while it's in force (controls.ts), as the watchdog last saw it.
+  hold?: HoldState | null;
+  // What it has spent (API-equivalent dollars, spend.ts), as of the watchdog's last full run.
+  spend?: Spend | null;
   // The planner's thread as T3 Code reports it (running, completed, …), or null when there's none.
   planner: string | null;
   // Members at work, by role.

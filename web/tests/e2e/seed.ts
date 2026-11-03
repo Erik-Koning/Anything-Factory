@@ -1,6 +1,7 @@
 // The end-to-end tests' world, made with the factory's own functions over the test database: two teams' published
-// settings and status, a task graph with proposals, stakeholders' requests (one promoted, one rejected), the first
-// admin (by create-admin's own code), a member and a contributor whose daily limit the tests reach.
+// settings and status, a task graph with proposals, a question for the operator and blocked work, stakeholders'
+// requests (one promoted, one rejected), the first admin (by create-admin's own code), a member and a contributor whose
+// daily limit the tests reach.
 import { newTask, nowIso, priorityOf, type Score, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { addRequest, stakeholderFor } from "../../../lib/tasks/requests.ts";
 import { update } from "../../../lib/tasks/store.ts";
@@ -8,13 +9,16 @@ import type { TeamSettings } from "../../../lib/tasks/teams.ts";
 import { auth } from "../../server/auth.ts";
 import { createAdmin } from "../../server/bootstrap.ts";
 import { storeFor } from "../../server/factory.ts";
+import { rememberIp } from "../../server/known-ips.ts";
 import { setMembership } from "../../server/people.ts";
+import { DEFAULT_IP } from "../../playwright.config.ts";
 
 export interface World {
   admin: { email: string; password: string; totpURI: string; backupCodes: string[] };
   member: string;
   busy: string;
   proposals: { approve: string; reject: string; untouched: string };
+  asks: { question: string; blocked: string };
   requests: { promoted: string; rejected: string };
 }
 
@@ -87,6 +91,22 @@ export async function seed(): Promise<World> {
   const untouched = await add({ title: "Gift cards", kind: "feature", status: "proposed", gate: gate("sales"), score: score("L", "holiday season") });
   for (const t of [toApprove, toReject, untouched]) await update(shop.tasks, t.id, (x) => ({ ...x, priority: x.score ? priorityOf(x.score) : null }));
   await add({ title: "Totals round the wrong way", kind: "bug", status: "approved", severity: "major" });
+  // What waits on the operator: a question the planner put to them, with its options, and work that's blocked.
+  const question = await add({
+    title: "Q: who sees a customer's past orders?",
+    kind: "research",
+    status: "proposed",
+    body:
+      "Customers can't see their past orders. Options: (a) keep them staff-only for now; (b) open them to signed-in customers; " +
+      "(c) open them with the totals hidden. Recommendation: (b), behind the same sign-in as checkout. Until you answer, nothing changes.",
+  });
+  await update(shop.tasks, question.id, (t) =>
+    withEvent({ ...t, status: "question" }, "planner", "proposed → question: who sees an order is the operator's", { from: "proposed", to: "question" })
+  );
+  const blocked = await add({ title: "Ship to Canada", kind: "feature", status: "approved", score: score("M", "a quarter of visitors") });
+  await update(shop.tasks, blocked.id, (t) =>
+    withEvent({ ...t, status: "blocked" }, "planner", "approved → blocked: needs the carrier's API key", { from: "approved", to: "blocked" })
+  );
 
   // Requests from a stakeholder the app has no account for (as e9g request add makes them).
   const grace = await stakeholderFor(shop, "shop", { name: "Grace Hopper", email: "grace@example.com", role: "customer" });
@@ -117,12 +137,17 @@ export async function seed(): Promise<World> {
   for (const p of people) {
     const { user } = await auth().api.createUser({ body: { email: p.email, name: p.name, role: "user" } });
     await setMembership({ userId: user.id, name: user.name, email: user.email }, "shop", p.role, p.label);
+    await rememberIp(user.id, DEFAULT_IP, "confirmed by email");
   }
+  // Everyone the story starts with has confirmed the address the tests' browsers come from; a new one asks by email.
+  const operator = await (await auth().$context).internalAdapter.findUserByEmail(admin.email);
+  if (operator) await rememberIp(operator.user.id, DEFAULT_IP, "confirmed by email");
   return {
     admin,
     member: "member@example.com",
     busy: "busy@example.com",
     proposals: { approve: toApprove.id, reject: toReject.id, untouched: untouched.id },
+    asks: { question: question.id, blocked: blocked.id },
     requests: { promoted: promoted.id, rejected: rejected.id },
   };
 }

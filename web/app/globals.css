@@ -7,6 +7,7 @@
   --muted: #5d5d64;
   --line: #deded8;
   --chip: #eeeeea;
+  --lane: #ebebe6;
   --accent: #2150c4;
   --accent-text: #ffffff;
   --ok: #1b6b38;
@@ -15,6 +16,8 @@
   --dim: #8d8d93;
   --focus: #2150c4;
   --radius: 10px;
+  /* A chart's one series: checked against both surfaces (lightness band, contrast), so not the dark accent. */
+  --chart: #2150c4;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -24,7 +27,9 @@
     --muted: #a4a4ab;
     --line: #2e2e33;
     --chip: #26262b;
+    --lane: #17171a;
     --accent: #8fb0ff;
+    --chart: #668bec;
     --accent-text: #0d1430;
     --ok: #6fd39a;
     --warn: #ff9b91;
@@ -151,7 +156,7 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 12px 0 4px;
+  margin: 12px 0 14px;
   padding: 0;
   list-style: none;
 }
@@ -168,6 +173,54 @@ h3 {
   background: var(--text);
   color: var(--panel);
   border-color: var(--text);
+}
+
+/* The other teams, from a team's heading. */
+.switcher {
+  position: relative;
+  margin-left: auto;
+  font-size: 13.5px;
+}
+.switcher > summary {
+  list-style: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+}
+.switcher > summary::-webkit-details-marker {
+  display: none;
+}
+.switcher > summary::after {
+  content: " ▾";
+  color: var(--muted);
+}
+.switcher ul {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  min-width: 220px;
+  max-width: calc(100vw - 32px);
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+}
+.switcher li a {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+}
+.switcher li a:hover,
+.switcher li a:focus-visible {
+  background: var(--bg);
 }
 
 /* --- Panels, lists, chips --------------------------------------------------------------------------------------- */
@@ -394,6 +447,55 @@ details > summary {
   color: var(--muted);
   margin: 0;
 }
+label.check {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--text);
+}
+label.check input {
+  width: auto;
+  flex: none;
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  background: var(--chip);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+/* An authenticator's QR code: black on white whatever the theme, so every phone camera reads it. */
+.qr {
+  width: 200px;
+  max-width: 100%;
+  background: #ffffff;
+  padding: 8px;
+  border-radius: 8px;
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+code.key {
+  word-break: break-all;
+}
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 10px 14px;
+  align-items: end;
+}
+.audit > li {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 4px 12px;
+}
+@media (max-width: 560px) {
+  .audit > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .codes {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   display: grid;
@@ -427,36 +529,119 @@ details > summary {
 }
 
 /* --- The board and the graph ---------------------------------------------------------------------------------- */
-.board {
+.board-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+}
+.board-bar .lede {
+  margin: 0;
+}
+a.button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+/* A lane per step, from the page's column to 16px from the window's right edge, so a wide window fits them all; it
+   scrolls sideways on its own when they don't fit, and a phone shows one lane and the edge of the next. */
+.board-bar,
+.kanban {
+  margin-right: min(0px, calc(50% + 16px - 50vw));
+}
+.kanban {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
-  gap: 12px;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(180px, 1fr);
+  gap: 10px;
   align-items: start;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding-bottom: 8px;
 }
-.column {
-  background: var(--bg);
-  border-radius: 8px;
+.lane {
+  background: var(--lane);
+  border-radius: var(--radius);
   padding: 10px;
+  min-width: 0;
+  scroll-snap-align: start;
 }
-.column h3 {
-  text-transform: capitalize;
+.lane h2 {
+  font-size: 13.5px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 2px 0;
 }
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 10px;
+.lane .count {
+  color: var(--muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
-.column .plain {
+.lane header .hint {
+  margin: 0 2px 10px;
+}
+.lane .empty {
+  margin: 0 2px;
+}
+.lane > ol,
+.lane-cards {
   display: grid;
   gap: 8px;
+}
+.lane > .hint {
+  margin: 8px 2px 0;
+}
+.card {
+  display: grid;
+  /* Its track may shrink below a long branch name, which is cut with an ellipsis instead. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.card-title {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+}
+.card-title:hover {
+  text-decoration: underline;
+}
+.card .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.card .meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.card code.branch {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .card.status-building {
   border-left: 3px solid var(--accent);
 }
 .card.status-blocked,
-.card.status-question {
+.card.status-question,
+.card.lapsed {
   border-left: 3px solid var(--warn);
+}
+.card.status-done .card-title {
+  color: var(--muted);
 }
 .claim {
   font-size: 12.5px;
@@ -522,6 +707,10 @@ details > summary {
 }
 
 @media (max-width: 560px) {
+  .kanban {
+    grid-auto-columns: 84%;
+    scroll-snap-type: x mandatory;
+  }
   /* The brand and who's signed in on one row, the main links on their own below. */
   .top nav {
     order: 3;
@@ -536,4 +725,398 @@ details > summary {
   .facts dd {
     margin-bottom: 6px;
   }
+}
+/* A group of choices (the pause panel's radios and journeys). */
+fieldset.choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+fieldset.choices > legend {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.choices.nested {
+  display: grid;
+  gap: 6px;
+  padding-left: 26px;
+}
+/* A plain-text report (a settled pause's), as written. */
+pre.report {
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 13.5px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0 0;
+}
+/* Charts: one series in --chart, hairline grid, text in text tokens at its own size; each column's tooltip shows on
+   hover and focus, above the others. */
+.chart {
+  margin: 12px 0 4px;
+}
+.chart .plot {
+  position: relative;
+  height: 160px;
+  margin: 44px 0 0 48px;
+  border-bottom: 1px solid var(--line);
+}
+.chart .gridline,
+.chart .limit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+.chart .gridline span {
+  position: absolute;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chart .limit {
+  border-top-color: var(--muted);
+  z-index: 1;
+}
+.chart .limit span {
+  position: absolute;
+  left: 4px;
+  bottom: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.chart .columns {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chart .columns li {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  outline: none;
+}
+.chart .bar {
+  width: min(24px, calc(100% - 6px));
+  min-height: 1px;
+  background: var(--chart);
+  border-radius: 4px 4px 0 0;
+}
+.chart .columns li:hover .bar,
+.chart .columns li:focus-visible .bar {
+  opacity: 0.8;
+}
+.chart .columns li:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+  border-radius: 4px;
+}
+.chart .value {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -4px);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chart .tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  visibility: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  pointer-events: none;
+}
+.chart .tip b {
+  color: var(--text);
+}
+.chart .columns li:nth-child(-n + 2) .tip {
+  left: 0;
+  transform: none;
+}
+.chart .columns li:nth-last-child(-n + 2) .tip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.chart .columns li:hover .tip,
+.chart .columns li:focus .tip {
+  visibility: visible;
+}
+.chart .columns:has(li:hover, li:focus) .value {
+  visibility: hidden;
+}
+.chart .days {
+  display: flex;
+  margin-left: 48px;
+  padding-top: 4px;
+}
+.chart .days span {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .chart .days span:nth-child(even) {
+    visibility: hidden;
+  }
+}
+/* A spend tile's budget: the fill says how much is used, the words beside it whether that's near or over. */
+.tiles li {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+.tiles b {
+  font-variant-numeric: normal;
+}
+.meter {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--chart);
+}
+.meter.near > span {
+  background: var(--caution);
+}
+.meter.over > span {
+  background: var(--warn);
+}
+.ranked li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+.ranked li:first-child {
+  border-top: 0;
+}
+.ranked .amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+table.figures {
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 8px;
+}
+table.figures th,
+table.figures td {
+  text-align: left;
+  padding: 3px 16px 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Waiting on you --------------------------------------------------------------------------------------------- */
+/* How many wait on the operator, beside the header's link and the team's tab. */
+.badge {
+  display: inline-block;
+  min-width: 1.6em;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.65;
+  text-align: center;
+}
+.top nav a.attention {
+  color: var(--text);
+  font-weight: 600;
+}
+/* The call to answer, at the top of the teams and overview pages. */
+.notice.attention {
+  border-color: var(--caution);
+  border-left-width: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+.chip.link {
+  color: var(--text);
+  text-decoration: none;
+}
+.chip.link:hover {
+  text-decoration: underline;
+}
+li.waiting {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+}
+li.waiting > p,
+li.waiting > dl {
+  margin: 0;
+}
+/* Why it came to the operator: the move's reason. */
+.why {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--caution);
+  background: var(--bg);
+  border-radius: 0 6px 6px 0;
+}
+.ask .text {
+  margin: 0;
+}
+.ask > p.small {
+  margin: 0 0 2px;
+}
+/* The answer form: its options as cards to pick, then the operator's own words. */
+.answer {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  gap: 10px;
+}
+.answer .notice {
+  margin: 0;
+}
+label.check.choice {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.45;
+}
+label.check.choice:hover {
+  border-color: var(--muted);
+}
+label.check.choice:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+label.check.choice input {
+  margin-top: 3px;
+  align-self: start;
+}
+/* What the operator answered, waiting for the planner to act. */
+.answered {
+  padding: 8px 12px;
+  border-left: 3px solid var(--ok);
+  background: var(--bg);
+  border-radius: 0 6px 6px 0;
+  margin: 8px 0;
+}
+.answered p {
+  margin: 0;
+}
+details.settled > summary {
+  color: var(--text);
+}
+.inline-heading {
+  display: inline;
+  font-size: 17px;
+  margin: 0;
+}
+.team-inbox {
+  margin-top: 28px;
+}
+.team-inbox > .head h2 {
+  margin: 0;
+}
+
+/* --- Notifications ---------------------------------------------------------------------------------------------- */
+fieldset.mode {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+fieldset.mode > legend {
+  float: left;
+  display: grid;
+  gap: 2px;
+  max-width: 30em;
+  padding: 0;
+}
+/* Three choices side by side, the chosen one filled. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.segmented label {
+  display: block;
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.segmented label + label {
+  border-left: 1px solid var(--line);
+}
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.segmented span {
+  display: block;
+  padding: 7px 12px;
+  background: var(--panel);
+}
+.segmented input:checked + span {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+}
+.digest-time {
+  align-items: start;
+}
+.digest-time select {
+  max-width: 100%;
+}
+.digest-time label {
+  min-width: 0;
 }

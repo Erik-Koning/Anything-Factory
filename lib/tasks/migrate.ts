@@ -1,13 +1,13 @@
-// Moving a team's task graph between stores (e9g task migrate): every task, request, stakeholder and closed cycle,
-// each keeping its id, into a store that has none of the team's yet. A file store moved from is marked, and opening it
-// again is refused, so a team can't go on writing to two graphs.
+// Moving a team's task graph between stores (e9g task migrate): every task, request, stakeholder, closed cycle and
+// control, each keeping its id, into a store that has none of the team's yet. A file store moved from is marked, and
+// opening it again is refused, so a team can't go on writing to two graphs.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeJson } from "../util.ts";
 import { type Doc, Refused } from "./model.ts";
 import type { Collection, Store } from "./store.ts";
 
-const NAMES = ["tasks", "requests", "stakeholders", "cycles"] as const;
+const NAMES = ["tasks", "requests", "stakeholders", "cycles", "controls"] as const;
 export type Counts = Record<(typeof NAMES)[number], number>;
 
 // Where a file store says it moved to, if it did.

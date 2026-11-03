@@ -111,8 +111,8 @@ review changes, then the task is blocked for the planner to split or decide.
 
 | From → to                                            | Who                                                   | How                                                                                                 |
 | ---------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| (new) → triage                                       | any member                                            | `e9g task add` (a finding or proposal)                                                              |
-| (new) → proposed                                     | planner                                               | `e9g task add`, then `e9g task score` at once                                                       |
+| (new) → triage                                       | any member, or a person suggesting from the web app   | `e9g task add` (a finding or proposal); the web app's Suggest a task, by `stakeholder`              |
+| (new) → proposed                                     | planner, or the operator (also from the web app)      | `e9g task add`, then `e9g task score` at once; the operator may add it approved (`--approved`)      |
 | triage → proposed, rejected, question                | planner                                               | `e9g task edit` (severity, area, files), then `e9g task status`                                     |
 | proposed → researching, approved, rejected, question | approver (proposed only), or the operator             | `e9g task research/approve/reject/escalate`; none for the approver when `approval.mode` is operator |
 | researching → proposed                               | planner                                               | after `e9g task note` with the findings and a new score                                             |

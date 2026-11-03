@@ -1,10 +1,11 @@
 // The task graph in MongoDB, for a team that runs on several machines (team.json tasks.store "mongo"). Each machine
 // connects with `e9g connect mongo`, which keeps the connection string in the Keychain; agents never see it. One
-// document per task, request, stakeholder and cycle, keyed "<team>:<id>", with a counter per collection. The driver
+// document per task, request, stakeholder, cycle and control, keyed "<team>:<id>", with a counter per collection. The driver
 // (the optional mongodb package) loads only here, and only the few calls below are used, so tests run on a fake.
 import type { Team } from "../config.ts";
 import type { Doc } from "./model.ts";
 import type { Collection, Store } from "./store.ts";
+import type { UsageDay } from "./spend.ts";
 import type { TeamDoc } from "./teams.ts";
 
 // The connection string comes from the caller: the factory's commands read it from the Keychain (mongoUri.ts), the web
@@ -37,7 +38,7 @@ export interface MongoClientLike {
   close(): Promise<void>;
 }
 
-const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c" } as const;
+const PREFIX = { tasks: "", requests: "r", stakeholders: "s", cycles: "c", controls: "k" } as const;
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 
 function collection<T extends Doc>(db: ReturnType<MongoClientLike["db"]>, team: string, name: keyof typeof PREFIX): Collection<T> {
@@ -123,6 +124,18 @@ export function storeOver(client: MongoClientLike, team: Pick<Team, "name" | "ta
     requests: collection(db, team.name, "requests"),
     stakeholders: collection(db, team.name, "stakeholders"),
     cycles: collection(db, team.name, "cycles"),
+    controls: collection(db, team.name, "controls"),
+    // One document per team, day and machine in "usage", replaced whole: publishing again never counts twice.
+    usage: {
+      publish: async (days) => {
+        for (const day of days) await db.collection("usage").updateOne({ _id: `${team.name}:${day.day}:${day.machine}` }, { $set: day }, { upsert: true });
+      },
+      since: async (from) =>
+        (await db.collection("usage").find({ team: team.name }).toArray())
+          .map(({ _id: _ignored, ...doc }) => doc as unknown as UsageDay)
+          .filter((day) => day.day >= from)
+          .sort((a, b) => a.day.localeCompare(b.day) || a.machine.localeCompare(b.machine)),
+    },
     // One document per team in "teams", by its name: the settings the lead publishes and the state it reports.
     publish: async (settings) => {
       await db.collection("teams").updateOne({ _id: team.name }, { $set: settings }, { upsert: true });

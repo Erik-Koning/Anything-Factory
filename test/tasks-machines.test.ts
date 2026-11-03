@@ -171,6 +171,37 @@ function fakeMongo(): MongoClientLike {
   };
 }
 
+describe("usage in Mongo", () => {
+  test("a document per team, day and machine, replaced whole; read back from a day on, every machine's", async () => {
+    const client = fakeMongo();
+    const mongo = storeOver(client, { name: "fixture", tasks: { store: "mongo", database: "e9g", lead: null } });
+    const other = storeOver(client, { name: "other", tasks: { store: "mongo", database: "e9g", lead: null } });
+    const row = (cost: number) => ({
+      role: "builder",
+      model: "m",
+      task: null,
+      requests: 1,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost,
+      unpriced: 0,
+    });
+    const day = (d: string, machine: string, cost: number) => ({ team: "fixture", day: d, machine, rows: [row(cost)], updatedAt: "" });
+    await mongo.usage.publish([day("2026-11-01", "studio", 1), day("2026-11-02", "studio", 2), day("2026-11-02", "worker", 3)]);
+    await mongo.usage.publish([day("2026-11-02", "studio", 5)]);
+    await other.usage.publish([{ ...day("2026-11-02", "studio", 9), team: "other" }]);
+    assert.deepEqual(
+      (await mongo.usage.since("2026-11-02")).map((d) => [d.day, d.machine, d.rows[0]?.cost]),
+      [
+        ["2026-11-02", "studio", 5],
+        ["2026-11-02", "worker", 3],
+      ]
+    );
+  });
+});
+
 describe("moving a task graph to Mongo", () => {
   test("copies every document with its id, refuses a store that has the team's already, and freezes the files", async () => {
     const run = tmp("e9g-run-");
@@ -191,7 +222,7 @@ describe("moving a task graph to Mongo", () => {
     });
     await files.stakeholders.create({ team: "fixture", name: "Dana", email: "d@example.com", role: "customer", createdAt: "x" });
     const mongo = storeOver(fakeMongo(), { name: "fixture", tasks: { store: "mongo", database: "e9g", lead: null } });
-    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0 });
+    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0, controls: 0 });
     assert.deepEqual(
       (await mongo.tasks.all()).map((t) => [t.id, t.title]),
       [

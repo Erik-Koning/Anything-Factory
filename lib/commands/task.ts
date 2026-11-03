@@ -8,6 +8,7 @@ import type { Team } from "../config.ts";
 import { machineName } from "../machine.ts";
 import { boardDir, readRegistry } from "../paths.ts";
 import { asOperator, teamSession } from "../session.ts";
+import { describeHold, holdOf } from "../tasks/controls.ts";
 import { betterDiagram } from "../tasks/graph.ts";
 import {
   branchFor,
@@ -23,7 +24,6 @@ import {
   type Kind,
   move,
   moveRefusal,
-  newTask,
   nextClaim,
   nowIso,
   OPERATOR,
@@ -42,6 +42,7 @@ import {
 import { blastRadius } from "../blast.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
 import { claimMark, importBoard, leaseMinutes, markClaim, openTeamStore } from "../tasks/ops.ts";
+import { addTask, proposes } from "../tasks/add.ts";
 import { type Decision, decide } from "../tasks/decide.ts";
 import { openStore, Refused, type Store, update } from "../tasks/store.ts";
 import { git, gitOk, list, type Options, parseArgs, text as optionText } from "../util.ts";
@@ -135,6 +136,7 @@ export function detail(t: Task): string {
   if (t.parent) out.push(`journey: #${t.parent}`);
   if (t.after.length) out.push(`after: ${t.after.map((id) => `#${id}`).join(", ")}`);
   if (t.request) out.push(`request: ${t.request}`);
+  if (t.from) out.push(`from the web app by stakeholder ${t.from}`);
   if (t.branch) out.push(`branch: ${t.branch}${t.sha ? ` at ${t.sha.slice(0, 9)}` : ""}`);
   if (t.claim) out.push(`claimed by the ${t.claim.role} on ${t.claim.machine} until ${t.claim.until}`);
   if (t.rounds) out.push(`review rounds with changes: ${t.rounds}`);
@@ -157,49 +159,24 @@ const add: Handler = async ({ team, store, who }, positional, options) => {
   if (who === "unknown") throw new Refused("only the team's members add tasks");
   const title = positional.join(" ").trim();
   if (!title) throw new Refused('give the task a title: e9g task add "<what should be true>"');
-  const planning = may(who, ["planner"]);
-  const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") ?? (planning || who === "innovator" ? "feature" : "bug");
-  const severity = oneOf(optionText(options["sev"]), SEVERITIES, "--sev") ?? null;
-  const body = bodyOf(options) ?? "";
-  // A member's finding goes to triage, and says how bad it is and what happened; the planner's work is a proposal.
-  const status: Status = planning ? (who === OPERATOR && options["approved"] ? "approved" : "proposed") : "triage";
-  if (!planning && ["bug", "ux"].includes(kind) && !severity) throw new Refused("a finding says how bad it is: --sev blocker|major|minor");
-  if (!planning && body.length < 20) throw new Refused("say what happened and what should happen, with steps: --body or --body-file");
-  const all = await store.tasks.all();
-  const byId = new Map(all.map((t) => [t.id, t]));
-  const parent = optionText(options["parent"])?.replace(/^#/, "") ?? null;
-  if (parent && byId.get(parent)?.kind !== "journey")
-    throw new Refused(`--parent names a journey; #${parent} ${byId.has(parent) ? "isn't one" : "doesn't exist"}`);
-  const after = commaList(options["after"]);
-  for (const id of after) if (!byId.has(id)) throw new Refused(`--after: no task ${id}`);
-  const request = optionText(options["request"]) ?? null;
-  if (request) {
-    need(who, ["planner"], "promoting a feature request");
-    if (!(await store.requests.get(request))) throw new Refused(`no feature request ${request}`);
-  }
-  const fields = newTask({
-    team: team.name,
-    title,
-    kind,
-    status,
-    severity,
-    body,
-    area: optionText(options["area"]) ?? null,
-    files: commaList(options["files"]),
-    parent,
-    after,
-    request,
-    by: who,
-  });
-  if (status === "approved") fields.approval = { by: OPERATOR, at: nowIso(), note: "added approved by the operator" };
-  const task = await store.tasks.create(fields);
-  if (request)
-    await update(store.requests, request, (r) =>
-      withEvent({ ...r, status: "promoted", tasks: [...new Set([...r.tasks, task.id])] }, who, `${r.status} → promoted: task ${task.id}`, {
-        from: r.status,
-        to: "promoted",
-      })
-    );
+  const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") ?? (proposes(who) || who === "innovator" ? "feature" : "bug");
+  const task = await addTask(
+    store,
+    team.name,
+    {
+      title,
+      kind,
+      severity: oneOf(optionText(options["sev"]), SEVERITIES, "--sev") ?? null,
+      body: bodyOf(options) ?? "",
+      area: optionText(options["area"]) ?? null,
+      files: commaList(options["files"]),
+      parent: optionText(options["parent"]) ?? null,
+      after: commaList(options["after"]),
+      request: optionText(options["request"]) ?? null,
+      approved: Boolean(options["approved"]),
+    },
+    who
+  );
   console.info(`task ${task.id} added (${task.status}): ${task.title}`);
   return 0;
 };
@@ -214,7 +191,8 @@ const listTasks: Handler = async ({ store, who }, _positional, options) => {
   if (kind) all = all.filter((t) => t.kind === kind);
   if (options["claimable"]) {
     const role = CLAIMS[who] ? who : "builder";
-    all = all.filter((t) => claimRefusal(t, role, everything) === null);
+    const hold = holdOf(await store.controls.all());
+    all = all.filter((t) => claimRefusal(t, role, everything, hold) === null);
   }
   if (options["json"]) console.info(JSON.stringify(all, null, 2));
   else console.info(all.length ? all.map((t) => line(t, everything)).join("\n") : "no tasks");
@@ -400,15 +378,18 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") as Kind | undefined;
   for (let attempt = 0; attempt < 8; attempt++) {
     const all = await store.tasks.all();
+    // The operator's pause in force, read each time: one asked for a moment ago stops this claim too.
+    const hold = holdOf(await store.controls.all());
     const held = all.find((t) => t.status === "building" && heldHere(t.claim, worktree, machineName()));
     if (held) throw new Refused(`this worktree holds task ${held.id} already; submit it (e9g task submit ${held.id}) or release it first`);
-    const target = id ? all.find((t) => t.id === id.replace(/^#/, "")) : nextClaim(all, who, kind);
+    const target = id ? all.find((t) => t.id === id.replace(/^#/, "")) : nextClaim(all, who, kind, hold);
     if (!target) {
       if (id) throw new Refused(`no task ${id}`);
-      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free. Say so in your report and stop.`);
+      const why = hold ? ` the operator is pausing the team after ${describeHold(hold)}, and nothing in that is free.` : "";
+      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why} Say so in your report and stop.`);
       return 3;
     }
-    const refusal = claimRefusal(target, who, all);
+    const refusal = claimRefusal(target, who, all, hold);
     if (refusal) {
       if (id) throw new Refused(refusal);
       continue;
@@ -613,11 +594,15 @@ const migrateTasks: Handler = async ({ team, run, store, who }, _positional, opt
       return 0;
     }
     const copied = await migrate(store, target);
+    // What this machine counted the team using (lib/usage.ts), so its budget and charts carry on from the same totals.
+    const { countedDays } = await import("../usage.ts");
+    const days = countedDays(run, team.name, machineName());
+    await target.usage.publish(days);
     if (store.kind === "files") markMoved(run, to);
     else rmSync(movedMark(run), { force: true });
     console.info(
       [
-        `copied ${said(copied)} from ${store.kind} to ${to}.`,
+        `copied ${said(copied)} from ${store.kind} to ${to}, and ${days.length} days of usage.`,
         `Now set team.json "tasks": {"store": "${to}"${to === "mongo" && team.tasks.lead ? `, "lead": "${team.tasks.lead}"` : ""}} and run e9g register again${to === "mongo" ? " on each machine" : ""}.`,
         store.kind === "files" ? "The file store is marked moved: commands refuse it from now on." : "",
       ]

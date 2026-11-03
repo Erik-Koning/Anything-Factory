@@ -12,8 +12,12 @@ const ALLOWED = new Set([
   "lib/tasks/mongo.ts",
   "lib/tasks/requests.ts",
   "lib/tasks/decide.ts",
+  "lib/tasks/answer.ts",
+  "lib/tasks/add.ts",
   "lib/tasks/teams.ts",
   "lib/tasks/graph.ts",
+  "lib/tasks/controls.ts",
+  "lib/tasks/spend.ts",
 ]);
 
 function sources(dir: string): string[] {

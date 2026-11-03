@@ -38,11 +38,30 @@ e9g init ~/code/my-app                           # detect, make the team's check
 To watch a team:
 
 ```bash
-e9g teams                  # every team on this Mac, its version, and whether it's active, paused or complete
-e9g status                 # each team: planner, members running, whether its environment answers, what's drained
+e9g teams                  # every team on this Mac, its version, and whether it's active, pausing, paused or complete
+e9g status                 # each team: planner, members running, its environment, what it spent, what's drained
 e9g metrics --team my-app  # agents, runs, model requests, tokens and time per role
 e9g pause my-app           # and e9g resume my-app; e9g rotate my-app for a fresh planner
 ```
+
+What a team spends is counted from its agents' Claude transcripts each watchdog run: tokens by day, role, model and
+task, priced at the API-equivalent rate (`lib/prices.ts`; on a subscription, how fast it uses your limits). `e9g status`
+shows today, this week and in all; the web app adds each day and the costliest journeys and tasks.
+
+To hold a team to a budget: `e9g budget my-app --daily 40 --weekly 200 --total 1500` (dollars, API-equivalent; a limit
+left out keeps its value, 0 removes it; `e9g budget my-app` shows them). At 80% of a limit you're warned, once per day,
+week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now. Resume it
+and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the budget):
+you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when the next
+day or week does. `e9g start` never lifts a pause; `e9g resume` does. With the task graph out of reach, `e9g pause`
+still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
+
+To stop a team gracefully, let what it's doing finish first: `e9g pause my-app --after tasks` lets the work under way
+(being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets
+the journeys under way (or `--journeys 3,7`) finish, their verification and polish included. Once nothing in it can
+move, the team pauses and you get a report (email, and the web app): what was done, each journey, what waits for you.
+It stays paused until `e9g resume my-app --note "…"`, whose note goes to the planner as your feedback. The web app's
+team page does the same for admins, each time with an authenticator code; the watchdog applies it within a minute.
 
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
@@ -175,6 +194,10 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Journeys.** A journey is a task with child tasks. When its children are all done it's due its verification (worked
   out from them, never stored): a UX audit at every viewport, an end-to-end spec of the whole journey, then polish,
   which is more tasks in it. The planner marks it done.
+- **Answers.** What waits on you (a `question` task, escalated or asked, and `blocked` work) you answer on the web
+  app's Waiting on you page, with the options the question offers: a note by the operator marked as the answer
+  (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
+  `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `e9g request add` takes a stakeholder's request; `e9g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks
   (`e9g task add --request`) or rejects it with a reason.

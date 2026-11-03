@@ -41,7 +41,8 @@ export function RequestForm({ team }: { team: string }) {
         </button>
       </div>
       <p id="request-privacy" className="hint">
-        The team&apos;s agents read your words and see your role, never your name or email. At most {LIMITS.requestsPerDay} requests a day.
+        The team&apos;s agents read your words and see your role, never your name or email. At most {LIMITS.requestsPerDay} requests and task suggestions a
+        day.
       </p>
     </form>
   );

@@ -7,6 +7,7 @@ import { describe, test } from "node:test";
 import type { RawTeam } from "../lib/config.ts";
 import { machineName } from "../lib/machine.ts";
 import { fileStore } from "../lib/tasks/files.ts";
+import { addTask } from "../lib/tasks/add.ts";
 import { update } from "../lib/tasks/store.ts";
 import {
   branchFor,
@@ -422,6 +423,44 @@ describe("e9g task, from proposal to merge", () => {
     assert.equal((await e9g(["task", "note", "1", "also on phone"], as("tester"))).code, 0);
     assert.equal((await e9g(["task", "status", "1", "proposed", "--reason", "real"], as("planner"))).code, 0);
     assert.match((await e9g(["task", "edit", "1", "--after", "1"], as("planner"))).out, /other than this one/);
+  });
+
+  test("the web app adds through the same code: the operator proposes or approves, a stakeholder suggests for triage", async () => {
+    const { run } = setup();
+    const store = fileStore(run, "fixture");
+    const journey = await addTask(store, "fixture", { title: "Checkout", kind: "journey" }, OPERATOR);
+    assert.deepEqual([journey.status, journey.by, journey.approval], ["proposed", OPERATOR, null]);
+    const approved = await addTask(store, "fixture", { title: "Pay by card", kind: "feature", parent: `#${journey.id}`, approved: true }, OPERATOR);
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.parent, journey.id);
+    assert.deepEqual(approved.approval?.by, OPERATOR);
+    // Only the operator adds work approved: the planner's is a proposal whatever it asks for.
+    assert.equal((await addTask(store, "fixture", { title: "x", kind: "feature", approved: true }, "planner")).status, "proposed");
+
+    const steps = "Steps: open the cart, press Pay. Nothing happens; it should pay.";
+    const suggested = await addTask(
+      store,
+      "fixture",
+      { title: "Pay does nothing", kind: "bug", severity: "major", body: steps, after: [approved.id], from: "s2" },
+      "stakeholder"
+    );
+    assert.deepEqual([suggested.status, suggested.by, suggested.from, suggested.after], ["triage", "stakeholder", "s2", [approved.id]]);
+    assert.equal(suggested.history[0]?.what, "added as triage, from the web app by stakeholder s2");
+    assert.equal(approved.history[0]?.what, "added as approved", "the CLI's own adds say nothing more");
+    // A suggestion is held to a member's finding: a severity for a bug, and a body that says what happened.
+    await assert.rejects(addTask(store, "fixture", { title: "Broken", kind: "bug", body: steps }, "stakeholder"), /--sev/);
+    await assert.rejects(addTask(store, "fixture", { title: "Broken", kind: "feature", body: "short" }, "stakeholder"), /what happened/);
+    await assert.rejects(addTask(store, "fixture", { title: "x", kind: "feature", parent: approved.id }, OPERATOR), /isn't one/);
+    await assert.rejects(addTask(store, "fixture", { title: "x", kind: "feature", after: ["99"] }, OPERATOR), /no task 99/);
+    await assert.rejects(addTask(store, "fixture", { title: "  ", kind: "feature" }, OPERATOR), /title/);
+    // Promoting a request is the planner's (and the operator's).
+    await assert.rejects(addTask(store, "fixture", { title: "x", kind: "feature", body: steps, request: "r1" }, "stakeholder"), /planner's/);
+    assert.equal((await store.tasks.all()).length, 4);
+    // The planner never approves a suggestion itself, even a bug with its severity: the approver or the operator does.
+    const ctx = { all: await store.tasks.all(), approval: { mode: "thresholds" as const, maxSize: "M" as const, findings: "planner" as const } };
+    assert.match(moveRefusal(suggested, "approved", "approve", "planner", ctx) ?? "", /suggested from the web app/);
+    assert.equal(moveRefusal(suggested, "proposed", "status", "planner", ctx), null);
+    assert.equal(moveRefusal(suggested, "approved", "approve", OPERATOR, ctx), null);
   });
 
   test("a journey is due its verification when its last task merges", async () => {

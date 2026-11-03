@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Waiting on you, in the web app.** Every question the planner or the approver puts to the operator, and every
+  blocked task, on one page per team and one for all of them, counted in the header of every page. A question shows why
+  it's the operator's, its options read out of it as choices with the team's recommendation marked, what it holds up and
+  the other questions it mentions. The answer (`lib/tasks/answer.ts`) is a note by the operator marked as one, leaving
+  the task where it is; the watchdog passes new answers to the planner within a minute (`lib/answers.ts`, on its
+  every-minute run too), and the planner's prompt says they're on the task already.
+- **Notifications.** Each person chooses what they're emailed about (questions, blocked work, journeys done, a team
+  pausing or finishing, merges, their requests): at once, in a daily digest at their hour and time zone, or not at all,
+  per team, with defaults by role and a test email. The web app's notifier works the events out of each team's
+  history, queues each once per person, and sends under a lease, one container at a time.
+
 ## 0.4.0: The task graph, feature requests, cycles and machines
 
 - **The board is a task graph.** Every piece of work is a task, one document each (`board: "tasks"`; `"files"` means
