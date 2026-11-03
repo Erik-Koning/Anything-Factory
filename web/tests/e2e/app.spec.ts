@@ -198,14 +198,30 @@ test("a member opens the graph by level: the journeys first, a journey's tasks i
   await expect(saving.getByText("feature · building")).toBeVisible();
   await expect(page).toHaveURL(/\/t\/shop\/graph\?at=\d+$/);
   const at = new URL(page.url()).searchParams.get("at");
-  // A reload opens the same level; the breadcrumbs come back out.
+  // Coming back to the page opens the same level, though it was opened at the top, and so does a reload; the
+  // breadcrumbs come back out.
+  await page.getByRole("link", { name: "Board", exact: true }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/board$/);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/t/shop/graph\\?at=${at}$`));
+  await expect(graph.getByText("C2 · Containers")).toBeVisible();
+  await expect(saving).toBeVisible();
   await page.reload();
   await expect(graph.getByText("C2 · Containers")).toBeVisible();
   await expect(saving).toBeVisible();
   await graph.getByRole("navigation", { name: "Diagram level" }).getByRole("button", { name: "Shop: task graph" }).click();
-  await expect(graph.locator(".react-flow__node").filter({ hasText: "Not in a journey" })).toBeVisible();
+  const loose = graph.locator(".react-flow__node").filter({ hasText: "Not in a journey" });
+  await expect(loose).toBeVisible();
   await expect(graph.getByText("C2 · Containers")).toHaveCount(0);
   await expect(page).toHaveURL(/\/t\/shop\/graph$/);
+  // The work in no journey: only what a member may build is a task; the rest says what it waits for.
+  await loose.dblclick();
+  await expect(page).toHaveURL(/\/t\/shop\/graph\?at=none$/);
+  const card = (title: string) => graph.locator(".react-flow__node").filter({ hasText: title });
+  await expect(card("Totals round the wrong way").getByText("Task", { exact: true })).toBeVisible();
+  await expect(card("Export orders as CSV").getByText("Not approved", { exact: true })).toBeVisible();
+  await expect(card("who sees a customer's past orders?").getByText("Question", { exact: true })).toBeVisible();
+  await expect(card("Ship to Canada").getByText("Blocked", { exact: true })).toBeVisible();
   // The journey's page links to its level.
   await page.goto(`/t/shop/tasks/${at}`);
   await page.getByRole("link", { name: "In the graph" }).click();

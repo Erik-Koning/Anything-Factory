@@ -64,12 +64,17 @@ request (Article 8).
   page.
 - `/t/<team>/graph` Graph (members and admins): the task graph by level, in BetterDiagrams' own editor
   (`@mosphere/better-diagrams`, read-only), from the factory's `levelDiagram` (`lib/tasks/graph.ts`). The journeys are on
-  the top level (C1), with a card for the work in no journey; double-click one to open its tasks a level down (C2), and
-  a journey inside it a level further (C3, and so on: a level for every `parent`). Each level puts a card after the cards
-  beside it that it waits on, a dependency between tasks in two journeys showing as one between the journeys, and a
-  task's card is done once merged, in progress or in review, held by the member's role on its machine, and links (↗) to
-  the task's page. The level is in the address (`?at=<id>`), which a task's page links to ("In the graph"); the
-  breadcrumbs and Esc come back out. The overview's graph links here.
+  the top level (C1), with a card for the work in no journey (opened at once when a team has no journeys); double-click
+  one, or its ⊞ count, to open its tasks a level down (C2), and a journey inside it a level further (C3, and so on: a
+  level for every `parent`). Each level puts a card after the cards beside it that it waits on, a dependency between
+  tasks in two journeys showing as one between the journeys. Only approved work is a Task card (done once merged, in
+  progress or in review, held by the member's role on its machine), so the editor's own reading of it holds: ready
+  when nothing it waits on is open, and the plan's progress. Work waiting for a decision, a question put to the
+  operator, blocked work and approved work after something that isn't a task card (a journey, unapproved or blocked
+  work, a rejected task: the editor would read it as ready) each have a card that says so, and what a blocked task
+  waits on is a dashed line. The editor's checks leave out what doesn't fit a task graph (tasks with no dependencies,
+  nobody holding open work); a deadlock still shows. Each card links (↗) to the task's page. The level is in the address (`?at=<id>`), which a task's
+  page links to ("In the graph"); the breadcrumbs and Esc come back out. The overview's graph links here.
 - `/t/<team>/add`, from the board's button: Add a task (admins: a proposal, or approved as it's added, under a
   journey, after other tasks) or Suggest a task (members: title, kind, how bad it is for a bug or a UX problem, and
   what's needed, at least 20 characters; it goes to triage, and the planner never approves it itself: it makes it its

@@ -1007,20 +1007,49 @@ describe("the task graph by level", () => {
     assert.ok(levels(tasks, { all: true }).some((c) => c.id === "9"));
   });
 
-  test("journeys whose parents loop go on the top level, and a long column wraps", () => {
-    assert.deepEqual(
-      where([task({ id: "1", kind: "journey", parent: "2" }), task({ id: "2", kind: "journey", parent: "1" }), task({ id: "3", parent: "1" })]),
-      {
-        "1": "top 0,0",
-        "2": "top 0,1",
-        "3": "1 0,0",
-      }
-    );
+  test("a loop of parents is broken at its first task, the order is the graph's own, and a long column wraps", () => {
+    // Journey 1 leaves its parent (2), the first in the loop; journey 2 and task 3 stay inside it.
+    const looped = [task({ id: "1", kind: "journey", parent: "2" }), task({ id: "2", kind: "journey", parent: "1" }), task({ id: "3", parent: "1" })];
+    assert.deepEqual(where(looped), { "1": "top 0,0", "2": "1 0,0", "3": "1 0,1" });
+    // Two journeys waiting on each other: the same layout whichever order the tasks come in.
+    const crossed = [
+      task({ id: "1", kind: "journey" }),
+      task({ id: "2", kind: "journey" }),
+      task({ id: "3", parent: "1", after: ["5"] }),
+      task({ id: "4", parent: "1" }),
+      task({ id: "5", parent: "2", after: ["4"] }),
+    ];
+    assert.deepEqual(where(crossed), where([...crossed].reverse()));
     const many = Array.from({ length: 7 }, (_, i) => task({ id: String(i + 1), kind: "journey" }));
     assert.deepEqual(Object.values(where(many)), ["top 0,0", "top 0,1", "top 0,2", "top 0,3", "top 1,0", "top 1,1", "top 1,2"]);
   });
 
-  test("the document: a card per journey, a task card each, and a line between tasks, never between a card and its own", () => {
+  test("approved work after what the editor can't see as a task waits, saying on what; after tasks, it's a task", () => {
+    const tasks = [
+      task({ id: "1", kind: "journey" }),
+      task({ id: "2", status: "proposed" }),
+      task({ id: "3", status: "rejected" }),
+      task({ id: "4", status: "approved" }),
+      task({ id: "10", after: ["2"] }),
+      task({ id: "11", after: ["1"] }),
+      task({ id: "12", after: ["3"] }),
+      task({ id: "13", after: ["99"] }),
+      task({ id: "14", after: ["10"] }),
+      task({ id: "15", after: ["4"] }),
+      task({ id: "16", after: ["2"], status: "done" }),
+      task({ id: "17", status: "unheard-of" as Task["status"] }),
+    ];
+    const doc = levelDiagram(tasks, { title: "Shop" }) as { nodes: Record<string, unknown>[] };
+    const card = (id: string) => doc.nodes.find((n) => n["id"] === `t${id}`)!;
+    assert.deepEqual(
+      ["10", "11", "12", "13", "14", "15", "16", "17"].map((id) => card(id)["kind"]),
+      ["waiting", "waiting", "waiting", "waiting", "waiting", "task", "task", "waiting"]
+    );
+    assert.equal(card("10")["description"], "feature · approved · waits on #2");
+    assert.equal(card("13")["description"], "feature · approved · waits on #99");
+  });
+
+  test("the document: a card per journey, a card per task by whether it may be built, and a line between tasks", () => {
     const tasks = [
       task({ id: "1", kind: "journey" }),
       task({ id: "2", parent: "1", status: "done" }),
@@ -1032,23 +1061,38 @@ describe("the task graph by level", () => {
         claim: { role: "builder", machine: "studio", worktree: "/w", at: "", until: "" },
       }),
       task({ id: "4", status: "proposed", after: ["3"] }),
+      task({ id: "5", status: "question" }),
+      task({ id: "6", status: "blocked", wait: { on: ["4"], then: "resume", by: "planner", at: "" } }),
+      task({ id: "7", kind: "journey", status: "done" }),
+      task({ id: "8", parent: "7", status: "done" }),
     ];
     const doc = levelDiagram(tasks, { title: "Shop", href: (t) => `/t/shop/tasks/${t.id}` }) as {
       nodes: Record<string, unknown>[];
-      edges: { source: string; target: string }[];
+      edges: { source: string; target: string; style: string }[];
     };
     const node = (id: string) => doc.nodes.find((n) => n["id"] === id)!;
     assert.deepEqual(
       { kind: node("t1")["kind"], parentId: node("t1")["parentId"], description: node("t1")["description"], url: node("t1")["url"] },
       { kind: "journey", parentId: null, description: "approved · 1 of 2 done", url: "/t/shop/tasks/1" }
     );
+    assert.equal(node("t7")["description"], "done · 1 task");
     assert.deepEqual([node("t2")["kind"], node("t2")["parentId"], node("t2")["done"]], ["task", "t1", true]);
-    assert.deepEqual([node("t3")["stage"], node("t3")["assignees"]], ["in-progress", ["builder@studio"]]);
-    assert.deepEqual([node("t4")["parentId"], node("t4")["status"]], [NO_JOURNEY, "proposed"]);
-    assert.deepEqual([node(NO_JOURNEY)["kind"], node(NO_JOURNEY)["parentId"]], ["no-journey", null]);
+    assert.deepEqual([node("t3")["kind"], node("t3")["stage"], node("t3")["assignees"]], ["task", "in-progress", ["builder@studio"]]);
+    // Only work a member may build is a task: the rest is a card of its own kind, with no done check to read as ready.
     assert.deepEqual(
-      doc.edges.map((e) => `${e.source}->${e.target}`),
-      ["t2->t3", "t3->t4"]
+      ["t4", "t5", "t6"].map((id) => [node(id)["kind"], node(id)["parentId"]]),
+      [
+        ["not-approved", NO_JOURNEY],
+        ["question", NO_JOURNEY],
+        ["blocked", NO_JOURNEY],
+      ]
     );
+    assert.deepEqual([node(NO_JOURNEY)["kind"], node(NO_JOURNEY)["parentId"]], ["no-journey", null]);
+    // None from the journey to its own task; what a blocked task waits on is dashed, and comes before it.
+    assert.deepEqual(
+      doc.edges.map((e) => `${e.source}->${e.target} ${e.style}`),
+      ["t2->t3 solid", "t3->t4 solid", "t4->t6 dashed"]
+    );
+    assert.deepEqual(where(tasks)["6"], `${NO_JOURNEY} 1,0`);
   });
 });
