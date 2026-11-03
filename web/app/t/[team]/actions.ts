@@ -1,8 +1,9 @@
 "use server";
 // A team's writes. Each checks the session and the person's role for the team (an admin's second factor too) before
 // it reads or writes anything, then calls the factory's own code.
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { withNotice } from "../../../components/ui.tsx";
+import { clip, withNotice } from "../../../components/ui.tsx";
 import {
   can,
   decisionProblem,
@@ -18,6 +19,7 @@ import {
 } from "../../../server/access.ts";
 import {
   addTaskFromWeb,
+  answerAsOperator,
   budgetFromWeb,
   decideAsOperator,
   describeHold,
@@ -30,6 +32,7 @@ import {
   storeFor,
   teamDoc,
 } from "../../../server/factory.ts";
+import { answerText, waitingOf } from "../../../server/inbox.ts";
 import { memberships, takeRequestAllowance } from "../../../server/people.ts";
 import { checkCode } from "../../../server/step-up.ts";
 import { allowed, authHeaders, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
@@ -156,6 +159,13 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
 
 const DONE: Record<string, string> = { approve: "approved", reject: "rejected", research: "sent back for research", escalate: "escalated" };
 
+// Where a decision or an answer goes back to: the page it was made on, of those that make them.
+function backTo(form: FormData, team: string): string {
+  const pages = [`/t/${team}/proposals`, `/t/${team}/inbox`, "/inbox"];
+  const asked = text(form, "back");
+  return pages.includes(asked) ? asked : (pages[0] ?? "/");
+}
+
 // An admin decides on a proposal, as the operator, by the factory's move table and the team's approval rules.
 export async function decideAction(form: FormData): Promise<void> {
   const team = text(form, "team");
@@ -163,7 +173,7 @@ export async function decideAction(form: FormData): Promise<void> {
   const decision = text(form, "decision");
   const note = text(form, "text");
   if (!TEAM_PARAM.test(team)) redirect("/");
-  const back = `/t/${team}/proposals`;
+  const back = backTo(form, team);
   let notice: { ok?: string; error?: string };
   let viewer = null;
   try {
@@ -191,7 +201,51 @@ export async function decideAction(form: FormData): Promise<void> {
       detail: `${decision}: ${notice.error}`,
     });
   }
+  // What waits on the operator changed: the header's and the tab's counts with it.
+  revalidatePath("/", "layout");
   redirect(withNotice(back, notice));
+}
+
+export interface AnswerFormState {
+  error: string | null;
+  pick: string;
+  extra: string;
+}
+
+// An admin answers what waits on them (a question, or blocked work), as the operator: the option they chose and what
+// they added, read against the task as it is now. The task stays where it is; the planner acts on the answer.
+export async function answerAction(_previous: AnswerFormState, form: FormData): Promise<AnswerFormState> {
+  const team = text(form, "team");
+  const id = text(form, "id");
+  const pick = text(form, "pick");
+  const extra = text(form, "extra");
+  const again = (error: string): AnswerFormState => ({ error, pick, extra });
+  if (!TEAM_PARAM.test(team)) return again("No such team.");
+  const back = backTo(form, team);
+  let viewer = null;
+  try {
+    viewer = await allowed("proposals:decide", team);
+    if (!TASK_ID.test(id)) return again("That isn't a task.");
+    if (extra.length > LIMITS.note) return again(`Keep it to ${LIMITS.note.toLocaleString("en")} characters.`);
+    const task = await storeFor(team).tasks.get(id);
+    if (!task) return again(`There's no task #${id} on this team.`);
+    const said = answerText(pick, extra, waitingOf(task, [task]));
+    if ("problem" in said) return again(said.problem);
+    await answerAsOperator(team, id, said.text);
+    await record(viewer, { action: "task.answered", outcome: "ok", team, target: `#${id} ${task.title}`, detail: clip(said.text, 300) });
+  } catch (error) {
+    const reason = reasonOf(error);
+    await record(viewer ?? (await getViewer()), {
+      action: "task.answered",
+      outcome: "refused",
+      team,
+      target: TASK_ID.test(id) ? `#${id}` : null,
+      detail: reason,
+    });
+    return again(reason);
+  }
+  revalidatePath("/", "layout");
+  redirect(withNotice(back, { ok: `Answer sent on #${id}. The planner gets it within a minute and moves #${id} on.` }));
 }
 
 // An admin pauses or resumes the team, as the operator, with a code from their authenticator: how a team runs changes

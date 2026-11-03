@@ -190,6 +190,10 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Journeys.** A journey is a task with child tasks. When its children are all done it's due its verification (worked
   out from them, never stored): a UX audit at every viewport, an end-to-end spec of the whole journey, then polish,
   which is more tasks in it. The planner marks it done.
+- **Answers.** What waits on you (a `question` task, escalated or asked, and `blocked` work) you answer on the web
+  app's Waiting on you page, with the options the question offers: a note by the operator marked as the answer
+  (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
+  `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `e9g request add` takes a stakeholder's request; `e9g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks
   (`e9g task add --request`) or rejects it with a reason.

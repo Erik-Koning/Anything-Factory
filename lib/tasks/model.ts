@@ -43,6 +43,8 @@ export interface Note {
   at: string;
   by: string;
   text: string;
+  // "answer": the operator's answer to a task waiting on them (answer.ts), which the watchdog passes to the planner.
+  kind?: "answer";
 }
 // An event in a document's history: what happened, in words, and for a move the statuses it went between and the
 // commit it was at, which the commands read rather than the words.

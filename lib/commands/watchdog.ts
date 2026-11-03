@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { relayAnswers } from "../answers.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
@@ -525,6 +526,13 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     clearNotes(run, delivered);
     log(`passed ${delivered} held message${delivered === 1 ? "" : "s"} on to the planner`);
   }
+  // The operator's answers from the web app, so the planner acts on them now rather than at its next wake.
+  await relayAnswers(
+    entry,
+    (text) => t3.threadSend(planner, text),
+    log,
+    (text) => oncePer("answers-unread", 60) && log(text)
+  );
 
   // The environment: only the planner can restart it (it lives in the checkout), so tell it.
   let envNote = "";
@@ -663,8 +671,8 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   return applied.log.length > 0;
 }
 
-// Between full runs, every minute: only the operator's new controls, so a pause or resume from the web app takes
-// effect within a minute, not at the next full run. A team another run is busy with waits for it.
+// Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from
+// the web app reaches the team within a minute, not at the next full run. A team another run is busy with waits for it.
 async function applyControlsOnce(): Promise<void> {
   const names = existsSync(teamsDir) ? readdirSync(teamsDir).filter((f) => f.endsWith(".json")) : [];
   for (const name of names.map((f) => f.replace(/\.json$/, ""))) {
@@ -675,6 +683,15 @@ async function applyControlsOnce(): Promise<void> {
     try {
       const log = (text: string) => appendFileSync(join(entry.run, "watchdog.log"), `${stamp()} ${text}\n`);
       if ((await applyTeamControls(entry, log, () => {})) && entry.tasks.store === "mongo") await reportState(entry, entry.run, () => {});
+      const file = join(entry.run, "planner-thread");
+      const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+      if (planner && !existsSync(join(entry.run, "paused")))
+        await relayAnswers(
+          entry,
+          (text) => t3.threadSend(planner, text),
+          log,
+          () => {}
+        );
     } finally {
       release();
     }

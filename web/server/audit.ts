@@ -33,10 +33,13 @@ export const AUDIT_ACTIONS = [
   "task.added",
   "task.suggested",
   "task.decided",
+  "task.answered",
   "request.sent",
   "team.paused",
   "team.resumed",
   "team.budget",
+  "notifications.changed",
+  "notifications.test",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export const isAuditAction = (value: unknown): value is AuditAction => typeof value === "string" && (AUDIT_ACTIONS as readonly string[]).includes(value);
@@ -167,8 +170,11 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "task.added": "Task added",
   "task.suggested": "Task suggested",
   "task.decided": "Decision",
+  "task.answered": "Answer to the team",
   "request.sent": "Request sent",
   "team.paused": "Team paused",
   "team.resumed": "Team resumed",
   "team.budget": "Budget set",
+  "notifications.changed": "Notification settings changed",
+  "notifications.test": "Test email sent",
 };

@@ -2,7 +2,8 @@
 
 A small Next.js app, on the same MongoDB as the teams' task graphs, where people beyond the operator's machine send
 **requests** to a team and follow its work, members **suggest tasks** for the planner to triage, and the operator
-**adds tasks** and **decides on proposals** from anywhere, switching between the teams they run. The plan is
+**adds tasks**, **decides on proposals** and **answers what waits on them** from anywhere, switching between the teams
+they run, and everyone chooses what they're **emailed** about. The plan is
 [docs/plans/web-app.md](../docs/plans/web-app.md).
 
 It has no rules of its own. It imports the factory's task code from `../lib/tasks/` (no copies) and writes only through
@@ -40,6 +41,16 @@ request (Article 8).
   **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
   is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
   week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause.
+- `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
+  `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
+  operator, with why it's theirs, the task's options read out of it ("(a) … (b) …") as choices with the team's
+  recommendation marked, what it holds up and the other questions it mentions; and each blocked task with why. An
+  answer is an option, the recommendation or the admin's own words, with anything added: the factory's `answer`
+  (`lib/tasks/answer.ts`), a note by the operator marked as the answer, which leaves the task where it is. The lead's
+  watchdog passes it to the planner within a minute, which records it in its decisions and moves the task on; until
+  then it's under "Answered, with the planner" (marked when the planner hasn't acted for 15 minutes), and once it has,
+  under "Settled this week". "Or decide it yourself" approves (scored work only, never a research question) or
+  rejects, as on Decisions, and comes back here.
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked
@@ -64,6 +75,12 @@ request (Article 8).
   with a reason, send back for research, escalate. Tasks in triage come last, for when one can't wait for the planner.
 - `/admin/people` (admins): invite by email with a role on a team, change a role, remove from a team, ban and unban.
 - `/admin/audit` (admins): the audit log, newest first, filtered by what, how it went, who and IP address.
+- `/account/notifications`: what the person is emailed about, for each kind of event they could see in the app
+  (questions for them, blocked work, journeys done, a team pausing or finishing, work merged, their requests): at
+  once, in a daily digest at the hour and time zone they choose (the browser's until they save one), or not at all;
+  the teams they hear about; for admins, whether the digest also lists what still waits on them. Until they save,
+  their role's defaults apply (an admin hears of questions and blocked work at once). It shows the last email sent and
+  what's waiting to go, and sends a test email (three an hour).
 - `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
   you're signed in, with each session's address; the IP addresses you've confirmed; your recent activity; sign out.
 - `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
@@ -152,6 +169,8 @@ are in Mongo (team.json `tasks.store: "mongo"`), and the lead's watchdog keeps i
 | `CLIENT_IP_HEADER`                                         | served for real             | The one header that carries the viewer's IP address (`x-e9g-viewer-ip` behind CloudFront; `x-forwarded-for` if unset) |
 | `ORIGIN_SECRET`                                            | served for real             | At least 32 characters, the same as the CDN sends in `x-e9g-origin`; requests without it are refused                  |
 | `AUDIT_RETENTION_DAYS`                                     | no (400)                    | How long the audit log keeps each event                                                                               |
+| `NOTIFY_EVERY_SECONDS`                                     | no (60)                     | How often the notifier looks for what to email; `0` turns notifications off                                           |
+| `NOTIFY_TIME_ZONE`                                         | no (`UTC`)                  | The daily digest's time zone for someone who hasn't chosen theirs (`America/Toronto`)                                 |
 
 `.env.local` is ignored by git. The connection string, the secret and the mail key are the app's, never a team's.
 Served anywhere but `http://localhost` with `NODE_ENV=production`, the app refuses to start without `ORIGIN_SECRET`,
@@ -320,6 +339,15 @@ changing the domain means adding passkeys again.
 - `server/factory.ts`: the bridge to `../lib/tasks` (`storeOver` over the app's MongoClient, `addRequest`,
   `stakeholderFor`, `addTask`, `decide`); `server/views.ts`: what the pages work out from a graph (progress, journeys,
   merges, proposals, the board's lanes).
+- `server/inbox.ts`: what waits on the operator, from a team's graph: the questions and blocked work, the options and
+  recommendation read out of each, what's answered and what was settled (pure).
+- `server/events.ts`, `server/notifications.ts`, `server/notifier.ts`, `instrumentation.ts`: notifications. The events
+  are worked out from each team's history, never stored (pure); a person's settings and the emails' words; and the
+  notifier, which the server starts (`instrumentation.ts`) and which runs every `NOTIFY_EVERY_SECONDS` under a lease in
+  the accounts database, so one container sends. It queues an email per person and event (`notification_queue`, its id
+  the person and the event, so each goes once, kept 30 days), sends what goes at once in one email per person a run,
+  and each digest once its hour has come. A team it sees for the first time has no news; a person hears only of what
+  they could open in the app (`access.ts`), and of a request only when it's theirs.
 - `server/origin.ts`: who a task came from, as the person looking may read it, the same on every page.
 - `server/auth-indexes.ts`: the indexes Better Auth's MongoDB adapter doesn't make (sessions by token, people by
   address, passkeys by credential, rate limits by key) and expiry for old sessions and verifications.
@@ -333,6 +361,6 @@ changing the domain means adding passkeys again.
   session cookie off to sign in.
 - `sst.config.ts`, `Dockerfile`: the deployment (Lightsail behind CloudFront); `tsconfig.infra.json` checks it.
 
-The app imports only `model`, `store` (for `update`), `mongo`, `requests`, `decide`, `add`, `teams` and `graph` from
-`lib/tasks`; never the file store, the Keychain, migrations or machines, and it never calls `openStore`
+The app imports only `model`, `store` (for `update`), `mongo`, `requests`, `decide`, `answer`, `add`, `teams`, `graph`
+and `controls` from `lib/tasks`; never the file store, the Keychain, migrations or machines, and it never calls `openStore`
 (`tests/unit/boundaries.test.ts` keeps it so).

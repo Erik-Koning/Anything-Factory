@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { SubmitButton } from "../../../../components/submit-button.tsx";
 import { Chip, clip, Notice, type SearchParams } from "../../../../components/ui.tsx";
+import { Verdict } from "../../../../components/verdict.tsx";
 import { DIMENSIONS } from "../../../../../lib/tasks/model.ts";
-import { can, LIMITS } from "../../../../server/access.ts";
+import { can } from "../../../../server/access.ts";
 import { storeFor, type Task } from "../../../../server/factory.ts";
 import { originsFor } from "../../../../server/origin.ts";
 import { proposals } from "../../../../server/views.ts";
-import { decideAction } from "../actions.ts";
 import { teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Decisions" };
@@ -137,22 +136,5 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
         </div>
       </details>
     </li>
-  );
-}
-
-function Verdict(props: { team: string; id: string; decision: string; label: string; field: string; required: boolean; className?: string }) {
-  const { team, id, decision, label, field, required, className } = props;
-  const input = `${decision}-${id}`;
-  return (
-    <form action={decideAction}>
-      <input type="hidden" name="team" value={team} />
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="decision" value={decision} />
-      <label htmlFor={input}>{field}</label>
-      <input id={input} name="text" required={required} maxLength={LIMITS.note} autoComplete="off" />
-      <div>
-        <SubmitButton className={className}>{`${label} #${id}`}</SubmitButton>
-      </div>
-    </form>
   );
 }
