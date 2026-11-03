@@ -730,6 +730,9 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   };
   if (team.tasks.store === "mongo" && team.tasks.lead && !push)
     problems.push('push: a team on several machines (tasks.lead) shares its code through a remote; set push, such as {"remote": "origin"}');
+  // The lead pushes the integration branch after every merge; another branch pushed beside it would hold nothing new.
+  if (team.tasks.store === "mongo" && team.tasks.lead && push && push.branch !== branch)
+    problems.push(`push.branch: a team on several machines pushes its integration branch, ${branch}, after every merge; leave push.branch out`);
   if (push && push.branch && protectedBranches.includes(push.branch))
     problems.push(`push.branch: ${push.branch} is protected (protectedBranches); the planner pushes only the team's branch`);
   if (push?.pullRequest && push.pullRequest === push.branch)

@@ -12,6 +12,7 @@ import { FACTORY_ROOT, PACKAGE } from "./paths.ts";
 import { contactRule } from "./contact.ts";
 import { PLANNER_LABEL } from "./labels.ts";
 import { policyStates } from "./policies.ts";
+import { multiMachine } from "./tasks/machines.ts";
 import { hash, localTime, writeFileAtomic } from "./util.ts";
 
 const read = (path: string): string => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
@@ -184,14 +185,19 @@ function teamTable(team: Team): string {
   return ["| Role | providerInstanceId | isolation | At most | Does |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-// What leaves the machine: the planner's pushes, if any, and a GitHub board's issues and comments.
+// What leaves the machine: the planner's pushes, if any, a team on several machines' branches, and a GitHub board's
+// issues and comments.
 function pushText(team: Team): string {
   const board = team.board.type === "github" ? " The board's issues and comments go to GitHub." : "";
   if (team.push) {
+    const several = multiMachine(team);
     const pull = team.push.pullRequest
-      ? ` After a push, the planner's ${code("e9g pr")} opens the pull request from ${code(team.push.branch)} into ${code(team.push.pullRequest)}, or updates the open one; the operator merges it.`
+      ? ` ${several ? "The" : "After a push, the"} planner's ${code("e9g pr")} opens the pull request from ${code(team.push.branch)} into ${code(team.push.pullRequest)}, or updates the open one; the operator merges it.`
       : "";
-    return `Pushes: only the planner, only ${code(`git push ${team.push.remote} ${team.push.branch}`)}${team.push.everyMin ? `, at most every ${team.push.everyMin / 60} h` : ""}.${pull}${board} Nothing else leaves this machine.`;
+    const planner = `only ${code(`git push ${team.push.remote} ${team.push.branch}`)}${team.push.everyMin ? `, at most every ${team.push.everyMin / 60} h` : ""}`;
+    if (several)
+      return `Pushes: the team's machines share code through ${code(team.push.remote)}, and only the factory's commands push to it: a builder's ${code("e9g task submit")} pushes its task's branch, and the lead's merge queue pushes ${code(team.branch)} after every merge. Beyond those, only the planner pushes, ${planner}.${pull}${board} Nothing else leaves these machines.`;
+    return `Pushes: only the planner, ${planner}.${pull}${board} Nothing else leaves this machine.`;
   }
   return board ? `Pushes: none, so the code stays on this machine.${board} Nothing else leaves it.` : "Pushes: none. Everything stays on this machine.";
 }

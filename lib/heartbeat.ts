@@ -1,7 +1,9 @@
 // The heartbeat: an outside check (healthchecks.io, Better Stack, Cronitor, UptimeRobot, Uptime Kuma, …) that the
 // watchdog pings at the end of every run in which T3 Code answers. When the pings stop (this Mac is off, asleep or
-// at the login screen after a restart, the watchdog is unloaded or keeps failing, or T3 Code won't start), the
+// at the login screen after a restart, the watchdog is unloaded or dies mid-run, or T3 Code won't start), the
 // service tells the operator: the one alert the factory can't send itself. `e9g connect heartbeat <url>` sets it up.
+// A ping says this Mac's watchdog runs, not that every team is well: a team whose run fails is logged, and the ping
+// still goes. Each machine needs a check of its own, since one check pinged by two alerts only when both stop.
 // The URL is in ~/.e9g/heartbeat.json, not the Keychain: it isn't a key, and whoever holds it can only ping it.
 import { existsSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";

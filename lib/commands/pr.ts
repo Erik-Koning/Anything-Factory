@@ -2,12 +2,14 @@
 // one the operator promotes into (team.json push.pullRequest). It opens one, or updates the one that's open, so the
 // operator has one to read at a time, and merging it is their promotion (Article 3). It says which commit it holds,
 // asking the remote itself: run it after git push. The factory runs gh here, so the team needs no github policy,
-// which would also let it merge pull requests, run workflows and change settings.
+// which would also let it merge pull requests, run workflows and change settings. An open pull request whose title
+// doesn't carry [E9G-Planner] is the operator's: its title and description stay theirs, and the report goes in a comment.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PLANNER_TAG } from "../labels.ts";
 import { inTeam, teamSession } from "../session.ts";
+import { multiMachine } from "../tasks/machines.ts";
 import { parseArgs, text } from "../util.ts";
 
 const USAGE = 'usage: e9g pr --title "<what it holds>" --body-file <file> (or --body "<text>")';
@@ -65,7 +67,8 @@ export function pr(argv: string[]): number {
   const repo = githubRepo(url);
   if (!repo) return fail(`${push.remote} (${shownUrl(url)}) isn't a GitHub repository, so there's nowhere to open a pull request`);
 
-  // What the pull request holds is what the remote has, which only the planner's pushes change.
+  // What the pull request holds is what the remote has: the planner's pushes, and on a team on several machines the
+  // lead's after every merge, so there the footer says when it was written rather than what the pull request holds.
   const remote = spawnSync("git", ["ls-remote", "--exit-code", push.remote, `refs/heads/${push.branch}`], {
     cwd: home,
     encoding: "utf8",
@@ -86,9 +89,12 @@ export function pr(argv: string[]): number {
   for (const prefix of [PLANNER_TAG, `[${team.title}]`]) if (subject.startsWith(prefix)) subject = subject.slice(prefix.length).trim();
   const threadFile = join(run, "planner-thread");
   const thread = existsSync(threadFile) ? readFileSync(threadFile, "utf8").trim() : "";
+  const holds = multiMachine(team)
+    ? `Written when \`${push.branch}\` was at ${pushed.slice(0, 9)}; the lead pushes it after every merge, so the pull request may hold newer work than this says`
+    : `Holds \`${push.branch}\` at ${pushed.slice(0, 9)}${unpushed ? `; ${unpushed} newer commit(s) on the team's machine aren't pushed yet` : ""}`;
   const footer = [
     "---",
-    `Holds \`${push.branch}\` at ${pushed.slice(0, 9)}${unpushed ? `; ${unpushed} newer commit(s) on the team's machine aren't pushed yet` : ""}. Merging it promotes the team's work into \`${into}\`, which the team never merges into itself.`,
+    `${holds}. Merging it promotes the team's work into \`${into}\`, which the team never merges into itself.`,
     "",
     `— planner · ${thread || "thread unknown"}`,
   ].join("\n");
@@ -98,17 +104,41 @@ export function pr(argv: string[]): number {
   const gh = (args: string[], input?: string) =>
     spawnSync("gh", args, { cwd: home, encoding: "utf8", timeout: 60_000, ...(input === undefined ? {} : { input }) });
   const why = (result: ReturnType<typeof gh>): string => (result.error ? result.error.message : (result.stderr || result.stdout).trim());
-  const open = gh(["pr", "list", "--repo", repo, "--head", push.branch, "--base", into, "--state", "open", "--json", "number,url", "--limit", "1"]);
+  // --head matches the branch's name in any repository, so a fork's pull request from a branch of the same name is
+  // left out.
+  const open = gh([
+    "pr",
+    "list",
+    "--repo",
+    repo,
+    "--head",
+    push.branch,
+    "--base",
+    into,
+    "--state",
+    "open",
+    "--json",
+    "number,url,title,isCrossRepository",
+    "--limit",
+    "20",
+  ]);
   if ((open.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return fail("gh isn't installed (brew install gh, then gh auth login)", 1);
   if (open.status !== 0) return fail(`gh couldn't list ${repo}'s pull requests: ${why(open)}`, 1);
-  let existing: { number?: number; url?: string } | undefined;
+  let existing: { number?: number; url?: string; title?: string } | undefined;
   try {
-    existing = (JSON.parse(open.stdout || "[]") as { number?: number; url?: string }[])[0];
+    const listed = JSON.parse(open.stdout || "[]") as { number?: number; url?: string; title?: string; isCrossRepository?: boolean }[];
+    existing = listed.find((one) => one.number && !one.isCrossRepository);
   } catch {
     return fail(`gh's list of pull requests didn't read as JSON: ${open.stdout.trim().slice(0, 200)}`, 1);
   }
 
-  if (existing?.number) {
+  if (existing?.number && !existing.title?.startsWith(PLANNER_TAG)) {
+    const comment = gh(["pr", "comment", String(existing.number), "--repo", repo, "--body-file", "-"], `**${fullTitle}**\n\n${fullBody}`);
+    if (comment.status !== 0) return fail(`gh couldn't comment on #${existing.number}: ${why(comment)}`, 1);
+    console.info(
+      `pr: commented on #${existing.number}, ${push.branch} into ${into}, which the operator opened (no ${PLANNER_TAG} in its title), so its title and description stay theirs: ${existing.url ?? ""}`.trim()
+    );
+  } else if (existing?.number) {
     const edit = gh(["pr", "edit", String(existing.number), "--repo", repo, "--title", fullTitle, "--body-file", "-"], fullBody);
     if (edit.status !== 0) return fail(`gh couldn't update #${existing.number}: ${why(edit)}`, 1);
     console.info(`pr: updated #${existing.number}, ${push.branch} into ${into}: ${existing.url ?? ""}`.trim());

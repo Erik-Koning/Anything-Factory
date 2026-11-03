@@ -47,10 +47,12 @@ e9g pause my-app           # and e9g resume my-app; e9g rotate my-app for a fres
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
 To get a team's work as a pull request, give `push` in `team.json` a `pullRequest`:
-`{"remote": "origin", "branch": "e9g/next", "every": "6h", "pullRequest": true}`. After each push, the planner runs
-`e9g pr`, which opens a pull request into `base` or updates the open one, with what's in it, the calls the planner made
-and what's left. Merging it is how you promote the work; the team never merges into `base` itself. The factory runs
-`gh` for it, so the `github` policy stays denied.
+`{"remote": "origin", "branch": "e9g/next", "every": "6h", "pullRequest": true}`. At the finish line and when a
+cycle closes, the planner pushes and runs `e9g pr`, which opens a pull request into `base` or updates the open one,
+with what's in it, the calls the planner made and what's left. Merging it is how you promote the work; the team never
+merges into `base` itself. If you open that pull request yourself (no `[E9G-Planner]` in its title), your title and
+description stay yours, and the planner comments instead. The factory runs `gh` for it, so the `github` policy stays
+denied.
 
 To hear from your teams away from this Mac, and answer them:
 
@@ -76,7 +78,9 @@ e9g connect heartbeat https://hc-ping.com/<uuid>   # a check at healthchecks.io 
 ```
 
 The watchdog pings it at the end of every run in which T3 Code answers, so give the check a period of 5 minutes and a
-grace of 15. When the pings stop, the service alerts you. `e9g disconnect heartbeat` turns it off.
+grace of 15. When the pings stop, the service alerts you. Give each Mac its own check: one that two Macs ping alerts
+you only when both stop. A ping says the Mac and its watchdog are running, not that every team is well; a team's own
+trouble is in its log and its planner's messages. `e9g disconnect heartbeat` turns it off.
 
 WhatsApp is one way. A business may message you first only with a template Meta has approved, so
 `e9g connect whatsapp` adds a utility template, `e9g_update`, to your WhatsApp Business account, and every message
@@ -203,6 +207,10 @@ review and merge.
 On a team on several machines:
 
 - **Limits are per machine:** each worker runs up to the role's `limit` of its own.
+- **A heartbeat per machine:** run `e9g connect heartbeat` on each with a check of its own, or a worker's pings hide
+  the lead stopping.
+- **The pull request** (`push.pullRequest`) moves with every merge, since the lead pushes the integration branch;
+  `push.branch` stays the integration branch.
 - **Builders on a worker** use their own previews: the team's shared environment runs on the lead (only the planner
   starts it).
 - **After changing `tasks` in `team.json`,** run `e9g register` again on each machine, as for `contact`.
