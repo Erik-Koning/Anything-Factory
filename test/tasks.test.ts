@@ -21,6 +21,7 @@ import {
   WATCHDOG,
   type ApprovalRules,
   newTask,
+  nowIso,
   nextClaim,
   OPERATOR,
   priorityOf,
@@ -29,7 +30,7 @@ import {
   type Task,
   ticketOf,
 } from "../lib/tasks/model.ts";
-import { claimMark, closeMerged, expireClaims, importBoard, markClaim, renewClaims, summary } from "../lib/tasks/ops.ts";
+import { claimMark, closeMerged, expireClaims, importBoard, markClaim, renewClaims, settleWaits, summary } from "../lib/tasks/ops.ts";
 
 const team = (overrides: RawTeam = {}) =>
   baseTeam({
@@ -126,7 +127,7 @@ describe("the task model", () => {
   });
 
   test("the move table, walked whole, keeps the rules nobody may break", () => {
-    const VIAS: Via[] = ["status", "approve", "reject", "research", "escalate", "claim", "release", "submit", "changes", "merge", "expire"];
+    const VIAS: Via[] = ["status", "approve", "reject", "research", "escalate", "claim", "release", "submit", "changes", "merge", "expire", "settle"];
     const ACTORS = ["planner", "approver", "builder", "tester", "reviewer", "ux-specialist", OPERATOR, MERGE, WATCHDOG];
     const approval: ApprovalRules = { mode: "full", maxSize: "XL", findings: "planner" };
     const allowed: string[] = [];
@@ -350,7 +351,21 @@ describe("e9g task, from proposal to merge", () => {
     assert.match((await e9g(["task", "approve", "2"], as("approver"))).out, /over this team's M.*escalate/);
     assert.match((await e9g(["task", "list"], as("planner"))).out, /#3 .*journey/);
     assert.doesNotMatch((await e9g(["task", "show", "3"], as("planner"))).out, /approved by/, "nobody had to approve the journey");
-    assert.equal((await e9g(["task", "escalate", "2", "--reason", "it changes scope"], as("approver"))).code, 0);
+    assert.match(
+      (await e9g(["task", "escalate", "2", "--reason", "it changes scope"], as("approver"))).out,
+      /--recommend/,
+      "raised without a recommendation"
+    );
+    assert.equal(
+      (await e9g(["task", "escalate", "2", "--reason", "it changes scope", "--recommend", "approve it: it's the launch"], as("approver"))).code,
+      0
+    );
+    assert.deepEqual((await store().tasks.get("2"))?.ask, {
+      reason: "it changes scope",
+      recommendation: "approve it: it's the launch",
+      by: "approver",
+      at: (await store().tasks.get("2"))?.ask?.at,
+    });
     assert.equal((await store().tasks.get("2"))?.status, "question");
     assert.equal((await e9g(["task", "approve", "2"], as(null))).code, 0, "the operator answers it");
     assert.equal((await store().tasks.get("2"))?.approval?.by, OPERATOR);
@@ -510,6 +525,112 @@ describe("e9g task, from proposal to merge", () => {
       doc.edges.map((e: { source: string; target: string }) => [e.source, e.target]),
       [["t2", "t3"]]
     );
+  });
+});
+
+describe("raising to the operator, and waiting on other tasks", () => {
+  test("a question carries why it's the operator's and the team's recommendation; the operator raising one gives the reason", async () => {
+    const { as, store } = setup();
+    for (const title of ["Which consent words", "Open the staff pages", "Mine to think about"]) await e9g(["task", "add", title], as("planner"));
+    assert.match((await e9g(["task", "status", "1", "question"], as("planner"))).out, /--reason/);
+    assert.match((await e9g(["task", "status", "1", "question", "--reason", "consent wording is the operator's"], as("planner"))).out, /--recommend/);
+    assert.equal((await store().tasks.get("1"))?.status, "proposed", "refused, nothing moved");
+    const raised = await e9g(
+      ["task", "status", "1", "question", "--reason", "consent wording is the operator's", "--recommend", "(b) the plain draft"],
+      as("planner")
+    );
+    assert.equal(raised.code, 0, raised.out);
+    assert.match(raised.out, /raised to the operator/);
+    assert.deepEqual(
+      [(await store().tasks.get("1"))?.ask?.reason, (await store().tasks.get("1"))?.ask?.recommendation, (await store().tasks.get("1"))?.ask?.by],
+      ["consent wording is the operator's", "(b) the plain draft", "planner"]
+    );
+    assert.match((await e9g(["task", "show", "1"], as("planner"))).out, /the team recommends: \(b\) the plain draft/);
+    // A recommendation that changed, or one added to a question raised before they were required.
+    assert.equal(
+      (await e9g(["task", "ask", "1", "--reason", "consent wording is the operator's", "--recommend", "(a) the operator's words"], as("planner"))).code,
+      0
+    );
+    assert.equal((await store().tasks.get("1"))?.ask?.recommendation, "(a) the operator's words");
+    assert.match((await e9g(["task", "ask", "2", "--reason", "x", "--recommend", "y"], as("planner"))).out, /only a question or a blocked task/);
+    assert.match((await e9g(["task", "ask", "1", "--reason", "x", "--recommend", "y"], as("builder"))).out, /the planner and the approver raise/);
+    // The operator raising one to themselves needn't recommend.
+    assert.equal((await e9g(["task", "status", "3", "question", "--reason", "I want to think about it"], as(null))).code, 0);
+    // Moving on clears the ask.
+    assert.equal((await e9g(["task", "status", "1", "proposed"], as("planner"))).code, 0);
+    assert.equal((await store().tasks.get("1"))?.ask, null);
+  });
+
+  test("a block says what it's on: a reason (the planner's), raised with a recommendation, or other tasks it waits on", async () => {
+    const { as, store } = setup();
+    for (const title of ["Ship to Canada", "Handover log rows", "Handover log filter"]) await e9g(["task", "add", title], as("planner"));
+    assert.match((await e9g(["task", "status", "1", "blocked"], as("planner"))).out, /--reason "…", or --waits-on/);
+    assert.equal((await e9g(["task", "status", "1", "blocked", "--reason", "the carrier's sandbox is down"], as("planner"))).code, 0);
+    assert.equal((await store().tasks.get("1"))?.ask, null, "the planner's to sort, not raised");
+    assert.equal((await e9g(["task", "status", "1", "proposed"], as("planner"))).code, 0);
+    assert.equal(
+      (await e9g(["task", "status", "1", "blocked", "--reason", "only the operator holds the key", "--recommend", "add it to the vault"], as("planner")))
+        .code,
+      0
+    );
+    assert.equal((await store().tasks.get("1"))?.ask?.recommendation, "add it to the vault");
+    assert.match((await e9g(["task", "status", "2", "blocked", "--waits-on", "2"], as("planner"))).out, /can't wait on itself/);
+    assert.match((await e9g(["task", "status", "2", "blocked", "--waits-on", "99"], as("planner"))).out, /no task #99/);
+    assert.match((await e9g(["task", "status", "2", "blocked", "--waits-on", "3", "--then", "later"], as("planner"))).out, /--then close/);
+    const folded = await e9g(
+      ["task", "status", "2", "blocked", "--waits-on", "#3", "--then", "close", "--reason", "folded into #3: the same component"],
+      as("planner")
+    );
+    assert.equal(folded.code, 0, folded.out);
+    assert.match(folded.out, /waiting on #3 \(then close\)/);
+    assert.deepEqual([(await store().tasks.get("2"))?.wait?.on, (await store().tasks.get("2"))?.wait?.then], [["3"], "close"]);
+    assert.match((await e9g(["task", "show", "2"], as("planner"))).out, /waits on #3, then closes \(folded into them\)/);
+    // A task parked before it could say so says it in place: what it waits on, or that it's the operator's now.
+    assert.equal((await e9g(["task", "status", "1", "blocked", "--waits-on", "3", "--reason", "the key comes with #3"], as(null))).code, 0);
+    assert.deepEqual(
+      [(await store().tasks.get("1"))?.status, (await store().tasks.get("1"))?.wait?.on, (await store().tasks.get("1"))?.ask],
+      ["blocked", ["3"], null]
+    );
+    assert.match((await e9g(["task", "status", "1", "blocked", "--waits-on", "3"], as("builder"))).out, /only the planner/);
+  });
+
+  test("a task waiting on others closes, goes back to work or back to the planner as they settle, at the merge or the watchdog's run", async () => {
+    const run = tmp("e9g-run-");
+    const store = fileStore(run, "fixture");
+    const add = (fields: Partial<Task> & Pick<Task, "title" | "status">) =>
+      store.tasks.create(newTask({ team: "fixture", kind: "feature", by: "planner", ...fields }));
+    const wait = (on: string[], then: "close" | "resume") => ({ on, then, by: "planner", at: nowIso() });
+    const fix = await add({ title: "Handover log filter", status: "approved", approval: { by: "approver", at: "x", note: "" } });
+    const folded = await add({ title: "Handover log rows", status: "blocked", wait: wait([fix.id], "close") });
+    const after = await add({
+      title: "Export the log",
+      status: "blocked",
+      approval: { by: "approver", at: "x", note: "" },
+      wait: wait([fix.id], "resume"),
+    });
+    const never = await add({ title: "Print the log", status: "blocked", wait: wait([fix.id], "resume") });
+    const dropped = await add({ title: "Old idea", status: "proposed" });
+    const orphan = await add({ title: "Follows the old idea", status: "blocked", wait: wait([dropped.id], "close") });
+    // Nothing moves while what they wait on is still going.
+    assert.deepEqual(await settleWaits(store, WATCHDOG), []);
+    // The merge closes the fix and what was folded into it; what waited goes back to work, or back to the planner.
+    const merged = await closeMerged(store, [fix.id], { branch: "e9g/b1-filter", sha: "abc" });
+    assert.deepEqual(merged.closed, [fix.id, folded.id]);
+    const now = async (id: string) => (await store.tasks.get(id))?.status;
+    assert.deepEqual([await now(folded.id), await now(after.id), await now(never.id)], ["done", "approved", "proposed"]);
+    assert.match((await store.tasks.get(folded.id))?.history.at(-1)?.what ?? "", /done with #1, which it was folded into/);
+    assert.equal((await store.tasks.get(folded.id))?.wait, null);
+    // A rejected one sends what waited on it back to the planner.
+    await update(store.tasks, dropped.id, (t) => ({ ...t, status: "rejected" as const }));
+    assert.deepEqual(
+      (await settleWaits(store, WATCHDOG)).map((s) => [s.id, s.to]),
+      [[orphan.id, "proposed"]]
+    );
+    assert.match((await store.tasks.get(orphan.id))?.history.at(-1)?.what ?? "", /rejected or removed: the planner decides it again/);
+    // Only the merge queue and the watchdog settle, and only as the wait says.
+    const blockedAgain = await add({ title: "Waits on nothing", status: "blocked" });
+    assert.match(moveRefusal(blockedAgain, "done", "settle", WATCHDOG, { all: await store.tasks.all() }) ?? "", /waits on no other task/);
+    assert.match(moveRefusal(blockedAgain, "done", "settle", "planner", { all: [] }) ?? "", /doesn't settle tasks/);
   });
 });
 
@@ -758,7 +879,7 @@ describe("the audit's findings stay fixed", () => {
     await e9g(["task", "approve", "1"], as("approver"));
     // proposed → blocked → approved would be the planner approving its own.
     assert.equal((await e9g(["task", "status", "1", "proposed"], as("planner"))).code, 0);
-    await e9g(["task", "status", "1", "blocked"], as("planner"));
+    await e9g(["task", "status", "1", "blocked", "--reason", "waits for the design"], as("planner"));
     assert.match((await e9g(["task", "status", "1", "approved"], as("planner"))).out, /never approved/);
     await e9g(["task", "status", "1", "proposed"], as("planner"));
     await e9g(["task", "approve", "1"], as("approver"));
@@ -813,7 +934,10 @@ describe("the audit's findings stay fixed", () => {
   test("options a subcommand doesn't read are refused; an agent's graph stays in the run folder", async () => {
     const { home, as } = setup();
     await e9g(["task", "add", "Thing"], as("planner"));
-    assert.match((await e9g(["task", "status", "1", "rejected", "--sev", "minor"], as("planner"))).out, /takes --reason, not --sev/);
+    assert.match(
+      (await e9g(["task", "status", "1", "rejected", "--sev", "minor"], as("planner"))).out,
+      /takes --reason, --recommend, --waits-on, --then, not --sev/
+    );
     assert.match((await e9g(["task", "graph", "--out", join(home, ".e9g/team.json")], as("reviewer"))).out, /run folder or \/tmp/);
     assert.equal((await e9g(["task", "graph", "--out", join(tmp(), "g.json")], as("reviewer"))).code, 0);
   });

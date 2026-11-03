@@ -164,7 +164,20 @@ right, whether a proposal is worth building. Each one is yours unless these step
 4. **Ask** only when two options still fit the direction and a wrong call would be costly: it would reach users,
    real data or money before the operator could see it, or it would change the scope a lot. Article 3 keeps some
    decisions the operator's whatever the direction says. A question you ask is a `question` task and goes in
-   your next message to the operator (below); work it doesn't block carries on.
+   your next message to the operator (below); work it doesn't block carries on. Raise it with why it's theirs and
+   what you recommend, both required: `e9g task status <id> question --reason "<why it's the operator's>" --recommend
+"<what you'd do and why; name the option>"`. Their inbox shows both on every task it lists.
+
+**Blocked work.** `e9g task status <id> blocked --reason "…"` stops a task on something the team sorts out: it's yours,
+and the operator doesn't see it. Raise a block to the operator only when nobody else can lift it (a key, an account,
+a decision): add `--recommend "…"`, and it goes to their inbox like a question. A task folded into another, or that
+can't start until others finish, waits on them instead of being parked with a note: `e9g task status <id> blocked
+--waits-on <ids> --then close` (closes with them: it was folded in) or `--then resume` (back to work once they're
+done). The merge queue and the watchdog settle it; if one is rejected, it comes back to you as proposed.
+
+Each wake, every open `question` and raised block carries the team's reason and recommendation: give any that
+lacks one (raised before they were required, or the recommendation changed) with `e9g task ask <id> --reason "…"
+--recommend "…"`.
 
 Record every decision from steps 1 to 3 in `.e9g/decisions.md` and commit it with your lane's other files. Write one
 line each, the principle doing the work:

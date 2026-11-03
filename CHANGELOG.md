@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Nothing reaches the operator without a reason and a recommendation.** Moving a task to `question` (`e9g task
+status`, the approver's `escalate`) refuses without `--reason` and `--recommend`; the task keeps both (`ask`), and
+  `e9g task ask` gives them to one raised before. A blocked task is the planner's to sort unless it's raised with a
+  recommendation. The web app's inbox lists only what was raised, and always shows why and what the team recommends
+  (saying so when an older task has neither).
+- **Tasks that wait on others settle themselves.** `e9g task status <id> blocked --waits-on <ids> --then
+close|resume`: once they're done the task closes (folded into them) or goes back to work, and once one is rejected
+  it goes back to the planner, by the merge queue as it merges and by the watchdog every minute (`settleWaits`). A
+  blocked task can say again what it's blocked on, in place.
+
 - **Waiting on you, in the web app.** Every question the planner or the approver puts to the operator, and every
   blocked task, on one page per team and one for all of them, counted in the header of every page. A question shows why
   it's the operator's, its options read out of it as choices with the team's recommendation marked, what it holds up and

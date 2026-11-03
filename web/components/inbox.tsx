@@ -2,7 +2,7 @@
 // recommendation, each blocked task with why, an answer form for either, and what the planner has yet to act on or
 // settled lately. The pages pass the team's inbox in; the forms write through the team's server actions.
 import Link from "next/link";
-import type { Task } from "../../lib/tasks/model.ts";
+import { OPERATOR, type Task } from "../../lib/tasks/model.ts";
 import type { Inbox, Settled, Waiting } from "../server/inbox.ts";
 import { AnswerForm } from "./answer-form.tsx";
 import { LinkedText } from "./linked-text.tsx";
@@ -103,33 +103,56 @@ function WaitingItem({ team, base, w, back, titles }: { team: string; base: stri
   const t = w.task;
   const fromNote = w.question.by !== null;
   const others = t.notes.filter((n) => n.at !== w.question.at || n.by !== w.question.by);
-  // The reason it moved is often the very note that asks: then once is enough.
-  const why = w.why && !w.question.text.includes(w.why) ? w.why : null;
+  // When the reason is the very note that asks (raised before tasks carried their own), the task says the rest.
+  const repeats = Boolean(w.why && fromNote && w.question.text.includes(w.why));
+  const shown = repeats ? t.body : w.question.shown;
   const more = others.length ? `${others.length} more note${others.length === 1 ? "" : "s"}` : "";
+  const byOperator = t.ask?.by === OPERATOR;
   return (
     <li id={`task-${t.id}`} className="waiting">
       <Heading base={base} task={t} journey={w.journey} />
       <p className="small muted">
         {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
       </p>
-      {why ? (
-        <p className="why small">
-          <b>{t.status === "question" ? "Why it's yours: " : "Why: "}</b>
-          <LinkedText text={why} base={base} titles={titles} />
-        </p>
-      ) : null}
-      <div className="ask">
-        {fromNote ? (
-          <p className="small muted">
-            The {w.question.by} asks, <Ago at={w.question.at} />:
-          </p>
-        ) : null}
-        {w.question.shown ? (
+      <dl className="raised">
+        <div className="why">
+          <dt>Why it&apos;s yours</dt>
+          <dd>
+            {w.why ? (
+              <LinkedText text={w.why} base={base} titles={titles} />
+            ) : (
+              <span className="missing">No reason was recorded. The team gives one now whenever it raises something to you; this one came before.</span>
+            )}
+          </dd>
+        </div>
+        <div className="recommends">
+          <dt>The team recommends</dt>
+          <dd>
+            {w.recommendation ? (
+              <LinkedText text={w.recommendation} base={base} titles={titles} />
+            ) : byOperator ? (
+              <span className="missing">Nothing: you raised it yourself.</span>
+            ) : (
+              <span className="missing">
+                No recommendation was recorded. The team gives one now whenever it raises something to you; the planner adds one to this (e9g task ask).
+              </span>
+            )}
+            {w.recommendationFrom === "inferred" ? <span className="hint"> (from the task&apos;s own words)</span> : null}
+          </dd>
+        </div>
+      </dl>
+      {shown ? (
+        <div className="ask">
+          {fromNote && !repeats ? (
+            <p className="small muted">
+              The {w.question.by} asks, <Ago at={w.question.at} />:
+            </p>
+          ) : null}
           <p className="text">
-            <LinkedText text={clip(w.question.shown, 2400)} base={base} titles={titles} />
+            <LinkedText text={clip(shown, 2400)} base={base} titles={titles} />
           </p>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {w.holds.length || w.related.length ? (
         <dl className="facts small">
           {w.holds.length ? (
@@ -164,10 +187,10 @@ function WaitingItem({ team, base, w, back, titles }: { team: string; base: stri
           ) : null}
         </dl>
       ) : null}
-      {(fromNote && t.body) || others.length ? (
+      {(fromNote && t.body && !repeats) || others.length ? (
         <details className="more">
-          <summary>{fromNote && t.body ? ["The task", more].filter(Boolean).join(", and ") : `Notes (${others.length})`}</summary>
-          {fromNote && t.body ? (
+          <summary>{fromNote && t.body && !repeats ? ["The task", more].filter(Boolean).join(", and ") : `Notes (${others.length})`}</summary>
+          {fromNote && t.body && !repeats ? (
             <p className="text small">
               <LinkedText text={clip(t.body, 2400)} base={base} titles={titles} />
             </p>

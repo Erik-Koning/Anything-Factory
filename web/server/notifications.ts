@@ -13,8 +13,8 @@ export const isMode = (value: unknown): value is Mode => typeof value === "strin
 export const MODE_LABEL: Record<Mode, string> = { now: "At once", digest: "In the daily digest", off: "Don't email" };
 
 export const KIND_TEXT: Record<EventKind, { label: string; hint: string }> = {
-  question: { label: "Questions for you", hint: "The planner or the approver needs your decision to go on." },
-  blocked: { label: "Blocked work", hint: "A task stopped until something changes." },
+  question: { label: "Questions for you", hint: "The team raised something to you: a decision, or work only you can unblock." },
+  blocked: { label: "Blocked work", hint: "A task stopped on something the team sorts out itself." },
   journey: { label: "Journeys done", hint: "A journey's tasks are built and verified." },
   team: { label: "A team pauses or finishes", hint: "It stopped, or reached its finish line." },
   merged: { label: "Work merged", hint: "Each task the merge queue lands." },
@@ -24,7 +24,7 @@ export const KIND_TEXT: Record<EventKind, { label: string; hint: string }> = {
 // What each role hears of until they choose: admins what needs them at once and the rest in the digest; members and
 // contributors what they'd follow on the overview.
 const DEFAULTS: Record<"admin" | TeamRole, Record<EventKind, Mode>> = {
-  admin: { question: "now", blocked: "now", journey: "now", team: "now", merged: "digest", request: "now" },
+  admin: { question: "now", blocked: "digest", journey: "now", team: "now", merged: "digest", request: "now" },
   member: { question: "off", blocked: "digest", journey: "now", team: "now", merged: "off", request: "now" },
   contributor: { question: "off", blocked: "off", journey: "digest", team: "off", merged: "off", request: "now" },
 };

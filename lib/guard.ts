@@ -584,6 +584,7 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
       ["planner"],
       "the planner shapes, scores and moves tasks; add a finding (e9g task add) or a note (e9g task note) instead.",
     ],
+    [e9g("task\\s+ask"), ["planner", "approver"], "the planner and the approver raise tasks to the operator, with why and what they recommend."],
     [
       e9g("task\\s+(?:reject|research|escalate)"),
       ["approver"],

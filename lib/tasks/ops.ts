@@ -1,5 +1,6 @@
 // What the factory's own processes do to the task graph, besides the commands members run: the merge queue closes
-// what it merged, a review that asks for changes sends its task back, the
+// what it merged (and what was folded into it), tasks waiting on others settle, a review that asks for changes sends
+// its task back, the
 // heartbeat renews a member's claim and the watchdog returns expired ones, a files board is imported, and the
 // planner's context gets a summary.
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
@@ -22,7 +23,9 @@ import {
   type Severity,
   type Status,
   type Task,
+  Refused,
   WATCHDOG,
+  waitOutcome,
 } from "./model.ts";
 import type { Team } from "../config.ts";
 import { machineName } from "../machine.ts";
@@ -52,7 +55,33 @@ export async function closeMerged(
     if (why) skipped.push(why);
     else closed.push(task.id);
   }
+  // What waited on these closes with them, or goes back to work.
+  const settled = await settleWaits(store, MERGE);
+  closed.push(...settled.filter((s) => s.to === "done").map((s) => s.id));
   return { closed, skipped };
+}
+
+// The tasks waiting on others (Wait in model.ts) that can settle now, moved by `by`: the merge queue right after a
+// merge, the watchdog each run. Closing one can settle another that waited on it, so it looks again, a few times.
+export async function settleWaits(store: Store, by: Actor): Promise<{ id: string; to: Status; why: string }[]> {
+  const settled: { id: string; to: Status; why: string }[] = [];
+  for (let pass = 0; pass < 5; pass++) {
+    const all = await store.tasks.all();
+    const due = all.flatMap((t) => {
+      const outcome = waitOutcome(t, all);
+      return outcome ? [{ t, ...outcome }] : [];
+    });
+    if (!due.length) break;
+    for (const { t, to, why } of due) {
+      try {
+        await update(store.tasks, t.id, (x) => move(x, to, "settle", by, { all }, { why }));
+        settled.push({ id: t.id, to, why });
+      } catch (error) {
+        if (!(error instanceof Refused)) throw error;
+      }
+    }
+  }
+  return settled;
 }
 
 // A merge that conflicts: the branch's task goes back to be claimed again on its branch and rebased. The round it went

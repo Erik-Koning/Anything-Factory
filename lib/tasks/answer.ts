@@ -1,14 +1,15 @@
-// The operator's answers to what waits on them: a question the planner or the approver asked (status question), or a
-// task that's blocked. An answer is a note by the operator, marked as one, that leaves the task where it is: the
+// The operator's answers to what waits on them: a question the planner or the approver asked (status question), or
+// blocked work raised to them. An answer is a note by the operator, marked as one, that leaves the task where it is: the
 // planner reads it, records it in decisions.md and moves the task on (approving or rejecting it outright is
 // decide.ts). The web app answers through here. The lead's watchdog passes each new answer to the planner
 // (lib/answers.ts), so it acts on it within a minute instead of at its next wake.
 import { type Actor, type Note, nowIso, OPERATOR, Refused, type Status, type Task } from "./model.ts";
 import { type Store, update } from "./store.ts";
 
-// What waits on the operator: these statuses, never a journey (journeys only group tasks).
+// What waits on the operator: every question, and blocked work raised to them (with an ask: a block that waits on
+// other tasks, or that the planner sorts, isn't theirs); never a journey (journeys only group tasks).
 export const WAITING: readonly Status[] = ["question", "blocked"];
-export const waitsOnOperator = (t: Task): boolean => WAITING.includes(t.status) && t.kind !== "journey";
+export const waitsOnOperator = (t: Task): boolean => t.kind !== "journey" && (t.status === "question" || (t.status === "blocked" && Boolean(t.ask)));
 
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 

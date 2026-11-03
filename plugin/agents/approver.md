@@ -35,7 +35,8 @@ Then record one verdict:
 - `e9g task research <id> --note "<what to find out>"` when it might be right but the evidence is missing. The
   planner researches and proposes it again.
 - `e9g task reject <id> --reason "<why, against the direction or the evidence>"` when it shouldn't be built.
-- `e9g task escalate <id> --reason "<what the operator needs to decide>"` when it's the operator's call: your rules'
+- `e9g task escalate <id> --reason "<what the operator needs to decide>" --recommend "<what you'd decide, and why>"`
+  when it's the operator's call (both are required, and their inbox shows both): your rules'
   approval thresholds keep it from you, or it touches anything Article 3 reserves (scope, privacy and personal data,
   a policy, promotion, the rules). The command refuses approvals the thresholds don't allow and says so.
 

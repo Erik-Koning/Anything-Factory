@@ -36,7 +36,12 @@ describe("answering what waits on the operator", () => {
 
   test("a blocked task takes an answer too; anything else, an empty answer or anyone but the operator doesn't", async () => {
     const { store, add } = await graph();
-    const blocked = await add("Needs a key", "blocked");
+    const blocked = await add("Needs a key", "blocked", {
+      ask: { reason: "only you hold the key", recommendation: "add it", by: "planner", at: "2026-11-01T00:00:00.000Z" },
+    });
+    // A block the team sorts out (no ask) isn't the operator's to answer.
+    const theirs = await add("Waits on #1", "blocked");
+    await assert.rejects(answer(store, theirs.id, { who: OPERATOR, text: "go" }), /doesn't wait/);
     assert.equal((await answer(store, blocked.id, { who: OPERATOR, text: "The key is in 1Password now." })).status, "blocked");
     const approved = await add("Build it", "approved");
     await assert.rejects(answer(store, approved.id, { who: OPERATOR, text: "yes" }), (e: Error) => e instanceof Refused && /doesn't wait/.test(e.message));
@@ -72,7 +77,9 @@ describe("passing answers to the planner", () => {
   test("answersSince lists answers on tasks still waiting, oldest first, each with its own key", async () => {
     const { store, add } = await graph();
     const a = await add("First", "question");
-    const b = await add("Second", "blocked");
+    const b = await add("Second", "blocked", {
+      ask: { reason: "only you can", recommendation: "unblock it", by: "planner", at: "2026-11-01T00:00:00.000Z" },
+    });
     await answer(store, b.id, { who: OPERATOR, text: "unblock with the staging key" });
     await answer(store, a.id, { who: OPERATOR, text: "(a)" });
     const tasks = await store.tasks.all();

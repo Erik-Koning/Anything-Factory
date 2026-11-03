@@ -43,7 +43,7 @@ test("eventsOf: questions, blocks, merges and journeys done, since a time, not t
   );
   const question = events.find((e) => e.kind === "question");
   assert.equal(question?.path, `/t/shop/inbox#task-${asked.id}`);
-  assert.match(question?.detail ?? "", /^it's the operator's Options: \(a\) no; \(b\) yes\.$/);
+  assert.match(question?.detail ?? "", /^Why it's yours: it's the operator's Options: \(a\) no; \(b\) yes\.$/);
   assert.equal(events.find((e) => e.kind === "blocked")?.detail, "needs the payment key");
   assert.equal(new Set(events.map((e) => e.id)).size, events.length);
   assert.deepEqual(eventsOf("shop", [asked], [], "2999-01-01T00:00:00.000Z"), []);
@@ -51,6 +51,26 @@ test("eventsOf: questions, blocks, merges and journeys done, since a time, not t
   assert.deepEqual(
     eventsOf("shop", [asked, stuck], [], "2000-01-01T00:00:00.000Z").map((e) => e.id),
     events.filter((e) => e.kind === "question" || e.kind === "blocked").map((e) => e.id)
+  );
+});
+
+test("eventsOf: a block raised to the operator, or an ask added later, is a question for them, with the recommendation", () => {
+  const raised = {
+    ...move(task("approved", { title: "Ship to Canada" }), "blocked", "planner", "needs the carrier's key"),
+    ask: { reason: "only you hold the carrier's key", recommendation: "add it to the vault", by: "planner", at: "2026-11-01T00:00:00.000Z" },
+  };
+  const later = {
+    ...withEvent(move(task("proposed", { title: "Open the log" }), "question", "planner", "yours"), "planner", "raised to the operator: who reads it"),
+    ask: { reason: "who reads it", recommendation: "own staff only", by: "planner", at: "2026-11-01T00:00:00.000Z" },
+  };
+  const events = eventsOf("shop", [raised, later], [], "2000-01-01T00:00:00.000Z");
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["question", "question", "question"]
+  );
+  assert.match(
+    events.find((e) => e.title.includes("Ship"))?.detail ?? "",
+    /^Why it's yours: only you hold the carrier's key The team recommends: add it to the vault/
   );
 });
 
@@ -154,6 +174,6 @@ test("digestMail: what still waits, then what happened; summaryOf and testMail s
   assert.match(mail.text, /Since your last digest:\n- Merged: #3 Export/);
   const prefs = prefsOr(null, "u1", "admin", "America/Toronto");
   const lines = summaryOf(prefs, ["question", "blocked", "merged"], "08:00");
-  assert.deepEqual(lines, ["- At once: questions for you, blocked work.", "- Daily at 08:00 (America/Toronto): work merged, what still waits on you."]);
+  assert.deepEqual(lines, ["- At once: questions for you.", "- Daily at 08:00 (America/Toronto): blocked work, work merged, what still waits on you."]);
   assert.match(testMail("Olive", lines, BASE).text, /^Hello Olive, this is the test email you asked for\./);
 });

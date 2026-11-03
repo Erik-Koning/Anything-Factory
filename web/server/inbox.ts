@@ -1,5 +1,5 @@
 // What waits on the operator, worked out from a team's graph (never stored): the questions the planner or the approver
-// asked them, the work that's blocked, what they answered that the planner hasn't acted on yet, and what was settled
+// asked them, the blocked work raised to them, what they answered that the planner hasn't acted on yet, and what was settled
 // lately. Pure: the inbox pages, the header's count and the notifier read it, and the unit tests prove it.
 import { answersOn, waitingSince, waitsOnOperator } from "../../lib/tasks/answer.ts";
 import { type Note, OPERATOR, type Status, type Task } from "../../lib/tasks/model.ts";
@@ -13,10 +13,15 @@ export interface Choice {
 
 export interface Waiting {
   task: Task;
-  // When it came to wait on the operator, who put it there and why (the move's reason).
+  // When it came to wait on the operator, who raised it and why: the reason the team gave (required since tasks carry
+  // an ask), else the reason on its move, from before; null when there's none at all.
   since: string;
   askedBy: string;
   why: string | null;
+  // Where the reason and the recommendation come from: the ask the team gave ("asked"), the move or the task's text
+  // ("inferred"), or nowhere (null).
+  whyFrom: "asked" | "inferred" | null;
+  recommendationFrom: "asked" | "inferred" | null;
   // The text that puts the question: the newest note by the team with options or a recommendation in it, otherwise
   // the task's description; what it found there; and the text without them, to show above the answer form's choices.
   question: { text: string; by: string | null; at: string | null; shown: string };
@@ -130,16 +135,23 @@ export function waitingOf(task: Task, all: Task[]): Waiting {
   const byId = new Map(all.map((t) => [t.id, t]));
   const since = waitingSince(task);
   const moved = task.history.findLast((e) => e.to === task.status);
-  const why = moved ? (/^\S+ → \S+: (.+)$/s.exec(moved.what)?.[1] ?? null) : null;
-  const { choices, recommendation, ...question } = questionOf(task);
+  const movedWhy = moved ? (/^\S+ → \S+: (.+)$/s.exec(moved.what)?.[1] ?? null) : null;
+  const { choices: offered, recommendation: written, ...question } = questionOf(task);
+  const asked = task.ask ?? null;
+  const why = asked?.reason.trim() || movedWhy;
+  const recommendation = asked?.recommendation.trim() || written;
+  // The option the recommendation names, whichever said it.
+  const key = recommendedKey(recommendation);
   const text = [task.body, ...task.notes.map((n) => n.text)].join("\n");
   return {
     task,
     since,
-    askedBy: moved?.by ?? task.by,
+    askedBy: asked?.by ?? moved?.by ?? task.by,
     why,
+    whyFrom: asked?.reason.trim() ? "asked" : why ? "inferred" : null,
+    recommendationFrom: asked?.recommendation.trim() ? "asked" : recommendation ? "inferred" : null,
     question,
-    choices,
+    choices: offered.map((c) => ({ ...c, recommended: key !== null && c.key === key })),
     recommendation,
     answers: answersOn(task),
     holds: all.filter((t) => t.after.includes(task.id) && t.status !== "done" && t.status !== "rejected"),

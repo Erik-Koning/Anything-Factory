@@ -301,9 +301,10 @@ test("the admin sees what waits on them and answers a question with one of its o
   await expect(page).toHaveURL(/\/t\/shop\/inbox$/);
   await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Waiting on you/ })).toHaveAttribute("aria-current", "page");
 
-  // The question as the planner put it: why it's the operator's, its options, the one it recommends.
+  // The question as the planner put it: why it's the operator's, what the team recommends, its options.
   const item = page.locator(`#task-${question}`);
   await expect(item.getByText("who sees an order is the operator's")).toBeVisible();
+  await expect(item.getByRole("definition").filter({ hasText: "(b), behind the same sign-in as checkout." })).toBeVisible();
   await expect(item.getByRole("radio")).toHaveCount(4);
   await expect(item.locator("label", { hasText: "(b) open them to signed-in customers" }).getByText("recommended")).toBeVisible();
   // A research question has nothing to approve: answer it, or reject it.
@@ -346,7 +347,9 @@ test("the admin approves blocked work again from the inbox, and comes back to it
   await expect(page.getByRole("heading", { name: "Waiting on you", level: 1 })).toBeVisible();
   await expect(page.getByText("1 waiting for your answer.")).toBeVisible();
   const item = page.locator(`#task-${blocked}`);
+  // Why it's the operator's, and what the team recommends, always.
   await expect(item.getByText("needs the carrier's API key")).toBeVisible();
+  await expect(item.getByRole("definition").filter({ hasText: "add the key to the vault, then approve it again" })).toBeVisible();
   await item.getByText(`Or decide #${blocked} yourself`).click();
   await item.locator(`#approve-${blocked}`).fill("The key is in the vault now");
   await item.getByRole("button", { name: `Approve again #${blocked}` }).click();
@@ -398,7 +401,7 @@ test("the admin chooses what they're emailed, and a test email shows it reaches 
     timeZone: "America/Toronto",
     reminder: true,
     muted: [],
-    modes: { question: "now", blocked: "now", merged: "off" },
+    modes: { question: "now", blocked: "digest", merged: "off" },
   });
 
   const seen = mailsTo(state().admin.email).length;

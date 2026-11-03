@@ -34,6 +34,7 @@ import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
 import * as t3 from "../t3.ts";
 import { die, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
+import { settleTeamWaits } from "../waits.ts";
 
 const LABEL = "ca.e9g.watchdog";
 const PLIST = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
@@ -526,6 +527,8 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     clearNotes(run, delivered);
     log(`passed ${delivered} held message${delivered === 1 ? "" : "s"} on to the planner`);
   }
+  // Tasks waiting on others that can move now (closed, back to work, back to the planner).
+  await settleTeamWaits(entry, log, (text) => oncePer("waits-unsettled", 60) && log(text));
   // The operator's answers from the web app, so the planner acts on them now rather than at its next wake.
   await relayAnswers(
     entry,
@@ -685,6 +688,7 @@ async function applyControlsOnce(): Promise<void> {
       if ((await applyTeamControls(entry, log, () => {})) && entry.tasks.store === "mongo") await reportState(entry, entry.run, () => {});
       const file = join(entry.run, "planner-thread");
       const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+      if (!existsSync(join(entry.run, "paused"))) await settleTeamWaits(entry, log, () => {});
       if (planner && !existsSync(join(entry.run, "paused")))
         await relayAnswers(
           entry,

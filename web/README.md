@@ -43,8 +43,10 @@ request (Article 8).
   week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
   `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
-  operator, with why it's theirs, the task's options read out of it ("(a) … (b) …") as choices with the team's
-  recommendation marked, what it holds up and the other questions it mentions; and each blocked task with why. An
+  operator, and each block raised to them (a block the team sorts out, or that waits on other tasks, isn't listed).
+  Every one shows why it's theirs and what the team recommends (the task's `ask`, which raising it requires; from its
+  own words for one raised before, or said to be missing), the task's options read out of it ("(a) … (b) …") as
+  choices with the recommended one marked, what it holds up and the other questions it mentions. An
   answer is an option, the recommendation or the admin's own words, with anything added: the factory's `answer`
   (`lib/tasks/answer.ts`), a note by the operator marked as the answer, which leaves the task where it is. The lead's
   watchdog passes it to the planner within a minute, which records it in its decisions and moves the task on; until

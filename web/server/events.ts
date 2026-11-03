@@ -41,13 +41,21 @@ const clip = (text: string, max: number): string => {
 // A move's reason, from its history line ("question → approved: why").
 const reasonOf = (what: string): string => /^\S+ → \S+: (.+)$/s.exec(what)?.[1] ?? "";
 
+// What an email says of something raised to the operator: why it's theirs and what the team recommends (the task's
+// ask, or the move's reason from before asks), then the task.
+function raisedDetail(t: Task, moved: string): string {
+  const reason = t.ask?.reason.trim() || moved;
+  const recommendation = t.ask?.recommendation.trim();
+  return [reason ? `Why it's yours: ${reason}` : "", recommendation ? `The team recommends: ${recommendation}` : "", t.body].filter(Boolean).join("\n\n");
+}
+
 // The events in `tasks` and `requests` from `since` (ISO) on, oldest first.
 export function eventsOf(team: string, tasks: Task[], requests: FeatureRequest[], since: string): TeamEvent[] {
   const base = `/t/${team}`;
   const events: TeamEvent[] = [];
   for (const t of tasks) {
     for (const e of t.history) {
-      if (e.at < since || !e.to) continue;
+      if (e.at < since || (!e.to && !e.what.startsWith("raised to the operator:"))) continue;
       const stamp = Date.parse(e.at);
       if (t.kind === "journey") {
         if (e.to === "done")
@@ -55,14 +63,18 @@ export function eventsOf(team: string, tasks: Task[], requests: FeatureRequest[]
         continue;
       }
       // The operator's own moves aren't news to them.
-      if (e.to === "question" && e.by !== OPERATOR)
+      // Raised to the operator: a question, a block with the team's reason and recommendation, or an ask added later.
+      // The operator's own moves aren't news to them.
+      const raised =
+        e.to === "question" || (e.to === "blocked" && t.status === "blocked" && Boolean(t.ask)) || e.what.startsWith("raised to the operator:");
+      if (raised && e.by !== OPERATOR)
         events.push({
           id: `question:${t.id}:${stamp}`,
           kind: "question",
           team,
           at: e.at,
           title: `#${t.id} ${t.title}`,
-          detail: clip([reasonOf(e.what), t.body].filter(Boolean).join("\n\n"), 600),
+          detail: clip(raisedDetail(t, reasonOf(e.what) || e.what.replace(/^raised to the operator: /, "")), 700),
           path: `${base}/inbox#task-${t.id}`,
         });
       else if (e.to === "blocked" && e.by !== OPERATOR)

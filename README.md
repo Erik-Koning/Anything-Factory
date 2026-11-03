@@ -194,8 +194,15 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Journeys.** A journey is a task with child tasks. When its children are all done it's due its verification (worked
   out from them, never stored): a UX audit at every viewport, an end-to-end spec of the whole journey, then polish,
   which is more tasks in it. The planner marks it done.
-- **Answers.** What waits on you (a `question` task, escalated or asked, and `blocked` work) you answer on the web
-  app's Waiting on you page, with the options the question offers: a note by the operator marked as the answer
+- **Raising to you.** A task reaches you only with why it's yours and what the team recommends: `e9g task status
+<id> question --reason "…" --recommend "…"` and the approver's `escalate` refuse without both (the operator raising
+  one to themselves gives the reason), and `e9g task ask` gives them to one raised before. A block is the planner's
+  to sort (`--reason`) unless it's raised to you with `--recommend`.
+- **Waiting on other tasks.** `e9g task status <id> blocked --waits-on <ids> --then close|resume` parks a task on
+  others: once they're done it closes (it was folded into them) or goes back to work, and once one is rejected it
+  goes back to the planner. The merge queue settles it as it merges, and the watchdog every minute.
+- **Answers.** What waits on you (every `question`, and blocks raised to you) you answer on the web app's Waiting on
+  you page, with the options the question offers: a note by the operator marked as the answer
   (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
   `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `e9g request add` takes a stakeholder's request; `e9g serve` gives each a form. Agents see a

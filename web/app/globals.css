@@ -986,13 +986,35 @@ li.waiting > p,
 li.waiting > dl {
   margin: 0;
 }
-/* Why it came to the operator: the move's reason. */
-.why {
+/* Why it came to the operator, and what the team recommends: both always shown, a gap said as one. */
+dl.raised {
   margin: 0;
+  display: grid;
+  gap: 6px;
+}
+dl.raised > div {
   padding: 8px 12px;
-  border-left: 3px solid var(--caution);
   background: var(--bg);
+  border-left: 3px solid var(--caution);
   border-radius: 0 6px 6px 0;
+  font-size: 13.5px;
+}
+dl.raised > div.recommends {
+  border-left-color: var(--accent);
+}
+dl.raised dt {
+  display: inline;
+  font-weight: 600;
+}
+dl.raised dt::after {
+  content: ": ";
+}
+dl.raised dd {
+  display: inline;
+  margin: 0;
+}
+.missing {
+  color: var(--warn);
 }
 .ask .text {
   margin: 0;

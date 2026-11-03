@@ -104,8 +104,18 @@ export async function seed(): Promise<World> {
     withEvent({ ...t, status: "question" }, "planner", "proposed → question: who sees an order is the operator's", { from: "proposed", to: "question" })
   );
   const blocked = await add({ title: "Ship to Canada", kind: "feature", status: "approved", score: score("M", "a quarter of visitors") });
+  // Raised to the operator: only they can lift it, so it carries why and what the team recommends.
   await update(shop.tasks, blocked.id, (t) =>
-    withEvent({ ...t, status: "blocked" }, "planner", "approved → blocked: needs the carrier's API key", { from: "approved", to: "blocked" })
+    withEvent(
+      {
+        ...t,
+        status: "blocked",
+        ask: { reason: "needs the carrier's API key", recommendation: "add the key to the vault, then approve it again", by: "planner", at: nowIso() },
+      },
+      "planner",
+      "approved → blocked: needs the carrier's API key",
+      { from: "approved", to: "blocked" }
+    )
   );
 
   // Requests from a stakeholder the app has no account for (as e9g request add makes them).

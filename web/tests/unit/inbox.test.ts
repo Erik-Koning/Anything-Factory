@@ -85,6 +85,33 @@ test("a question is read from the newest note by the team that puts it, else the
   assert.deepEqual([plain.question.text, plain.question.by, plain.choices, plain.recommendation], ["Which words?", null, [], null]);
 });
 
+test("waitingOf takes the reason and the recommendation from the team's ask, else from the task's own words", () => {
+  const asked = {
+    ...moved(
+      task("proposed", { body: "Options: (a) keep it; (b) drop it. Recommendation: (a), for now." }),
+      "question",
+      "planner",
+      "yours",
+      "2026-11-01T10:00:00.000Z"
+    ),
+    ask: { reason: "it changes what donors see", recommendation: "(b): nobody uses it", by: "approver", at: "2026-11-01T10:00:00.000Z" },
+  };
+  const w = waitingOf(asked, [asked]);
+  assert.deepEqual(
+    [w.why, w.whyFrom, w.recommendation, w.recommendationFrom, w.askedBy],
+    ["it changes what donors see", "asked", "(b): nobody uses it", "asked", "approver"]
+  );
+  assert.deepEqual(
+    w.choices.map((c) => [c.key, c.recommended]),
+    [
+      ["a", false],
+      ["b", true],
+    ]
+  );
+  const before = waitingOf(moved(task("proposed"), "question", "planner", "it's yours", "2026-11-01T10:00:00.000Z"), []);
+  assert.deepEqual([before.why, before.whyFrom, before.recommendation, before.recommendationFrom], ["it's yours", "inferred", null, null]);
+});
+
 test("waitingOf says who asked, why, since when, and what it holds up", () => {
   const journey = task("approved", { kind: "journey", title: "Register a person" });
   const q = moved(
@@ -116,7 +143,15 @@ test("waitingOf says who asked, why, since when, and what it holds up", () => {
 test("inbox: questions and blocked work longest waiting first, answered ones apart, settled ones newest first", () => {
   const old = moved(task("proposed"), "question", "planner", "yours", "2026-11-01T10:00:00.000Z");
   const recent = moved(task("proposed"), "question", "planner", "yours", "2026-11-01T12:00:00.000Z");
-  const stuck = moved(task("building"), "blocked", "planner", "needs a key", "2026-11-01T11:00:00.000Z");
+  // Blocked work raised to the operator waits on them; a block the team sorts out (or that waits on other tasks) doesn't.
+  const stuck = {
+    ...moved(task("building"), "blocked", "planner", "needs a key", "2026-11-01T11:00:00.000Z"),
+    ask: { reason: "only you hold the carrier's key", recommendation: "add it to the vault", by: "planner", at: "2026-11-01T11:00:00.000Z" },
+  };
+  const folded = {
+    ...moved(task("triage"), "blocked", "planner", "folded into #3", "2026-11-01T11:30:00.000Z"),
+    wait: { on: ["3"], then: "close" as const, by: "planner", at: "2026-11-01T11:30:00.000Z" },
+  };
   const answered = {
     ...moved(task("proposed"), "question", "planner", "yours", "2026-11-01T09:00:00.000Z"),
     notes: [{ at: "2026-11-01T13:00:00.000Z", by: OPERATOR, text: "(b)", kind: "answer" as const }],
@@ -139,7 +174,7 @@ test("inbox: questions and blocked work longest waiting first, answered ones apa
     "no",
     "2026-09-02T08:00:00.000Z"
   );
-  const all = [recent, old, stuck, answered, journey, settledQ, longAgo];
+  const all = [recent, old, stuck, folded, answered, journey, settledQ, longAgo];
   const box = inbox(all, { now: Date.parse("2026-11-02T00:00:00.000Z") });
   assert.deepEqual(
     box.questions.map((w) => w.task.id),

@@ -57,6 +57,24 @@ export interface Event {
   sha?: string;
 }
 
+// A task raised to the operator (a question, or blocked work only they can unblock): why it's theirs, and what the
+// team recommends. The operator's inbox shows both; e9g task status/escalate/ask require them.
+export interface Ask {
+  reason: string;
+  recommendation: string;
+  by: string;
+  at: string;
+}
+// A blocked task waiting on other tasks: once they're all done it closes ("close": it was folded into them) or goes
+// back to work ("resume"); if one is rejected or gone, it goes back to the planner. The merge queue and the watchdog
+// settle it (settleWaits in ops.ts), so it never waits on anyone to remember.
+export interface Wait {
+  on: string[];
+  then: "close" | "resume";
+  by: string;
+  at: string;
+}
+
 // Every document a store keeps: an id it assigns, and a version it checks on every replace.
 export interface Doc {
   id: string;
@@ -90,6 +108,9 @@ export interface Task extends Doc {
   critical: string[];
   // How much could break, as the reviewer judged it when it approved (a high-risk change merges with its tests).
   risk: Risk | null;
+  // Raised to the operator, and waiting on other tasks (above); cleared when it moves on.
+  ask?: Ask | null;
+  wait?: Wait | null;
   by: string;
   // The person who added or suggested it from the web app, by stakeholder id (Article 8); none for the team's own work
   // and what the operator adds with e9g task add.
@@ -192,7 +213,8 @@ export const UNAPPROVED: Status[] = ["triage", "proposed", "researching"];
 // Every change of a task's status goes through move(), against one table: the command it comes from (via), who may
 // make it, from which statuses to which, and what else must hold. docs/plans/task-graph.md shows the same table.
 
-export type Via = "status" | "approve" | "reject" | "research" | "escalate" | "claim" | "release" | "submit" | "changes" | "merge" | "conflict" | "expire";
+export type Via =
+  "status" | "approve" | "reject" | "research" | "escalate" | "claim" | "release" | "submit" | "changes" | "merge" | "conflict" | "expire" | "settle";
 export interface ApprovalRules {
   mode: "operator" | "thresholds" | "full";
   maxSize: Size;
@@ -268,6 +290,12 @@ const plannerDone: Check = (t, _to, _actor, { all }) => {
   if (t.kind !== "journey") return codeDone(t);
   return journeyDue(t, all) ? null : `journey ${t.id} is done once it's verified: its tasks done, then its audit, end-to-end spec and polish`;
 };
+// A blocked task settles only the way its wait says, once the tasks it waits on allow it.
+const settles: Check = (t, to, _actor, { all }) => {
+  const outcome = waitOutcome(t, all);
+  if (!outcome) return t.wait ? `task ${t.id} still waits on ${t.wait.on.map((id) => `#${id}`).join(", ")}` : `task ${t.id} waits on no other task`;
+  return outcome.to === to ? null : `task ${t.id} settles to ${outcome.to}, not ${to}`;
+};
 const holder: Check = (t, _to, _actor, { machine = "", worktree = null }) =>
   heldHere(t.claim, worktree, machine)
     ? null
@@ -336,6 +364,8 @@ const RULES: Rule[] = [
   // A branch that conflicts goes back to be claimed again and rebased.
   { via: "conflict", by: [MERGE], from: ["review"], to: ["approved"], check: sameBranch },
   { via: "expire", by: [WATCHDOG], from: ["building"], to: ["approved"], check: leaseOut },
+  // A task waiting on others closes, goes back to work or back to the planner once they're settled (settleWaits).
+  { via: "settle", by: [WATCHDOG, MERGE], from: ["blocked"], to: ["done", "approved", "proposed"], check: settles },
 ];
 
 const DOES: Record<Via, string> = {
@@ -351,6 +381,7 @@ const DOES: Record<Via, string> = {
   merge: "merge",
   conflict: "send a conflicting branch back",
   expire: "expire claims",
+  settle: "settle tasks that wait on others",
 };
 const DONE_TO: Partial<Record<Via, string>> = { approve: "approved", reject: "rejected", research: "sent back for research", escalate: "escalated" };
 
@@ -371,6 +402,7 @@ function notFrom(t: Task, to: Status, via: Via): string {
         ? `#${t.id} was rejected`
         : `#${t.id} is ${t.status}, never approved`;
   if (via === "expire") return `task ${t.id} isn't building`;
+  if (via === "settle") return `task ${t.id} is ${t.status}, not waiting on other tasks`;
   if (to === "approved") return `the planner doesn't approve its own proposals: the approver or the operator does (e9g task approve ${t.id})`;
   if (to === "done") return codeDone(t);
   if (to === "review") return "a task goes to review when its claimant submits it (e9g task submit)";
@@ -416,10 +448,44 @@ export function move(
     ...task,
     ...(UNAPPROVED.includes(to) ? { approval: null } : {}),
     ...(to === "building" ? {} : { claim: null }),
+    ...(to === "question" || to === "blocked" ? {} : { ask: null, wait: null }),
     ...fields,
     status: to,
   };
+  const asked = to === "question" ? askRefusal(moved.ask ?? null, actor) : null;
+  if (asked) throw new Refused(asked);
   return withEvent(moved, by, `${task.status} → ${to}${why ? `: ${why}` : ""}`, { from: task.status, to, ...(sha ? { sha } : {}) });
+}
+
+// What a question must carry: why it's the operator's and the team's recommendation. The operator raising one to
+// themselves gives the reason only.
+export function askRefusal(ask: Pick<Ask, "reason" | "recommendation"> | null, actor: Actor): string | null {
+  if (!ask?.reason.trim()) return "say why it's the operator's to decide: --reason \"…\"";
+  if (actor !== OPERATOR && !ask.recommendation.trim())
+    return 'give the team\'s recommendation: --recommend "…" (what you would do, and why; name the option when there are some)';
+  return null;
+}
+
+// What a move into blocked must say: what it waits on (other tasks), or why it's blocked.
+export function blockRefusal({ reason, waitsOn }: { reason: string; waitsOn: string[] }): string | null {
+  return waitsOn.length || reason.trim() ? null : 'say what it\'s blocked on: --reason "…", or --waits-on <ids> when it waits for other tasks';
+}
+
+// Where a waiting task goes now: closed or back to work once everything it waits on is done, back to the planner
+// (proposed) once one is rejected or gone; null while any is still moving.
+export function waitOutcome(t: Task, all: Task[]): { to: Status; why: string } | null {
+  if (t.status !== "blocked" || !t.wait?.on.length) return null;
+  const byId = new Map(all.map((x) => [x.id, x]));
+  const ids = t.wait.on.map((id) => `#${id}`).join(", ");
+  const failed = t.wait.on.filter((id) => !byId.has(id) || byId.get(id)?.status === "rejected");
+  if (failed.length)
+    return {
+      to: "proposed",
+      why: `${failed.map((id) => `#${id}`).join(", ")} ${failed.length === 1 ? "was" : "were"} rejected or removed: the planner decides it again`,
+    };
+  if (!t.wait.on.every((id) => byId.get(id)?.status === "done")) return null;
+  if (t.wait.then === "close") return { to: "done", why: `done with ${ids}, which it was folded into` };
+  return t.approval ? { to: "approved", why: `${ids} done: back to work` } : { to: "proposed", why: `${ids} done: back to the planner, never approved` };
 }
 
 // Which kinds each role builds.
