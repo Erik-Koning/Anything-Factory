@@ -1,7 +1,7 @@
 // The operator's controls (lib/tasks/controls.ts), applied in a team's run folder, where the guard and the watchdog
-// read them: `paused` (nothing starts or merges, as e9g pause always did), hold.json (a pause and how far it has got),
+// read them: `paused` (nothing starts or merges, as a6g pause always did), hold.json (a pause and how far it has got),
 // budget.json (the limits in force) and controls-applied (the newest control applied, so each applies once). The
-// watchdog applies new ones on every run, and e9g pause, resume and budget at once.
+// watchdog applies new ones on every run, and a6g pause, resume and budget at once.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";

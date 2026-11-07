@@ -62,7 +62,7 @@ export async function seed(): Promise<World> {
   const journey = await add({ title: "Checkout", kind: "journey", status: "approved" });
   const merged = await add({ title: "Pay by card", kind: "feature", status: "done", parent: journey.id, score: score("M", "most orders") });
   await update(shop.tasks, merged.id, (t) =>
-    withEvent({ ...t, sha: "a1b2c3d4e5" }, "merge-queue", "review → done: merged e9g/b2-pay-by-card", { from: "review", to: "done", sha: "a1b2c3d4e5" })
+    withEvent({ ...t, sha: "a1b2c3d4e5" }, "merge-queue", "review → done: merged a6g/b2-pay-by-card", { from: "review", to: "done", sha: "a1b2c3d4e5" })
   );
   await add({
     title: "Save the card for next time",
@@ -90,7 +90,7 @@ export async function seed(): Promise<World> {
   for (const t of [toApprove, toReject, untouched]) await update(shop.tasks, t.id, (x) => ({ ...x, priority: x.score ? priorityOf(x.score) : null }));
   await add({ title: "Totals round the wrong way", kind: "bug", status: "approved", severity: "major" });
 
-  // Requests from a stakeholder the app has no account for (as e9g request add makes them).
+  // Requests from a stakeholder the app has no account for (as a6g request add makes them).
   const grace = await stakeholderFor(shop, "shop", { name: "Grace Hopper", email: "grace@example.com", role: "customer" });
   const promoted = await addRequest(shop, "shop", {
     title: "Refund exports",
