@@ -566,7 +566,8 @@ export async function upgrade(argv: string[]): Promise<number> {
   if (!existsSync(versionDir(version))) die(`Anything Factory ${version} isn't installed (a6g versions lists them)`);
   const force = Boolean(options["force"]);
   if (realpathSync(versionDir(version)) !== realpathSync(FACTORY_ROOT)) {
-    if (process.env.A6G_UPGRADING === version) die(`Anything Factory ${version} at ${versionDir(version)} handed the upgrade back; run it from that version`);
+    if (process.env.A6G_UPGRADING === version)
+      die(`Anything Factory ${version} at ${versionDir(version)} handed the upgrade back; run it from that version`);
     const result = spawnSync(process.execPath, [entryOf(versionDir(version)), "upgrade", entry.name, version, ...(force ? ["--force"] : [])], {
       stdio: "inherit",
       env: { ...process.env, A6G_HANDED_OVER: "1", A6G_UPGRADING: version },

@@ -179,7 +179,7 @@ are in Mongo (team.json `tasks.store: "mongo"`), and the lead's watchdog keeps i
 | `BETTER_AUTH_URL`                                          | yes                         | The app's address (`https://a6g.example.com`): email links, and the passkeys' relying party and origin                |
 | `SES_REGION`, `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` | served for real (or Resend) | Amazon SES and a key that may only send as the sender (`sst.config.ts` makes both)                                    |
 | `RESEND_API_KEY`                                           | served for real (or SES)    | Resend's API key, instead of SES                                                                                      |
-| `MAIL_FROM`                                                | served for real             | The sender, verified with the mail service (`Anything Factory <a6g@example.com>`)                                                  |
+| `MAIL_FROM`                                                | served for real             | The sender, verified with the mail service (`Anything Factory <a6g@example.com>`)                                     |
 | `MAIL_LOG`                                                 | no                          | `1` prints emails to the console when there's no mail service: only while `BETTER_AUTH_URL` is `http://localhost`     |
 | `CLIENT_IP_HEADER`                                         | served for real             | The one header that carries the viewer's IP address (`x-a6g-viewer-ip` behind CloudFront; `x-forwarded-for` if unset) |
 | `ORIGIN_SECRET`                                            | served for real             | At least 32 characters, the same as the CDN sends in `x-a6g-origin`; requests without it are refused                  |
@@ -271,9 +271,9 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
    cluster in the same place as the app (an AWS cluster in `A6G_WEB_REGION`): every page waits on several round trips
    to it, a millisecond each next door and tens of milliseconds across a continent or between clouds.
 3. **Email (Amazon SES)**: once per domain, not per stage, make the sender's domain an SES sender: with its Route 53
-   zone in the account, `AWS_REGION=us-east-2 scripts/ses-domain.sh a6gfactory.dev` adds the SES identity with DKIM,
+   zone in the account, `AWS_REGION=us-east-2 scripts/ses-domain.sh anythingfactory.dev` adds the SES identity with DKIM,
    its own MAIL FROM (`mail.<domain>`, for SPF) and a DMARC policy, so mail from it is signed, authorised and not spam.
-   Each stage then sends from `A6G_WEB_SENDER` (`no-reply@a6gfactory.dev`) with an IAM user's key that may send from
+   Each stage then sends from `A6G_WEB_SENDER` (`no-reply@anythingfactory.dev`) with an IAM user's key that may send from
    that address alone. Until the account has SES production access (asked for in the SES console), SES sends only to
    verified addresses, 200 a day: verify each person's address in SES meanwhile. Sign-in links, invitations and
    new-address confirmations all go by email; the first admin can't get in without them.
@@ -295,7 +295,7 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
 
 ```sh
 cd web
-A6G_WEB_SENDER=no-reply@a6gfactory.dev A6G_WEB_DOMAIN=app.a6gfactory.dev npx sst deploy --stage production
+A6G_WEB_SENDER=no-reply@anythingfactory.dev A6G_WEB_DOMAIN=app.anythingfactory.dev npx sst deploy --stage production
 ```
 
 It prints the app's `url` and Lightsail's `origin`. Then make the first admin (above) against the production database

@@ -30,11 +30,11 @@ team may leave out (`finish`, `afterMerge`, `gate.full`, `environment.script`, �
 
 **Identity**
 
-| Key       | Default                    | Meaning                                                                                                                                                                         |
-| --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`    | (required)                 | Lowercase letters, digits and dashes, up to 31 characters. Names the team in `a6g` commands, T3 instances (`a6g-<name>-<role>`) and `~/.a6g/runs/<name>`                        |
-| `title`   | `name`                     | Shown in T3 Code, emails (`[<title>] …`) and prompts; `""` is the name too                                                                                                      |
-| `owner`   | none                       | The operator's email: the only address the planner may write to                                                                                                                 |
+| Key       | Default                    | Meaning                                                                                                                                                                              |
+| --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`    | (required)                 | Lowercase letters, digits and dashes, up to 31 characters. Names the team in `a6g` commands, T3 instances (`a6g-<name>-<role>`) and `~/.a6g/runs/<name>`                             |
+| `title`   | `name`                     | Shown in T3 Code, emails (`[<title>] …`) and prompts; `""` is the name too                                                                                                           |
+| `owner`   | none                       | The operator's email: the only address the planner may write to                                                                                                                      |
 | `factory` | the version `a6g init` ran | The Anything Factory version the team runs (`a6g versions`); `"dev"` for a linked source checkout. `a6g upgrade` moves it. Without one, the team runs whichever version registers it |
 
 **Branches**

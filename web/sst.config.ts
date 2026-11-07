@@ -16,10 +16,10 @@
 // Before the first deploy, per stage (the values stay in SST's encrypted secrets, never in the repository):
 //   npx sst secret set MongodbUri "mongodb+srv://…" --stage production
 //   npx sst secret set BetterAuthSecret "$(openssl rand -base64 32)" --stage production
-// Then: A6G_WEB_SENDER=no-reply@a6gfactory.dev A6G_WEB_DOMAIN=app.a6gfactory.dev npx sst deploy --stage production
+// Then: A6G_WEB_SENDER=no-reply@anythingfactory.dev A6G_WEB_DOMAIN=app.anythingfactory.dev npx sst deploy --stage production
 //
 // Settings, from the environment of the deploy:
-//   A6G_WEB_SENDER   the address email comes from (required), at a domain verified in SES: no-reply@a6gfactory.dev.
+//   A6G_WEB_SENDER   the address email comes from (required), at a domain verified in SES: no-reply@anythingfactory.dev.
 //   A6G_WEB_DOMAIN   the app's own domain, in a Route 53 hosted zone of this account (a certificate is made for it).
 //                    Without it the app is served on CloudFront's own *.cloudfront.net address. Passkeys belong to
 //                    the domain they were made on, so choose it before people add theirs.
