@@ -1,6 +1,6 @@
 // The task graph as a BetterDiagrams document, generated from the tasks and never edited: a band per journey with its
 // tasks inside, a band for the tasks in no journey, columns by how many tasks must come first, and an edge for each
-// dependency. Open it with `npx @mosphere/better-diagrams <file>`; e9g serve draws the same layout itself. The web app
+// dependency. Open it with `npx @mosphere/better-diagrams <file>`; a6g serve draws the same layout itself. The web app
 // also draws it by level (levelDiagram, below): the journeys on the top level, their tasks drilled into.
 import { claimOrder, journeyDue, type Kind, type Task } from "./model.ts";
 
@@ -245,7 +245,7 @@ export function levelDiagram(
 ): Record<string, unknown> {
   const cards = levels(tasks, { all });
   const nodeId = (id: string) => (id === NO_JOURNEY ? NO_JOURNEY : `t${id}`);
-  // The editor holds a task back only for a task card before it that isn't done, where e9g holds it for anything it
+  // The editor holds a task back only for a task card before it that isn't done, where a6g holds it for anything it
   // comes after that isn't done (claimRefusal): a journey, work not approved or stopped, or what isn't drawn (rejected,
   // or gone). Approved work after any of those, or after work that waits so itself, is Waiting, not a task.
   const everyTask = new Map(tasks.map((t) => [t.id, t]));
