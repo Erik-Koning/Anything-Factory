@@ -258,9 +258,9 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
    cluster in the same place as the app (an AWS cluster in `A6G_WEB_REGION`): every page waits on several round trips
    to it, a millisecond each next door and tens of milliseconds across a continent or between clouds.
 3. **Email (Amazon SES)**: once per domain, not per stage, make the sender's domain an SES sender: with its Route 53
-   zone in the account, `AWS_REGION=us-east-2 scripts/ses-domain.sh a6gfactory.dev` adds the SES identity with DKIM,
+   zone in the account, `AWS_REGION=us-east-2 scripts/ses-domain.sh anythingfactory.dev` adds the SES identity with DKIM,
    its own MAIL FROM (`mail.<domain>`, for SPF) and a DMARC policy, so mail from it is signed, authorised and not spam.
-   Each stage then sends from `A6G_WEB_SENDER` (`no-reply@a6gfactory.dev`) with an IAM user's key that may send from
+   Each stage then sends from `A6G_WEB_SENDER` (`no-reply@anythingfactory.dev`) with an IAM user's key that may send from
    that address alone. Until the account has SES production access (asked for in the SES console), SES sends only to
    verified addresses, 200 a day: verify each person's address in SES meanwhile. Sign-in links, invitations and
    new-address confirmations all go by email; the first admin can't get in without them.
@@ -282,7 +282,7 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
 
 ```sh
 cd web
-A6G_WEB_SENDER=no-reply@a6gfactory.dev A6G_WEB_DOMAIN=app.a6gfactory.dev npx sst deploy --stage production
+A6G_WEB_SENDER=no-reply@anythingfactory.dev A6G_WEB_DOMAIN=app.anythingfactory.dev npx sst deploy --stage production
 ```
 
 It prints the app's `url` and Lightsail's `origin`. Then make the first admin (above) against the production database
