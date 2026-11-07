@@ -76,7 +76,7 @@ describe("reading a subscription's usage", () => {
   });
 
   test("every session on the machine counts, the operator's own too, by UTC hour; long-untouched transcripts are passed over", () => {
-    const root = tmp("e9g-hours-");
+    const root = tmp("a6g-hours-");
     const dir = join(root, "projects", encodePath("/Users/x/anything"));
     mkdirSync(dir, { recursive: true });
     const now = new Date("2026-11-02T12:30:00Z");
@@ -144,13 +144,13 @@ describe("budgets in shares of a subscription", () => {
   });
 });
 
-describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
+describe("a6g budget in percent, a6g subscriptions, and the watchdog", () => {
   async function world() {
     const { fakeWorld } = await import("./fake-t3.ts");
     const w = await fakeWorld();
-    const file = join(w.e9gHome, "teams", "fixture.json");
-    write(join(w.e9gHome, "teams"), {
-      "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), tasks: { store: "files", database: "e9g", lead: null } },
+    const file = join(w.a6gHome, "teams", "fixture.json");
+    write(join(w.a6gHome, "teams"), {
+      "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), tasks: { store: "files", database: "a6g", lead: null } },
     });
     write(w.run, { "planner-thread": "mcp:planner\n" });
     const store = fileStore(w.run, "fixture");
@@ -161,16 +161,16 @@ describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
   test("limits as percentages, over 100% too; one unit for the whole budget", async () => {
     const { w } = await world();
     try {
-      const set = await w.e9g("budget", "fixture", "--weekly", "60%", "--total", "250%");
+      const set = await w.a6g("budget", "fixture", "--weekly", "60%", "--total", "250%");
       assert.equal(set.code, 0, set.out);
       assert.match(set.out, /none a day, 60% a week, 250% in all since .* \(each a share of one subscription's weekly limit\)/);
       assert.match(set.out, /the subscription hasn't been measured yet/);
       assert.equal(readLimits(w.run)?.unit, "subscription");
-      assert.notEqual((await w.e9g("budget", "fixture", "--daily", "10", "--weekly", "5%")).code, 0);
-      const dollars = await w.e9g("budget", "fixture", "--daily", "40");
+      assert.notEqual((await w.a6g("budget", "fixture", "--daily", "10", "--weekly", "5%")).code, 0);
+      const dollars = await w.a6g("budget", "fixture", "--daily", "40");
       assert.match(dollars.out, /\$40 a day, none a week, none in all .*the limits that were in percent and weren't given again are dropped/);
       assert.equal(readLimits(w.run)?.unit, "usd");
-      assert.notEqual((await w.e9g("budget", "fixture", "--weekly", "20000%")).code, 0);
+      assert.notEqual((await w.a6g("budget", "fixture", "--weekly", "20000%")).code, 0);
     } finally {
       await w.close();
     }
@@ -179,7 +179,7 @@ describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
   test("the watchdog measures spend in shares of the subscription it last read, and holds the team to them", async () => {
     const { w, store } = await world();
     try {
-      write(join(w.e9gHome, "subscriptions"), {
+      write(join(w.a6gHome, "subscriptions"), {
         "state.json": {
           readings: {
             default: {
@@ -195,16 +195,16 @@ describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
           week: 500,
         },
       });
-      assert.match((await w.e9g("subscriptions")).out, /default \(this Mac's own login\): 30% of this week used.*\n.*about \$500 API-equivalent/);
+      assert.match((await w.a6g("subscriptions")).out, /default \(this Mac's own login\): 30% of this week used.*\n.*about \$500 API-equivalent/);
       // 1% of a $500 week is $5; the team spends $5.25 of it.
-      assert.equal((await w.e9g("budget", "fixture", "--daily", "1%")).code, 0);
+      assert.equal((await w.a6g("budget", "fixture", "--daily", "1%")).code, 0);
       const transcripts = join(w.root, "home", ".claude", "projects", encodePath(w.home));
       mkdirSync(transcripts, { recursive: true });
       writeFileSync(
         join(transcripts, "p.jsonl"),
-        `${JSON.stringify({ type: "agent-setting", agentSetting: "e9g:planner" })}\n${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), gitBranch: "e9g/next", message: { id: "m", model: "claude-opus-5-5", usage: { input_tokens: 1_312_500 } } })}\n`
+        `${JSON.stringify({ type: "agent-setting", agentSetting: "a6g:planner" })}\n${JSON.stringify({ type: "assistant", timestamp: new Date().toISOString(), gitBranch: "a6g/next", message: { id: "m", model: "claude-opus-5-5", usage: { input_tokens: 1_312_500 } } })}\n`
       );
-      assert.equal((await w.e9g("watchdog", "run", "fixture")).code, 0);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
       const spent = JSON.parse(readFileSync(join(w.run, "spend.json"), "utf8"));
       assert.deepEqual(
         [spent.subscriptionWeek, spent.subscriptions],
@@ -213,7 +213,7 @@ describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
       assert.equal(holdOf(await store.controls.all())?.scope, "tasks");
       assert.match(readFileSync(join(w.run, "watchdog.log"), "utf8"), /1\.1% of the 1% a day budget \(shares of a subscription's week\) is spent/);
       assert.match(
-        (await w.e9g("status", "fixture")).out,
+        (await w.a6g("status", "fixture")).out,
         /Spent: 1\.1% today of 1%, 1\.1% this week, 1\.1% since \d{4}-\d{2}-\d{2} \(shares of one subscription's week, about \$500 API-equivalent\)/
       );
     } finally {
@@ -224,13 +224,13 @@ describe("e9g budget in percent, e9g subscriptions, and the watchdog", () => {
   test("subscriptions: another account is its own Claude Code config folder, and the last one stays", async () => {
     const { w } = await world();
     try {
-      assert.notEqual((await w.e9g("subscriptions", "add", "second", "--config-dir", join(w.root, "nowhere"))).code, 0);
+      assert.notEqual((await w.a6g("subscriptions", "add", "second", "--config-dir", join(w.root, "nowhere"))).code, 0);
       const dir = join(w.root, "claude-two");
       mkdirSync(dir);
-      assert.equal((await w.e9g("subscriptions", "add", "second", "--config-dir", dir)).code, 0);
-      assert.match((await w.e9g("subscriptions")).out, /default \(this Mac's own login\): not read yet\n {2}second \(.*claude-two\): not read yet/);
-      assert.equal((await w.e9g("subscriptions", "remove", "second")).code, 0);
-      assert.notEqual((await w.e9g("subscriptions", "remove", "default")).code, 0);
+      assert.equal((await w.a6g("subscriptions", "add", "second", "--config-dir", dir)).code, 0);
+      assert.match((await w.a6g("subscriptions")).out, /default \(this Mac's own login\): not read yet\n {2}second \(.*claude-two\): not read yet/);
+      assert.equal((await w.a6g("subscriptions", "remove", "second")).code, 0);
+      assert.notEqual((await w.a6g("subscriptions", "remove", "default")).code, 0);
     } finally {
       await w.close();
     }

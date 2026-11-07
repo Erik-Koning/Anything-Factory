@@ -1,4 +1,4 @@
-// e9g subscriptions [check | add <name> --config-dir <dir> | remove <name>]: the Claude subscriptions the teams run on
+// a6g subscriptions [check | add <name> --config-dir <dir> | remove <name>]: the Claude subscriptions the teams run on
 // (lib/subscriptions.ts), what each one's usage report last said, and what one subscription's week comes to in
 // API-equivalent dollars, which a budget in percent is a share of. The operator's: an agent never changes them.
 import { existsSync } from "node:fs";
@@ -7,7 +7,7 @@ import { operatorOnly } from "../session.ts";
 import { type Account, accounts, observeSubscriptions, setAccounts, subscriptionState } from "../subscriptions.ts";
 import { die, parseArgs } from "../util.ts";
 
-const USAGE = "usage: e9g subscriptions [check | add <name> --config-dir <dir> | remove <name>]";
+const USAGE = "usage: a6g subscriptions [check | add <name> --config-dir <dir> | remove <name>]";
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
@@ -40,7 +40,7 @@ export function subscriptions(argv: string[]): number {
   operatorOnly(`subscriptions ${sub}`);
   const list = accounts();
   if (sub === "check") {
-    for (const line of observeSubscriptions()) console.error(`e9g: ${line}`);
+    for (const line of observeSubscriptions()) console.error(`a6g: ${line}`);
     show();
     return 0;
   }
@@ -54,14 +54,14 @@ export function subscriptions(argv: string[]): number {
     if (list.some((a) => a.name === name)) die(`there's a subscription named ${name} already`);
     if (list.some((a) => a.configDir === dir)) die(`${dir} is a subscription already`);
     setAccounts([...list, { name, configDir: dir } satisfies Account]);
-    console.info(`e9g: added ${name}; e9g subscriptions check reads it now`);
+    console.info(`a6g: added ${name}; a6g subscriptions check reads it now`);
     return 0;
   }
   if (sub === "remove") {
     if (!name || !list.some((a) => a.name === name)) die(`no subscription named ${name ?? ""} (${list.map((a) => a.name).join(", ")})`);
     if (list.length === 1) die("that's the only one: the factory always reads at least this Mac's own");
     setAccounts(list.filter((a) => a.name !== name));
-    console.info(`e9g: removed ${name}`);
+    console.info(`a6g: removed ${name}`);
     return 0;
   }
   die(USAGE);

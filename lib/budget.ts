@@ -58,7 +58,7 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
       if (!move.warn.some((w) => w.key === "budget-unmeasured"))
         move.warn.push({
           key: "budget-unmeasured",
-          text: "The team's budget is in shares of a subscription, and there's no reading of the subscription yet (e9g subscriptions): it isn't checked until there is.",
+          text: "The team's budget is in shares of a subscription, and there's no reading of the subscription yet (a6g subscriptions): it isn't checked until there is.",
         });
       continue;
     }

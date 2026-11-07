@@ -6,14 +6,14 @@
 // a team that runs on more than one. The weekly limit across all models is the one measured; a model's own weekly
 // limit (Fable's, on some plans) is reported, not budgeted.
 //
-// Accounts: ~/.e9g/subscriptions.json, [{ name, configDir }]; with none listed, this Mac's own Claude Code login
+// Accounts: ~/.a6g/subscriptions.json, [{ name, configDir }]; with none listed, this Mac's own Claude Code login
 // (~/.claude). Another account has a Claude Code config folder of its own (CLAUDE_CONFIG_DIR), as Claude Code's docs
-// say to run several. Readings and estimates: ~/.e9g/subscriptions/state.json.
+// say to run several. Readings and estimates: ~/.a6g/subscriptions/state.json.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { E9G_HOME } from "./paths.ts";
+import { A6G_HOME } from "./paths.ts";
 import { round } from "./tasks/spend.ts";
 import { allTranscriptDirs, collectHours } from "./usage.ts";
 import { readJson, writeJson } from "./util.ts";
@@ -45,8 +45,8 @@ export interface SubscriptionState {
   week: number | null;
 }
 
-const SUBS = join(E9G_HOME, "subscriptions");
-const accountsFile = join(E9G_HOME, "subscriptions.json");
+const SUBS = join(A6G_HOME, "subscriptions");
+const accountsFile = join(A6G_HOME, "subscriptions.json");
 const stateFile = join(SUBS, "state.json");
 // A reading needs this much of the week used, and this much spent, to say what a week comes to: the report gives
 // whole percents, and a little use says little.

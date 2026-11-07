@@ -1,4 +1,4 @@
-// e9g task …: the team's task graph (lib/tasks/). Every change goes through here, checked against the caller's role
+// a6g task …: the team's task graph (lib/tasks/). Every change goes through here, checked against the caller's role
 // and the task's status, written only if nobody changed the task meanwhile, and recorded in its history. Agents never
 // write the store themselves: it's in the run folder, which the guard refuses them.
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -47,7 +47,7 @@ import { type Decision, decide } from "../tasks/decide.ts";
 import { openStore, Refused, type Store, update } from "../tasks/store.ts";
 import { git, gitOk, list, type Options, parseArgs, text as optionText } from "../util.ts";
 
-export const USAGE = `usage: e9g task <command>
+export const USAGE = `usage: a6g task <command>
   add "<title>" [--kind k] [--sev s] [--body "…" | --body-file f] [--area a] [--files p,q] [--parent id] [--after id,id] [--request rN]
       (a member's finding goes to triage; the planner's work is proposed; yours may be --approved)
   list [--status s,t] [--kind k] [--all] [--claimable] [--json]   ·   show <id> [--json]   ·   graph [--out <file>] [--all]
@@ -60,8 +60,8 @@ export const USAGE = `usage: e9g task <command>
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
   migrate --to mongo|files [--dry-run]   (yours: the whole graph into the other store)`;
 
-// Who's acting: the member's role (its instance's E9G_ROLE), or the operator when a person runs it.
-const actor = (): string => (asOperator() ? OPERATOR : process.env.E9G_ROLE || "unknown");
+// Who's acting: the member's role (its instance's A6G_ROLE), or the operator when a person runs it.
+const actor = (): string => (asOperator() ? OPERATOR : process.env.A6G_ROLE || "unknown");
 const may = (who: string, roles: string[]): boolean => who === OPERATOR || roles.includes(who);
 const need = (who: string, roles: string[], what: string): void => {
   if (!may(who, roles))
@@ -79,7 +79,7 @@ interface Context {
 async function withStore<R>(fn: (ctx: Context) => Promise<R>, { importFirst = true } = {}): Promise<R> {
   const { home, team, run } = teamSession();
   if (team.board.type !== "tasks") throw new Refused("this team's board is GitHub issues (team.json board), so it keeps no task graph");
-  // A 0.3 files board comes across once, ticket by ticket (lib/tasks/ops.ts); e9g task import does it itself, to say so.
+  // A 0.3 files board comes across once, ticket by ticket (lib/tasks/ops.ts); a6g task import does it itself, to say so.
   const store = importFirst ? await openTeamStore(team, run, home) : await openStore(team, run);
   try {
     return await fn({ home, team, run, store, who: actor() });
@@ -158,7 +158,7 @@ type Handler = (ctx: Context, positional: string[], options: Options) => Promise
 const add: Handler = async ({ team, store, who }, positional, options) => {
   if (who === "unknown") throw new Refused("only the team's members add tasks");
   const title = positional.join(" ").trim();
-  if (!title) throw new Refused('give the task a title: e9g task add "<what should be true>"');
+  if (!title) throw new Refused('give the task a title: a6g task add "<what should be true>"');
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") ?? (proposes(who) || who === "innovator" ? "feature" : "bug");
   const task = await addTask(
     store,
@@ -208,7 +208,7 @@ const show: Handler = async ({ store }, [id], options) => {
 const note: Handler = async ({ store, who }, [id, ...rest], options) => {
   if (who === "unknown") throw new Refused("only the team's members add notes");
   const text = (optionText(options["text"]) ?? rest.join(" ")).trim();
-  if (!text) throw new Refused('say what: e9g task note <id> "<text>"');
+  if (!text) throw new Refused('say what: a6g task note <id> "<text>"');
   const task = await getTask(store, id);
   await update(store.tasks, task.id, (t) => withEvent({ ...t, notes: [...t.notes, { at: nowIso(), by: who, text }] }, who, "added a note"));
   console.info(`task ${task.id}: note added`);
@@ -248,14 +248,14 @@ const edit: Handler = async ({ store, who }, [id], options) => {
     if (loop) throw new Refused(`--after ${loop} would make a loop: ${loop} already waits for ${task.id}`);
     changes.after = after;
   }
-  if (!Object.keys(changes).length) throw new Refused("nothing to change; see e9g task help");
+  if (!Object.keys(changes).length) throw new Refused("nothing to change; see a6g task help");
   if (changes.kind && changes.kind !== "journey" && task.kind === "journey" && all.some((t) => t.parent === task.id))
     throw new Refused(`journey ${task.id} has tasks (--parent ${task.id}); move them out first`);
   // What the task is (its title, body and kind) is what was approved: changed, it's approved again before it's built.
   const substance = (["title", "body", "kind"] as const).filter((key) => key in changes);
   const moved = await update(store.tasks, task.id, (t) => {
     if (substance.length && ["building", "review"].includes(t.status))
-      throw new Refused(`task ${t.id} is ${t.status}: its ${substance.join(", ")} stay as claimed; add a note (e9g task note) or move it back first`);
+      throw new Refused(`task ${t.id} is ${t.status}: its ${substance.join(", ")} stay as claimed; add a note (a6g task note) or move it back first`);
     const edited = `edited ${Object.keys(changes).join(", ")}`;
     if (!substance.length || t.approval === null) return withEvent({ ...t, ...changes }, who, edited);
     // An approved task goes back among the proposals (a move, by the table); a blocked or questioned one keeps its status.
@@ -299,7 +299,7 @@ const score: Handler = async ({ team, store, who }, [id], options) => {
   const moved = await update(store.tasks, task.id, (t) => {
     // Being built or reviewed, it stays as it was approved; a new score waits until it's back.
     if (["building", "review"].includes(t.status))
-      throw new Refused(`task ${t.id} is ${t.status}: score it again once it's back (e9g task note it meanwhile)`);
+      throw new Refused(`task ${t.id} is ${t.status}: score it again once it's back (a6g task note it meanwhile)`);
     const fields = { gate, score: scored, priority, approval: null };
     const said = `scored: priority ${priority} (size ${size}, ${confidence})`;
     return t.status === "approved"
@@ -381,7 +381,7 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
     // The operator's pause in force, read each time: one asked for a moment ago stops this claim too.
     const hold = holdOf(await store.controls.all());
     const held = all.find((t) => t.status === "building" && heldHere(t.claim, worktree, machineName()));
-    if (held) throw new Refused(`this worktree holds task ${held.id} already; submit it (e9g task submit ${held.id}) or release it first`);
+    if (held) throw new Refused(`this worktree holds task ${held.id} already; submit it (a6g task submit ${held.id}) or release it first`);
     const target = id ? all.find((t) => t.id === id.replace(/^#/, "")) : nextClaim(all, who, kind, hold);
     if (!target) {
       if (id) throw new Refused(`no task ${id}`);
@@ -444,7 +444,7 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
           : written.branch || leftover
             ? `${leftover ? "An earlier member's" : "Its"} branch has the work so far: git checkout ${branch} (if git says another worktree uses it, git -C <that path> switch --detach first).`
             : `Your branch: git branch -m ${branch}`,
-        `Done and committed: e9g task submit ${written.id}. Can't finish: e9g task release ${written.id} --blocked "<why>".`,
+        `Done and committed: a6g task submit ${written.id}. Can't finish: a6g task release ${written.id} --blocked "<why>".`,
         "",
         detail(written),
       ].join("\n")
@@ -498,7 +498,7 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
   if (git(worktree, "status", "--porcelain", "--untracked-files=normal") !== "") throw new Refused("commit your changes first, new files included");
   const base = baseRef(team, worktree);
   if (Number(git(worktree, "rev-list", "--count", `${base}..HEAD`)) === 0)
-    throw new Refused(`${branch} has nothing beyond ${team.branch}; release the task instead (e9g task release ${task.id} --blocked "…")`);
+    throw new Refused(`${branch} has nothing beyond ${team.branch}; release the task instead (a6g task release ${task.id} --blocked "…")`);
   const sha = git(worktree, "rev-parse", "HEAD");
   // A rework builds on the round it was sent back with, never beside it (a rebase after a conflict starts afresh: the
   // merge queue clears the round it sent back).
@@ -576,7 +576,7 @@ const migrateTasks: Handler = async ({ team, run, store, who }, _positional, opt
   if (!to) throw new Refused("which store? --to mongo or --to files");
   if (to === store.kind) throw new Refused(`this team's task graph is in ${to} already (team.json tasks.store)`);
   // Nothing may write to the graph between the copy and the switch: the team waits, paused.
-  if (!existsSync(join(run, "paused"))) throw new Refused(`pause the team first (e9g pause ${team.name}), so nothing changes the graph while it moves`);
+  if (!existsSync(join(run, "paused"))) throw new Refused(`pause the team first (a6g pause ${team.name}), so nothing changes the graph while it moves`);
   const { countsOf, markMoved, migrate, movedMark } = await import("../tasks/migrate.ts");
   const target =
     to === "mongo"
@@ -603,7 +603,7 @@ const migrateTasks: Handler = async ({ team, run, store, who }, _positional, opt
     console.info(
       [
         `copied ${said(copied)} from ${store.kind} to ${to}, and ${days.length} days of usage.`,
-        `Now set team.json "tasks": {"store": "${to}"${to === "mongo" && team.tasks.lead ? `, "lead": "${team.tasks.lead}"` : ""}} and run e9g register again${to === "mongo" ? " on each machine" : ""}.`,
+        `Now set team.json "tasks": {"store": "${to}"${to === "mongo" && team.tasks.lead ? `, "lead": "${team.tasks.lead}"` : ""}} and run a6g register again${to === "mongo" ? " on each machine" : ""}.`,
         store.kind === "files" ? "The file store is marked moved: commands refuse it from now on." : "",
       ]
         .filter(Boolean)
@@ -671,13 +671,13 @@ export async function task(argv: string[]): Promise<number> {
     return 0;
   }
   try {
-    // An option a subcommand doesn't read is refused rather than dropped (e9g task status 3 proposed --sev minor would
+    // An option a subcommand doesn't read is refused rather than dropped (a6g task status 3 proposed --sev minor would
     // otherwise change the status and nothing else).
     const known = OPTIONS[sub] ?? [];
     const unknown = Object.keys(options).filter((key) => key !== "--" && !known.includes(key));
     if (unknown.length)
       throw new Refused(
-        `e9g task ${sub} takes ${known.length ? known.map((k) => `--${k}`).join(", ") : "no options"}, not ${unknown.map((k) => `--${k}`).join(", ")}`
+        `a6g task ${sub} takes ${known.length ? known.map((k) => `--${k}`).join(", ") : "no options"}, not ${unknown.map((k) => `--${k}`).join(", ")}`
       );
     return await withStore((ctx) => handler(ctx, positional, options), { importFirst: sub !== "import" });
   } catch (error) {
