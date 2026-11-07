@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.5.0: Anything Factory
 
+- **The factory has a new name.** It's Anything Factory, and its CLI is `a6g`. The name changed everywhere it's used,
+  so every one of these moves with it: the home (`~/.a6g`) and the launcher, a team's `.a6g/` folder and its
+  `a6g/next` branch and `a6g/` branch prefix, the `A6G_*` environment variables, the plugin (`a6g:review`), the watchdog
+  (`ca.a6g.watchdog`), T3 instances (`a6g-<team>-<role>`), Keychain entries, the task graph's and the web app's databases
+  (`a6g`, `a6g_web`), the web app's headers (`x-a6g-*`) and its SST app (`a6g-web`). Nothing moves by itself: an
+  existing team, install or deployed stage has to be moved to the new names before it runs this release. Releases before
+  this one can't share a home with it, so the launcher no longer falls back to a JavaScript entry point (`bin/a6g.ts` only).
 - **Nothing reaches the operator without a reason and a recommendation.** Moving a task to `question` (`a6g task
 status`, the approver's `escalate`) refuses without `--reason` and `--recommend`; the task keeps both (`ask`), and
   `a6g task ask` gives them to one raised before. A blocked task is the planner's to sort unless it's raised with a

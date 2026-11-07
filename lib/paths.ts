@@ -95,8 +95,7 @@ export function readRegistry(name: string): RegistryEntry | null {
   return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as RegistryEntry) : null;
 }
 
-// A version's command line: bin/a6g.ts, or bin/a6g.mjs in versions before the move to TypeScript.
+// A version's command line.
 export function entryOf(root: string): string {
-  const ts = join(root, "bin", "a6g.ts");
-  return existsSync(ts) ? ts : join(root, "bin", "a6g.mjs");
+  return join(root, "bin", "a6g.ts");
 }

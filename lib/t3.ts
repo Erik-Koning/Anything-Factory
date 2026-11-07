@@ -411,7 +411,9 @@ export function contract(): string[] {
   const version = installedVersion();
   if (!version) return ["T3 Code's CLI (t3) isn't on PATH: install T3 Code (https://github.com/pingdotgg/t3code)"];
   if (!satisfies(version, SUPPORTED))
-    problems.push(`T3 Code ${version} is outside the range this factory supports (${SUPPORTED}); upgrade Anything Factory, or adjust lib/t3.ts and the range`);
+    problems.push(
+      `T3 Code ${version} is outside the range this factory supports (${SUPPORTED}); upgrade Anything Factory, or adjust lib/t3.ts and the range`
+    );
   if (!existsSync(DB)) problems.push(`T3 Code's database isn't at ${DB}`);
   else {
     for (const [table, columns] of Object.entries(COLUMNS)) {

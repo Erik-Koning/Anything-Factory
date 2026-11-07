@@ -20,7 +20,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -65,15 +64,6 @@ function archive(commit: string, ...paths: string[]): string | null {
   rmSync(tar);
   return dir;
 }
-// The same, as a clone to self-install from. Its dependency is a folder of its own: through a link, an install could
-// write into this checkout's node_modules.
-function releaseClone(commit: string): string | null {
-  const dir = archive(commit);
-  if (!dir) return null;
-  cpSync(join(ROOT, "node_modules", "axe-core"), join(dir, "node_modules", "axe-core"), { recursive: true });
-  return gitRepo(dir);
-}
-
 // The key paths at which two values differ, so a failure names where without printing what.
 function differences(a: unknown, b: unknown, at = ""): string[] {
   if (isDeepStrictEqual(a, b)) return [];
@@ -294,46 +284,42 @@ describe("an older self-install after a newer one, on a machine of its own (#3, 
   const m = machine();
   const versions = join(m.a6gHome, "versions");
   const source = sourceCopy();
-  const old = releaseClone(V020);
-  const skip = old ? false : `${V020} (0.2.0) isn't in this clone's history`;
-  const launcher = (args: string[], { cwd, env = {} }: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) =>
-    run([m.launcher, ...args], { env: { ...m.env, ...env }, ...(cwd === undefined ? {} : { cwd }) });
-
-  test("0.2.0 installed after this release leaves it reachable, for its agents and through 0.2.0's hand-over (#3)", { skip }, async () => {
+  test("doctor judges a team pinned to an older version by that version's own loader (#5)", async () => {
     const installed = await node(join(source, "bin", "a6g.ts"), ["self-install"], { env: m.env });
     assert.equal(installed.code, 0, installed.out);
-    assert.ok(statSync(join(versions, VERSION, "bin", "a6g.mjs")).mode & 0o100, "the release has bin/a6g.mjs, executable");
-    const rolledBack = await node(join(old ?? "", "bin", "a6g.mjs"), ["self-install"], { env: m.env });
-    assert.equal(rolledBack.code, 0, rolledBack.out);
-    assert.match(readFileSync(join(m.a6gHome, "bin", "a6g"), "utf8"), /\/bin\/a6g\.mjs" "\$@"/, "0.2.0's launcher, which runs bin/a6g.mjs");
-    const agent = await launcher(["--version"], { env: { A6G_VERSION: VERSION } });
-    assert.equal(agent.out.trim(), VERSION, agent.out);
-    const home = makeRepo(baseTeam({ factory: VERSION }));
-    const person = await launcher(["prompt", home, "planner"], { cwd: home });
-    assert.match(person.out, new RegExp(`compiled by Anything Factory ${escape(VERSION)} `), person.out.slice(0, 400));
-  });
-
-  test("doctor judges a team pinned to 0.2.0 by 0.2.0's loader (#5)", { skip }, async () => {
+    // An older release whose loader reads a page id with a dot, which this version refuses; and, like this version,
+    // refuses an isolation it doesn't know.
+    const older = sourceCopy("0.2.98");
+    const config = join(older, "lib", "config.ts");
+    const loader = readFileSync(config, "utf8");
+    const dots = loader.replace("const ID = /^[\\w-]+$/;", "const ID = /^[\\w.-]+$/;");
+    assert.notEqual(dots, loader, "the older release's loader reads a dot");
+    writeFileSync(config, dots);
+    const added = await node(join(older, "bin", "a6g.ts"), ["self-install"], { env: m.env });
+    assert.equal(added.code, 0, added.out);
     mkdirSync(join(m.a6gHome, "teams"), { recursive: true });
     const register = (name: string, extra: RawTeam) => {
-      const home = makeRepo(baseTeam({ name, factory: "0.2.0", ...extra }));
+      const home = makeRepo(baseTeam({ name, factory: "0.2.98", ...extra }));
       const runDir = join(m.root, "runs", name);
-      writeFileSync(join(m.a6gHome, "teams", `${name}.json`), JSON.stringify({ name, title: name, home, run: runDir, version: "0.2.0" }));
+      writeFileSync(join(m.a6gHome, "teams", `${name}.json`), JSON.stringify({ name, title: name, home, run: runDir, version: "0.2.98" }));
       mkdirSync(join(runDir, "prompts"), { recursive: true });
       for (const role of Object.keys(baseTeam().roles ?? {})) {
-        const prompt = spawnSync(process.execPath, [join(versions, "0.2.0", "bin", "a6g.mjs"), "prompt", name, role], {
+        const prompt = spawnSync(process.execPath, [join(versions, "0.2.98", "bin", "a6g.ts"), "prompt", name, role], {
           env: { ...process.env, ...m.env, A6G_HANDED_OVER: "1" },
           encoding: "utf8",
         });
         writeFileSync(join(runDir, "prompts", `${role}.md`), prompt.stdout);
       }
     };
-    // 0.2.0 reads a page id with a dot, which this version refuses; and refuses an isolation it doesn't know.
     register("dotted", { pages: { list: [{ id: "home.v2", path: "/" }] } });
     register("loose", { isolation: "loose" });
     const doctor = await node(join(versions, VERSION, "bin", "a6g.ts"), ["doctor"], { env: m.env });
-    assert.match(doctor.out, /^ok {4}dotted: rules load, prompts current \(judged by 0\.2\.0\)/m, doctor.out);
-    assert.match(doctor.out, /^FAIL {2}loose: Anything Factory 0\.2\.0, which it pins, can't load its rules or compile its prompts: .*isolation/m, doctor.out);
+    assert.match(doctor.out, /^ok {4}dotted: rules load, prompts current \(judged by 0\.2\.98\)/m, doctor.out);
+    assert.match(
+      doctor.out,
+      /^FAIL {2}loose: Anything Factory 0\.2\.98, which it pins, can't load its rules or compile its prompts: .*isolation/m,
+      doctor.out
+    );
     for (const name of ["dotted", "loose"]) rmSync(join(m.a6gHome, "teams", `${name}.json`));
   });
 

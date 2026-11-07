@@ -45,10 +45,9 @@ const LAUNCHER = `#!/usr/bin/env bash
 export A6G_HOME="\${A6G_HOME:-__A6G_HOME__}"
 root="$A6G_HOME/current"
 if [ -n "\${A6G_VERSION:-}" ] && [ -d "$A6G_HOME/versions/$A6G_VERSION" ]; then root="$A6G_HOME/versions/$A6G_VERSION"; fi
-# Versions before 0.3.0 were JavaScript (bin/a6g.mjs). Node's compile cache keeps it from stripping the TypeScript
-# again on every run; the factory drops it for anything it starts (lib/paths.ts).
+# Node's compile cache keeps it from stripping the TypeScript again on every run; the factory drops it for anything it
+# starts (lib/paths.ts).
 entry="$root/bin/a6g.ts"
-[ -f "$entry" ] || entry="$root/bin/a6g.mjs"
 if [ -z "\${NODE_COMPILE_CACHE:-}" ]; then export NODE_COMPILE_CACHE="$root/.cache" A6G_NODE_CACHE=1; fi
 exec "\${A6G_NODE:-$(command -v node || echo '__NODE__')}" "$entry" "$@"
 `;
@@ -192,7 +191,7 @@ export function selfInstall(argv: string[]): number {
     const staging = join(versionsDir, `.${version}.installing-${process.pid}`);
     rmSync(staging, { recursive: true, force: true });
     for (const file of files) cpSync(join(FACTORY_ROOT, file), join(staging, file), { recursive: true });
-    for (const script of ["bin/a6g.ts", "bin/a6g.mjs", ...files.filter((f) => f.endsWith(".sh"))])
+    for (const script of ["bin/a6g.ts", ...files.filter((f) => f.endsWith(".sh"))])
       if (existsSync(join(staging, script))) chmodSync(join(staging, script), 0o755);
     // The production dependencies, as this checkout has them installed: axe-core for a6g pages, and the optional
     // mongodb driver for teams whose tasks are in Mongo. Without them, npm installs them into the release.
@@ -225,8 +224,8 @@ export function selfInstall(argv: string[]): number {
     link(FACTORY_ROOT, versionDir("dev"));
     console.info(`a6g: versions/dev → ${FACTORY_ROOT}`);
   }
-  // The launcher and current are shared by every version, and an older one doesn't know the newer releases (0.2.0's
-  // launcher runs bin/a6g.mjs only), so installing an older version leaves them as they are.
+  // The launcher and current are shared by every version, and an older one doesn't know the newer releases, so
+  // installing an older version leaves them as they are.
   const current = readJson<Partial<FactoryPackage>>(join(A6G_HOME, "current", "package.json"))?.version;
   if (current && older(version, current) && !options["force"]) {
     console.info(`a6g: ${current} stays current, since ${version} is older; teams can pin ${version} (self-install --force makes it current)`);
