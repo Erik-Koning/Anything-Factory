@@ -1,8 +1,10 @@
 // The app end to end, against a local MongoDB seeded with the factory's own functions (seed.ts): one story, in order.
 import { readFileSync } from "node:fs";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { answersMessage, answersSince } from "../../../lib/tasks/answer.ts";
 import { type Control, holdOf, holdReport } from "../../../lib/tasks/controls.ts";
-import type { Task } from "../../../lib/tasks/model.ts";
+import { newTask, type Task, withEvent } from "../../../lib/tasks/model.ts";
+import { update } from "../../../lib/tasks/store.ts";
 import { actionIdOn, closeDatabases, databases, errorOf, freshCode, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
@@ -11,6 +13,8 @@ const CONTRIBUTOR = "casey@example.com";
 let admin: { context: BrowserContext; page: Page };
 let contributor: { context: BrowserContext; page: Page };
 let member: { context: BrowserContext; page: Page };
+// The member's session once their browser is closed, for a later look (sign-in links go at most once a minute).
+let memberSession: Awaited<ReturnType<BrowserContext["storageState"]>>;
 // A lane of the board, by its name.
 const lane = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
 
@@ -241,6 +245,7 @@ test("a member follows the work on the board, and suggests a task, which goes to
     parent: null,
     after: [],
   });
+  memberSession = await member.context.storageState();
   await member.context.close();
 });
 
@@ -283,6 +288,160 @@ test("the admin approves one proposal with a note and rejects another with a rea
   // A decision the move table refuses comes back in its words.
   await page.goto("/t/shop/proposals");
   await expect(page.getByRole("button", { name: `Approve #${approve}` })).toHaveCount(0);
+});
+
+test("the admin sees what waits on them and answers a question with one of its options, as the operator", async () => {
+  const { page } = admin;
+  const { question } = state().asks;
+  await page.goto("/t/shop");
+  // Every page says how much waits; the overview asks for an answer.
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /Waiting on you/ })).toContainText("2");
+  await expect(page.getByText("2 things are waiting on you.")).toBeVisible();
+  await page.getByRole("link", { name: "Answer them" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/inbox$/);
+  await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Waiting on you/ })).toHaveAttribute("aria-current", "page");
+
+  // The question as the planner put it: why it's the operator's, what the team recommends, its options.
+  const item = page.locator(`#task-${question}`);
+  await expect(item.getByText("who sees an order is the operator's")).toBeVisible();
+  await expect(item.getByRole("definition").filter({ hasText: "(b), behind the same sign-in as checkout." })).toBeVisible();
+  await expect(item.getByRole("radio")).toHaveCount(4);
+  await expect(item.locator("label", { hasText: "(b) open them to signed-in customers" }).getByText("recommended")).toBeVisible();
+  // A research question has nothing to approve: answer it, or reject it.
+  await item.getByText(`Or decide #${question} yourself`).click();
+  await expect(item.getByRole("button", { name: `Approve #${question}` })).toHaveCount(0);
+  await expect(item.getByRole("button", { name: `Reject #${question}` })).toBeVisible();
+  // Something else needs words; an option doesn't.
+  await item.getByRole("radio", { name: /^Something else/ }).check();
+  await expect(item.getByLabel("Your answer", { exact: true })).toHaveAttribute("required", "");
+  await item.getByRole("radio", { name: /^\(b\) open them to signed-in customers/ }).check();
+  await item.getByLabel("Anything to add (optional)").fill("Show the totals too.");
+  await item.getByRole("button", { name: `Send the answer on #${question}` }).click();
+  await expect(page.getByRole("status")).toContainText(`Answer sent on #${question}.`);
+
+  // It waits on the planner now, not on the admin.
+  const answered = page.getByRole("region", { name: /^Answered, with the planner/ });
+  await expect(answered.getByText("Show the totals too.")).toBeVisible();
+  await expect(answered.getByText("sent", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: /^Questions for you/ })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Waiting on you/ })).toContainText("1");
+
+  // In the graph: the operator's note, marked as the answer, and the task where it was, for the planner to move on.
+  const { graph, accounts } = await databases();
+  const task = (await graph.collection("tasks").findOne({ _id: `shop:${question}` as never })) as unknown as Task;
+  expect(task).toMatchObject({ status: "question" });
+  expect(task.notes.at(-1)).toMatchObject({ by: "operator", kind: "answer", text: "(b) open them to signed-in customers.\n\nShow the totals too." });
+  expect(task.history.at(-1)).toMatchObject({ by: "operator", what: "answered: (b) open them to signed-in customers. Show the totals too." });
+  // What the lead's watchdog passes to the planner.
+  expect(answersMessage(answersSince([task], "2000-01-01T00:00:00.000Z"))).toContain(
+    `1. #${question} "Q: who sees a customer's past orders?" (question): (b)`
+  );
+  const logged = await accounts.collection("audit").findOne({ action: "task.answered", outcome: "ok" });
+  expect(logged).toMatchObject({ team: "shop", target: `#${question} Q: who sees a customer's past orders?` });
+});
+
+test("the admin approves blocked work again from the inbox, and comes back to it", async () => {
+  const { page } = admin;
+  const { blocked } = state().asks;
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Waiting on you", level: 1 })).toBeVisible();
+  await expect(page.getByText("1 waiting for your answer.")).toBeVisible();
+  const item = page.locator(`#task-${blocked}`);
+  // Why it's the operator's, and what the team recommends, always.
+  await expect(item.getByText("needs the carrier's API key")).toBeVisible();
+  await expect(item.getByRole("definition").filter({ hasText: "add the key to the vault, then approve it again" })).toBeVisible();
+  await item.getByText(`Or decide #${blocked} yourself`).click();
+  await item.locator(`#approve-${blocked}`).fill("The key is in the vault now");
+  await item.getByRole("button", { name: `Approve again #${blocked}` }).click();
+  await expect(page).toHaveURL(/\/inbox\?/);
+  await expect(page.getByRole("status")).toContainText(`#${blocked} approved.`);
+  await expect(page.getByText("Nothing is waiting on you.")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Waiting on you", exact: true })).toBeVisible();
+  const { graph } = await databases();
+  expect(await graph.collection("tasks").findOne({ _id: `shop:${blocked}` as never })).toMatchObject({
+    status: "approved",
+    approval: { by: "operator", note: "The key is in the vault now" },
+  });
+});
+
+test("only an admin sees what waits on the operator", async ({ browser }) => {
+  const { context, page } = await newPage(browser, { storageState: memberSession });
+  await page.goto("/t/shop");
+  await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Waiting on you/ })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /Waiting on you/ })).toHaveCount(0);
+  for (const path of ["/t/shop/inbox", "/inbox"]) {
+    const response = await page.goto(path);
+    expect(response?.status(), path).toBe(404);
+  }
+  await context.close();
+});
+
+test("the admin chooses what they're emailed, and a test email shows it reaches them", async () => {
+  const { page } = admin;
+  await page.goto("/account");
+  await page.getByRole("link", { name: "Change what we email you" }).click();
+  await expect(page.getByRole("heading", { name: "Notifications", level: 1 })).toBeVisible();
+  await expect(page.getByText("These are the defaults for an admin")).toBeVisible();
+  await expect(page.getByRole("group", { name: /^Questions for you/ }).getByRole("radio", { name: "At once" })).toBeChecked();
+  await expect(page.getByRole("group", { name: /^Work merged/ }).getByRole("radio", { name: "In the daily digest" })).toBeChecked();
+  // This admin wants no email about merges, and their digest at 7 in Toronto.
+  await page
+    .getByRole("group", { name: /^Work merged/ })
+    .getByText("Don't email")
+    .click();
+  await page.getByRole("combobox", { name: /^At/ }).selectOption("7");
+  await page.getByRole("combobox", { name: /^Time zone/ }).selectOption("America/Toronto");
+  await page.getByRole("button", { name: "Save notifications" }).click();
+  await expect(page.getByRole("status")).toContainText("Saved.");
+  await expect(page.getByRole("group", { name: /^Work merged/ }).getByRole("radio", { name: "Don't email" })).toBeChecked();
+  const { accounts } = await databases();
+  const user = await accounts.collection("user").findOne({ email: state().admin.email });
+  expect(await accounts.collection("notification_prefs").findOne({ _id: String(user?._id) as never })).toMatchObject({
+    digestHour: 7,
+    timeZone: "America/Toronto",
+    reminder: true,
+    muted: [],
+    modes: { question: "now", blocked: "digest", merged: "off" },
+  });
+
+  const seen = mailsTo(state().admin.email).length;
+  await page.getByRole("button", { name: "Send me a test email" }).click();
+  await expect(page.getByRole("status")).toContainText("Test email sent to your sign-in address.");
+  expect(await nextLink(state().admin.email, seen)).toBe(`${state().baseURL}/account/notifications`);
+});
+
+test("the notifier emails the admin a new question at once, once, and never the member", async () => {
+  // The server's notifier is off in these tests: they run it here, as the server would every minute.
+  const { notifyOnce } = await import("../../server/notifier.ts");
+  const { storeFor } = await import("../../server/factory.ts");
+  const sent: string[] = [];
+  const info = console.info;
+  console.info = (...args: unknown[]) => void sent.push(args.join(" "));
+  try {
+    // The first look at a team is no news, whatever happened before it.
+    await notifyOnce();
+    const mails = () => sent.filter((line) => line.startsWith("[mail]") && line.includes("[Shop]"));
+    expect(mails()).toEqual([]);
+
+    const shop = storeFor("shop");
+    const asked = await shop.tasks.create(
+      newTask({ team: "shop", title: "Q: refunds by card or credit?", kind: "research", status: "proposed", by: "planner" })
+    );
+    await update(shop.tasks, asked.id, (t) =>
+      withEvent({ ...t, status: "question" }, "planner", "proposed → question: money is the operator's", { from: "proposed", to: "question" })
+    );
+    await notifyOnce();
+    expect(mails()).toEqual([
+      `[mail] to=${state().admin.email} subject="[Shop] Question for you: #${asked.id} Q: refunds by card or credit?" link=${state().baseURL}/t/shop/inbox#task-${asked.id}`,
+    ]);
+    // Read again, it isn't news again.
+    await notifyOnce();
+    expect(mails()).toHaveLength(1);
+    expect(mails().some((line) => line.includes(state().member))).toBe(false);
+  } finally {
+    console.info = info;
+    await (await import("../../server/db.ts")).closeMongo();
+  }
 });
 
 test("a contributor calling an admin's server action directly is refused, and nothing changes", async () => {
@@ -782,9 +941,12 @@ test("pages fit a phone's width without scrolling sideways", async ({ browser })
     "/t/shop/tasks/1",
     "/t/shop/requests",
     "/t/shop/proposals",
+    "/t/shop/inbox",
+    "/inbox",
     "/admin/people",
     "/admin/audit",
     "/account",
+    "/account/notifications",
   ]) {
     await page.goto(path);
     // The page itself, not a refusal.

@@ -6,6 +6,7 @@ import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
 import { controlsOf, limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
+import { waitingCount } from "../../../server/inbox.ts";
 import { journeys, merges, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
@@ -31,9 +32,21 @@ export default async function OverviewPage({ params, searchParams }: { params: P
   const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
   const details = can(viewer, "team:board", team.name);
   const shownJourneys = journeys(tasks);
+  const waiting = can(viewer, "proposals:decide", team.name) ? waitingCount(tasks) : 0;
   return (
     <>
       <Notice searchParams={searchParams} />
+      {waiting ? (
+        <div className="notice attention inline">
+          <span>
+            <b>{waiting === 1 ? "One thing is" : `${waiting} things are`} waiting on you.</b> The team goes on with everything else, and settles{" "}
+            {waiting === 1 ? "it" : "them"} once you answer.
+          </span>
+          <Link className="button primary" href={`/t/${team.name}/inbox`}>
+            {waiting === 1 ? "Answer it" : "Answer them"}
+          </Link>
+        </div>
+      ) : null}
       <div className="grid">
         <section className="panel" aria-labelledby="status">
           <h2 id="status">Status</h2>

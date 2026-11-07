@@ -73,10 +73,12 @@ team page does the same for admins, each time with an authenticator code; the wa
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
 To get a team's work as a pull request, give `push` in `team.json` a `pullRequest`:
-`{"remote": "origin", "branch": "a6g/next", "every": "6h", "pullRequest": true}`. After each push, the planner runs
-`a6g pr`, which opens a pull request into `base` or updates the open one, with what's in it, the calls the planner made
-and what's left. Merging it is how you promote the work; the team never merges into `base` itself. The factory runs
-`gh` for it, so the `github` policy stays denied.
+`{"remote": "origin", "branch": "a6g/next", "every": "6h", "pullRequest": true}`. At the finish line and when a
+cycle closes, the planner pushes and runs `a6g pr`, which opens a pull request into `base` or updates the open one,
+with what's in it, the calls the planner made and what's left. Merging it is how you promote the work; the team never
+merges into `base` itself. If you open that pull request yourself (no `[A6G-Planner]` in its title), your title and
+description stay yours, and the planner comments instead. The factory runs `gh` for it, so the `github` policy stays
+denied.
 
 To hear from your teams away from this Mac, and answer them:
 
@@ -102,7 +104,9 @@ a6g connect heartbeat https://hc-ping.com/<uuid>   # a check at healthchecks.io 
 ```
 
 The watchdog pings it at the end of every run in which T3 Code answers, so give the check a period of 5 minutes and a
-grace of 15. When the pings stop, the service alerts you. `a6g disconnect heartbeat` turns it off.
+grace of 15. When the pings stop, the service alerts you. Give each Mac its own check: one that two Macs ping alerts
+you only when both stop. A ping says the Mac and its watchdog are running, not that every team is well; a team's own
+trouble is in its log and its planner's messages. `a6g disconnect heartbeat` turns it off.
 
 WhatsApp is one way. A business may message you first only with a template Meta has approved, so
 `a6g connect whatsapp` adds a utility template, `a6g_update`, to your WhatsApp Business account, and every message
@@ -197,6 +201,17 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Journeys.** A journey is a task with child tasks. When its children are all done it's due its verification (worked
   out from them, never stored): a UX audit at every viewport, an end-to-end spec of the whole journey, then polish,
   which is more tasks in it. The planner marks it done.
+- **Raising to you.** A task reaches you only with why it's yours and what the team recommends: `a6g task status
+<id> question --reason "…" --recommend "…"` and the approver's `escalate` refuse without both (the operator raising
+  one to themselves gives the reason), and `a6g task ask` gives them to one raised before. A block is the planner's
+  to sort (`--reason`) unless it's raised to you with `--recommend`.
+- **Waiting on other tasks.** `a6g task status <id> blocked --waits-on <ids> --then close|resume` parks a task on
+  others: once they're done it closes (it was folded into them) or goes back to work, and once one is rejected it
+  goes back to the planner. The merge queue settles it as it merges, and the watchdog every minute.
+- **Answers.** What waits on you (every `question`, and blocks raised to you) you answer on the web app's Waiting on
+  you page, with the options the question offers: a note by the operator marked as the answer
+  (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
+  `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `a6g request add` takes a stakeholder's request; `a6g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks
   (`a6g task add --request`) or rejects it with a reason.
@@ -229,6 +244,10 @@ review and merge.
 On a team on several machines:
 
 - **Limits are per machine:** each worker runs up to the role's `limit` of its own.
+- **A heartbeat per machine:** run `a6g connect heartbeat` on each with a check of its own, or a worker's pings hide
+  the lead stopping.
+- **The pull request** (`push.pullRequest`) moves with every merge, since the lead pushes the integration branch;
+  `push.branch` stays the integration branch.
 - **Builders on a worker** use their own previews: the team's shared environment runs on the lead (only the planner
   starts it).
 - **After changing `tasks` in `team.json`,** run `a6g register` again on each machine, as for `contact`.
@@ -300,7 +319,7 @@ When T3 Code updates (`t3 update`), run `a6g doctor`:
   current. An installed release doesn't change under a running team. An older version than the current one is only
   added, for teams to pin (`--force` makes it current): the launcher is shared, and an older one doesn't know the
   newer releases. An install that was interrupted is put right by the next one.
-- **Pins:** each team pins one release in `team.json` (`"factory": "0.4.0"`; `a6g init` writes the version that
+- **Pins:** each team pins one release in `team.json` (`"factory": "0.5.0"`; `a6g init` writes the version that
   drafted it), and its agents run that release. A team without a pin runs whichever version registers it.
 - **Upgrading:** `a6g upgrade <team> [version]` registers the team with the target version first, and moves the pin
   only once that worked (`--force` registers even when T3 Code doesn't meet the contract). A running planner keeps
@@ -314,7 +333,7 @@ When T3 Code updates (`t3 update`), run `a6g doctor`:
 
 ```
 CONSTITUTION.md        the purpose, principles and the articles every agent works under
-bin/a6g.ts             the CLI (bin/a6g.mjs runs it, for the launchers of versions before 0.3.0)
+bin/a6g.ts             the CLI
 lib/                   config, policies, prompts, the T3 Code adapter, locks, detection, and the commands
 plugin/                the Claude Code plugin every agent loads: agents/ (roles and setup), hooks/
 templates/team/        the starter .a6g/ that init writes

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0: Anything Factory
+
+- **The factory has a new name.** It's Anything Factory, and its CLI is `a6g`. The name changed everywhere it's used,
+  so every one of these moves with it: the home (`~/.a6g`) and the launcher, a team's `.a6g/` folder and its
+  `a6g/next` branch and `a6g/` branch prefix, the `A6G_*` environment variables, the plugin (`a6g:review`), the watchdog
+  (`ca.a6g.watchdog`), T3 instances (`a6g-<team>-<role>`), Keychain entries, the task graph's and the web app's databases
+  (`a6g`, `a6g_web`), the web app's headers (`x-a6g-*`) and its SST app (`a6g-web`). Nothing moves by itself: an
+  existing team, install or deployed stage has to be moved to the new names before it runs this release. Releases before
+  this one can't share a home with it, so the launcher no longer falls back to a JavaScript entry point (`bin/a6g.ts` only).
+- **Nothing reaches the operator without a reason and a recommendation.** Moving a task to `question` (`a6g task
+status`, the approver's `escalate`) refuses without `--reason` and `--recommend`; the task keeps both (`ask`), and
+  `a6g task ask` gives them to one raised before. A blocked task is the planner's to sort unless it's raised with a
+  recommendation. The web app's inbox lists only what was raised, and always shows why and what the team recommends
+  (saying so when an older task has neither).
+- **Tasks that wait on others settle themselves.** `a6g task status <id> blocked --waits-on <ids> --then
+close|resume`: once they're done the task closes (folded into them) or goes back to work, and once one is rejected
+  it goes back to the planner, by the merge queue as it merges and by the watchdog every minute (`settleWaits`). A
+  blocked task can say again what it's blocked on, in place.
+
+- **Waiting on you, in the web app.** Every question the planner or the approver puts to the operator, and every
+  blocked task, on one page per team and one for all of them, counted in the header of every page. A question shows why
+  it's the operator's, its options read out of it as choices with the team's recommendation marked, what it holds up and
+  the other questions it mentions. The answer (`lib/tasks/answer.ts`) is a note by the operator marked as one, leaving
+  the task where it is; the watchdog passes new answers to the planner within a minute (`lib/answers.ts`, on its
+  every-minute run too), and the planner's prompt says they're on the task already.
+- **Notifications.** Each person chooses what they're emailed about (questions, blocked work, journeys done, a team
+  pausing or finishing, merges, their requests): at once, in a daily digest at their hour and time zone, or not at all,
+  per team, with defaults by role and a test email. The web app's notifier works the events out of each team's
+  history, queues each once per person, and sends under a lease, one container at a time.
+
 ## 0.4.0: The task graph, feature requests, cycles and machines
 
 - **The board is a task graph.** Every piece of work is a task, one document each (`board: "tasks"`; `"files"` means
@@ -79,14 +109,18 @@ add`), which opens only the form and their own requests and attributes what they
   ends with the commit it holds (read from the remote, with any newer commits not yet pushed), and with the
   planner's thread. The factory runs `gh` for it, so the `github` policy stays denied: `gh pr create` and
   everything else gh does beyond issues stay refused. Only the planner runs it (the guard, and the command itself).
-  Its rules describe it, the Done report links it, and `a6g check` proves who may run it, and warns when the remote
-  isn't GitHub or `gh` is missing.
+  Its rules describe it, the Done report links it, each cycle's close updates it, and `a6g check` proves who may run
+  it, and warns when the remote isn't GitHub or `gh` is missing. A pull request the operator opened (no
+  `[A6G-Planner]` in its title) keeps their title and description, and the planner's report goes in a comment; a
+  fork's pull request from a branch of the same name is left alone. On several machines, where the lead pushes after
+  every merge, its footer says when it was written, and `push.branch` must be the integration branch.
 - **A heartbeat, for when the Mac itself stops.** `a6g connect heartbeat <url>` keeps a check's ping URL
   (healthchecks.io, or any service like it) once a test ping goes through. The watchdog pings it at the end of every
   run of every team in which T3 Code answers. When the pings stop, because the Mac is off, asleep or at the login
   screen, the watchdog stopped, or T3 Code won't start, the service alerts the operator: the one alert the factory
   can't send itself. A failing ping is logged at most hourly. `a6g connect` and `a6g doctor` show when it last
-  went through, and `a6g disconnect heartbeat` turns it off.
+  went through, and `a6g disconnect heartbeat` turns it off. It says the Mac's watchdog runs, not that every team is
+  well, and each machine needs a check of its own.
 
 ## 0.3.1: The planner decides from direction, and writes less often
 

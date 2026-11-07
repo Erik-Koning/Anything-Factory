@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
 import { ACTION_LABEL, listAudit } from "../../server/audit.ts";
@@ -31,6 +32,20 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
         {viewer.admin ? " · admin" : ""}
       </p>
       <Notice searchParams={searchParams} />
+      <section className="panel" aria-labelledby="notifications">
+        <div className="head">
+          <h2 id="notifications" className="title">
+            Notifications
+          </h2>
+          <Link className="button" href="/account/notifications">
+            Change what we email you
+          </Link>
+        </div>
+        <p className="hint">
+          {viewer.admin ? "Questions for you, blocked work, journeys done and your requests" : "Journeys done, blocked work and your requests"}: at once,
+          in a daily digest, or not at all. A test email shows they reach you.
+        </p>
+      </section>
       <div className="grid">
         <section className="panel" aria-labelledby="passkeys">
           <h2 id="passkeys">Passkeys</h2>

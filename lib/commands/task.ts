@@ -11,17 +11,19 @@ import { asOperator, teamSession } from "../session.ts";
 import { describeHold, holdOf } from "../tasks/controls.ts";
 import { betterDiagram } from "../tasks/graph.ts";
 import {
+  askRefusal,
+  blockRefusal,
   branchFor,
-  CLAIMS,
   claimRefusal,
+  CLAIMS,
   CONFIDENCE,
   conflictOf,
-  heldHere,
-  DIMENSIONS,
   type Dimension,
+  DIMENSIONS,
+  heldHere,
   journeyDue,
-  KINDS,
   type Kind,
+  KINDS,
   move,
   moveRefusal,
   nextClaim,
@@ -30,10 +32,10 @@ import {
   priorityOf,
   type Score,
   SEVERITIES,
-  SIZES,
   type Size,
-  STATUSES,
+  SIZES,
   type Status,
+  STATUSES,
   statusRefusal,
   type Task,
   ticketOf,
@@ -56,7 +58,11 @@ export const USAGE = `usage: a6g task <command>
   score <id> --pain N --reach N --revenue N --wow N --distribution N --leverage N --urgency N --risk N
              --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…"]
   status <id> <status> [--reason "…"]   ·   import
-  approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…"
+      question: --reason "why it's the operator's" --recommend "what the team would do" (both required)
+      blocked: --reason "…" (the planner's to sort), with --recommend "…" to raise it to the operator,
+               or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
+  ask <id> --reason "…" --recommend "…"   a question or blocked task: why it's the operator's and what the team recommends
+  approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…" --recommend "…"
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
   migrate --to mongo|files [--dry-run]   (yours: the whole graph into the other store)`;
 
@@ -145,6 +151,15 @@ export function detail(t: Task): string {
   if (t.score)
     out.push(`score: ${DIMENSIONS.map((d) => `${d} ${t.score?.[d]}`).join(", ")}; confidence ${t.score.confidence}, size ${t.score.size}. ${t.score.why}`);
   if (t.approval) out.push(`approved by the ${t.approval.by} at ${t.approval.at}${t.approval.note ? `: ${t.approval.note}` : ""}`);
+  if (t.ask)
+    out.push(
+      `raised to the operator by the ${t.ask.by}: ${t.ask.reason}`,
+      `the team recommends: ${t.ask.recommendation || "(none: the operator raised it)"}`
+    );
+  if (t.wait)
+    out.push(
+      `waits on ${t.wait.on.map((id) => `#${id}`).join(", ")}, then ${t.wait.then === "close" ? "closes (folded into them)" : "goes back to work"}`
+    );
   if (t.body) out.push("", t.body);
   if (t.notes.length) out.push("", "Notes:", ...t.notes.map((n) => `- ${n.at.slice(0, 16)} ${n.by}: ${n.text}`));
   out.push("", "History:", ...t.history.slice(-8).map((e) => `- ${e.at.slice(0, 16)} ${e.by}: ${e.what}`));
@@ -317,16 +332,107 @@ const setStatus: Handler = async ({ store, who }, [id, to], options) => {
   if (!target) throw new Refused(`which status? ${STATUSES.join(", ")}`);
   const task = await getTask(store, id);
   const all = await store.tasks.all();
-  const refusal = statusRefusal(task, target, who, all);
+  // Blocked already: say again what it's blocked on (what it waits for, or raising it to the operator), in place.
+  const again = task.status === "blocked" && target === "blocked";
+  const refusal = again
+    ? who === "planner" || who === OPERATOR
+      ? null
+      : `only the planner (or the operator) sets a task's status; the ${who} uses its own task commands`
+    : statusRefusal(task, target, who, all);
   if (refusal) throw new Refused(refusal);
   const reason = optionText(options["reason"]);
+  const recommendation = optionText(options["recommend"]) ?? "";
+  // A question is raised to the operator: it says why it's theirs and what the team recommends. A block says what it's
+  // on: other tasks (settled when they're done), or why; with a recommendation, it's raised to the operator too.
+  const waitsOn = waitIds(options["waits-on"], task.id, all);
+  const then = optionText(options["then"]) ?? "resume";
+  if (then !== "close" && then !== "resume") throw new Refused("--then close (it was folded into them) or resume (back to work once they're done)");
+  if ((waitsOn.length || options["then"] !== undefined) && target !== "blocked")
+    throw new Refused("--waits-on and --then are for blocking a task: a6g task status <id> blocked --waits-on …");
+  if (target === "blocked") {
+    const blocked = blockRefusal({ reason: reason ?? "", waitsOn });
+    if (blocked) throw new Refused(blocked);
+    if (recommendation && !reason) throw new Refused("say why it's the operator's: --reason \"…\" with --recommend");
+  }
+  if (target === "question") {
+    const asked = askRefusal({ reason: reason ?? "", recommendation }, who);
+    if (asked) throw new Refused(asked);
+  }
   await update(store.tasks, task.id, (t) => {
-    const notes = reason ? { notes: [...t.notes, { at: nowIso(), by: who, text: `${t.status} → ${target}: ${reason}` }] } : {};
+    const at = nowIso();
+    const notes = reason ? { notes: [...t.notes, { at, by: who, text: `${t.status} → ${target}: ${reason}` }] } : {};
     // The operator setting a task approved approves it.
-    const approval = target === "approved" && who === OPERATOR && !t.approval ? { approval: { by: OPERATOR, at: nowIso(), note: reason ?? "" } } : {};
-    return move(t, target, "status", who, { all }, { fields: { ...notes, ...approval }, why: reason });
+    const approval = target === "approved" && who === OPERATOR && !t.approval ? { approval: { by: OPERATOR, at, note: reason ?? "" } } : {};
+    const raised =
+      target === "question" || (target === "blocked" && recommendation)
+        ? { ask: { reason: reason ?? "", recommendation, by: who, at } }
+        : target === "blocked"
+          ? { ask: null }
+          : {};
+    const waiting = target === "blocked" ? { wait: waitsOn.length ? { on: waitsOn, then: then as "close" | "resume", by: who, at } : null } : {};
+    if (again)
+      return withEvent(
+        { ...t, ...notes, ...raised, ...waiting },
+        who,
+        `blocked on${waitsOn.length ? ` ${waitsOn.map((id) => `#${id}`).join(", ")}, then ${then}` : ""}${reason ? `: ${reason}` : ""}`
+      );
+    return move(
+      t,
+      target,
+      "status",
+      who,
+      { all },
+      {
+        fields: { ...notes, ...approval, ...raised, ...waiting },
+        why: reason ?? (waitsOn.length ? `waits on ${waitsOn.map((id) => `#${id}`).join(", ")}` : undefined),
+      }
+    );
   });
-  console.info(`task ${task.id}: ${task.status} → ${target}`);
+  console.info(
+    `task ${task.id}: ${again ? "still blocked" : `${task.status} → ${target}`}${waitsOn.length ? `, waiting on ${waitsOn.map((id) => `#${id}`).join(", ")} (then ${then})` : ""}${target === "question" || recommendation ? ", raised to the operator" : ""}`
+  );
+  return 0;
+};
+
+// The tasks a block waits on, from --waits-on "192, #193": each one a task of the team, never the task itself.
+function waitIds(option: string | true | string[] | undefined, self: string, all: Task[]): string[] {
+  const text = optionText(option);
+  if (!text) return [];
+  const ids = [
+    ...new Set(
+      text
+        .split(/[\s,]+/)
+        .map((id) => id.replace(/^#/, ""))
+        .filter(Boolean)
+    ),
+  ];
+  const known = new Set(all.map((t) => t.id));
+  for (const id of ids) {
+    if (id === self) throw new Refused(`task ${self} can't wait on itself`);
+    if (!known.has(id)) throw new Refused(`--waits-on: there's no task #${id}`);
+  }
+  return ids;
+}
+
+// a6g task ask: why a question or a blocked task is the operator's, and what the team recommends, set again (a
+// question raised before they were required, a recommendation that changed, or a blocked task only the operator can
+// unblock). The operator's inbox shows both.
+const ask: Handler = async ({ store, who }, [id], options) => {
+  if (who !== "planner" && who !== "approver" && who !== OPERATOR)
+    throw new Refused("the planner and the approver raise tasks to the operator; add a note (a6g task note) instead");
+  const reason = optionText(options["reason"]) ?? "";
+  const recommendation = optionText(options["recommend"]) ?? "";
+  const task = await getTask(store, id);
+  if (task.status !== "question" && task.status !== "blocked")
+    throw new Refused(
+      `task ${task.id} is ${task.status}: only a question or a blocked task is raised to the operator (a6g task status ${task.id} question …)`
+    );
+  const refusal = askRefusal({ reason, recommendation }, who);
+  if (refusal) throw new Refused(refusal);
+  await update(store.tasks, task.id, (t) =>
+    withEvent({ ...t, ask: { reason, recommendation, by: who, at: nowIso() } }, who, `raised to the operator: ${reason}`)
+  );
+  console.info(`task ${task.id}: raised to the operator, with the team's recommendation`);
   return 0;
 };
 
@@ -342,8 +448,9 @@ const proposalVerdict =
   (decision: Exclude<Decision, "approve">, flag: "reason" | "note"): Handler =>
   async ({ team, store, who }, [id], options) => {
     const reason = optionText(options[flag]) ?? "";
+    const recommendation = optionText(options["recommend"]) ?? "";
     try {
-      const task = await decide(store, id ?? "", decision, { who, approval: team.approval, text: reason });
+      const task = await decide(store, id ?? "", decision, { who, approval: team.approval, text: reason, recommendation });
       console.info(`task ${task.id}: ${task.status}`);
       return 0;
     } catch (error) {
@@ -623,11 +730,12 @@ const OPTIONS: Record<string, string[]> = {
   note: ["text"],
   edit: ["title", "body", "body-file", "kind", "sev", "area", "files", "parent", "after"],
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
-  status: ["reason"],
+  status: ["reason", "recommend", "waits-on", "then"],
+  ask: ["reason", "recommend"],
   approve: ["note"],
   reject: ["reason"],
   research: ["note"],
-  escalate: ["reason"],
+  escalate: ["reason", "recommend"],
   claim: ["kind"],
   release: ["blocked"],
   submit: [],
@@ -645,6 +753,7 @@ const COMMANDS: Record<string, Handler> = {
   edit,
   score,
   status: setStatus,
+  ask,
   approve,
   reject: proposalVerdict("reject", "reason"),
   research: proposalVerdict("research", "note"),

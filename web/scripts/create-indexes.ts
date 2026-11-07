@@ -13,8 +13,15 @@ const { ensureAuthIndexes } = await import("../server/auth-indexes.ts");
 const audit = await import("../server/audit.ts");
 const knownIps = await import("../server/known-ips.ts");
 const codeAttempts = await import("../server/code-attempts.ts");
+const notifier = await import("../server/notifier.ts");
 try {
-  await Promise.all([ensureAuthIndexes(authDb()), audit.ensureIndexes(), knownIps.ensureIndexes(), codeAttempts.ensureIndexes()]);
+  await Promise.all([
+    ensureAuthIndexes(authDb()),
+    audit.ensureIndexes(),
+    knownIps.ensureIndexes(),
+    codeAttempts.ensureIndexes(),
+    notifier.ensureIndexes(),
+  ]);
   for (const name of [
     "user",
     "session",
@@ -27,6 +34,7 @@ try {
     "known_ips",
     "ip_challenges",
     "code_attempts",
+    "notification_queue",
   ]) {
     const indexes = await authDb()
       .collection(name)

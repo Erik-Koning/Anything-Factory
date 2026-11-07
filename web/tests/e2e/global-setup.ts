@@ -62,6 +62,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
     BETTER_AUTH_URL: `http://localhost:${PORT}`,
     MAIL_LOG: "1",
+    // The notifier stays off in the server: the tests run it themselves, when they choose (app.spec.ts).
+    NOTIFY_EVERY_SECONDS: "0",
     // As behind CloudFront: the viewer's address in one header, trusted with the CDN's secret.
     CLIENT_IP_HEADER: "x-a6g-viewer-ip",
     ORIGIN_SECRET,

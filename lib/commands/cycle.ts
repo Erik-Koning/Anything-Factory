@@ -60,6 +60,11 @@ export async function cycle(argv: string[]): Promise<number> {
       `Subject: Cycle ${number}: ${firstLine}\n\n${report}\n\nDone this cycle: ${done.map((id) => `#${id}`).join(" ") || "nothing merged"}.\n`
     );
     console.info(`cycle ${number} closed (${done.length} done); the report is in the outbox: ${draft}`);
+    // The pull request says what it holds as of this cycle (plugin/agents/planner.md, Cycles).
+    if (team.push?.pullRequest)
+      console.info(
+        `then the pull request: push ${team.push.branch} if it isn't pushed (git push ${team.push.remote} ${team.push.branch}), and a6g pr --title "Cycle ${number}: …" --body-file ${file ?? "<the report's file>"}`
+      );
     return 0;
   } finally {
     await store.close();

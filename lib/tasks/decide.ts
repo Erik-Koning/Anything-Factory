@@ -8,12 +8,14 @@ export type Decision = "approve" | "reject" | "research" | "escalate";
 const TO: Record<Decision, Status> = { approve: "approved", reject: "rejected", research: "researching", escalate: "question" };
 
 // `who` decides on task `id`. An approval may carry a note; the others need one (why it's rejected, what to find
-// out, what the operator has to decide). Throws a Refused saying why when it can't.
+// out, what the operator has to decide). An escalation raises it to the operator, so it carries the team's
+// recommendation too (the operator escalating to themselves needn't give one). Throws a Refused saying why when it
+// can't.
 export async function decide(
   store: Store,
   id: string,
   decision: Decision,
-  { who, approval, text = "" }: { who: Actor; approval: ApprovalRules; text?: string }
+  { who, approval, text = "", recommendation = "" }: { who: Actor; approval: ApprovalRules; text?: string; recommendation?: string }
 ): Promise<Task> {
   const task = await store.tasks.get(id.replace(/^#/, ""));
   if (!task) throw new Refused(`no task ${id}`);
@@ -26,6 +28,12 @@ export async function decide(
   return update(store.tasks, task.id, (t) =>
     decision === "approve"
       ? move(t, to, via, who, ctx, { fields: { approval: { by: who, at: nowIso(), note: text } }, why: text || undefined })
-      : move(t, to, via, who, ctx, { fields: { notes: [...t.notes, { at: nowIso(), by: who, text }] }, why: text })
+      : move(t, to, via, who, ctx, {
+          fields: {
+            notes: [...t.notes, { at: nowIso(), by: who, text }],
+            ...(decision === "escalate" ? { ask: { reason: text.trim(), recommendation: recommendation.trim(), by: who, at: nowIso() } } : {}),
+          },
+          why: text,
+        })
   );
 }

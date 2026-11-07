@@ -5,6 +5,7 @@ import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/
 import { DIMENSIONS, journeyDue } from "../../../../../../lib/tasks/model.ts";
 import { can, TASK_ID } from "../../../../../server/access.ts";
 import { storeFor } from "../../../../../server/factory.ts";
+import { waitsOnOperator } from "../../../../../../lib/tasks/answer.ts";
 import { originsFor } from "../../../../../server/origin.ts";
 import { PROPOSALS } from "../../../../../server/views.ts";
 import { teamFor } from "../../team.ts";
@@ -19,7 +20,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const store = storeFor(team.name);
   const [task, tasks, origins] = await Promise.all([store.tasks.get(id), store.tasks.all(), originsFor(team.name, viewer)]);
   if (!task) notFound();
-  const decide = can(viewer, "proposals:decide", team.name) && (PROPOSALS.includes(task.status) || task.status === "triage") && task.kind !== "journey";
+  const admin = can(viewer, "proposals:decide", team.name);
+  const decide = admin && (PROPOSALS.includes(task.status) || task.status === "triage") && task.kind !== "journey";
+  const answer = admin && waitsOnOperator(task);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const base = `/t/${team.name}`;
   const ref = (tid: string) => (
@@ -54,11 +57,18 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           {origins.of(task, true)} · added <Ago at={task.createdAt} /> · updated <Ago at={task.updatedAt} />
         </p>
         {task.body ? <p className="text">{task.body}</p> : <p className="empty">No description.</p>}
-        {decide ? (
-          <p>
-            <Link className="button primary" href={`${base}/proposals#task-${task.id}`}>
-              Decide on #{task.id}
-            </Link>
+        {answer || decide ? (
+          <p className="inline">
+            {answer ? (
+              <Link className="button primary" href={`${base}/inbox#task-${task.id}`}>
+                Answer #{task.id}
+              </Link>
+            ) : null}
+            {decide ? (
+              <Link className={answer ? "button" : "button primary"} href={`${base}/proposals#task-${task.id}`}>
+                Decide on #{task.id}
+              </Link>
+            ) : null}
           </p>
         ) : null}
       </article>
@@ -209,7 +219,8 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
             {task.notes.map((n, i) => (
               <li key={`n${i}`}>
                 <p className="small muted">
-                  {n.by} · <Ago at={n.at} />
+                  {n.by}
+                  {n.kind === "answer" ? " (answer)" : ""} · <Ago at={n.at} />
                 </p>
                 <p className="text">{n.text}</p>
               </li>

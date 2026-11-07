@@ -2,9 +2,10 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
+// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
 // openStore (the Keychain, the run folder and child processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
+import { answer } from "../../lib/tasks/answer.ts";
 import { budgetControl, type Control, type HoldScope, type Limits, limitsOf, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
@@ -80,6 +81,10 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
   if (!settings?.approval) throw new Refused(`${team} hasn't published its approval rules (a6g register publishes them)`);
   return decide(storeFor(team), id, decision, { who: OPERATOR, approval: settings.approval, text: text.trim() });
 }
+
+// An admin's answer to what waits on them (a question, or blocked work), as the operator: a note marked as the answer,
+// which the lead's watchdog passes to the planner within a minute.
+export const answerAsOperator = (team: string, id: string, text: string): Promise<Task> => answer(storeFor(team), id, { who: OPERATOR, text });
 
 // A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
 // added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,

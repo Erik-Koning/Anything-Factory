@@ -24,6 +24,10 @@ export interface WebConfig {
   originSecret: string | null;
   // How long the audit log keeps an event, in days.
   auditDays: number;
+  // How often the notifier looks for what to email (seconds; 0: never), and the time zone of the daily digest for
+  // someone who hasn't chosen theirs.
+  notifyEverySeconds: number;
+  notifyTimeZone: string;
 }
 
 const DATABASE = /^[\w-]{1,60}$/;
@@ -64,6 +68,12 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
   }
   const auditDays = Number(env.AUDIT_RETENTION_DAYS || 400);
   if (!Number.isInteger(auditDays) || auditDays < 30) problems.push("AUDIT_RETENTION_DAYS: a whole number of days, 30 or more");
+  const notifyEverySeconds = Number(env.NOTIFY_EVERY_SECONDS || 60);
+  if (!Number.isInteger(notifyEverySeconds) || notifyEverySeconds < 0)
+    problems.push("NOTIFY_EVERY_SECONDS: a whole number of seconds, or 0 for no notifications");
+  const notifyTimeZone = env.NOTIFY_TIME_ZONE || "UTC";
+  if (notifyTimeZone !== "UTC" && !Intl.supportedValuesOf("timeZone").includes(notifyTimeZone))
+    problems.push("NOTIFY_TIME_ZONE: a time zone such as America/Toronto");
   if (problems.length) throw new Error(`The web app's environment isn't set:\n- ${problems.join("\n- ")}`);
   return {
     mongoUri,
@@ -78,6 +88,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     ipHeader,
     originSecret,
     auditDays,
+    notifyEverySeconds,
+    notifyTimeZone,
   };
 }
 

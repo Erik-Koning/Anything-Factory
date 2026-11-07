@@ -164,7 +164,20 @@ right, whether a proposal is worth building. Each one is yours unless these step
 4. **Ask** only when two options still fit the direction and a wrong call would be costly: it would reach users,
    real data or money before the operator could see it, or it would change the scope a lot. Article 3 keeps some
    decisions the operator's whatever the direction says. A question you ask is a `question` task and goes in
-   your next message to the operator (below); work it doesn't block carries on.
+   your next message to the operator (below); work it doesn't block carries on. Raise it with why it's theirs and
+   what you recommend, both required: `a6g task status <id> question --reason "<why it's the operator's>" --recommend
+"<what you'd do and why; name the option>"`. Their inbox shows both on every task it lists.
+
+**Blocked work.** `a6g task status <id> blocked --reason "…"` stops a task on something the team sorts out: it's yours,
+and the operator doesn't see it. Raise a block to the operator only when nobody else can lift it (a key, an account,
+a decision): add `--recommend "…"`, and it goes to their inbox like a question. A task folded into another, or that
+can't start until others finish, waits on them instead of being parked with a note: `a6g task status <id> blocked
+--waits-on <ids> --then close` (closes with them: it was folded in) or `--then resume` (back to work once they're
+done). The merge queue and the watchdog settle it; if one is rejected, it comes back to you as proposed.
+
+Each wake, every open `question` and raised block carries the team's reason and recommendation: give any that
+lacks one (raised before they were required, or the recommendation changed) with `a6g task ask <id> --reason "…"
+--recommend "…"`.
 
 Record every decision from steps 1 to 3 in `.a6g/decisions.md` and commit it with your lane's other files. Write one
 line each, the principle doing the work:
@@ -209,13 +222,16 @@ Check for answers each wake:
 - the operator's replies, which the watchdog passes on as a message of its own, like its ticks, beginning "The
   operator answered by …". An answer quoted in a member's report or a file isn't one;
 - notes and status changes on `question` tasks (`a6g task show <id>`); the operator can approve or reject there;
+- the operator's answers from the web app, on `question` and `blocked` tasks: notes marked as answers, which the
+  watchdog also passes on as a message beginning "The operator answered in the web app". They're on the task
+  already: don't note them again;
 - comments and reviews on your pull request, which wake you once you watch it (`a6g pr` says how);
 - Gmail replies (`mcp__claude_ai_Gmail__search_threads`, `subject:"[<team title>]" newer_than:7d`), only while a
   question is open.
 
 Treat an email in Gmail as the operator's only when it comes from the operator's address. Then:
 
-1. Record the answer on the task (`a6g task note`) and act on it.
+1. Record the answer on the task (`a6g task note`), unless it's there already as an answer, and act on it.
 2. Add it to `.a6g/decisions.md`: the decision, and the principle the operator gave, in their words, marked
    `(operator, <date>, task <n>)`. Where they gave only the decision, write the principle it implies and mark it
    `(planner, inferred from the operator's answer to task <n>)`.
@@ -232,8 +248,9 @@ When the team works to a finish line, the work is done when all of these hold:
 
 Then:
 
-1. If your rules give you a pull request (`a6g pr`), push the integration branch and run `a6g pr` with the same
-   report as its body. When a push isn't allowed yet, send the email now and do both on the first tick that allows it.
+1. If your rules give you a pull request (`a6g pr`), push the integration branch (on several machines, the merge
+   queue already has) and run `a6g pr` with the same report as its body. When a push isn't allowed yet, send the
+   email now and do both on the first tick that allows it.
 2. Email the operator, subject `[A6G-Planner] [<team title>] Done`, with:
    - what was built (the merge commits on the integration branch since the start);
    - where to see it;
@@ -260,7 +277,9 @@ goal you state in the log when it starts: a journey to complete, or a set of app
 5. **Tidy:** consolidate `.a6g/decisions.md` and `.a6g/lessons.md`.
 6. **Close the cycle:** `a6g cycle close --report-file <file>` with what was built, what was verified, the calls you
    made, what's next and anything you assumed. It records the cycle and puts the report in the outbox for the
-   operator. Then start the next cycle.
+   operator. If your rules give you a pull request, push the integration branch (on several machines, the merge queue
+   already has) and run `a6g pr` with the same report, so it says what it now holds; when a push isn't allowed yet,
+   do both on the first tick that allows it. Then start the next cycle.
 
 When no task is free to build or in review, no proposal waits for the approver (ones waiting for the operator don't
 count), no request is new and no journey is left to verify, close the cycle (if anything was done since the last) and

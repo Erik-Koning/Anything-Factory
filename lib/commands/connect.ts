@@ -323,7 +323,8 @@ const HEARTBEAT_HELP = `An outside service tells you when this Mac stops pinging
 after a restart, when the watchdog stops, or when T3 Code won't start. The watchdog pings it at the end of every
 run (every 5 minutes) in which T3 Code answers.
   1. Make a check at a service that alerts you when pings stop, such as https://healthchecks.io (free): period
-     5 minutes, grace 15, so a restart of T3 Code doesn't alert you.
+     5 minutes, grace 15, so a restart of T3 Code doesn't alert you. One check per Mac: a check two Macs ping
+     alerts you only when both stop.
   2. a6g connect heartbeat <the check's ping URL>`;
 
 async function connectHeartbeat(argv: string[]): Promise<number> {

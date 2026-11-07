@@ -940,3 +940,205 @@ table.figures td {
   padding: 3px 16px 3px 0;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Waiting on you --------------------------------------------------------------------------------------------- */
+/* How many wait on the operator, beside the header's link and the team's tab. */
+.badge {
+  display: inline-block;
+  min-width: 1.6em;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.65;
+  text-align: center;
+}
+.top nav a.attention {
+  color: var(--text);
+  font-weight: 600;
+}
+/* The call to answer, at the top of the teams and overview pages. */
+.notice.attention {
+  border-color: var(--caution);
+  border-left-width: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+.chip.link {
+  color: var(--text);
+  text-decoration: none;
+}
+.chip.link:hover {
+  text-decoration: underline;
+}
+li.waiting {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+}
+li.waiting > p,
+li.waiting > dl {
+  margin: 0;
+}
+/* Why it came to the operator, and what the team recommends: both always shown, a gap said as one. */
+dl.raised {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+dl.raised > div {
+  padding: 8px 12px;
+  background: var(--bg);
+  border-left: 3px solid var(--caution);
+  border-radius: 0 6px 6px 0;
+  font-size: 13.5px;
+}
+dl.raised > div.recommends {
+  border-left-color: var(--accent);
+}
+dl.raised dt {
+  display: inline;
+  font-weight: 600;
+}
+dl.raised dt::after {
+  content: ": ";
+}
+dl.raised dd {
+  display: inline;
+  margin: 0;
+}
+.missing {
+  color: var(--warn);
+}
+.ask .text {
+  margin: 0;
+}
+.ask > p.small {
+  margin: 0 0 2px;
+}
+/* The answer form: its options as cards to pick, then the operator's own words. */
+.answer {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  gap: 10px;
+}
+.answer .notice {
+  margin: 0;
+}
+label.check.choice {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.45;
+}
+label.check.choice:hover {
+  border-color: var(--muted);
+}
+label.check.choice:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+label.check.choice input {
+  margin-top: 3px;
+  align-self: start;
+}
+/* What the operator answered, waiting for the planner to act. */
+.answered {
+  padding: 8px 12px;
+  border-left: 3px solid var(--ok);
+  background: var(--bg);
+  border-radius: 0 6px 6px 0;
+  margin: 8px 0;
+}
+.answered p {
+  margin: 0;
+}
+details.settled > summary {
+  color: var(--text);
+}
+.inline-heading {
+  display: inline;
+  font-size: 17px;
+  margin: 0;
+}
+.team-inbox {
+  margin-top: 28px;
+}
+.team-inbox > .head h2 {
+  margin: 0;
+}
+
+/* --- Notifications ---------------------------------------------------------------------------------------------- */
+fieldset.mode {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+fieldset.mode > legend {
+  float: left;
+  display: grid;
+  gap: 2px;
+  max-width: 30em;
+  padding: 0;
+}
+/* Three choices side by side, the chosen one filled. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.segmented label {
+  display: block;
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.segmented label + label {
+  border-left: 1px solid var(--line);
+}
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.segmented span {
+  display: block;
+  padding: 7px 12px;
+  background: var(--panel);
+}
+.segmented input:checked + span {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+}
+.digest-time {
+  align-items: start;
+}
+.digest-time select {
+  max-width: 100%;
+}
+.digest-time label {
+  min-width: 0;
+}

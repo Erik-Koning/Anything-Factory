@@ -1,6 +1,6 @@
-// Email: sign-in links, invitations and new-IP confirmations, through Resend (RESEND_API_KEY) or Amazon SES (SES_REGION
-// and its key). Without either, on this machine only (MAIL_LOG), the message goes to the server's console instead,
-// where a test can read the link.
+// Email: sign-in links, invitations, new-IP confirmations and notifications, through Resend (RESEND_API_KEY) or Amazon
+// SES (SES_REGION and its key). Without either, on this machine only (MAIL_LOG), the message goes to the server's
+// console instead, where a test can read the link.
 import type { SESv2Client } from "@aws-sdk/client-sesv2";
 import { config } from "./config.ts";
 
@@ -19,9 +19,14 @@ let ses: SESv2Client | null = null;
 export async function sendMail({ to, subject, text, link }: Mail): Promise<void> {
   const settings = config();
   const { resendKey, mailFrom, mailLog } = settings;
+  // Each paragraph as one, its lines kept, and every address in it a link (the main one and any other).
+  const linked = (paragraph: string): string =>
+    escapeHtml(paragraph)
+      .replace(/https?:\/\/[^\s<]+/g, (url) => `<a href="${url}">${url}</a>`)
+      .replaceAll("\n", "<br>");
   const html = `<div style="font:15px/1.5 system-ui,sans-serif;max-width:560px">${text
     .split("\n\n")
-    .map((p) => `<p>${escapeHtml(p).replaceAll(escapeHtml(link), `<a href="${escapeHtml(link)}">${escapeHtml(link)}</a>`)}</p>`)
+    .map((p) => `<p>${linked(p)}</p>`)
     .join("")}</div>`;
   if (resendKey) {
     const { Resend } = await import("resend");
