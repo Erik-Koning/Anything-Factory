@@ -279,8 +279,9 @@ machines its members and admins run it on. A machine not heard from for 15 minut
 the members of a team link machines, ten each. Unlink one from its card or with `a6g disconnect app`; one that reports
 nothing for 30 days, or whose person is banned or no longer on a team as a member, is unlinked too. Linking a Mac
 again replaces its old link only because the CLI shows the old token: a machine someone else names after yours is a
-second one, never yours replaced. `a6g connect app --test` reports now; `--url` names another deployment of the app
-(https, or http://localhost for one on this Mac), and `--machine` the Mac's name.
+second one, never yours replaced. `a6g connect app --test` reports now; `--url` names a deployment of the app other
+than `https://app.anythingfactory.dev` (https, or http://localhost for one on this Mac), which the Mac keeps until
+it's linked elsewhere, and `--machine` the Mac's name.
 
 ## The two places you edit
 

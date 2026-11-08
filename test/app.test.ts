@@ -95,17 +95,17 @@ const keep = (keychain: string, link: { url: string; token: string }): void =>
   writeFileSync(join(keychain, "a6g-app"), Buffer.from(JSON.stringify(link)).toString("base64url"));
 
 test("the app's address is https, or http on this Mac only, with nothing after the host", () => {
-  assert.equal(appUrl("https://app.a6gfactory.dev"), "https://app.a6gfactory.dev");
-  assert.equal(appUrl("https://app.a6gfactory.dev/"), "https://app.a6gfactory.dev");
+  assert.equal(appUrl("https://app.anythingfactory.dev"), "https://app.anythingfactory.dev");
+  assert.equal(appUrl("https://app.anythingfactory.dev/"), "https://app.anythingfactory.dev");
   assert.equal(appUrl("http://localhost:3000"), "http://localhost:3000");
   assert.equal(appUrl("http://127.0.0.1:3100"), "http://127.0.0.1:3100");
   for (const wrong of [
-    "http://app.a6gfactory.dev",
-    "https://app.a6gfactory.dev/machines",
-    "https://someone:secret@app.a6gfactory.dev",
-    "https://app.a6gfactory.dev/?next=x",
-    "ftp://app.a6gfactory.dev",
-    "app.a6gfactory.dev",
+    "http://app.anythingfactory.dev",
+    "https://app.anythingfactory.dev/machines",
+    "https://someone:secret@app.anythingfactory.dev",
+    "https://app.anythingfactory.dev/?next=x",
+    "ftp://app.anythingfactory.dev",
+    "app.anythingfactory.dev",
   ])
     assert.equal(appUrl(wrong), null, wrong);
 });

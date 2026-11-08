@@ -453,7 +453,8 @@ async function connectApp(argv: string[]): Promise<number> {
   const { options } = parseArgs(argv, { booleans: ["test", "no-open"] });
   if (options["test"]) return reportNow();
   const previous = readAppLink();
-  const given = text(options["url"]) ?? previous?.url ?? DEFAULT_APP;
+  const named = text(options["url"]);
+  const given = named ?? previous?.url ?? DEFAULT_APP;
   const base = appUrl(given);
   if (!base) die(`--url: the web app's address, https://… (or http://localhost:<port> for one on this Mac), not ${given}`);
   let name = text(options["machine"]);
@@ -466,6 +467,9 @@ async function connectApp(argv: string[]): Promise<number> {
   const started = await startLink(base, name, previous?.url === base ? previous.token : null);
   if ("problem" in started) {
     console.error(`a6g: couldn't start linking this machine: ${started.problem}`);
+    // The first link goes to the default address unless --url names another deployment.
+    if (named === undefined && !previous)
+      console.error(`  That's the default address, ${DEFAULT_APP}; name your deployment with a6g connect app --url https://…`);
     return 1;
   }
   const { link } = started;

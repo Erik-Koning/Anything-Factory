@@ -27,7 +27,7 @@ import { A6G_HOME, PACKAGE } from "./paths.ts";
 import { readJson, writeJson } from "./util.ts";
 
 export const APP_FILE = join(A6G_HOME, "app.json");
-export const DEFAULT_APP = "https://app.a6gfactory.dev";
+export const DEFAULT_APP = "https://app.anythingfactory.dev";
 const KEYCHAIN = ["a6g-app", "link"] as const;
 // The most of an answer the CLI reads, and of the app's words it shows.
 const ANSWER_BYTES = 64 * 1024;
