@@ -1,0 +1,94 @@
+# A domain the app moved off, its web addresses sent to the same names on the new one (scripts/retire-domain.sh deploys
+# it, in the app's region, with a certificate it makes in us-east-1, where CloudFront takes them from). A CloudFront
+# function answers every request with a 301 to https://<the same name on the new domain><path>?<query>; nothing behind
+# it is ever asked. The redirect is cached for a day, not forever, so the old domain can be used again.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Anything Factory: a retired domain's web addresses redirect to the domain it moved to"
+Parameters:
+  From:
+    Type: String
+    Description: the retired domain, such as a6gfactory.dev
+  To:
+    Type: String
+    Description: the domain it moved to, such as anythingfactory.dev
+  ZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: the retired domain's hosted zone
+  Certificate:
+    Type: String
+    Description: an issued ACM certificate in us-east-1 for the domain and *.<domain>
+Resources:
+  Redirect:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${AWS::StackName}-redirect"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: !Sub "${From} to ${To}"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        function handler(event) {
+          var request = event.request;
+          var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
+          var suffix = ".${From}";
+          var name = host.length > suffix.length && host.slice(-suffix.length) === suffix ? host.slice(0, -suffix.length) + "." : "";
+          var query = [];
+          var keys = Object.keys(request.querystring);
+          for (var i = 0; i < keys.length; i++) {
+            var entry = request.querystring[keys[i]];
+            var values = entry.multiValue || [entry];
+            for (var j = 0; j < values.length; j++) query.push(values[j].value === "" ? keys[i] : keys[i] + "=" + values[j].value);
+          }
+          return {
+            statusCode: 301,
+            statusDescription: "Moved Permanently",
+            headers: {
+              location: { value: "https://" + name + "${To}" + request.uri + (query.length ? "?" + query.join("&") : "") },
+              "cache-control": { value: "max-age=86400" },
+            },
+          };
+        }
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "${From} redirects to ${To}"
+        Enabled: true
+        Aliases: [!Ref From, !Sub "*.${From}"]
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        # Never asked: the function answers first.
+        Origins:
+          - Id: unused
+            DomainName: !Ref To
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+        DefaultCacheBehavior:
+          TargetOriginId: unused
+          ViewerProtocolPolicy: redirect-to-https
+          # Every method, so a form posted to the old address is redirected too, not refused.
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          # CachingDisabled, AWS's managed policy.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt Redirect.FunctionMetadata.FunctionARN
+  # The apex and every name under it with no records of its own: a name a stage still serves keeps its records.
+  Addresses:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      RecordSets:
+        - { Name: !Ref From, Type: A, AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 } }
+        - { Name: !Ref From, Type: AAAA, AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 } }
+        - { Name: !Sub "*.${From}", Type: A, AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 } }
+        - { Name: !Sub "*.${From}", Type: AAAA, AliasTarget: { DNSName: !GetAtt Distribution.DomainName, HostedZoneId: Z2FDTNDATAQYW2 } }
+Outputs:
+  Distribution:
+    Value: !Ref Distribution

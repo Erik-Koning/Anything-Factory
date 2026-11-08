@@ -338,7 +338,11 @@ The operator deploys the app; teams never do (Article 7). `sst.config.ts` (SST 4
    new-address confirmations all go by email; the first admin can't get in without them.
 4. **The domain**: pick it now (`A6G_WEB_DOMAIN`, in a Route 53 hosted zone of the account). Passkeys belong to the
    domain they were made on, so moving later means everyone adds theirs again. Without one the app is on CloudFront's
-   `*.cloudfront.net` address.
+   `*.cloudfront.net` address. A domain the app moved off is retired with
+   `AWS_REGION=us-east-2 scripts/retire-domain.sh a6gfactory.dev anythingfactory.dev`: each of its names redirects to
+   the same name on the new one, and once no stage serves on it (run it again after the last `sst remove`) its SES
+   identity goes and its DNS says it sends no mail, so nobody can send as it. Keep it registered while anything may
+   still point at it.
 5. **The secrets**, per stage (SST keeps them encrypted in the account; never in the repository):
 
    ```sh
