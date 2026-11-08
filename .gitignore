@@ -15,3 +15,14 @@ web/.env*
 # SST: its platform and providers (sst install) and local state.
 web/.sst/
 web/sst-env.d.ts
+
+# Environment files hold secrets: never commit them. Examples stay tracked.
+.env
+.env*
+!.env.example
+!.env.sample
+!.env.template
+!.env.dist
+!.env.*.example
+!.env.*.sample
+!.env.*.template
