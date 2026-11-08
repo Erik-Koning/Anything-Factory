@@ -7,16 +7,16 @@
 // (usage.json, written whole, so the two never disagree), and publishes its totals to the team's store, a document per
 // day and machine, replaced each time: publishing again never counts twice. Budgets and the web app add every
 // machine's (tasks/spend.ts).
-import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { roleOfAgent } from "./config.ts";
-import { costOf, modelKey, priced } from "./prices.ts";
+import { costOf, modelKey, priced, type Tokens } from "./prices.ts";
 import { ticketOf } from "./tasks/model.ts";
 import { dayOf, round, type UsageDay, type UsageRow } from "./tasks/spend.ts";
 import { readJson, writeFileAtomic } from "./util.ts";
 
-interface Cursor {
+export interface Cursor {
   // Bytes read: every complete line before this offset has been counted.
   at: number;
   role: string | null;
@@ -63,23 +63,23 @@ export function transcriptDirs(home: string, worktrees: string, projects = join(
     .map((name) => join(projects, name));
 }
 
-// Reads what the transcripts added since the last call, adds it to the run folder's totals, and resolves to the days
-// that changed (this machine's, whole), for the store.
-export function collectUsage(opts: {
-  run: string;
-  team: string;
-  machine: string;
-  dirs: string[];
-  home?: string;
-  worktrees?: string;
-  now?: Date;
-}): UsageDay[] {
-  const state = readJson<State>(stateFile(opts.run), { cursors: {}, days: {} });
-  // A line that says where it ran must have run in the checkout or one of its worktrees.
-  const ours = (cwd: string | undefined): boolean =>
-    !cwd || !opts.home || cwd === opts.home || cwd.startsWith(`${opts.home}/`) || (opts.worktrees !== undefined && cwd.startsWith(`${opts.worktrees}/`));
-  const changed = new Set<string>();
-  for (const dir of opts.dirs) {
+// One request read from a transcript: when, by which agent (null outside the factory's agents), on which model, branch
+// and folder, its tokens, and its API-equivalent cost (null for a model with no price).
+export interface Request {
+  at: Date;
+  role: string | null;
+  model: string;
+  branch: string | null;
+  cwd: string | null;
+  tokens: Tokens;
+  cost: number | null;
+}
+
+// Reads what each transcript in `dirs` added since `cursors` were last moved on (they are, in place), and hands each new
+// request to `visit` once. Resolves to whether any came.
+export function readRequests(dirs: string[], cursors: Record<string, Cursor>, visit: (request: Request) => void): boolean {
+  let any = false;
+  for (const dir of dirs) {
     let names: string[];
     try {
       names = readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
@@ -88,7 +88,7 @@ export function collectUsage(opts: {
     }
     for (const name of names) {
       const path = join(dir, name);
-      const cursor = state.cursors[path] ?? { at: 0, role: null, seen: [] };
+      const cursor = cursors[path] ?? { at: 0, role: null, seen: [] };
       const read = readFrom(path, cursor.at);
       if (!read) continue;
       const { text, from } = read;
@@ -106,49 +106,120 @@ export function collectUsage(opts: {
         }
         if (line.type === "agent-setting") cursor.role = roleOfAgent(line.agentSetting) ?? cursor.role;
         const message = line.message;
-        if (line.type !== "assistant" || !message?.id || seen.has(message.id) || !ours(line.cwd)) continue;
+        if (line.type !== "assistant" || !message?.id || seen.has(message.id)) continue;
         seen.add(message.id);
         cursor.seen = [...cursor.seen, message.id].slice(-50);
-        // Not one of the team's agents (no --agent), or a line Claude Code made up itself.
-        if (!cursor.role || !message.model || message.model.startsWith("<")) continue;
+        // A line Claude Code made up itself.
+        if (!message.model || message.model.startsWith("<")) continue;
         const at = new Date(line.timestamp ?? "");
         if (Number.isNaN(at.getTime())) continue;
         const usage = message.usage ?? {};
-        const write1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-        const write5m = usage.cache_creation ? (usage.cache_creation.ephemeral_5m_input_tokens ?? 0) : (usage.cache_creation_input_tokens ?? 0);
-        const tokens = {
+        const tokens: Tokens = {
           input: usage.input_tokens ?? 0,
           output: usage.output_tokens ?? 0,
           cacheRead: usage.cache_read_input_tokens ?? 0,
-          cacheWrite5m: write5m,
-          cacheWrite1h: write1h,
+          cacheWrite5m: usage.cache_creation ? (usage.cache_creation.ephemeral_5m_input_tokens ?? 0) : (usage.cache_creation_input_tokens ?? 0),
+          cacheWrite1h: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0,
           fast: usage.speed === "fast",
         };
-        const day = dayOf(at);
         const model = modelKey(message.model);
-        const task = line.gitBranch ? (ticketOf(line.gitBranch, line.gitBranch.split("/")[0] ?? "") ?? null) : null;
-        const rows = (state.days[day] ??= []);
-        let row = rows.find((r) => r.role === cursor.role && r.model === model && r.task === task);
-        if (!row) {
-          row = { role: cursor.role, model, task, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 };
-          rows.push(row);
-        }
-        row.requests += 1;
-        row.input += tokens.input;
-        row.output += tokens.output;
-        row.cacheRead += tokens.cacheRead;
-        row.cacheWrite += write5m + write1h;
-        if (priced(model)) row.cost = round(row.cost + (costOf(model, tokens) ?? 0));
-        else row.unpriced += 1;
-        changed.add(day);
+        visit({
+          at,
+          role: cursor.role,
+          model,
+          branch: line.gitBranch ?? null,
+          cwd: line.cwd ?? null,
+          tokens,
+          cost: priced(model) ? costOf(model, tokens) : null,
+        });
+        any = true;
       }
       cursor.at = from + Buffer.byteLength(text.slice(0, end + 1));
-      state.cursors[path] = cursor;
+      cursors[path] = cursor;
     }
   }
+  return any;
+}
+
+// Reads what the transcripts added since the last call, adds it to the run folder's totals, and resolves to the days
+// that changed (this machine's, whole), for the store. Only the factory's agents count, and only lines that ran in the
+// checkout or one of its worktrees (a line that says where it ran).
+export function collectUsage(opts: {
+  run: string;
+  team: string;
+  machine: string;
+  dirs: string[];
+  home?: string;
+  worktrees?: string;
+  now?: Date;
+}): UsageDay[] {
+  const state = readJson<State>(stateFile(opts.run), { cursors: {}, days: {} });
+  const ours = (cwd: string | null): boolean =>
+    !cwd || !opts.home || cwd === opts.home || cwd.startsWith(`${opts.home}/`) || (opts.worktrees !== undefined && cwd.startsWith(`${opts.worktrees}/`));
+  const changed = new Set<string>();
+  readRequests(opts.dirs, state.cursors, (request) => {
+    const { role } = request;
+    if (!role || !ours(request.cwd)) return;
+    const day = dayOf(request.at);
+    const task = request.branch ? (ticketOf(request.branch, request.branch.split("/")[0] ?? "") ?? null) : null;
+    const rows = (state.days[day] ??= []);
+    let row = rows.find((r) => r.role === role && r.model === request.model && r.task === task);
+    if (!row) {
+      row = { role, model: request.model, task, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 };
+      rows.push(row);
+    }
+    row.requests += 1;
+    row.input += request.tokens.input;
+    row.output += request.tokens.output;
+    row.cacheRead += request.tokens.cacheRead;
+    row.cacheWrite += request.tokens.cacheWrite5m + request.tokens.cacheWrite1h;
+    if (request.cost !== null) row.cost = round(row.cost + request.cost);
+    else row.unpriced += 1;
+    changed.add(day);
+  });
   if (changed.size || !existsSync(stateFile(opts.run))) writeFileAtomic(stateFile(opts.run), `${JSON.stringify(state)}\n`);
   const updatedAt = (opts.now ?? new Date()).toISOString();
   return [...changed].sort().map((day) => ({ team: opts.team, day, machine: opts.machine, rows: state.days[day] ?? [], updatedAt }));
+}
+
+// Everything an account's Claude Code used on this machine, every session's (the operator's own too: they all draw on
+// the same subscription), API-equivalent dollars by UTC hour ("2026-11-02T03"), the last fortnight kept. In
+// `stateFile`, with where it stopped in each transcript.
+export function collectHours(stateFile: string, dirs: string[], now = new Date()): Record<string, number> {
+  const state = readJson<{ cursors: Record<string, Cursor>; hours: Record<string, number> }>(stateFile, { cursors: {}, hours: {} });
+  // A transcript first seen and untouched for longer than is kept is passed over whole: nothing in it would count.
+  const kept = now.getTime() - 15 * 86_400_000;
+  for (const dir of dirs) {
+    let names: string[];
+    try {
+      names = readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const path = join(dir, name);
+      if (state.cursors[path]) continue;
+      try {
+        const { mtimeMs, size } = statSync(path);
+        if (mtimeMs < kept) state.cursors[path] = { at: size, role: null, seen: [] };
+      } catch {}
+    }
+  }
+  const changed = readRequests(dirs, state.cursors, (request) => {
+    if (request.cost === null) return;
+    const hour = request.at.toISOString().slice(0, 13);
+    state.hours[hour] = round((state.hours[hour] ?? 0) + request.cost);
+  });
+  const oldest = new Date(now.getTime() - 15 * 86_400_000).toISOString().slice(0, 13);
+  for (const hour of Object.keys(state.hours)) if (hour < oldest) delete state.hours[hour];
+  if (changed || !existsSync(stateFile)) writeFileAtomic(stateFile, `${JSON.stringify(state)}\n`);
+  return state.hours;
+}
+
+// Every transcript folder of a Claude Code config folder (~/.claude, or an account's own CLAUDE_CONFIG_DIR).
+export function allTranscriptDirs(configDir: string): string[] {
+  const projects = join(configDir, "projects");
+  return existsSync(projects) ? readdirSync(projects).map((name) => join(projects, name)) : [];
 }
 
 // Every day this machine has counted, as the store keeps them (to publish them all again, after a store moved).

@@ -68,7 +68,7 @@ describe("the guard review's findings stay fixed", { concurrency: true }, () => 
   test("2: the factory's operator commands and owned commands, however they're called", () => {
     const { home, b, inB } = monorepo(baseTeam({ environment: { script: ".a6g/adapters/env.sh" } as never }));
     return holds([
-      ...["pause", "resume", "budget", "unregister", "rotate"].map((sub) =>
+      ...["pause", "resume", "budget", "subscriptions", "unregister", "rotate"].map((sub) =>
         bash(home, "builder", `node --no-warnings ~/.a6g/versions/0.3.0/bin/a6g.ts ${sub} fixture`, "refuse", inB)
       ),
       bash(home, "builder", "node --import tsx /Users/x/.a6g/versions/dev/bin/a6g.ts merge a6g/b2-x", "refuse", inB),

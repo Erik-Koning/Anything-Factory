@@ -28,6 +28,7 @@ import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
 import { dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
+import { observeSubscriptions, subscriptionState } from "../subscriptions.ts";
 import { collectUsage, transcriptDirs } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
@@ -329,6 +330,16 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
     glog(`couldn't read how the operator is connected: ${(error as Error).message}`);
   }
   if (!(await t3Answers(glog, reach))) return "T3 Code isn't answering (see ~/.a6g/watchdog.log)";
+  // The subscriptions' usage, every quarter hour (lib/subscriptions.ts): what a budget in shares of one is measured by.
+  const subscriptionsRead = join(A6G_HOME, ".stamp-subscriptions");
+  if (!only && minutesSince(subscriptionsRead) >= 15) {
+    writeFileSync(subscriptionsRead, "");
+    try {
+      for (const line of observeSubscriptions()) glog(line);
+    } catch (error) {
+      glog(`couldn't read the subscriptions' usage: ${(error as Error).message.split("\n")[0]}`);
+    }
+  }
   // Ids of replies already passed on or passed over; only those Resend still lists matter, so the newest few hundred.
   const seenFile = join(A6G_HOME, "replies-seen.json");
   let seen = new Set<string>();
@@ -724,7 +735,12 @@ async function trackUsage(entry: RegistryEntry, problem: (text: string) => void)
       const now = new Date();
       const limits = readLimits(entry.run);
       const from = limits ? [dayOf(new Date(limits.since)), weekOf(now)].sort()[0] : "0000-00-00";
-      const spend = spendOf(await store.usage.since(from ?? "0000-00-00"), now, limits?.since ?? null);
+      const subs = subscriptionState();
+      const spend = {
+        ...spendOf(await store.usage.since(from ?? "0000-00-00"), now, limits?.since ?? null),
+        subscriptionWeek: subs.week,
+        subscriptions: Object.values(subs.readings).map(({ account, percent, resetsAt }) => ({ account, percent, resetsAt })),
+      };
       writeJson(join(entry.run, "spend.json"), spend);
       return spend;
     } finally {

@@ -716,12 +716,24 @@ test("the admin sees what the team spent: today, this week and in all against th
     journeys: [],
     limits: { daily: 10, weekly: null, total: 100, since: new Date(Date.now() - 30 * 86_400_000).toISOString() },
   });
-  await graph
-    .collection("teams")
-    .updateOne(
-      { _id: "shop" as never },
-      { $set: { "status.spend": { day: day(0), today: 8, week: 21.25, total: 27.75, since: day(30), unpriced: 0, at: new Date().toISOString() } } }
-    );
+  await graph.collection("teams").updateOne(
+    { _id: "shop" as never },
+    {
+      $set: {
+        "status.spend": {
+          day: day(0),
+          today: 8,
+          week: 21.25,
+          total: 27.75,
+          since: day(30),
+          unpriced: 0,
+          at: new Date().toISOString(),
+          subscriptionWeek: 1000,
+          subscriptions: [{ account: "default", percent: 52, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() }],
+        },
+      },
+    }
+  );
 
   await page.goto("/t/shop");
   const panel = page.getByRole("region", { name: "Spend" });
@@ -729,6 +741,10 @@ test("the admin sees what the team spent: today, this week and in all against th
   await expect(tiles.nth(0)).toContainText("Today$8.00");
   await expect(tiles.nth(0)).toContainText("of $10 a day · near the budget");
   await expect(tiles.nth(1)).toContainText("This week$21");
+  // With the subscription measured ($1,000 a week here), each figure's share of it, and what its own report says.
+  await expect(tiles.nth(1)).toContainText("2.1% of a subscription's week");
+  await expect(panel.getByText(/Your subscription: 52% of this week used/)).toBeVisible();
+  await expect(panel.getByText(/one subscription's week is about \$1,000 API-equivalent/)).toBeVisible();
   const since = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${day(30)}T12:00:00Z`));
   await expect(tiles.nth(2)).toContainText(`Since ${since}$28`);
   await expect(panel.locator(".chart .columns li")).toHaveCount(14);
@@ -766,6 +782,22 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
   });
   // The tiles measure against it at once.
   await expect(panel.locator(".tiles li").first()).toContainText("of $12 a day");
+
+  // As a share of a subscription's week, over 100% too: one and a half subscriptions' worth in all.
+  await panel.getByText("Change the budget").first().click();
+  await panel.getByLabel(/Percent of a subscription's week/).check();
+  await panel.getByLabel("A day", { exact: true }).fill("");
+  await panel.getByLabel("A week", { exact: true }).fill("60");
+  await panel.getByLabel("In all", { exact: true }).fill("150%");
+  await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Change the budget" }).click();
+  await expect(page.getByRole("status")).toContainText("The budget is none a day, 60% a week, 150% in all of a subscription's week.");
+  const shares = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  expect(shares).toMatchObject({ limits: { daily: null, weekly: 60, total: 150, unit: "subscription" } });
+  // 21.25 of a $1,000 week is 2.1% of 60%; 27.75 is 2.8% of 150%.
+  await expect(panel.locator(".tiles li").nth(1)).toContainText("2.1%");
+  await expect(panel.locator(".tiles li").nth(1)).toContainText("of 60% a week");
+  await expect(panel.locator(".tiles li").nth(2)).toContainText("of 150% in all");
   await graph.collection("controls").deleteMany({ team: "shop", kind: "budget" });
 });
 

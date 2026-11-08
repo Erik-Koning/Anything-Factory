@@ -22,7 +22,7 @@ export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/m
 export type { TeamDoc } from "../../lib/tasks/teams.ts";
 export type { Control, HoldScope, HoldState, Limits } from "../../lib/tasks/controls.ts";
 export { describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
-export { spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
+export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
 
 const stores = new Map<string, Store>();
 
@@ -118,7 +118,15 @@ export const usageOf = (team: string, from: string): Promise<UsageDay[]> => stor
 // total keeps counting from when the budget began, unless `restart`.
 export async function budgetFromWeb(
   team: string,
-  ask: { daily: number | null; weekly: number | null; total: number | null; autoResume: boolean; restart: boolean; from: string }
+  ask: {
+    daily: number | null;
+    weekly: number | null;
+    total: number | null;
+    unit: "usd" | "subscription";
+    autoResume: boolean;
+    restart: boolean;
+    from: string;
+  }
 ): Promise<Control> {
   const store = storeFor(team);
   const current = limitsOf(await store.controls.all());
@@ -126,6 +134,6 @@ export async function budgetFromWeb(
   const limits: Limits | null =
     daily === null && weekly === null && total === null
       ? null
-      : { daily, weekly, total, autoResume: ask.autoResume, since: ask.restart || !current ? new Date().toISOString() : current.since };
+      : { daily, weekly, total, unit: ask.unit, autoResume: ask.autoResume, since: ask.restart || !current ? new Date().toISOString() : current.since };
   return store.controls.create(budgetControl(team, `web:${ask.from}`, limits));
 }

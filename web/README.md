@@ -40,7 +40,10 @@ request (Article 8).
   lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac). Then
   **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
   is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
-  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause.
+  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause,
+  in dollars or in percent of a Claude subscription's week (over 100% for more than one subscription's worth). Once
+  the subscription is measured (`a6g subscriptions`), every figure also shows its share of a subscription's week, and
+  the panel what the subscription's own usage report says.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
   `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
   operator, and each block raised to them (a block the team sorts out, or that waits on other tasks, isn't listed).

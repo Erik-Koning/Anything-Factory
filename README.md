@@ -49,7 +49,14 @@ task, priced at the API-equivalent rate (`lib/prices.ts`; on a subscription, how
 shows today, this week and in all; the web app adds each day and the costliest journeys and tasks.
 
 To hold a team to a budget: `a6g budget my-app --daily 40 --weekly 200 --total 1500` (dollars, API-equivalent; a limit
-left out keeps its value, 0 removes it; `a6g budget my-app` shows them). At 80% of a limit you're warned, once per day,
+left out keeps its value, 0 removes it; `a6g budget my-app` shows them). Or as shares of a Claude subscription:
+`a6g budget my-app --weekly 60% --total 300%`, where 100% is one subscription's weekly limit and more is more than one
+subscription's worth. The watchdog reads each subscription's usage every quarter hour, from Claude Code's own usage
+report (`claude -p /usage`, a local command that uses nothing), and with what the Mac used that week, every session's,
+works out what one subscription's week comes to in API-equivalent dollars; `a6g subscriptions` shows it. Until there's
+a reading with 5% of the week used, a budget in shares isn't checked, and says so. Several subscriptions: give each its
+own Claude Code config folder (`CLAUDE_CONFIG_DIR`, as Claude Code's docs say for several accounts), then
+`a6g subscriptions add <name> --config-dir <dir>`. At 80% of a limit you're warned, once per day,
 week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now. Resume it
 and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the budget):
 you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when the next

@@ -167,12 +167,12 @@ describe("a6g budget and the watchdog", () => {
       const set = await w.a6g("budget", "fixture", "--daily", "40", "--total", "$500");
       assert.equal(set.code, 0, set.out);
       assert.match(set.out, /\$40 a day, none a week, \$500 in all/);
-      assert.deepEqual({ ...readLimits(w.run), since: "" }, { daily: 40, weekly: null, total: 500, since: "", autoResume: false });
+      assert.deepEqual({ ...readLimits(w.run), since: "" }, { daily: 40, weekly: null, total: 500, since: "", autoResume: false, unit: "usd" });
       const since = readLimits(w.run)?.since;
       assert.equal((await w.a6g("budget", "fixture", "--daily", "0", "--auto-resume")).code, 0);
       assert.deepEqual(
         readLimits(w.run),
-        { daily: null, weekly: null, total: 500, since, autoResume: true },
+        { daily: null, weekly: null, total: 500, since, autoResume: true, unit: "usd" },
         "the rest kept, the total still counted from when it began"
       );
       assert.match((await w.a6g("budget", "fixture")).out, /none a day, none a week, \$500 in all since .*; a new day or week resumes/);

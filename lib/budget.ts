@@ -6,7 +6,7 @@
 // decides, as controls in the team's store, the same as the operator's.
 import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "./tasks/controls.ts";
 import type { Task } from "./tasks/model.ts";
-import { dollars, type Spend, weekOf } from "./tasks/spend.ts";
+import { dollars, limitDollars, percentOf, type Spend, weekOf } from "./tasks/spend.ts";
 
 export const WARN_AT = 0.8;
 export const HARD_AT = 1.1;
@@ -51,10 +51,28 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
     const cap = limits[limit.name];
     if (!cap) continue;
     const spent = spend[limit.spent];
-    const share = spent / cap;
+    // A share of a subscription needs the subscription measured first (lib/subscriptions.ts); until then it isn't checked.
+    const capDollars = limitDollars(cap, limits, spend.subscriptionWeek);
+    const week = spend.subscriptionWeek;
+    if (capDollars === null) {
+      if (!move.warn.some((w) => w.key === "budget-unmeasured"))
+        move.warn.push({
+          key: "budget-unmeasured",
+          text: "The team's budget is in shares of a subscription, and there's no reading of the subscription yet (a6g subscriptions): it isn't checked until there is.",
+        });
+      continue;
+    }
+    const share = spent / capDollars;
     const trigger = periodOf(limit.name, spend, limits);
-    const said = `${dollars(spent)} of the ${dollars(cap)} ${limit.per} budget`;
-    if (share >= WARN_AT) move.warn.push({ key: `budget-${trigger}-${cap}`, text: `The team has spent ${said} (API-equivalent).` });
+    const said =
+      limits.unit === "subscription" && week
+        ? `${percentOf(spent, week)}% of the ${cap}% ${limit.per} budget (shares of a subscription's week)`
+        : `${dollars(spent)} of the ${dollars(cap)} ${limit.per} budget`;
+    if (share >= WARN_AT)
+      move.warn.push({
+        key: `budget-${trigger}-${cap}${limits.unit === "subscription" ? "pct" : ""}`,
+        text: `The team has spent ${said} (API-equivalent).`,
+      });
     if (share < 1 || overridden(trigger)) continue;
     over = true;
     if (share >= HARD_AT && !paused && hold?.scope !== "now" && !hard) {
