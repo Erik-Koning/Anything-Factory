@@ -393,11 +393,10 @@ Things to know:
    and the app's own (`user`, `session`, `account`, `verification`, `twoFactor`, `passkey`, `rateLimit`, `memberships`,
    `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`, the linked machines'
    `machine_links` and `machines`, and the notifier's `notification_prefs`, `notification_queue`, `notification_tests`
-   and `notifier`), and only `find` and `insert`
-   on `audit`, so the app can't change or delete what it recorded, nor add an index that would expire it early
-   (MongoDB's own expiry still removes old events). The indexes are an operator's to make (`npm run create-indexes`);
-   the app tries its own too and carries on when refused. Nothing else: no `remove` on `a6g`, nothing on other
-   databases, no admin roles. Give it a long random password.
+   and `notifier`), and only `find` and `insert` on `audit`, so the app can't change or delete what it recorded, nor add
+   an index that would expire it early (MongoDB's own expiry still removes old events). The indexes are an operator's to
+   make (`npm run create-indexes`); the app tries its own too and carries on when refused. Nothing else: no `remove` on
+   `a6g`, nothing on other databases, no admin roles. Give it a long random password.
 
 2. **Network access**: Lightsail containers have no fixed outbound address, so allow `0.0.0.0/0`, and let the narrow
    role, the long password and TLS (always on with Atlas) carry the protection.
