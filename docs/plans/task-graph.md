@@ -109,21 +109,21 @@ review changes, then the task is blocked for the planner to split or decide.
 
 ### Statuses and who moves them
 
-| From → to                                            | Who                                                   | How                                                                                                 |
-| ---------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| (new) → triage                                       | any member, or a person suggesting from the web app   | `a6g task add` (a finding or proposal); the web app's Suggest a task, by `stakeholder`              |
-| (new) → proposed                                     | planner, or the operator (also from the web app)      | `a6g task add`, then `a6g task score` at once; the operator may add it approved (`--approved`)      |
-| triage → proposed, rejected, question                | planner                                               | `a6g task edit` (severity, area, files), then `a6g task status`                                     |
-| proposed → researching, approved, rejected, question | approver (proposed only), or the operator             | `a6g task research/approve/reject/escalate`; none for the approver when `approval.mode` is operator |
-| researching → proposed                               | planner                                               | after `a6g task note` with the findings and a new score                                             |
-| approved → building                                  | builder or tester                                     | `a6g task claim` (atomic; best eligible task; whoever sees a clash on the same files gives way)     |
-| building → approved, blocked                         | the claimant, or the planner for a member that's gone | `a6g task release [--blocked "…"]`; the Stop hook releases as blocked when it lets a member stop    |
-| building → review                                    | the claimant                                          | `a6g task submit` (branch, commit, UI and critical paths; a rework must be a new commit)            |
-| review → approved (rework)                           | reviewer (or the operator)                            | `a6g verdict review … changes` (rounds + 1; blocked past `review.maxRounds`); only a task in review |
-| review (or an approved task `--closes` names) → done | merge queue                                           | `a6g merge --closes`; not a task being built, a journey, or one never approved                      |
-| journey: approved → done                             | planner                                               | once it's due (its tasks all done or rejected, one done: worked out, never stored) and verified     |
-| any → blocked, question, rejected; reopen            | planner                                               | `a6g task status` (never building or approved; done only for research, and journeys once due)       |
-| back to triage, proposed or researching; a new score | —                                                     | the approval is cleared: it's approved again before it's built                                      |
+| From → to                                            | Who                                                   | How                                                                                                                                |
+| ---------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| (new) → triage                                       | any member, or a person suggesting from the web app   | `a6g task add` (a finding or proposal); the web app's Suggest a task, by `stakeholder`                                             |
+| (new) → proposed                                     | planner, or the operator (also from the web app)      | `a6g task add`, then `a6g task score` at once; the operator may add it approved (`--approved`)                                     |
+| triage → proposed, rejected, question                | planner                                               | `a6g task edit` (severity, area, files), then `a6g task status`; a stakeholder's suggestion only once screened (`a6g task screen`) |
+| proposed → researching, approved, rejected, question | approver (proposed only), or the operator             | `a6g task research/approve/reject/escalate`; none for the approver when `approval.mode` is operator                                |
+| researching → proposed                               | planner                                               | after `a6g task note` with the findings and a new score                                                                            |
+| approved → building                                  | builder or tester                                     | `a6g task claim` (atomic; best eligible task; whoever sees a clash on the same files gives way)                                    |
+| building → approved, blocked                         | the claimant, or the planner for a member that's gone | `a6g task release [--blocked "…"]`; the Stop hook releases as blocked when it lets a member stop                                   |
+| building → review                                    | the claimant                                          | `a6g task submit` (branch, commit, UI and critical paths; a rework must be a new commit)                                           |
+| review → approved (rework)                           | reviewer (or the operator)                            | `a6g verdict review … changes` (rounds + 1; blocked past `review.maxRounds`); only a task in review                                |
+| review (or an approved task `--closes` names) → done | merge queue                                           | `a6g merge --closes`; not a task being built, a journey, or one never approved                                                     |
+| journey: approved → done                             | planner                                               | once it's due (its tasks all done or rejected, one done: worked out, never stored) and verified                                    |
+| any → blocked, question, rejected; reopen            | planner                                               | `a6g task status` (never building or approved; done only for research, and journeys once due)                                      |
+| back to triage, proposed or researching; a new score | —                                                     | the approval is cleared: it's approved again before it's built                                                                     |
 
 The planner never approves its own proposals and never marks code done: approval is the approver's or the
 operator's, and code is done when the merge queue merges it.
@@ -183,6 +183,11 @@ loopback it requires the token.
   escalates (status question), which reaches the operator in the planner's next message.
 - **full:** the approver approves anything, scope included. Never delegable: privacy and personal data, policy
   unlocks, promotion to production, changes to the rules or the constitution.
+
+Work made of a stakeholder's words (a request the planner promotes, a suggestion from the web app) is screened by the
+planner first (`a6g request screen`, `a6g task screen`: clear or risky, against `SCREEN_RISKS`), and its screen goes
+with it. `approval.stakeholders` says who approves it: `"operator"` (the default) whatever the mode, or `"screened"`,
+the approver too when it's clear and within the mode; never the approver when it's risky.
 
 The approver (`plugin/agents/approver.md`) is read-only, may research on the web, and judges proposals against the
 direction, the decisions and the score.

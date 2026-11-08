@@ -1,6 +1,7 @@
 import { baseTeam, commit, a6g, fakeKeychain, git, makeRepo, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import type { RawTeam } from "../lib/config.ts";
@@ -20,6 +21,8 @@ import { newTask, type Task, withEvent } from "../lib/tasks/model.ts";
 import { decide } from "../lib/tasks/decide.ts";
 import { keyHash } from "../lib/tasks/requests.ts";
 import { settingsOf } from "../lib/tasks/teams.ts";
+import { machinesRunning, online } from "../lib/fleet.ts";
+import { machineReport } from "../lib/commands/watchdog.ts";
 import { markMoved, migrate } from "../lib/tasks/migrate.ts";
 import { openStore, update } from "../lib/tasks/store.ts";
 import { type MongoClientLike, type MongoCollectionLike, storeOver } from "../lib/tasks/mongo.ts";
@@ -82,6 +85,9 @@ describe("feature requests", () => {
     // Researched, then promoted into a task, or rejected with a reason.
     assert.equal((await a6g(["request", "note", "r1", "Three competitors have it."], as("planner"))).code, 0);
     assert.equal((await store().requests.get("r1"))?.status, "researching");
+    // A request becomes work only once the planner has screened it.
+    assert.match((await a6g(["task", "add", "PDF export of the summary", "--request", "r1"], as("planner"))).out, /screen request r1 first/);
+    assert.equal((await a6g(["request", "screen", "r1", "clear", "--note", "a PDF of what they see; no data leaves"], as("planner"))).code, 0);
     assert.equal((await a6g(["task", "add", "PDF export of the summary", "--request", "r1"], as("planner"))).code, 0);
     const r1 = await store().requests.get("r1");
     assert.deepEqual([r1?.status, r1?.tasks], ["promoted", ["1"]]);
@@ -276,6 +282,70 @@ describe("what the web app shares", () => {
     await assert.rejects(decide(store, "1", "reject", { who: "operator", approval }), /say why/);
     const approved = await decide(store, "1", "approve", { who: "operator", approval, text: "from the web" });
     assert.deepEqual([approved.status, approved.approval?.by, approved.approval?.note], ["approved", "operator", "from the web"]);
+  });
+});
+
+describe("the machines the web app lists", () => {
+  test("a machine reports every team registered on it, in files or Mongo, lead or worker", () => {
+    const home = process.env.A6G_HOME ?? "";
+    const teams = join(home, "teams");
+    const runs = { alpha: tmp("a6g-run-"), beta: tmp("a6g-run-") };
+    const entry = (name: keyof typeof runs, extra: Record<string, unknown>) => ({
+      name,
+      title: `${name} team`,
+      home: `/code/${name}`,
+      run: runs[name],
+      project: "p",
+      version: "0.4.0",
+      ...extra,
+    });
+    write(teams, {
+      "alpha.json": entry("alpha", { tasks: { store: "files", database: "a6g", lead: null } }),
+      "beta.json": entry("beta", {
+        home: join(homedir(), "code", "beta"),
+        tasks: { store: "mongo", database: "graphs", lead: "studio" },
+        worker: true,
+        limits: { builder: 2 },
+      }),
+    });
+    write(runs.alpha, { paused: "" });
+    write(home, { "machine.json": { name: "laptop" } });
+    try {
+      const report = machineReport();
+      assert.equal(report.name, "laptop");
+      assert.deepEqual(
+        report.teams.map((t) => [t.name, t.part, t.store, t.state, t.home, t.factory]),
+        [
+          ["alpha", "lead", "files", "paused", "/code/alpha", "0.4.0"],
+          ["beta", "worker", "mongo", "active", "~/code/beta", "0.4.0"],
+        ]
+      );
+      assert.equal(report.teams[1]?.planner, null, "a worker runs no planner");
+      assert.deepEqual(Object.keys(report).sort(), ["factory", "name", "teams"], "nothing about whose it is");
+
+      // Which machines run a team, its lead first; and which have reported lately.
+      const at = new Date().toISOString();
+      const running = machinesRunning(
+        [
+          { ...report, name: "attic", at },
+          { ...report, name: "studio", at, teams: [{ ...report.teams[1]!, part: "lead" as const }] },
+        ],
+        "beta"
+      );
+      assert.deepEqual(
+        running.map(({ machine, part }) => [machine.name, part]),
+        [
+          ["studio", "lead"],
+          ["attic", "worker"],
+        ]
+      );
+      const now = Date.parse(at);
+      assert.deepEqual([online({ at }, now + 14 * 60_000), online({ at }, now + 16 * 60_000), online({ at: null }, now)], [true, false, false]);
+    } finally {
+      rmSync(join(teams, "alpha.json"));
+      rmSync(join(teams, "beta.json"));
+      write(home, { "machine.json": {} });
+    }
   });
 });
 

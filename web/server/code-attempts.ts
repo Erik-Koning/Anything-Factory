@@ -1,6 +1,7 @@
 // How many authenticator or backup codes a person may try: five in the 15 minutes from their first, whichever session
 // or page they come from. Each try is counted before its code is checked, so tries made at once can't each get a guess; a
 // right code clears the count. (Better Auth's own limits cover a password's second step, which has no session yet.)
+// Linking a machine counts its own tries the same way, under keys of its own and with limits of its own (machines.ts).
 import { authDb } from "./db.ts";
 
 export const CODE_TRIES = 5;
@@ -21,12 +22,12 @@ export const ensureIndexes = (): Promise<unknown> =>
 
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 
-// Takes one of the person's tries; false when they've none left.
-export async function takeCodeAttempt(userId: string, now = new Date()): Promise<boolean> {
+// Takes one of the person's tries (of `tries`, CODE_TRIES unless said); false when they've none left.
+export async function takeCodeAttempt(userId: string, now = new Date(), tries: number = CODE_TRIES): Promise<boolean> {
   void ensureIndexes();
   try {
     const taken = await attempts().findOneAndUpdate(
-      { _id: userId, n: { $lt: CODE_TRIES }, expiresAt: { $gt: now } },
+      { _id: userId, n: { $lt: tries }, expiresAt: { $gt: now } },
       { $inc: { n: 1 }, $setOnInsert: { expiresAt: new Date(now.getTime() + LOCK_MINUTES * 60_000) } },
       { upsert: true, returnDocument: "after" }
     );

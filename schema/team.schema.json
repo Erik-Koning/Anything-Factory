@@ -322,8 +322,20 @@
         "findings": {
           "enum": ["planner", "approver"],
           "description": "Who approves the bug, UX and test findings other members file: the planner (the default), or the approver with the proposals."
+        },
+        "stakeholders": {
+          "enum": ["operator", "screened"],
+          "description": "Who approves work made of a stakeholder's words (a feature request, a suggestion from the web app): you (the default), or the approver too when the planner screened it clear."
         }
       }
+    },
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$"
+      },
+      "description": "Hosts beyond this machine the team may reach from the shell (the network policy): api.example.com, or *.example.com for every host under it."
     },
     "critical": {
       "type": "array",

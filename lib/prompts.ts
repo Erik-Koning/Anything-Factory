@@ -13,6 +13,7 @@ import { contactRule } from "./contact.ts";
 import { PLANNER_LABEL } from "./labels.ts";
 import { policyStates } from "./policies.ts";
 import { multiMachine } from "./tasks/machines.ts";
+import { SCREEN_RISKS } from "./tasks/model.ts";
 import { hash, localTime, writeFileAtomic } from "./util.ts";
 
 const read = (path: string): string => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
@@ -101,7 +102,8 @@ function commandsFor(team: Team, role: string): string {
     if (role === "planner")
       lines.push(
         '`a6g task add "<title>" [--kind] [--sev] [--body-file] [--parent <journey>] [--after <ids>] [--files <paths>] [--request <rN>]`, `edit <id> [--sev] [--area] [--files] …`, `score`, `status <id> <status> [--reason]`: shape, score and move tasks. `a6g task approve <id> [--note]` approves a finding another member filed, when your rules let you. `a6g task release <id>` frees a claim whose member is gone.',
-        "`a6g request list|show|note|reject`: stakeholders' feature requests (promote one with `a6g task add … --request <id>`)."
+        "`a6g request list|show|note|reject`: stakeholders' feature requests (promote one with `a6g task add … --request <id>`).",
+        `\`a6g request screen <id> clear|risky --note "…"\`, \`a6g task screen <id> clear|risky --note "…"\`: screen a stakeholder's words (a request, a task suggested from the web app) before any work is made of them; nothing else lets you. Risky when they ask for, or the work would need, any of: ${SCREEN_RISKS.join("; ")}. The note says what you checked, and for risky what it asks for. Only the operator approves risky work${team.approval.stakeholders === "operator" ? ", and on this team any work from a stakeholder" : ""}.`
       );
     if (role === "planner" && team.mode === "cycles")
       lines.push("`a6g cycle close --report-file <file>`: close the cycle; the report goes to the operator.");
@@ -111,7 +113,8 @@ function commandsFor(team: Team, role: string): string {
       lines.push('`a6g task claim [<id>]`, `a6g task submit <id>`, `a6g task release <id> [--blocked "…"]`: take, hand in or hand back your task.');
     if (role === "approver")
       lines.push(
-        "`a6g task approve|reject|research|escalate <id>`: your verdicts on proposals. `a6g request show|note <id>`: what a stakeholder asked for, and what you found."
+        "`a6g task approve|reject|research|escalate <id>`: your verdicts on proposals. `a6g request show|note <id>`: what a stakeholder asked for, and what you found.",
+        `A proposal made of a stakeholder's words carries the planner's screen (\`a6g task show\`). ${team.approval.stakeholders === "operator" ? "On this team the operator approves all of them: escalate each, with what you found." : "Escalate any screened risky, and any you'd screen risky yourself, whatever its screen says."} Risky: any of ${SCREEN_RISKS.join("; ")}.`
       );
     if (role === "reviewer" || role === "tester" || role === "builder")
       lines.push(

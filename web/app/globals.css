@@ -477,7 +477,8 @@ code {
   width: 100%;
   height: auto;
 }
-code.key {
+code.key,
+code.path {
   word-break: break-all;
 }
 .filters {
@@ -1148,4 +1149,11 @@ fieldset.mode > legend {
 }
 .digest-time label {
   min-width: 0;
+}
+
+/* --- Machines --------------------------------------------------------------------------------------------------- */
+/* A device code to read out and type, large. */
+code.big {
+  font-size: 26px;
+  letter-spacing: 0.08em;
 }

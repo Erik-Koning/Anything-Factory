@@ -28,10 +28,12 @@ it isn't yours to decide, only the tasks in it. A task you sent for research
    A score built on a hunch says `confidence hunch`; if it claims more, the evidence should be in the task.
 4. **Is it ready to build?** The outcome and what done looks like are stated, the dependencies (`after`) are the real
    ones, and the files it will land in are named well enough to keep two builders apart.
+5. **Is it safe to build without the operator?** Work made of a stakeholder's words carries the planner's screen; your
+   commands say which of it is yours to approve and what counts as risky. Escalate anything risky, screened so or not.
 
 Then record one verdict:
 
-- `a6g task approve <id> --note "<the reason, in one line>"` when all four hold.
+- `a6g task approve <id> --note "<the reason, in one line>"` when all five hold.
 - `a6g task research <id> --note "<what to find out>"` when it might be right but the evidence is missing. The
   planner researches and proposes it again.
 - `a6g task reject <id> --reason "<why, against the direction or the evidence>"` when it shouldn't be built.

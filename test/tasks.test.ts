@@ -475,7 +475,10 @@ describe("a6g task, from proposal to merge", () => {
     // The planner never approves a suggestion itself, even a bug with its severity: the approver or the operator does.
     const ctx = { all: await store.tasks.all(), approval: { mode: "thresholds" as const, maxSize: "M" as const, findings: "planner" as const } };
     assert.match(moveRefusal(suggested, "approved", "approve", "planner", ctx) ?? "", /suggested from the web app/);
-    assert.equal(moveRefusal(suggested, "proposed", "status", "planner", ctx), null);
+    // It's proposed once the planner has screened it (test/screen.test.ts).
+    assert.match(moveRefusal(suggested, "proposed", "status", "planner", ctx) ?? "", /screen them first/);
+    const screened = { ...suggested, screen: { verdict: "clear" as const, by: "planner", at: suggested.createdAt, note: "a receipt; nothing leaves" } };
+    assert.equal(moveRefusal(screened, "proposed", "status", "planner", ctx), null);
     assert.equal(moveRefusal(suggested, "approved", "approve", OPERATOR, ctx), null);
   });
 

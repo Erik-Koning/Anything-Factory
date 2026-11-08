@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Monitor|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|mcp__.*",
+        "matcher": "Bash|Monitor|Edit|Write|MultiEdit|NotebookEdit|Read|Grep|WebFetch|WebSearch|mcp__.*",
         "hooks": [
           {
             "type": "command",
