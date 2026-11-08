@@ -40,6 +40,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             {signedIn ? (
               <nav aria-label="Main">
                 <Link href="/">Teams</Link>
+                <Link href="/machines">Machines</Link>
                 {viewer.admin ? <Link href="/admin/people">People</Link> : null}
                 {viewer.admin ? <Link href="/admin/audit">Audit</Link> : null}
                 <Link href="/account">Account</Link>

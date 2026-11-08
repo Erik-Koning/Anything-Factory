@@ -77,8 +77,9 @@ export interface RawTeam {
   mode?: string;
   tasks?: { store?: string; database?: string; lead?: string | null };
   priorities?: { weights?: Record<string, number> };
-  approval?: { mode?: string; maxSize?: string; findings?: string };
+  approval?: { mode?: string; maxSize?: string; findings?: string; stakeholders?: string };
   critical?: string[];
+  hosts?: string[];
   branchPrefix?: string;
   model?: string;
   roles?: Record<string, RoleSettings>;
@@ -146,6 +147,8 @@ export interface Team {
   approval: ApprovalRules;
   // Paths (regexes) whose changes get the full review whatever their size.
   critical: string[];
+  // Hosts beyond this machine the team may reach (policies.ts network): api.example.com, or *.example.com.
+  hosts: string[];
   branchPrefix: string;
   model: string;
   roles: Record<string, Lane>;
@@ -221,6 +224,7 @@ const KNOWN_KEYS = new Set([
   "priorities",
   "approval",
   "critical",
+  "hosts",
   "model",
   "roles",
   "review",
@@ -526,7 +530,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     else if (typeof value !== "number" || !Number.isFinite(value) || value < 0) problems.push(`priorities.weights.${key}: a number, 0 or more`);
     else weights[key as Dimension] = value;
   }
-  const approvalIn = object(input.approval, "approval", ["mode", "maxSize", "findings"]) ?? {};
+  const approvalIn = object(input.approval, "approval", ["mode", "maxSize", "findings", "stakeholders"]) ?? {};
   const approvalMode = approvalIn.mode ?? "thresholds";
   if (approvalMode !== "operator" && approvalMode !== "thresholds" && approvalMode !== "full")
     problems.push(
@@ -537,6 +541,11 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   const findings = approvalIn.findings ?? "planner";
   if (findings !== "planner" && findings !== "approver")
     problems.push('approval.findings: "planner" (it approves the findings other members file) or "approver" (they go with the proposals)');
+  const stakeholders = approvalIn.stakeholders ?? "operator";
+  if (stakeholders !== "operator" && stakeholders !== "screened")
+    problems.push(
+      'approval.stakeholders: "operator" (you approve work from a stakeholder\'s words) or "screened" (the approver too, when the planner screened it clear)'
+    );
 
   const review = object(input.review, "review", ["required", "removedPattern", "maxRounds"]) ?? {};
   // A tester's branches get the assertion default; null turns it off.
@@ -680,8 +689,15 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       mode: approvalMode === "operator" || approvalMode === "full" ? approvalMode : "thresholds",
       maxSize: typeof maxSize === "string" && Object.hasOwn(SIZES, maxSize) ? (maxSize as Size) : "M",
       findings: findings === "approver" ? "approver" : "planner",
+      stakeholders: stakeholders === "screened" ? "screened" : "operator",
     },
     critical: list(input.critical, "critical", regex) ?? [],
+    hosts:
+      list(input.hosts, "hosts", (value, where) =>
+        typeof value === "string" && /^(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(value)
+          ? value.toLowerCase()
+          : bad(where, "a host, such as api.example.com or *.example.com")
+      ) ?? [],
     branchPrefix: prefix,
     model: text(input.model, "model") ?? "claude-opus-5-5",
     roles,

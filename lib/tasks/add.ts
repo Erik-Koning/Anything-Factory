@@ -62,6 +62,9 @@ export async function addTask(store: Store, team: string, input: TaskInput, who:
     if (!proposes(who)) throw new Refused(`promoting a feature request is the planner's; you're the ${who}`);
     promoted = await store.requests.get(request);
     if (!promoted) throw new Refused(`no feature request ${request}`);
+    // The planner makes work of a stakeholder's words only once it has screened them; the operator decides for itself.
+    if (who !== OPERATOR && !promoted.screen)
+      throw new Refused(`screen request ${request} first: a6g request screen ${request} clear|risky --note "what you checked"`);
   }
   const fields = newTask({
     team,
@@ -77,6 +80,7 @@ export async function addTask(store: Store, team: string, input: TaskInput, who:
     request,
     by: who,
     ...(input.from ? { from: input.from } : {}),
+    ...(promoted?.screen ? { screen: promoted.screen } : {}),
   });
   if (status === "approved") fields.approval = { by: OPERATOR, at: nowIso(), note: "added approved by the operator" };
   // Who it came from, in its history too: the history is what the planner and the operator read back.

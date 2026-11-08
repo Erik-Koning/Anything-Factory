@@ -156,7 +156,12 @@ describe("WhatsApp messages", () => {
 
   test("agents can't message through the Graph API themselves", () => {
     const { team } = normalize({ name: "fixture", branch: "a6g/next" }, "/tmp/fixture");
-    assert.ok(refusal(team, "curl -X POST https://graph.facebook.com/v25.0/111/messages -H 'Authorization: Bearer x' -d @m.json"));
-    assert.equal(refusal(team, "curl https://graph.facebook.com/v25.0/me?fields=id"), null);
+    assert.equal(
+      refusal(team, "curl -X POST https://graph.facebook.com/v25.0/111/messages -H 'Authorization: Bearer x' -d @m.json")?.source,
+      "policy messages"
+    );
+    // Reading it isn't messaging anyone (with the network policy unlocked, as nothing else would let it out).
+    const open = normalize({ name: "fixture", branch: "a6g/next", policies: { network: "allow" } }, "/tmp/fixture").team;
+    assert.equal(refusal(open, "curl https://graph.facebook.com/v25.0/me?fields=id"), null);
   });
 });

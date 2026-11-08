@@ -6,15 +6,34 @@
 //   a6g connect whatsapp [--phone-number-id <id>] [--account-id <id>] [--to <number>]
 //   a6g connect heartbeat <url>                   an outside check the watchdog pings, which tells them when it stops
 //   a6g connect mongo [--machine <name>] [--no-check]   this machine's connection to a team's shared task graph
-//   a6g connect email|whatsapp|heartbeat --test   send another test message, or ping
-//   a6g disconnect email|whatsapp|heartbeat
+//   a6g connect app [--url <url>] [--machine <name>] [--no-open]   link this machine to the operator's account on the
+//                                                 web app, which shows them it and the teams it runs (lib/fleet.ts)
+//   a6g connect email|whatsapp|heartbeat|app --test   send another test message, ping, or report
+//   a6g disconnect email|whatsapp|heartbeat|app
 //
 // Email goes through Resend with the operator's own API key (lib/email.ts); WhatsApp through their WhatsApp Business
 // number on Meta's Cloud API (lib/whatsapp.ts). Each key or token is typed at a prompt or piped in, goes in the
 // Keychain, and is kept only after a test message goes through (or, for WhatsApp, while Meta reviews the template).
-// The heartbeat (lib/heartbeat.ts) is kept only after a test ping goes through.
+// The heartbeat (lib/heartbeat.ts) is kept only after a test ping goes through. The web app's link (lib/app.ts) is
+// made by signing in to the app in a browser and approving this machine there.
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { MACHINE_NAME, machineName, saveMachineName } from "../machine.ts";
+import {
+  APP_FILE,
+  appSettings,
+  appUrl,
+  awaitLink,
+  DEFAULT_APP,
+  forgetLink,
+  hasAppLink,
+  readAppLink,
+  saveLink,
+  sendReport,
+  startLink,
+  unlinkSelf,
+} from "../app.ts";
+import { IDLE_DAYS } from "../fleet.ts";
+import { MACHINE_NAME, machineName, saveMachineName, savedMachineName } from "../machine.ts";
 import { driver, MONGO_URI, shownUri } from "../tasks/mongo.ts";
 import { forgetUri, hasUri, readUri, storeUri } from "../tasks/mongoUri.ts";
 import { hostname } from "node:os";
@@ -51,6 +70,7 @@ import {
   whatsappSettings,
 } from "../whatsapp.ts";
 import { teamNames } from "./team.ts";
+import { machineReport } from "./watchdog.ts";
 
 const TEST_SUBJECT = "[Anything Factory] Email is connected";
 const testText = (replies: boolean): string => `This is Anything Factory on ${hostname()}. From now on the watchdog emails you here when a team needs you:
@@ -399,6 +419,95 @@ async function connectMongo(argv: string[]): Promise<number> {
   return 0;
 }
 
+function appStatus(): void {
+  const settings = appSettings();
+  if (!settings) console.info("app  not linked: a6g connect app (shows you this machine and its teams on the web app)");
+  else if (!readAppLink()) console.info(`app  ${settings.url}, but this machine's link isn't in the Keychain any more: a6g connect app`);
+  else
+    console.info(
+      `app  ${settings.url}, as the machine ${settings.machine.name}, since ${localTime(new Date(settings.linkedAt))} (a6g connect app --test reports it now)`
+    );
+}
+
+// Sends this machine's report now, as the watchdog does at the end of every run.
+async function reportNow(): Promise<number> {
+  const link = readAppLink();
+  if (!link) die("this machine isn't linked to the web app: a6g connect app");
+  const sent = await sendReport(link, machineReport());
+  if (!sent.ok) {
+    console.error(`a6g: the web app didn't take the report: ${sent.problem}`);
+    if (sent.unlinked) console.error("  It no longer knows this machine (unlinked there, or quiet too long): a6g connect app links it again.");
+    return 1;
+  }
+  console.info(
+    `a6g: reported ${appSettings()?.machine.name ?? machineName()} to ${link.url}${sent.token ? "; its token was replaced, as it is every week" : ""}`
+  );
+  return 0;
+}
+
+// a6g connect app: the device authorization grant (lib/fleet.ts). The CLI shows a code and opens the app's page for it;
+// the person signs in there, checks the code and the machine, and approves; the CLI then keeps the machine's token.
+// Linking again (to the same app) shows the app the link so far, which the new one replaces.
+async function connectApp(argv: string[]): Promise<number> {
+  const { options } = parseArgs(argv, { booleans: ["test", "no-open"] });
+  if (options["test"]) return reportNow();
+  const previous = readAppLink();
+  const given = text(options["url"]) ?? previous?.url ?? DEFAULT_APP;
+  const base = appUrl(given);
+  if (!base) die(`--url: the web app's address, https://… (or http://localhost:<port> for one on this Mac), not ${given}`);
+  let name = text(options["machine"]);
+  // The host's name often names its owner, and every member of a team sees a machine's name: asked, the first time.
+  if (name === undefined && !savedMachineName() && process.stdin.isTTY)
+    name = (await ask(`What should the web app call this machine? (team members see it) [${machineName()}]: `)) || machineName();
+  name ??= machineName();
+  if (!MACHINE_NAME.test(name)) die("--machine: lowercase letters, digits and dashes, such as studio");
+
+  const started = await startLink(base, name, previous?.url === base ? previous.token : null);
+  if ("problem" in started) {
+    console.error(`a6g: couldn't start linking this machine: ${started.problem}`);
+    return 1;
+  }
+  const { link } = started;
+  const minutes = Math.max(1, Math.round(link.expires_in / 60));
+  console.info(`To link this machine, ${name}, to your account, open
+  ${link.verification_uri}
+sign in, and check that the page shows this code:
+
+  ${link.user_code}
+
+Approve it only if you started this, here, just now. The code works for ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+  if (!options["no-open"] && process.stdout.isTTY) spawnSync("open", [link.verification_uri_complete], { stdio: "ignore" });
+  console.info("Waiting for you to approve it on the web app…");
+
+  const outcome = await awaitLink(base, link);
+  if ("refused" in outcome) {
+    console.error("a6g: it was refused on the web app. Nothing was saved.");
+    return 1;
+  }
+  if ("expired" in outcome) {
+    console.error("a6g: the code expired before it was approved. Nothing was saved; a6g connect app starts again.");
+    return 1;
+  }
+  if ("problem" in outcome) {
+    console.error(`a6g: ${outcome.problem}. Nothing was saved.`);
+    return 1;
+  }
+  if (!saveLink(base, outcome.token))
+    die("the app linked this machine, but its token couldn't be kept in the Keychain; unlink it from the web app's Machines page", 1);
+  // Kept either way, like a6g connect mongo's, so a network that changes the host's name doesn't change which machine this is.
+  saveMachineName(name);
+  // A link to another app ends there too.
+  if (previous && previous.url !== base) await unlinkSelf(previous);
+  console.info(`a6g: ${name} is linked to ${outcome.token.account || "your account"} on ${base}.
+  The watchdog reports it and its teams there every five minutes; a machine that reports nothing for ${IDLE_DAYS} days is
+  unlinked. Unlink it from the app's Machines page, or with a6g disconnect app. Its token is in the Keychain, and
+  ${APP_FILE} says what it's linked to.`);
+  const linked = readAppLink();
+  const sent = linked ? await sendReport(linked, machineReport()) : null;
+  if (sent && !sent.ok) console.error(`a6g: its first report didn't go through: ${sent.problem}. The watchdog tries again in five minutes.`);
+  return 0;
+}
+
 export async function connect(argv: string[]): Promise<number> {
   operatorOnly("connect");
   const [what, ...rest] = argv;
@@ -407,17 +516,34 @@ export async function connect(argv: string[]): Promise<number> {
     whatsappStatus();
     heartbeatStatus();
     mongoStatus();
+    appStatus();
     return 0;
   }
   if (what === "email") return connectEmail(rest);
   if (what === "whatsapp") return connectWhatsApp(rest);
   if (what === "heartbeat") return connectHeartbeat(rest);
   if (what === "mongo") return connectMongo(rest);
-  die("usage: a6g connect [email|whatsapp|heartbeat|mongo]");
+  if (what === "app") return connectApp(rest);
+  die("usage: a6g connect [email|whatsapp|heartbeat|mongo|app]");
 }
 
-export function disconnect(argv: string[]): number {
+export async function disconnect(argv: string[]): Promise<number> {
   operatorOnly("disconnect");
+  if (argv[0] === "app") {
+    const settings = appSettings();
+    const link = readAppLink();
+    if (!settings && !link && !hasAppLink()) console.info("a6g: this machine wasn't linked to the web app");
+    else {
+      const problem = link ? await unlinkSelf(link) : "its link wasn't in the Keychain";
+      forgetLink();
+      console.info(
+        problem
+          ? `a6g: this machine forgot its link, but the app wasn't told (${problem}): unlink it from the app's Machines page.`
+          : `a6g: this machine is unlinked from ${link?.url}; the app no longer lists it.`
+      );
+    }
+    return 0;
+  }
   if (argv[0] === "mongo") {
     if (!hasUri()) console.info("a6g: Mongo wasn't connected");
     else {
@@ -443,7 +569,7 @@ export function disconnect(argv: string[]): number {
     }
     return 0;
   }
-  if (argv[0] !== "email") die("usage: a6g disconnect email|whatsapp|heartbeat|mongo");
+  if (argv[0] !== "email") die("usage: a6g disconnect email|whatsapp|heartbeat|mongo|app");
   if (!emailSettings() && !readKey()) {
     console.info("a6g: email wasn't connected");
     return 0;

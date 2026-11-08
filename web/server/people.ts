@@ -20,6 +20,11 @@ const key = (userId: string, team: string): string => `${userId}:${team}`;
 
 export const memberships = (filter: Partial<Pick<Membership, "userId" | "team">> = {}): Promise<Membership[]> =>
   collection().find(filter).sort({ team: 1 }).toArray();
+// Everyone's of `userIds`, in one look.
+export const membershipsOf = (userIds: readonly string[]): Promise<Membership[]> =>
+  collection()
+    .find({ userId: { $in: [...userIds] } })
+    .toArray();
 
 // Puts the person on `team` as `role`, and links their stakeholder record there (made when new).
 export async function setMembership(

@@ -477,7 +477,8 @@ code {
   width: 100%;
   height: auto;
 }
-code.key {
+code.key,
+code.path {
   word-break: break-all;
 }
 .filters {
@@ -939,4 +940,8 @@ table.figures td {
   text-align: left;
   padding: 3px 16px 3px 0;
   font-variant-numeric: tabular-nums;
+}
+code.big {
+  font-size: 26px;
+  letter-spacing: 0.08em;
 }

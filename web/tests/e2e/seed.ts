@@ -1,6 +1,8 @@
 // The end-to-end tests' world, made with the factory's own functions over the test database: two teams' published
 // settings and status, a task graph with proposals, stakeholders' requests (one promoted, one rejected), the first
-// admin (by create-admin's own code), a member and a contributor whose daily limit the tests reach.
+// admin (by create-admin's own code), a member and a contributor whose daily limit the tests reach, and three machines
+// linked to them as a6g connect app links one, with their reports.
+import type { MachineReport } from "../../../lib/fleet.ts";
 import { newTask, nowIso, priorityOf, type Score, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { addRequest, stakeholderFor } from "../../../lib/tasks/requests.ts";
 import { update } from "../../../lib/tasks/store.ts";
@@ -9,6 +11,7 @@ import { auth } from "../../server/auth.ts";
 import { createAdmin } from "../../server/bootstrap.ts";
 import { storeFor } from "../../server/factory.ts";
 import { rememberIp } from "../../server/known-ips.ts";
+import { decideLink, machineByToken, recordReport, redeemLink, startLink } from "../../server/machines.ts";
 import { setMembership } from "../../server/people.ts";
 import { DEFAULT_IP } from "../../playwright.config.ts";
 
@@ -18,6 +21,8 @@ export interface World {
   busy: string;
   proposals: { approve: string; reject: string; untouched: string };
   requests: { promoted: string; rejected: string };
+  // The member's machine's token, as its Keychain would hold it.
+  studioToken: string;
 }
 
 const score = (size: Score["size"], why: string): Score => ({
@@ -116,19 +121,57 @@ export async function seed(): Promise<World> {
     { email: "member@example.com", name: "Morgan Member", role: "member" as const, label: "sales" },
     { email: "busy@example.com", name: "Bea Busy", role: "contributor" as const, label: "customer" },
   ];
+  const ids: Record<string, string> = {};
   for (const p of people) {
     const { user } = await auth().api.createUser({ body: { email: p.email, name: p.name, role: "user" } });
     await setMembership({ userId: user.id, name: user.name, email: user.email }, "shop", p.role, p.label);
     await rememberIp(user.id, DEFAULT_IP, "confirmed by email");
+    ids[p.email] = user.id;
   }
   // Everyone the story starts with has confirmed the address the tests' browsers come from; a new one asks by email.
   const operator = await (await auth().$context).internalAdapter.findUserByEmail(admin.email);
   if (operator) await rememberIp(operator.user.id, DEFAULT_IP, "confirmed by email");
+
+  // The member's machine, Shop's lead and the only home of a team whose tasks are in files; the operator's, a worker
+  // of Shop's last heard from two hours ago; and one of a member of Blog's, whose report says it leads Shop as well (a
+  // machine says where a team runs only when its person is one of the team's members or an admin).
+  const link = async (userId: string | undefined, report: MachineReport, at = new Date()): Promise<string> => {
+    // From an address of the seed's own, so the tests' own codes and looks start from none.
+    const from = { ip: "192.0.2.10", userAgent: "a6g/0.4.0" };
+    const started = await startLink({ ...from, name: report.name, replacing: null }, at);
+    if (!userId || !started || typeof (await decideLink({ userId, ip: from.ip }, started.userCode, true, null, at)) !== "object")
+      throw new Error(`couldn't link ${report.name}`);
+    const linked = await redeemLink(started.deviceCode, from, at);
+    if ("error" in linked) throw new Error(`couldn't link ${report.name}: ${linked.error}`);
+    const bearing = await machineByToken(linked.token, from.ip, at);
+    if (!bearing || !(await recordReport(bearing, report, from.ip, at))) throw new Error(`couldn't report ${report.name}`);
+    return linked.token;
+  };
+  const team = { factory: "0.4.0", state: "active" as const, planner: null, members: {} };
+  const shopLead = { ...team, name: "shop", title: "Shop", part: "lead" as const, store: "mongo" as const, planner: "running", members: { builder: 1 } };
+  const studioToken = await link(ids["member@example.com"], {
+    name: "studio",
+    factory: "0.4.0",
+    teams: [
+      { ...shopLead, home: "/Users/morgan/code/shop-a6g" },
+      { ...team, name: "notes", title: "Notes", part: "lead", store: "files", home: "/Users/morgan/code/notes-a6g", state: "paused" },
+    ],
+  });
+  await link(
+    operator?.user.id,
+    { name: "attic", factory: "0.4.0", teams: [{ ...team, name: "shop", title: "Shop", part: "worker", store: "mongo", home: "/Users/olive/shop" }] },
+    new Date(Date.now() - 2 * 3_600_000)
+  );
+  // Someone on another team only, whose machine says it leads Shop.
+  const { user: outsider } = await auth().api.createUser({ body: { email: "blake@example.com", name: "Blake Blog", role: "user" } });
+  await setMembership({ userId: outsider.id, name: outsider.name, email: outsider.email }, "blog", "member", "writer");
+  await link(outsider.id, { name: "kiosk", factory: "0.4.0", teams: [{ ...shopLead, home: "/Users/blake/shop" }] });
   return {
     admin,
     member: "member@example.com",
     busy: "busy@example.com",
     proposals: { approve: toApprove.id, reject: toReject.id, untouched: untouched.id },
     requests: { promoted: promoted.id, rejected: rejected.id },
+    studioToken,
   };
 }

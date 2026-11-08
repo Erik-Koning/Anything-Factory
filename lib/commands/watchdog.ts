@@ -4,7 +4,8 @@
 // team's health URLs and its run folder, and sends anything that needs a checkout to the team's planner as a
 // message. What needs the operator also goes through every channel they've connected (a6g connect,
 // lib/channels.ts), and their replies go to the planner. Run from a terminal (a6g watchdog run, a6g start) it also
-// clears finished worktrees. A run of every team ends by pinging the heartbeat, if one is connected (lib/heartbeat.ts).
+// clears finished worktrees. A run of every team ends by reporting this machine and its teams to the web app, if it's
+// linked (a6g connect app, lib/fleet.ts), and pinging the heartbeat, if one is connected (lib/heartbeat.ts).
 //
 // Per team, in its run folder: watchdog.log, planner-thread, heartbeat/, outbox/, replies/, paused, hold.json,
 // budget.json, controls-applied, complete.
@@ -14,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
@@ -21,8 +23,9 @@ import { budgetCheck } from "../budget.ts";
 import { applyControls, holdNote, progressHold, readHold, readLimits } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
-import { A6G_HOME, entryOf, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
+import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
+import type { MachineReport, MachineTeam } from "../fleet.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
@@ -370,8 +373,65 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
   }
   if (reach.some((channel) => channel.replies)) writeJson(seenFile, [...seen].slice(-500));
   warnFailing(reach, glog);
-  if (!only) await beat(glog);
+  if (!only) {
+    await reportThisMachine(glog);
+    await beat(glog);
+  }
   return skipped;
+}
+
+// A path under the home folder as ~/…: the home folder's own path names its user.
+const underHome = (path: string): string => (path.startsWith(`${homedir()}/`) ? `~/${path.slice(homedir().length + 1)}` : path);
+
+// This machine and every team registered on it (lib/fleet.ts), as a full run sees them.
+export function machineReport(): MachineReport {
+  const teams: MachineTeam[] = [];
+  for (const entry of registered()) {
+    const { state, planner, members } = teamState(entry, entry.run);
+    teams.push({
+      name: entry.name,
+      title: entry.title,
+      part: entry.worker ? "worker" : "lead",
+      store: entry.tasks?.store ?? null,
+      home: underHome(entry.home),
+      factory: entry.version,
+      state,
+      planner,
+      members,
+    });
+  }
+  return { name: machineName(), factory: PACKAGE.version, teams };
+}
+
+const registered = (): RegistryEntry[] =>
+  existsSync(teamsDir)
+    ? readdirSync(teamsDir)
+        .filter((f) => f.endsWith(".json"))
+        .flatMap((f) => readRegistry(f.replace(/\.json$/, "")) ?? [])
+    : [];
+
+// The report, when this machine is linked to the web app (lib/app.ts). A failing report is logged at most hourly; one
+// the app refuses because it no longer knows the token (unlinked there, or quiet too long) ends the link here too. A
+// new token the app answers with is kept before anything else.
+async function reportThisMachine(glog: (text: string) => void): Promise<void> {
+  const mark = join(A6G_HOME, ".stamp-machine-unreported");
+  const failed = (text: string): void => {
+    if (minutesSince(mark) < 60) return;
+    writeFileSync(mark, "");
+    glog(text);
+  };
+  try {
+    if (!appSettings() && !hasAppLink()) return;
+    const link = readAppLink();
+    if (!link) return failed("this machine's link to the web app isn't in the Keychain any more: a6g connect app links it again");
+    const sent = await sendReport(link, machineReport());
+    if (sent.ok) return rmSync(mark, { force: true });
+    if (!sent.unlinked) return failed(`couldn't report this machine to the web app: ${sent.problem}`);
+    forgetLink();
+    glog("the web app no longer knows this machine (unlinked there, or quiet too long), so it stops reporting: a6g connect app links it again");
+  } catch (error) {
+    failed(`couldn't report this machine to the web app: ${cleaned((error as Error).message)}`);
+  }
 }
 
 // The heartbeat (lib/heartbeat.ts), last, so a ping says a whole run got through; a run that watches one team (a6g
@@ -727,24 +787,33 @@ async function enforceBudget(
   }
 }
 
-// The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).
-async function reportState(entry: RegistryEntry, run: string, log: (text: string) => void): Promise<void> {
+// Where a team stands on this machine: on its lead, the planner and the members it started; on a worker, the members
+// its watchdog started that are still at work.
+function teamState(entry: RegistryEntry, run: string): TeamState {
   const flag = (name: string): boolean => existsSync(join(run, name));
   const file = join(run, "planner-thread");
-  const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+  const planner = !entry.worker && existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const prefix = `a6g-${entry.name}-`;
   const pending = readHold(run);
   const hold = pending && !pending.settledAt && pending.scope !== "now";
   const members: Record<string, number> = {};
   if (planner) for (const { instance, n } of t3.childCounts(planner)) members[instance.startsWith(prefix) ? instance.slice(prefix.length) : instance] = n;
-  const state: TeamState = {
+  if (entry.worker)
+    for (const [role, threads] of Object.entries(readJson<WorkerThreads>(join(run, "worker-threads.json"), {})))
+      members[role] = threads.filter(({ id }) => workerBusy(id)).length;
+  return {
     state: flag("paused") ? "paused" : hold ? "pausing" : flag("complete") ? "complete" : flag("idle") ? "idle" : "active",
-    hold: readHold(run),
+    hold: pending,
     spend: readJson<Spend | null>(join(run, "spend.json"), null),
     planner: planner ? (t3.threadShow(planner)?.status ?? null) : null,
     members,
     at: new Date().toISOString(),
   };
+}
+
+// The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).
+async function reportState(entry: RegistryEntry, run: string, log: (text: string) => void): Promise<void> {
+  const state = teamState(entry, run);
   try {
     const store = await openStore({ name: entry.name, tasks: entry.tasks as NonNullable<RegistryEntry["tasks"]> }, run);
     try {
@@ -766,6 +835,10 @@ export const WORKER_PROMPT =
   "Claim a task from the team's task graph and build it: run a6g task claim first, then work as your role's instructions say, and hand it in with a6g task submit.";
 const WORKER_WINDOW_MIN = 30;
 type WorkerThreads = Record<string, { id: string; at: string }[]>;
+const workerBusy = (id: string): boolean => {
+  const status = t3.threadShow(id)?.status ?? "";
+  return BUSY.includes(status) || status === "waiting";
+};
 async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void): Promise<void> {
   if (!entry.tasks || !entry.limits) return;
   const file = join(entry.run, "worker-threads.json");
@@ -779,13 +852,9 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
   } finally {
     await store.close();
   }
-  const busy = (id: string): boolean => {
-    const status = t3.threadShow(id)?.status ?? "";
-    return BUSY.includes(status) || status === "waiting";
-  };
   for (const role of Object.keys(entry.limits)) {
     const recent = (started[role] ?? []).filter(({ at }) => Date.now() - Date.parse(at) < WORKER_WINDOW_MIN * 60_000);
-    const running = (started[role] ?? []).filter(({ id }) => busy(id));
+    const running = (started[role] ?? []).filter(({ id }) => workerBusy(id));
     const limit = entry.limits[role] ?? 0;
     const claimable = all.filter((t) => claimRefusal(t, role, all, hold) === null).length;
     const n = Math.min(limit - running.length, limit - recent.length, claimable);

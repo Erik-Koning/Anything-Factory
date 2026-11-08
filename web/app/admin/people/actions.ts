@@ -8,6 +8,7 @@ import { withNotice } from "../../../components/ui.tsx";
 import { invitationProblem, isTeamRole, LIMITS, TEAM_PARAM } from "../../../server/access.ts";
 import { auth, isAdminRole } from "../../../server/auth.ts";
 import { Refused, teamDoc } from "../../../server/factory.ts";
+import { unlinkAllOf, unlinkIfNotAllowed } from "../../../server/machines.ts";
 import { changeRole, removeMembership, setMembership } from "../../../server/people.ts";
 import type { AuditAction } from "../../../server/audit.ts";
 import { allowed, getViewer, NotAllowed, type Person, record } from "../../../server/viewer.ts";
@@ -91,7 +92,13 @@ export async function changeRoleAction(form: FormData): Promise<void> {
     const role = text(form, "role");
     if (!TEAM_PARAM.test(team) || !isTeamRole(role)) throw new Refused("Choose member or contributor.");
     if (!(await changeRole(user.id, team, role))) throw new Refused(`${user.email} isn't on ${team}.`);
-    return { ok: `${user.email} is now a ${role} of ${team}.`, target: user.email, team, detail: role };
+    const unlinked = await unlinkIfNotAllowed(user.id);
+    return {
+      ok: `${user.email} is now a ${role} of ${team}${machinesEnded(unlinked)}.`,
+      target: user.email,
+      team,
+      detail: `${role}${machinesEnded(unlinked)}`,
+    };
   });
 }
 
@@ -101,18 +108,33 @@ export async function removeAction(form: FormData): Promise<void> {
     const team = text(form, "team");
     if (!TEAM_PARAM.test(team)) throw new Refused("No such team.");
     await removeMembership(user.id, team);
-    return { ok: `${user.email} is no longer on ${team}.`, target: user.email, team };
+    const unlinked = await unlinkIfNotAllowed(user.id);
+    return {
+      ok: `${user.email} is no longer on ${team}${machinesEnded(unlinked)}.`,
+      target: user.email,
+      team,
+      ...(unlinked ? { detail: machinesEnded(unlinked).slice(2) } : {}),
+    };
   });
 }
 
-// A ban ends every session the person has and keeps them from signing in; admins are managed by create-admin.
+// "; their 2 machines are unlinked", when a change leaves someone who may no longer link machines (access.ts) with some.
+const machinesEnded = (n: number): string => (n ? `; ${n === 1 ? "their machine is" : `their ${n} machines are`} unlinked` : "");
+
+// A ban ends every session the person has, unlinks their machines, and keeps them from signing in; admins are managed
+// by create-admin.
 export async function banAction(form: FormData): Promise<void> {
   await run("person.banned", form, async () => {
     const user = await userById(text(form, "userId"));
     if (isAdminRole(user.role)) throw new Refused("Admins aren't banned from here; remove one with create-admin on the operator's machine.");
     const reason = text(form, "reason").slice(0, LIMITS.label) || "removed by an admin";
     await auth().api.banUser({ body: { userId: user.id, banReason: reason }, headers: await headers() });
-    return { ok: `${user.email} is banned and signed out everywhere.`, target: user.email, detail: reason };
+    const unlinked = await unlinkAllOf(user.id);
+    return {
+      ok: `${user.email} is banned and signed out everywhere${machinesEnded(unlinked)}.`,
+      target: user.email,
+      detail: `${reason}${machinesEnded(unlinked)}`,
+    };
   });
 }
 

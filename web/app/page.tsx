@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Ago, Chip, Notice, type SearchParams } from "../components/ui.tsx";
-import { can, roleIn } from "../server/access.ts";
+import { machinesRunning, online } from "../../lib/fleet.ts";
+import { can, roleIn, runsTeam } from "../server/access.ts";
 import { allTeams, storeFor, type TeamDoc } from "../server/factory.ts";
+import { linkedMachines, ownersOf } from "../server/machines.ts";
 import { requireViewer } from "../server/viewer.ts";
 import { merges, proposals } from "../server/views.ts";
 
@@ -11,6 +13,9 @@ export const metadata: Metadata = { title: "Teams" };
 export default async function TeamsPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
   const teams = (await allTeams()).filter((team) => roleIn(viewer, team.name) !== null);
+  // Only the machines that report a team whose board the viewer sees.
+  const machines = await linkedMachines({ teams: teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name) });
+  const owners = await ownersOf(machines);
   const cards = await Promise.all(teams.map(async (team) => ({ team, ...(await summary(team)) })));
   return (
     <>
@@ -23,6 +28,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
             const role = roleIn(viewer, team.name);
             const status = team.status;
             const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
+            // Where it runs, for those who see who holds what on the board: the machines of its members and admins that
+            // report it.
+            const runsOn = can(viewer, "team:board", team.name)
+              ? machinesRunning(
+                  machines.filter((m) => runsTeam(owners.get(m.userId), team.name)),
+                  team.name
+                )
+              : null;
             return (
               <li key={team.name}>
                 <div className="head">
@@ -38,6 +51,16 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                   <dd>{status?.planner ?? "not running"}</dd>
                   <dt>At work</dt>
                   <dd>{atWork.length ? atWork.map(([r, n]) => `${n} ${r}${n === 1 ? "" : "s"}`).join(", ") : "nobody"}</dd>
+                  {runsOn ? (
+                    <>
+                      <dt>Machines</dt>
+                      <dd>
+                        {runsOn.length
+                          ? runsOn.map(({ machine, part }) => `${machine.name} (${part}${online(machine) ? "" : ", not reporting"})`).join(", ")
+                          : "none reports it"}
+                      </dd>
+                    </>
+                  ) : null}
                   <dt>Aim</dt>
                   <dd>
                     {team.mode === "cycles" ? `cycle ${cycles + 1}` : status?.state === "complete" ? "finish line reached" : "working to its finish line"}

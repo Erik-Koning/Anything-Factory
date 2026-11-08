@@ -1,5 +1,6 @@
-// The app has no rules of its own and runs nothing of the CLI's: it imports only the factory's shareable task code,
-// and never the run folder's store, the Keychain, migrations, machines or anything that starts processes.
+// The app has no rules of its own and runs nothing of the CLI's: it imports only the factory's shareable task code and
+// the machines' reports (lib/fleet.ts), and never the run folder's store, the Keychain, migrations, the task graph's
+// machines or anything that starts processes.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -17,6 +18,7 @@ const ALLOWED = new Set([
   "lib/tasks/graph.ts",
   "lib/tasks/controls.ts",
   "lib/tasks/spend.ts",
+  "lib/fleet.ts",
 ]);
 
 function sources(dir: string): string[] {
