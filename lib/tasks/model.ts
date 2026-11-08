@@ -235,10 +235,13 @@ export const FINDINGS: Kind[] = ["bug", "ux", "test", "test-infra"];
 export const UNAPPROVED: Status[] = ["triage", "proposed", "researching"];
 
 // Work that came from a stakeholder's words: suggested from the web app, or made of a feature request by the team (the
-// operator's own tasks, from a request or the web app, are the operator's words). Its title and body are still theirs
-// while it's a suggestion the planner hasn't rewritten.
+// operator's own tasks, from a request or the web app, are the operator's words). A suggestion's words stay theirs,
+// fenced, until the planner has rewritten them: its title, and its body if it has one. A new kind or a rewritten title
+// alone leaves their words in it.
 export const fromStakeholder = (t: Pick<Task, "by" | "request">): boolean => t.by === "stakeholder" || (!!t.request && t.by !== OPERATOR);
-export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !rewrittenByPlanner(t);
+const plannerEdited = (t: Task, field: "title" | "body"): boolean =>
+  t.history.some((e) => e.by === "planner" && new RegExp(String.raw`\bedited\b[^;]*\b${field}\b`).test(e.what));
+export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !(plannerEdited(t, "title") && (plannerEdited(t, "body") || !t.body.trim()));
 
 // --- How a task moves -----------------------------------------------------------------------------------------------
 // Every change of a task's status goes through move(), against one table: the command it comes from (via), who may

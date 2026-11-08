@@ -26,7 +26,8 @@ import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
-import type { MachineReport, MachineTeam } from "../fleet.ts";
+import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
+import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
@@ -396,14 +397,16 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
 // A path under the home folder as ~/…: the home folder's own path names its user.
 const underHome = (path: string): string => (path.startsWith(`${homedir()}/`) ? `~/${path.slice(homedir().length + 1)}` : path);
 
-// This machine and every team registered on it (lib/fleet.ts), as a full run sees them.
+// This machine and every team registered on it (lib/fleet.ts), as a full run sees them. A title goes as one plain line
+// the app takes (team.json's has no limit): one that's too long or holds a newline mustn't stop the whole report.
 export function machineReport(): MachineReport {
   const teams: MachineTeam[] = [];
   for (const entry of registered()) {
     const { state, planner, members } = teamState(entry, entry.run);
+    const title = plain(entry.title).replace(/\s+/g, " ").trim();
     teams.push({
       name: entry.name,
-      title: entry.title,
+      title: title.length > REPORT_LIMITS.text ? `${title.slice(0, REPORT_LIMITS.text - 1)}…` : title,
       part: entry.worker ? "worker" : "lead",
       store: entry.tasks?.store ?? null,
       home: underHome(entry.home),

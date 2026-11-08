@@ -288,13 +288,19 @@ export const POLICIES: Policy[] = [
       "rsync -a . someone@host.example.com:/srv",
       "ssh build-box",
       "curl -x http://proxy.example.com:8080 http://localhost:3000",
+      "curl -sxproxy.example.com:8080 http://localhost:3000",
+      "https_proxy=http://proxy.example.com:8080 curl https://localhost:3000",
+      "export https_proxy=http://proxy.example.com:8080",
+      "CURL_HOME=. curl http://localhost:3000",
+      "curl 'http://collect.example.com?@localhost/'",
+      "ssh -Jjump.example.com localhost",
       "wget -i urls.txt",
     ],
     default: "deny",
     summary: "reaching other hosts from the shell (curl, wget, httpie, nc, ssh, scp, rsync, …): only this machine, and the hosts team.json lists",
     reason: `the team reaches only this machine (its servers, previews and containers) and the hosts its team.json lists ("hosts"): anything it sent elsewhere could carry the code or its data out. ${ASK}`,
     rules: [],
-    forTeam: (team) => [outbound(team.hosts ?? [])],
+    forTeam: (team) => [outbound(team.hosts ?? []), SETS_PROXY],
   },
   {
     id: "payments",
@@ -386,6 +392,18 @@ function hostsOf(client: string, args: string[]): (string | null)[] {
     if (opaque.test(option)) {
       hosts.push(null);
       if (inline === undefined) i++;
+    } else if (/^-[^-]./.test(arg)) {
+      // Short options together (-sSf), or one with its value (-xproxy, -ofile): past the first that takes a value, the
+      // rest of the word is that value.
+      for (let k = 1; k < arg.length; k++) {
+        const flag = `-${arg[k]}`;
+        const last = k === arg.length - 1;
+        if (opaque.test(flag)) hosts.push(null);
+        if (opaque.test(flag) || valued.has(flag)) {
+          if (last) i++;
+          break;
+        }
+      }
     } else if (arg.startsWith("-") && arg !== "-") {
       if (valued.has(option) && inline === undefined) i++;
     } else positional.push(arg);
@@ -395,7 +413,8 @@ function hostsOf(client: string, args: string[]): (string | null)[] {
       hosts.push(null);
       continue;
     }
-    const url = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/\s]*@)?(\[[^\]]+\]|[^:/?#\s]+)/i.exec(arg);
+    // A user before the host ends at the first / ? or #: http://elsewhere?@localhost/ goes to elsewhere.
+    const url = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#\s]*@)?(\[[^\]]+\]|[^:/?#\s]+)/i.exec(arg);
     if (url) hosts.push((url[1] ?? "").replace(/^\[|\]$/g, ""));
     else if (SHELL.test(client)) {
       // [user@]host:path for scp and rsync, [user@]host for ssh and sftp; a plain path is this machine's.
@@ -426,6 +445,15 @@ function hostsOf(client: string, args: string[]): (string | null)[] {
 const CLIENT = new RegExp(
   String.raw`${START}${VIA}(curl|wget|https?|xhs?|httpie|aria2c|websocat|ssh|scp|sftp|rsync|nc|ncat|netcat|telnet|socat|l?ftp)${AT}(?=\s|$)(.*)$`
 );
+// Variables that send a client somewhere else: a proxy, or settings it reads from a file (~/.curlrc, .wgetrc).
+const PROXY_VARS = String.raw`(?:https?|all|ftp|socks5?h?)_proxy|CURL_HOME|WGETRC`;
+const CLIENT_VARS = new RegExp(String.raw`(?:^|\s)(?:${PROXY_VARS}|HOME|XDG_CONFIG_HOME)=`, "i");
+// Setting one of those, or exporting it, for whatever runs after it.
+const SETS_PROXY: Matcher = {
+  test: (line) =>
+    new RegExp(String.raw`(?:^|\s)(?:${PROXY_VARS})=`, "i").test(line) ||
+    new RegExp(String.raw`${START}(?:export|declare|typeset|readonly)\b[^;&|]*\s(?:${PROXY_VARS})(?=\s|$)`, "i").test(line),
+};
 // A network client reaching anywhere but this machine and `hosts`.
 export function outbound(hosts: readonly string[]): Matcher {
   return {
@@ -433,6 +461,7 @@ export function outbound(hosts: readonly string[]): Matcher {
       const match = CLIENT.exec(line);
       if (!match) return false;
       const client = match[1] ?? "";
+      if (CLIENT_VARS.test(line.slice(0, line.length - (match[2] ?? "").length))) return true;
       const oneWord = !SHELL.test(client);
       return hostsOf(client, (match[2] ?? "").split(/\s+/).filter(Boolean)).some(
         (host) => host === null || !(isLocal(host, oneWord) || listed(host, hosts))

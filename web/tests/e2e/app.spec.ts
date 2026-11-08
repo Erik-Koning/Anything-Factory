@@ -479,13 +479,13 @@ test("a machine's token is replaced each week; the old one used after the new on
   expect(rotated.status).toBe(200);
   const next = String(rotated.body["access_token"]);
   expect(next).toMatch(/^a6gm_/);
-  // A CLI that missed the answer still has the old one, for a day: it gets another, and the one it missed is done.
+  // A CLI that missed the answer still has the old one, for a day: it gets another (the one it missed, used later, would
+  // end the link: tests/integration/machines.test.ts).
   await later("studio");
   const again = await cli("/api/machines/report", { body: reportOf("studio"), token: old });
   expect(again.status).toBe(200);
   const newest = String(again.body["access_token"]);
-  await later("studio");
-  expect((await cli("/api/machines/report", { body: reportOf("studio"), token: next })).status).toBe(401);
+  expect(newest).not.toBe(next);
   await later("studio");
   expect((await cli("/api/machines/report", { body: reportOf("studio"), token: newest })).status).toBe(204);
   // Once the newest has been used, the old one is a copy someone kept: the link ends, and it's audited.

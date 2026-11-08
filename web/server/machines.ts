@@ -15,7 +15,8 @@
 //
 // A machine's token is kept only as its hash too, and does nothing but report its machine and unlink it. Every
 // ROTATE_DAYS a report is answered with a new one; the old one keeps working ROTATE_GRACE_HOURS for a CLI that missed
-// the answer, and is a stolen one if it's used after the new one has been: the link ends (RFC 9700 section 4.14). A
+// the answer, and is a stolen one if it's used after the new one has been: the link ends (RFC 9700 section 4.14). So
+// does a new one used after the old one came back unused and was given another in its place (orphanHashes). A
 // token stops working when its machine is unlinked (from the Machines page, or by itself), when its person is banned
 // or no longer may link machines (mayLinkMachines), or after IDLE_DAYS without a report. Each person has at most
 // MAX_MACHINES.
@@ -84,6 +85,9 @@ interface MachineDoc {
   // The token before it, while it still works for a CLI that missed the new one.
   previousHash: string | null;
   previousUntil: Date | null;
+  // Tokens issued and replaced before anything used them (the previous one came back meanwhile): one of these used
+  // later means two holders, and ends the link. The last few; absent on machines linked before there were any.
+  orphanHashes?: string[];
   // Its last report, or its link: the idle expiry counts from here.
   lastSeenAt: Date;
   lastIp: string | null;
@@ -126,6 +130,7 @@ export function ensureIndexes(): Promise<unknown> {
     links().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     machines().createIndex({ tokenHash: 1 }, { unique: true }),
     machines().createIndex({ previousHash: 1 }, { sparse: true }),
+    machines().createIndex({ orphanHashes: 1 }, { sparse: true }),
     machines().createIndex({ userId: 1 }),
     machines().createIndex({ "teams.name": 1 }),
     machines().createIndex({ lastSeenAt: 1 }, { expireAfterSeconds: IDLE_DAYS * 86_400 }),
@@ -139,7 +144,9 @@ export function ensureIndexes(): Promise<unknown> {
 const hash = (secret: string): string => createHash("sha256").update(secret).digest("hex");
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 const newToken = (): string => `a6gm_${randomBytes(32).toString("base64url")}`;
-const VIEW = { projection: { tokenHash: 0, previousHash: 0 } } as const;
+const VIEW = { projection: { tokenHash: 0, previousHash: 0, orphanHashes: 0 } } as const;
+// Replaced tokens kept for spotting a second holder.
+const ORPHANS_KEPT = 10;
 const view = (doc: Omit<MachineDoc, "tokenHash" | "previousHash"> & Partial<MachineDoc>): Machine => ({
   id: doc._id,
   userId: doc.userId,
@@ -265,7 +272,8 @@ export async function decideLink(
   if (!doc) return null;
   const replaces = await replacedName(doc, userId);
   if (approve) {
-    if (doc.ip !== ip && typed !== userCode) return "type the code";
+    // An unknown address is never the same one.
+    if ((doc.ip === null || doc.ip !== ip) && typed !== userCode) return "type the code";
     if (!replaces && (await machines().countDocuments({ userId, lastSeenAt: { $gt: idleSince(now) } })) >= MAX_MACHINES) return "too many";
   }
   const decided = await links().findOneAndUpdate({ ...open, _id: doc._id }, { $set: { status: approve ? "approved" : "refused", userId } });
@@ -357,17 +365,23 @@ export interface Bearing {
   currentHash: string;
 }
 
-// The machine a token is for, while it's linked and its person may have it. An old token used after its successor
-// ends the link: it was stolen, or copied. Null otherwise. `ip` is the request's, for the audit log.
+// The machine a token is for, while it's linked and its person may have it. An old token used after its successor,
+// or a successor used after the old one came back and was given another, ends the link: it was stolen, or copied.
+// Null otherwise. `ip` is the request's, for the audit log.
 export async function machineByToken(token: string, ip: string | null, now = new Date()): Promise<Bearing | null> {
   if (!MACHINE_TOKEN.test(token)) return null;
   const tokenHash = hash(token);
-  const doc = await machines().findOne({ $or: [{ tokenHash }, { previousHash: tokenHash }] });
+  const doc = await machines().findOne({ $or: [{ tokenHash }, { previousHash: tokenHash }, { orphanHashes: tokenHash }] });
   if (!doc) return null;
-  const owner = doc.lastSeenAt > idleSince(now) ? await standing(doc.userId) : null;
+  if (doc.tokenHash !== tokenHash && doc.previousHash !== tokenHash) {
+    await endLink(doc, ip, "a token replaced before it was used came back: two machines held this link, so it ended");
+    return null;
+  }
+  const quiet = doc.lastSeenAt <= idleSince(now);
+  const owner = quiet ? null : await standing(doc.userId);
   if (!owner) {
     // Quiet too long, or its person may no longer have it: the link ends here, whether or not anything else ended it.
-    await machines().deleteOne({ _id: doc._id });
+    await endLink(doc, ip, quiet ? `no report in ${IDLE_DAYS} days, so the link ended` : "its person may no longer link machines, so the link ended");
     return null;
   }
   const due = doc.issuedAt.getTime() <= now.getTime() - ROTATE_DAYS * 86_400_000;
@@ -376,20 +390,25 @@ export async function machineByToken(token: string, ip: string | null, now = new
     return { machine: view(doc), which: "current", due, currentHash: doc.tokenHash };
   }
   if (!doc.seen && doc.previousUntil && doc.previousUntil > now) return { machine: view(doc), which: "previous", due: true, currentHash: doc.tokenHash };
-  if (doc.seen) {
-    await machines().deleteOne({ _id: doc._id });
-    await audit({
-      action: "machine.unlinked",
-      outcome: "ok",
-      userId: doc.userId,
-      email: owner.email,
-      ip,
-      userAgent: null,
-      target: doc.name,
-      detail: "a replaced token was used after its successor: it was copied, so the link ended",
-    });
-  }
+  if (doc.seen) await endLink(doc, ip, "a replaced token was used after its successor: it was copied, so the link ended");
   return null;
+}
+
+// Ends a link when a token's use shows it must (copied, quiet too long, its person no longer allowed), on the audit
+// log; nothing when something else ended it first.
+async function endLink(doc: MachineDoc, ip: string | null, detail: string): Promise<void> {
+  if (!(await machines().deleteOne({ _id: doc._id })).deletedCount) return;
+  const owner = await standing(doc.userId);
+  await audit({
+    action: "machine.unlinked",
+    outcome: "ok",
+    userId: doc.userId,
+    email: owner?.email ?? null,
+    ip,
+    userAgent: null,
+    target: doc.name,
+    detail,
+  });
 }
 
 // Keeps the machine's report (not its name: that stays as approved): false when it reported less than
@@ -412,7 +431,11 @@ export async function recordReport(
       tokenHash: bearing.currentHash,
       $or: [{ at: null }, { at: { $lte: new Date(now.getTime() - REPORT_GAP_SECONDS * 1000) } }],
     },
-    { $set: set }
+    {
+      $set: set,
+      // The previous token came back while its successor was unused: that successor is replaced, and remembered.
+      ...(token && bearing.which === "previous" ? { $push: { orphanHashes: { $each: [bearing.currentHash], $slice: -ORPHANS_KEPT } } } : {}),
+    }
   );
   return matchedCount === 1 ? { token } : false;
 }

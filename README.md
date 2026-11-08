@@ -271,16 +271,16 @@ the code up, check it, the machine and the address it asked from, and approve; a
 than yours must be typed, not only clicked, and you get an email whenever a machine is linked. The Mac then keeps a
 token in the Keychain, with the address it goes to, that does one thing: report this machine (OAuth's device
 authorization grant, RFC 8628). It isn't a sign-in, can't read anything or act as you, and is replaced every week (an
-old one used after its successor ends the link). At the end of every full watchdog run it reports every team
-registered on it, those whose tasks are in files too: lead or worker, where the team stands, who's at work, and its
-checkout (as `~/…` under your home folder). **Machines** on the web app shows you your machines, and an admin every
-machine and whose it is; a team's card on **Teams** names the machines its members and admins run it on. A machine
-not heard from for 15 minutes shows as not reporting. Admins and the members of a team link machines, ten each.
-Unlink one from its card or with `a6g disconnect app`; one that reports nothing for 30 days, or whose person is banned
-or no longer on a team as a member, is unlinked too. Linking a Mac again replaces its old link only because the CLI
-shows the old token: a machine someone else names after yours is a second one, never yours replaced.
-`a6g connect app --test` reports now; `--url` names another deployment of the app (https, or http://localhost for one
-on this Mac), and `--machine` the Mac's name.
+old one used after its successor ends the link, as does a new one turning up after the old one was given another). At
+the end of every full watchdog run it reports every team registered on it, those whose tasks are in files too: lead or
+worker, where the team stands, who's at work, and its checkout (as `~/…` under your home folder). **Machines** on the
+web app shows you your machines, and an admin every machine and whose it is; a team's card on **Teams** names the
+machines its members and admins run it on. A machine not heard from for 15 minutes shows as not reporting. Admins and
+the members of a team link machines, ten each. Unlink one from its card or with `a6g disconnect app`; one that reports
+nothing for 30 days, or whose person is banned or no longer on a team as a member, is unlinked too. Linking a Mac
+again replaces its old link only because the CLI shows the old token: a machine someone else names after yours is a
+second one, never yours replaced. `a6g connect app --test` reports now; `--url` names another deployment of the app
+(https, or http://localhost for one on this Mac), and `--machine` the Mac's name.
 
 ## The two places you edit
 

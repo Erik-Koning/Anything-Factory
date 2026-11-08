@@ -38,12 +38,15 @@ export async function lookUpLinkAction(_before: LinkState, form: FormData): Prom
   const code = normalUserCode(typed);
   if (!code) return { error: "That isn't a code: eight letters, like BCDF-GHJK.", link: null, code: typed };
   const link = await lookUpLink(viewer.userId, viewer.ip, code);
-  if (link === "tries") return { error: TRIES, link: null, code: typed };
+  if (link === "tries") {
+    await record(viewer, { action: "machine.linked", outcome: "refused", detail: `looked up a code past the limit on looks in 15 minutes` });
+    return { error: TRIES, link: null, code: typed };
+  }
   if (!link) {
     await record(viewer, { action: "machine.linked", outcome: "failed", detail: "looked up a code no machine was waiting for" });
     return { error: GONE, link: null, code: typed };
   }
-  return { error: null, link: { ...link, here: link.ip === viewer.ip, ago: ago(link.createdAt) }, code: typed };
+  return { error: null, link: { ...link, here: link.ip !== null && link.ip === viewer.ip, ago: ago(link.createdAt) }, code: typed };
 }
 
 // Approves or refuses the code looked up (`decision`); a code asked for from another address is approved only with
@@ -72,7 +75,7 @@ export async function decideLinkAction(_before: DecideState, form: FormData): Pr
     action,
     outcome: "ok",
     target: link.name,
-    detail: `asked for from ${link.ip ?? "an unknown address"} by ${link.device}${link.ip === viewer.ip ? "" : ", another address than the person's"}`,
+    detail: `asked for from ${link.ip ?? "an unknown address"} by ${link.device}${link.ip !== null && link.ip === viewer.ip ? "" : ", another address than the person's"}`,
   });
   redirect(
     withNotice(

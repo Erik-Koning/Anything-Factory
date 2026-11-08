@@ -128,7 +128,7 @@ handles the machine's token. Admins and the members of a team link machines, at 
 2. It shows the user code and opens `/machines/link?code=…`, which only fills the form in. The person signs in as
    anywhere else (their second factor, a confirmed address) and looks the code up: a form post, so a link from
    anywhere else can't spend their looks. Every look and every decision counts, right or wrong, and nothing clears the
-   count before it expires: ten per person and fifty per address in 15 minutes, so nobody signed in finds someone
+   count before it expires: ten per person and thirty per address in 15 minutes, so nobody signed in finds someone
    else's code by guessing. The page shows the code, the machine's name, and the address and device it asked from; a
    code asked for from another address than the person's comes with a warning, and must be typed to be approved.
 3. Meanwhile the CLI polls `POST /api/machines/token` (`grant_type`, `device_code`, `client_id`) every five seconds,
@@ -141,15 +141,18 @@ handles the machine's token. Admins and the members of a team link machines, at 
    `~/` paths) and refused whole otherwise (400), over 256 KB (413), or sooner than 20 seconds after the last (429). It
    doesn't rename the machine. When the token is a week old, the answer carries the next one (200); the old one keeps
    working for a day, for a CLI that missed it, until the new one is used, and if it's used after that, the link ends
-   (RFC 9700's refresh token rotation). `DELETE /api/machines/self` unlinks it (`a6g disconnect app`).
+   (RFC 9700's refresh token rotation). An old one that comes back while its successor is unused gets another in the
+   successor's place; that successor, if it ever turns up, was someone else's, and the link ends too.
+   `DELETE /api/machines/self` unlinks it (`a6g disconnect app`).
 
 The token reports its machine and does nothing else: no page or Better Auth endpoint takes it, and these endpoints
 take no cookie and set none. It stops working when the machine is unlinked (from its card, or by itself), when its
 person is banned or is no longer a member of any team (an admin's change of their role or teams unlinks them at once),
 and after 30 days without a report; only an `invalid_token` tells the watchdog to forget it. The endpoints are behind
 the CDN like every other request, and their answers are never cached. Links and codes live in the accounts database
-(`machine_links`, `machines`), never in the task graphs the agents read. Linking, refusing, a token's issue, unlinking,
-a replaced token used again, and a made-up token (once per address in 15 minutes) go in the audit log.
+(`machine_links`, `machines`), never in the task graphs the agents read. Linking, refusing, a token's issue, unlinking
+(a link a token's use ended too: copied, quiet too long, its person no longer allowed), a look past the limit, and a
+made-up token (once per address in 15 minutes) go in the audit log.
 
 ## Signing in: two factors, new IP addresses, and the audit log
 
@@ -388,8 +391,9 @@ Things to know:
 
    On the accounts database (`a6g_web`): `find`, `insert`, `update` and `remove` on each of Better Auth's collections
    and the app's own (`user`, `session`, `account`, `verification`, `twoFactor`, `passkey`, `rateLimit`, `memberships`,
-   `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`, and the notifier's
-   `notification_prefs`, `notification_queue`, `notification_tests` and `notifier`), and only `find` and `insert`
+   `request_counts`, `magic_link_sends`, `known_ips`, `ip_challenges`, `code_attempts`, the linked machines'
+   `machine_links` and `machines`, and the notifier's `notification_prefs`, `notification_queue`, `notification_tests`
+   and `notifier`), and only `find` and `insert`
    on `audit`, so the app can't change or delete what it recorded, nor add an index that would expire it early
    (MongoDB's own expiry still removes old events). The indexes are an operator's to make (`npm run create-indexes`);
    the app tries its own too and carries on when refused. Nothing else: no `remove` on `a6g`, nothing on other

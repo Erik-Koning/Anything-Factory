@@ -10,9 +10,10 @@ export const UNSHOWN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 // One line of it, with each of those a space.
 export const plain = (text: string): string => text.replace(new RegExp(UNSHOWN.source, "gu"), " ");
 
-// A title in a list or a context line: quoted, plain, cut to `max` characters.
+// A title in a list or a context line: quoted, plain, cut to `max` characters. Its own « and » become " so it can't
+// close the quotes and go on as the factory's words.
 export function quoted(title: string, max = 200): string {
-  const line = plain(title).replace(/\s+/g, " ").trim();
+  const line = plain(title).replace(/[«»]/g, '"').replace(/\s+/g, " ").trim();
   return `«${line.length > max ? `${line.slice(0, max - 1)}…` : line}»`;
 }
 
