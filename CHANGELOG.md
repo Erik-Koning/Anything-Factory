@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0: Linked machines, subscription budgets, the graph by level and screened requests
 
 - **Budgets as shares of a Claude subscription.** A limit can be a share of one subscription's week as well as
   API-equivalent dollars (`a6g budget my-app --weekly 60% --total 300%`, or the web app's budget form; over 100% is more
