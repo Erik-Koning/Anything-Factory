@@ -98,9 +98,15 @@ are in Mongo (team.json `tasks.store: "mongo"`), and the lead's watchdog keeps i
 ### Tests
 
 ```sh
-npm test               # tsc, then the unit tests (node --test): access rules, the UV check, TOTP, views, import boundaries
+npm test               # tsc, then node --test: the unit tests (access rules, the UV check, TOTP, views, import boundaries, the Better Auth pin)
+                       #   and the integration tests (the real server/auth.ts over a throwaway local MongoDB)
 npm run test:e2e       # next build, then Playwright against a local MongoDB
 ```
+
+The integration tests (`tests/integration/auth.test.ts`) call `auth().handler` directly, with no server or browser, over
+a throwaway replica set from the same cached mongod binary as below: closed sign-up, magic links, an admin's password and
+authenticator code, backup codes, the HTTP guard, passkeys signed by a software authenticator (with and without user
+verification, and from another origin), sessions, bans and `create-admin` run again.
 
 The end-to-end tests start a MongoDB replica set with `mongodb-memory-server` from the mongod binary already on this
 machine (`MONGOMS_SYSTEM_BINARY`, by default `~/.cache/mongodb-binaries/mongod-arm64-darwin-8.2.6`; nothing is
