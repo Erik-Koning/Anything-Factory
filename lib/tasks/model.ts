@@ -239,8 +239,9 @@ export const UNAPPROVED: Status[] = ["triage", "proposed", "researching"];
 // fenced, until the planner has rewritten them: its title, and its body if it has one. A new kind or a rewritten title
 // alone leaves their words in it.
 export const fromStakeholder = (t: Pick<Task, "by" | "request">): boolean => t.by === "stakeholder" || (!!t.request && t.by !== OPERATOR);
+// Only a6g task edit's own event counts ("edited title, body"), never words a planner wrote in a reason or a note.
 const plannerEdited = (t: Task, field: "title" | "body"): boolean =>
-  t.history.some((e) => e.by === "planner" && new RegExp(String.raw`\bedited\b[^;]*\b${field}\b`).test(e.what));
+  t.history.some((e) => e.by === "planner" && new RegExp(String.raw`^edited [^;]*\b${field}\b`).test(e.what));
 export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !(plannerEdited(t, "title") && (plannerEdited(t, "body") || !t.body.trim()));
 
 // --- How a task moves -----------------------------------------------------------------------------------------------

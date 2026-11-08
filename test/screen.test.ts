@@ -110,6 +110,11 @@ describe("a stakeholder's words", () => {
     assert.equal(theirWords({ ...suggestion, history: [edit("edited title"), edit("edited body")] }), false, "all the planner's now");
     assert.equal(theirWords({ ...suggestion, body: "", history: [edit("edited title")] }), false, "no body of theirs");
     assert.equal(theirWords({ ...suggestion, history: [{ ...edit("edited title, body"), by: "builder" }] }), true, "only the planner's rewrite counts");
+    assert.equal(
+      theirWords({ ...suggestion, history: [edit("screened clear: edited title and body asks only for a CSV export")] }),
+      true,
+      "not words in a note or a reason"
+    );
   });
 
   test("become work only once the planner has screened them; the screen goes with the work, and the prompts say what's risky", async () => {

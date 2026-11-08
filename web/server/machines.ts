@@ -145,7 +145,8 @@ const hash = (secret: string): string => createHash("sha256").update(secret).dig
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 const newToken = (): string => `a6gm_${randomBytes(32).toString("base64url")}`;
 const VIEW = { projection: { tokenHash: 0, previousHash: 0, orphanHashes: 0 } } as const;
-// Replaced tokens kept for spotting a second holder.
+// Replaced tokens kept for spotting a second holder: at most this many, and none ever dropped. The old token coming
+// back once more ends the link instead (a CLI misses an answer now and then; a copy can come back every 20 seconds).
 const ORPHANS_KEPT = 10;
 const view = (doc: Omit<MachineDoc, "tokenHash" | "previousHash"> & Partial<MachineDoc>): Machine => ({
   id: doc._id,
@@ -389,7 +390,11 @@ export async function machineByToken(token: string, ip: string | null, now = new
     if (!doc.seen) await machines().updateOne({ _id: doc._id, tokenHash }, { $set: { seen: true } });
     return { machine: view(doc), which: "current", due, currentHash: doc.tokenHash };
   }
-  if (!doc.seen && doc.previousUntil && doc.previousUntil > now) return { machine: view(doc), which: "previous", due: true, currentHash: doc.tokenHash };
+  if (!doc.seen && doc.previousUntil && doc.previousUntil > now) {
+    if ((doc.orphanHashes?.length ?? 0) < ORPHANS_KEPT) return { machine: view(doc), which: "previous", due: true, currentHash: doc.tokenHash };
+    await endLink(doc, ip, `a replaced token came back once more after ${ORPHANS_KEPT} of its successors went unused, so the link ended`);
+    return null;
+  }
   if (doc.seen) await endLink(doc, ip, "a replaced token was used after its successor: it was copied, so the link ended");
   return null;
 }
@@ -434,7 +439,7 @@ export async function recordReport(
     {
       $set: set,
       // The previous token came back while its successor was unused: that successor is replaced, and remembered.
-      ...(token && bearing.which === "previous" ? { $push: { orphanHashes: { $each: [bearing.currentHash], $slice: -ORPHANS_KEPT } } } : {}),
+      ...(token && bearing.which === "previous" ? { $push: { orphanHashes: bearing.currentHash } } : {}),
     }
   );
   return matchedCount === 1 ? { token } : false;

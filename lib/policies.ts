@@ -343,9 +343,10 @@ const listed = (host: string, hosts: readonly string[]): boolean =>
 // jump host, a command to connect through).
 const SHELL = /^(?:ssh|scp|sftp|rsync)$/;
 const RAW = /^(?:nc|ncat|netcat|telnet|socat|l?ftp)$/;
+const HTTPIE_CLIENTS = /^(?:https?|httpie|xhs?)$/;
 const options = (text: string): Set<string> => new Set(text.split(" "));
 const CURL = options(
-  "-o -d -H -X -u -A -e -b -c -F -T -m -w -r -z -Y -y -E --output --data --data-binary --data-raw --data-ascii --data-urlencode --json --header --request --user --user-agent --referer --cookie --cookie-jar --form --form-string --upload-file --max-time --connect-timeout --write-out --range --retry --retry-delay --cert --key --cacert --limit-rate --max-filesize"
+  "-o -d -H -X -u -A -e -b -c -F -T -m -w -r -z -Y -y -E -C -P -Q -t -U --output --data --data-binary --data-raw --data-ascii --data-urlencode --json --header --request --user --user-agent --referer --cookie --cookie-jar --form --form-string --upload-file --max-time --connect-timeout --write-out --range --retry --retry-delay --cert --key --cacert --limit-rate --max-filesize --continue-at --ftp-port --quote --telnet-option --proxy-user"
 );
 const WGET = options(
   "-O -o -a -P -U -t -T -w -Q --output-document --output-file --append-output --directory-prefix --user-agent --tries --timeout --wait --quota --post-data --post-file --body-data --body-file --method --header --user --password"
@@ -359,7 +360,7 @@ const VALUED: Record<string, Set<string>> = {
   httpie: HTTPIE,
   xh: HTTPIE,
   xhs: HTTPIE,
-  ssh: options("-p -i -l -L -R -D -F -c -m -b -E -O -Q -W -w"),
+  ssh: options("-p -i -l -D -F -c -m -b -E -O -Q -w"),
   scp: options("-P -i -l -F -c"),
   sftp: options("-P -i -l -F -c -b -B -R"),
   rsync: options("--port --bwlimit --timeout --chmod --chown --exclude --include --filter --exclude-from --include-from --files-from"),
@@ -371,7 +372,7 @@ const VALUED: Record<string, Set<string>> = {
 const OPAQUE: Record<string, RegExp> = {
   curl: /^(?:-x|--proxy|--preproxy|--url|--connect-to|--resolve|-K|--config)$/,
   wget: /^(?:-i|--input-file|-e|--execute|--config)$/,
-  ssh: /^(?:-J|-o)$/,
+  ssh: /^(?:-J|-o|-L|-R|-W)$/,
   scp: /^(?:-J|-o|-S)$/,
   sftp: /^(?:-J|-o|-S)$/,
   rsync: /^(?:-e|--rsh|--rsync-path)$/,
@@ -427,8 +428,8 @@ function hostsOf(client: string, args: string[]): (string | null)[] {
     } else if (RAW.test(client)) {
       hosts.push(arg);
       break;
-    } else if (/^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(arg) || /[=@]|^[\w-]+:(?!\d)/.test(arg)) {
-      // httpie's method and its items (name=value, Header:value, field@file).
+    } else if (HTTPIE_CLIENTS.test(client) && (/^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(arg) || /[=@]|^[\w-]+:(?!\d)/.test(arg))) {
+      // httpie's method and its items (name=value, Header:value, field@file); for any other client, a host.
       continue;
     } else {
       const bare = /^([a-z0-9.-]+|\[[^\]]+\])(?::\d+)?(?:[/?#]|$)/i.exec(arg);
@@ -448,11 +449,13 @@ const CLIENT = new RegExp(
 // Variables that send a client somewhere else: a proxy, or settings it reads from a file (~/.curlrc, .wgetrc).
 const PROXY_VARS = String.raw`(?:https?|all|ftp|socks5?h?)_proxy|CURL_HOME|WGETRC`;
 const CLIENT_VARS = new RegExp(String.raw`(?:^|\s)(?:${PROXY_VARS}|HOME|XDG_CONFIG_HOME)=`, "i");
-// Setting one of those, or exporting it, for whatever runs after it.
+// Setting one of those where a command starts (alone, or for the command after it), or exporting one, or the home
+// folder, for whatever runs after it. Not a word that only names one: grep -rn https_proxy= src.
+const ASSIGNS = String.raw`(?:^|[;&|(\x60]|\$\()\s*(?:(?:env|exec|nohup|time|nice)\s+(?:-\S+\s+)*)?(?:\w+=\S*\s+)*`;
 const SETS_PROXY: Matcher = {
   test: (line) =>
-    new RegExp(String.raw`(?:^|\s)(?:${PROXY_VARS})=`, "i").test(line) ||
-    new RegExp(String.raw`${START}(?:export|declare|typeset|readonly)\b[^;&|]*\s(?:${PROXY_VARS})(?=\s|$)`, "i").test(line),
+    new RegExp(String.raw`${ASSIGNS}(?:${PROXY_VARS})=`, "i").test(line) ||
+    new RegExp(String.raw`${START}(?:export|declare|typeset|readonly)\b[^;&|]*\s(?:${PROXY_VARS}|HOME|XDG_CONFIG_HOME)(?==|\s|$)`, "i").test(line),
 };
 // A network client reaching anywhere but this machine and `hosts`.
 export function outbound(hosts: readonly string[]): Matcher {

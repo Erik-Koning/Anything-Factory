@@ -115,3 +115,16 @@ test("the old token used after the new one ends the link", async () => {
   assert.equal(await machines().countDocuments({ name: "laptop" }), 0);
   assert.match(await unlinkedBecause("laptop"), /a replaced token was used after its successor/);
 });
+
+test("an old token that keeps coming back while its successors go unused ends the link, and drops none of them", async () => {
+  const copied = await linked("tablet");
+  const real = await reportWith("tablet", copied, { due: true });
+  // A copy reporting every 20 seconds with the old token can't push the real machine's new one out of the list.
+  let theirs: string | null | "refused" = null;
+  for (let n = 0; n < 10; n++) theirs = await reportWith("tablet", copied);
+  assert.match(String(theirs), /^a6gm_/);
+  assert.equal(await reportWith("tablet", copied), "refused", "the eleventh time ends it");
+  assert.equal(await machines().countDocuments({ name: "tablet" }), 0);
+  assert.match(await unlinkedBecause("tablet"), /came back once more/);
+  assert.equal(await reportWith("tablet", String(real)), "refused");
+});
