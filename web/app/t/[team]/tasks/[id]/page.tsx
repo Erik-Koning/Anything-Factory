@@ -39,6 +39,12 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     <>
       <p className="small">
         <Link href={`${base}/board`}>← Board</Link>
+        {task.status === "rejected" ? null : (
+          <>
+            {" "}
+            · <Link href={`${base}/graph?at=${task.id}`}>In the graph</Link>
+          </>
+        )}
       </p>
       <Notice searchParams={searchParams} />
       <article className="panel" aria-labelledby="task-title">

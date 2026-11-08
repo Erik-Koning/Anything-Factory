@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Budgets as shares of a Claude subscription.** A limit can be a share of one subscription's week as well as
+  API-equivalent dollars (`a6g budget my-app --weekly 60% --total 300%`, or the web app's budget form; over 100% is more
+  than one subscription's worth). The watchdog reads each subscription's usage every quarter hour from Claude Code's own
+  usage report and works out what one subscription's week comes to in dollars; until a reading has 5% of the week used,
+  a budget in shares isn't checked, and the operator is told once. Each subscription is its own Claude Code config folder
+  (`a6g subscriptions add <name> --config-dir <dir>`); `a6g subscriptions` shows each one's reading and the estimate, and
+  spend lines, `a6g status` and the web app show each figure's share of a subscription's week.
+- **The task graph by level, in the web app.** A Graph tab draws the graph in BetterDiagrams' editor, read-only, as
+  C1–C4 levels: the journeys on the top level with a card for the work in none, a journey's tasks a level down, and a
+  journey in a journey further down, a level for every `parent`. Each level is laid out on its own, by what waits on
+  what (a dependency between tasks in two journeys orders the journeys), and the level is in the address, linked from a
+  task's page. Only work a member can take is a task card, so the editor's ready count and progress hold; proposals,
+  questions, blocked work and approved work waiting on any of those have cards that say so. `levels` and `levelDiagram`
+  in `lib/tasks/graph.ts`.
+
 ## 0.5.0: Anything Factory
 
 - **The factory has a new name.** It's Anything Factory, and its CLI is `a6g`. The name changed everywhere it's used,

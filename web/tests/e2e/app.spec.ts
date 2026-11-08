@@ -175,6 +175,59 @@ test("a member sees the board, the graph and every request, senders by role only
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
 });
 
+test("a member opens the graph by level: the journeys first, a journey's tasks inside it, and back out", async () => {
+  const { page } = member;
+  await page.goto("/t/shop");
+  await page.getByRole("link", { name: "Graph", exact: true }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/graph$/);
+  const graph = page.locator(".level-graph");
+  // The top level (C1): the journey, and a card for the work in none; no task of its own.
+  const checkout = graph.locator(".react-flow__node").filter({ hasText: "Checkout" });
+  await expect(checkout).toBeVisible();
+  await expect(checkout.getByText("Journey")).toBeVisible();
+  await expect(graph.getByText("C2 · Containers")).toHaveCount(0);
+  await expect(checkout.getByText("approved · 1 of 2 done")).toBeVisible();
+  await expect(graph.locator(".react-flow__node").filter({ hasText: "Not in a journey" })).toBeVisible();
+  await expect(graph.getByText("Pay by card")).toHaveCount(0);
+  // A level down (C2): the journey's tasks, in the order they're built, and the level in the address.
+  await checkout.dblclick();
+  await expect(graph.getByText("C2 · Containers")).toBeVisible();
+  await expect(graph.locator(".react-flow__node").filter({ hasText: "Pay by card" })).toBeVisible();
+  const saving = graph.locator(".react-flow__node").filter({ hasText: "Save the card for next time" });
+  await expect(saving).toBeVisible();
+  await expect(saving.getByText("feature · building")).toBeVisible();
+  await expect(page).toHaveURL(/\/t\/shop\/graph\?at=\d+$/);
+  const at = new URL(page.url()).searchParams.get("at");
+  // Coming back to the page opens the same level, though it was opened at the top, and so does a reload; the
+  // breadcrumbs come back out.
+  await page.getByRole("link", { name: "Board", exact: true }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/board$/);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/t/shop/graph\\?at=${at}$`));
+  await expect(graph.getByText("C2 · Containers")).toBeVisible();
+  await expect(saving).toBeVisible();
+  await page.reload();
+  await expect(graph.getByText("C2 · Containers")).toBeVisible();
+  await expect(saving).toBeVisible();
+  await graph.getByRole("navigation", { name: "Diagram level" }).getByRole("button", { name: "Shop: task graph" }).click();
+  const loose = graph.locator(".react-flow__node").filter({ hasText: "Not in a journey" });
+  await expect(loose).toBeVisible();
+  await expect(graph.getByText("C2 · Containers")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/t\/shop\/graph$/);
+  // The work in no journey: only what a member may build is a task; the rest says what it waits for.
+  await loose.dblclick();
+  await expect(page).toHaveURL(/\/t\/shop\/graph\?at=none$/);
+  const card = (title: string) => graph.locator(".react-flow__node").filter({ hasText: title });
+  await expect(card("Totals round the wrong way").getByText("Task", { exact: true })).toBeVisible();
+  await expect(card("Export orders as CSV").getByText("Not approved", { exact: true })).toBeVisible();
+  await expect(card("who sees a customer's past orders?").getByText("Question", { exact: true })).toBeVisible();
+  await expect(card("Ship to Canada").getByText("Blocked", { exact: true })).toBeVisible();
+  // The journey's page links to its level.
+  await page.goto(`/t/shop/tasks/${at}`);
+  await page.getByRole("link", { name: "In the graph" }).click();
+  await expect(graph.getByText("Save the card for next time")).toBeVisible();
+});
+
 test("a member follows the work on the board, and suggests a task, which goes to triage as theirs", async () => {
   const { page } = member;
   await page.goto("/t/shop/board");
@@ -555,12 +608,13 @@ test("the admin adds a proposal, and a task approved under a journey after anoth
 
 test("a contributor neither sees the work nor adds to it, by page or by calling the action", async () => {
   const { page } = contributor;
-  for (const path of ["/t/shop/board", "/t/shop/add", "/t/shop/tasks/1"]) {
+  for (const path of ["/t/shop/board", "/t/shop/graph", "/t/shop/add", "/t/shop/tasks/1"]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: "Not found" }), path).toBeVisible();
   }
   await page.goto("/t/shop");
   await expect(page.getByRole("link", { name: "Board", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Graph", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Suggest a task" })).toHaveCount(0);
   // The add form's own fields, as the admin's page has them, posted as a browser without scripts would post them: the
   // admin's adds a task, the contributor's adds nothing.
@@ -937,6 +991,7 @@ test("pages fit a phone's width without scrolling sideways", async ({ browser })
     "/",
     "/t/shop",
     "/t/shop/board",
+    "/t/shop/graph",
     "/t/shop/add",
     "/t/shop/tasks/1",
     "/t/shop/requests",

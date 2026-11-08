@@ -124,6 +124,9 @@ export default async function OverviewPage({ params, searchParams }: { params: P
           <section className="panel" aria-labelledby="graph">
             <h2 id="graph">Graph</h2>
             <TaskGraph tasks={tasks} />
+            <p className="small">
+              <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
+            </p>
           </section>
           <section className="panel" aria-labelledby="merges">
             <h2 id="merges">Recent merges</h2>
