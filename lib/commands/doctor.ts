@@ -1,7 +1,7 @@
 // a6g doctor: is this machine ready to run teams? Checks the tools, T3 Code against the range this factory supports
 // and against what its adapter reads, the launcher and the watchdog, disk space, and every registered team.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadTeam, TeamError } from "../config.ts";
@@ -162,8 +162,18 @@ export async function doctor(): Promise<number> {
         stale = judged.stale;
       }
       if (stale === null) warn(`${name}: rules load; its prompts are ${pin}'s, which doctor couldn't compile to compare (a6g prompt ${name} <role>)`);
-      else if (stale.length) warn(`${name}: prompts out of date for ${stale.join(", ")} (a6g register ${entry.home})`);
-      else ok(`${name}: rules load, prompts current${pin === PACKAGE.version ? "" : ` (judged by ${pin})`}`);
+      else if (stale.length) {
+        // A role's next session recompiles its stale prompt (the session-start hook), so new decisions, lessons or notes
+        // need nothing; team.json changed since it was registered can also change what register sets up.
+        const registered = Date.parse(entry.registeredAt);
+        const known = !Number.isNaN(registered);
+        if (known && statSync(team.file).mtimeMs <= registered)
+          ok(`${name}: rules load; prompts for ${stale.join(", ")} recompile at their next session (the decisions, lessons or notes changed)`);
+        else
+          warn(
+            `${name}: prompts out of date for ${stale.join(", ")}${known ? ", and team.json changed after it was registered" : ""} (a6g register ${entry.home})`
+          );
+      } else ok(`${name}: rules load, prompts current${pin === PACKAGE.version ? "" : ` (judged by ${pin})`}`);
       const kept = keptWorktrees(entry.run);
       if (kept.length) warn(`${name}: ${kept.length} finished worktrees are kept because they may hold work (a6g status ${name} lists them)`);
     } catch (error) {

@@ -6,7 +6,7 @@
 import { baseTeam, commit, a6g, git, gitRepo, machine, makeRepo, ROOT, sourceCopy, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { teamName } from "../lib/commands/init.ts";
@@ -118,9 +118,11 @@ describe("installing and pinning releases, on a machine of its own", () => {
     const home = makeRepo(baseTeam({ factory: "0.2.99", t3ProjectId: "p1" }));
     const runDir = join(m.root, "runs", "fixture");
     mkdirSync(join(m.a6gHome, "teams"), { recursive: true });
+    const registeredAt = new Date();
+    utimesSync(join(home, ".a6g", "team.json"), new Date(registeredAt.getTime() - 60_000), new Date(registeredAt.getTime() - 60_000));
     writeFileSync(
       join(m.a6gHome, "teams", "fixture.json"),
-      JSON.stringify({ name: "fixture", title: "Fixture team", home, run: runDir, version: "0.2.99" })
+      JSON.stringify({ name: "fixture", title: "Fixture team", home, run: runDir, version: "0.2.99", registeredAt: registeredAt.toISOString() })
     );
     // Registered by 0.2.99: its prompts carry 0.2.99's sources hash.
     for (const role of Object.keys(baseTeam().roles ?? {})) {
@@ -129,8 +131,13 @@ describe("installing and pinning releases, on a machine of its own", () => {
       writeFileSync(join(runDir, "prompts", `${role}.md`), prompt.out);
     }
     assert.match((await launcher(["doctor"])).out, /^ok {4}fixture: rules load, prompts current \(judged by 0\.2\.99\)/m);
+    // A new decision: each role's next session recompiles its own prompt, so there's nothing to register.
+    write(home, { ".a6g/decisions.md": "- CSV exports → orders only. (planner)\n" });
+    const decided = (await launcher(["doctor"])).out;
+    assert.match(decided, /^ok {4}fixture: rules load; prompts for planner.* recompile at their next session/m);
+    assert.doesNotMatch(decided, /a6g register/);
     write(home, { ".a6g/team.json": baseTeam({ factory: "0.2.99", t3ProjectId: "p1", title: "Renamed" }) });
-    assert.match((await launcher(["doctor"])).out, /^warn {2}fixture: prompts out of date for planner/m);
+    assert.match((await launcher(["doctor"])).out, /^warn {2}fixture: prompts out of date for planner.*team\.json changed after it was registered/m);
   });
 
   test("a source checkout runs its own code; the installed a6g hands a pinned team over (#18)", async () => {
