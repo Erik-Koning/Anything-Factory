@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1: The web app's new address, and doctor on stale prompts
+
+- **`a6g connect app` goes to `https://app.anythingfactory.dev` by default**, the domain the factory moved to; 0.6.0's
+  default was a name on the old one that nothing answers at. A first link that fails there says to name the deployment
+  with `--url`, which the Mac keeps after that.
+- **Doctor sends a team to `a6g register` only when its `team.json` changed after it was registered.** New decisions,
+  lessons or notes leave the compiled prompts behind until each role's next session recompiles its own (the
+  session-start hook), so doctor now says that instead of asking for a register.
+- **Retiring a domain the web app moved off** (`web/scripts/retire-domain.sh <old> <new>`): every name on it redirects
+  to the same name on the new domain, and once no stage serves on it, its SES identity goes and its DNS says it sends no
+  mail (null MX, SPF `-all`, DMARC `reject`).
+
 ## 0.6.0: Linked machines, subscription budgets, the graph by level and screened requests
 
 - **Budgets as shares of a Claude subscription.** A limit can be a share of one subscription's week as well as
