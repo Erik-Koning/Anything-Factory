@@ -18,9 +18,9 @@ process.env.T3CODE_HOME = tmp("a6g-t3-");
 process.env.HOME = tmp("a6g-user-");
 for (const key of ["A6G_TEAM", "A6G_HOME_DIR", "A6G_RUN", "A6G_ROLE", "A6G_SETUP", "A6G_VERSION", "A6G_MERGE_QUEUED", "CLAUDE_PROJECT_DIR"])
   delete process.env[key];
-// Stand-ins for t3, launchctl, docker, osascript and open first on PATH (test/fake-t3/), for the tests that run a6g
-// without a machine of their own; and a T3 server address where nothing listens, since lib/t3.ts would otherwise try
-// the real server's default port.
+// Stand-ins for t3, launchctl, docker, osascript, open and an empty Keychain's security first on PATH (test/fake-t3/),
+// for the tests that run a6g without a machine of their own; and a T3 server address where nothing listens, since
+// lib/t3.ts would otherwise try the real server's default port.
 process.env.PATH = `${join(ROOT, "test", "fake-t3")}:${process.env.PATH ?? ""}`;
 export const NO_SERVER = "http://127.0.0.1:1";
 export const fakeT3Home = (dir: string): void => {
@@ -210,8 +210,8 @@ export function a6g(
 }
 
 // A machine of its own, for anything that installs, runs the launcher or runs doctor: HOME, A6G_HOME and T3CODE_HOME
-// in a temporary folder (T3's server address where nothing listens), and a PATH whose t3, launchctl, claude and gh are
-// stand-ins. node is there under a name of its own (like Homebrew's /opt/homebrew/bin/node).
+// in a temporary folder (T3's server address where nothing listens), and a PATH whose t3, launchctl, claude, gh and
+// security (an empty Keychain) are stand-ins. node is there under a name of its own (like Homebrew's /opt/homebrew/bin/node).
 export function machine({ a6gHome }: { a6gHome?: string } = {}) {
   const root = tmp("a6g-machine-");
   const home = join(root, "home");
@@ -227,6 +227,7 @@ export function machine({ a6gHome }: { a6gHome?: string } = {}) {
   stub("claude", 'echo "2.1.300 (Claude Code)"');
   stub("gh", "exit 1");
   symlinkSync(process.execPath, join(bin, "node"));
+  symlinkSync(join(ROOT, "test", "fake-t3", "security"), join(bin, "security"));
   fakeT3Home(join(home, ".t3"));
   const env: NodeJS.ProcessEnv = {
     HOME: home,

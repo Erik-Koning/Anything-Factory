@@ -16,7 +16,10 @@ import {
   senderShort,
   taskIds,
   taskProblem,
+  mayLinkMachines,
+  runsTeam,
   type Viewer,
+  visibleMachines,
   visibleTeams,
 } from "../../server/access.ts";
 
@@ -48,6 +51,7 @@ const TEAM_ABILITIES: Ability[] = [
   "tasks:suggest",
   "senders:names",
   "proposals:decide",
+  "machines:all",
   "people:manage",
   "audit:read",
   "team:control",
@@ -121,6 +125,50 @@ test("members and admins see every request of the team; nobody signed out sees a
   assert.equal(canSeeRequest(admin, "shop", { from: "s9" }, null), true);
   assert.equal(canSeeRequest(null, "shop", { from: "s9" }, "s9"), false);
   assert.equal(canSeeRequest(adminWithoutSecondFactor, "shop", { from: "s9" }, null), false);
+});
+
+describe("machines", () => {
+  const machines = [
+    { name: "attic", userId: "u-other" },
+    { name: "laptop", userId: "u-member" },
+    { name: "studio", userId: "u-admin" },
+  ];
+  test("an admin sees every machine, and only from a session with its second factor", () => {
+    assert.deepEqual(
+      visibleMachines(admin, machines).map((m) => m.name),
+      ["attic", "laptop", "studio"]
+    );
+    assert.deepEqual(visibleMachines(adminWithoutSecondFactor, machines), []);
+  });
+  test("anyone else sees only the machines they linked themselves", () => {
+    assert.deepEqual(
+      visibleMachines(member, machines).map((m) => m.name),
+      ["laptop"]
+    );
+    assert.deepEqual(visibleMachines(contributor, machines), []);
+    assert.equal(can(member, "machines:all"), false);
+    assert.deepEqual(visibleMachines(null, machines), []);
+  });
+  test("a session that owes a step sees none, even its own", () => {
+    assert.deepEqual(visibleMachines({ ...member, ipConfirmed: false }, machines), []);
+  });
+  test("admins and the members of a team link machines; a contributor or someone on no team doesn't", () => {
+    assert.equal(mayLinkMachines(admin), true);
+    assert.equal(mayLinkMachines(member), true);
+    assert.equal(mayLinkMachines(contributor), false);
+    assert.equal(mayLinkMachines({ admin: false, teams: { shop: "contributor", blog: "member" } }), true);
+    assert.equal(mayLinkMachines({ admin: false, teams: {} }), false);
+    assert.equal(mayLinkMachines(null), false);
+  });
+  test("only the machines of a team's members and admins say where it runs", () => {
+    assert.equal(runsTeam({ admin: false, teams: { shop: "member" } }, "shop"), true);
+    assert.equal(runsTeam({ admin: true, teams: {} }, "shop"), true);
+    // Anyone may link a machine and name any team in its report: a contributor's, or an outsider's, says nothing.
+    assert.equal(runsTeam({ admin: false, teams: { shop: "contributor" } }, "shop"), false);
+    assert.equal(runsTeam({ admin: false, teams: { blog: "member" } }, "shop"), false);
+    assert.equal(runsTeam({ admin: false, teams: {} }, "constructor"), false);
+    assert.equal(runsTeam(undefined, "shop"), false);
+  });
 });
 
 test("nobody signed out may do anything", () => {

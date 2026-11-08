@@ -901,7 +901,7 @@ function a6gCli(words: string[]): string[] {
 // variant is the command that actually runs.
 export function unwrap(words: string[]): string[][] {
   const variants: string[][] = [];
-  for (let current: string[] | null = words; current?.length && variants.length < 16; ) {
+  for (let current: string[] | null = words; current?.length && variants.length < 16;) {
     const cli = a6gCli(current);
     if (variants.some((seen) => seen.length === cli.length && seen.every((word, i) => word === cli[i]))) break;
     variants.push(cli);

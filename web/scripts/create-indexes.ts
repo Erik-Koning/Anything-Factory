@@ -14,6 +14,7 @@ const audit = await import("../server/audit.ts");
 const knownIps = await import("../server/known-ips.ts");
 const codeAttempts = await import("../server/code-attempts.ts");
 const notifier = await import("../server/notifier.ts");
+const machines = await import("../server/machines.ts");
 try {
   await Promise.all([
     ensureAuthIndexes(authDb()),
@@ -21,6 +22,7 @@ try {
     knownIps.ensureIndexes(),
     codeAttempts.ensureIndexes(),
     notifier.ensureIndexes(),
+    machines.ensureIndexes(),
   ]);
   for (const name of [
     "user",
@@ -35,6 +37,8 @@ try {
     "ip_challenges",
     "code_attempts",
     "notification_queue",
+    "machine_links",
+    "machines",
   ]) {
     const indexes = await authDb()
       .collection(name)

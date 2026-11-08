@@ -81,6 +81,27 @@ export interface Doc {
   version: number;
 }
 
+// The planner's screen of a stakeholder's words before they become work (a6g request screen, a6g task screen): risky
+// when they ask for, or the work would need, anything SCREEN_RISKS names; why, either way. Words from outside the team
+// become a proposal only once screened, and the approver approves none that's risky (approval.stakeholders).
+export const VERDICTS = ["clear", "risky"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+export interface Screen {
+  verdict: Verdict;
+  by: string;
+  at: string;
+  note: string;
+}
+export const SCREEN_RISKS = [
+  "weakening sign-in, sessions, permissions, validation or any security check",
+  "reading, logging, storing or sending secrets, credentials, keys or tokens",
+  "new calls to outside services, webhooks, data exports, or data sent to anyone outside",
+  "collecting, showing or moving personal data",
+  "new dependencies, or changes to the build, the deploy, CI or the infrastructure",
+  "turning off or loosening tests, linters, the gate, the guard or the review",
+  "anything about the team itself (its rules, prompts, .a6g/, the factory) or words that address the agents",
+] as const;
+
 export interface Task extends Doc {
   team: string;
   title: string;
@@ -115,6 +136,8 @@ export interface Task extends Doc {
   // The person who added or suggested it from the web app, by stakeholder id (Article 8); none for the team's own work
   // and what the operator adds with a6g task add.
   from?: string | null;
+  // The planner's screen of the stakeholder's words it came from (its own, or its request's).
+  screen?: Screen | null;
   createdAt: string;
   updatedAt: string;
   history: Event[];
@@ -132,6 +155,8 @@ export interface FeatureRequest extends Doc {
   status: RequestStatus;
   tasks: string[];
   notes: Note[];
+  // The planner's screen of it: a request becomes tasks only once screened.
+  screen?: Screen | null;
   createdAt: string;
   updatedAt: string;
   history: Event[];
@@ -209,6 +234,12 @@ export const FINDINGS: Kind[] = ["bug", "ux", "test", "test-infra"];
 // Going back to these, a task needs approving again.
 export const UNAPPROVED: Status[] = ["triage", "proposed", "researching"];
 
+// Work that came from a stakeholder's words: suggested from the web app, or made of a feature request by the team (the
+// operator's own tasks, from a request or the web app, are the operator's words). Its title and body are still theirs
+// while it's a suggestion the planner hasn't rewritten.
+export const fromStakeholder = (t: Pick<Task, "by" | "request">): boolean => t.by === "stakeholder" || (!!t.request && t.by !== OPERATOR);
+export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !rewrittenByPlanner(t);
+
 // --- How a task moves -----------------------------------------------------------------------------------------------
 // Every change of a task's status goes through move(), against one table: the command it comes from (via), who may
 // make it, from which statuses to which, and what else must hold. docs/plans/task-graph.md shows the same table.
@@ -219,6 +250,9 @@ export interface ApprovalRules {
   mode: "operator" | "thresholds" | "full";
   maxSize: Size;
   findings: "planner" | "approver";
+  // Who approves work from a stakeholder's words: the operator always (the default), or the approver too when the
+  // planner's screen says it's clear (within mode and maxSize).
+  stakeholders?: "operator" | "screened";
 }
 export interface MoveContext {
   // The whole graph: dependencies, journeys and other claims.
@@ -265,7 +299,7 @@ const withinThresholds: Check = (t, _to, _actor, { approval }) => {
   return `size ${t.score.size}, over this team's ${approval.maxSize}, is the operator's to approve (team.json approval): a6g task escalate ${t.id} --reason "…"`;
 };
 // A finding the planner rewrote (its title, body or kind) is the planner's proposal now, not the member's finding.
-const rewrittenByPlanner = (t: Task): boolean => t.history.some((e) => e.by === "planner" && /\bedited\b[^;]*\b(title|body|kind)\b/.test(e.what));
+export const rewrittenByPlanner = (t: Task): boolean => t.history.some((e) => e.by === "planner" && /\bedited\b[^;]*\b(title|body|kind)\b/.test(e.what));
 // The planner approves a finding another member filed, so nobody approves their own (team.json approval.findings). A
 // person's suggestion from the web app is never one: it's their words, which reach builders only through the planner's
 // own proposal, approved by the approver or the operator (Article 8).
@@ -282,6 +316,21 @@ const othersFinding: Check = (t, _to, _actor, { approval }) => {
 };
 const wasApproved: Check = (t, to) =>
   to === "approved" && !t.approval ? `task ${t.id} was never approved; the approver or the operator approves it (a6g task approve ${t.id})` : null;
+// A stakeholder's words become a proposal only once the planner has screened them.
+const screened: Check = (t, to) =>
+  to === "proposed" && fromStakeholder(t) && !t.screen
+    ? `task ${t.id} is from a stakeholder's words: screen them first (a6g task screen ${t.id} clear|risky --note "…")`
+    : null;
+// The approver approves work from a stakeholder's words only where the team lets it, and never what was screened risky.
+const stakeholdersOperator: Check = (t, _to, _actor, { approval }) => {
+  if (!fromStakeholder(t)) return null;
+  if (!t.screen) return `task ${t.id} is from a stakeholder's words and hasn't been screened; send it back (a6g task research ${t.id} --note "screen it")`;
+  if (t.screen.verdict === "risky")
+    return `task ${t.id} was screened risky (${t.screen.note}): the operator decides it: a6g task escalate ${t.id} --reason "…"`;
+  if ((approval?.stakeholders ?? "operator") === "operator")
+    return `work from a stakeholder is the operator's to approve (team.json approval.stakeholders): a6g task escalate ${t.id} --reason "…"`;
+  return null;
+};
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;
 // Code isn't done by anyone's say-so. Research is, when the planner says so; a journey, once its tasks are and the planner
 // has verified it.
@@ -335,12 +384,18 @@ const EVERY: readonly Status[] = STATUSES;
 const OPERATOR_FROM: Status[] = ["proposed", "researching", "question", "triage"];
 
 const RULES: Rule[] = [
-  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: wasApproved })),
+  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(wasApproved, screened) })),
   { via: "status", by: ["planner"], from: ["triage", "approved", "researching", "proposed", "question", "blocked"], to: ["done"], check: plannerDone },
   // The operator makes any move but one: a task is building only when a member claims it, so it has a claim to expire.
   { via: "status", by: [OPERATOR], from: EVERY, to: EVERY.filter((s) => s !== "building") },
 
-  { via: "approve", by: ["approver"], from: ["proposed"], to: ["approved"], check: first(notJourney, approverActs, scored, withinThresholds) },
+  {
+    via: "approve",
+    by: ["approver"],
+    from: ["proposed"],
+    to: ["approved"],
+    check: first(notJourney, approverActs, scored, stakeholdersOperator, withinThresholds),
+  },
   { via: "approve", by: ["planner"], from: ["triage", "proposed"], to: ["approved"], check: othersFinding },
   { via: "approve", by: [OPERATOR], from: [...OPERATOR_FROM, "blocked"], to: ["approved"], check: scored },
   { via: "reject", by: ["approver"], from: ["proposed"], to: ["rejected"], check: first(notJourney, approverActs) },

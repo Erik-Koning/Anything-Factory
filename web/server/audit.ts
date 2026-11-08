@@ -4,8 +4,8 @@
 // (and each person their own); the team's agents never see this database (Article 8).
 //
 // Sign-ins, sign-outs, second factors, new IP addresses, passkeys and authenticators are recorded from Better Auth's
-// hooks (auth.ts); people, tasks, decisions, requests, pauses, resumes and budgets from the server actions that make
-// them.
+// hooks (auth.ts); people, tasks, decisions, requests, pauses, resumes, budgets and linked machines from the server
+// actions and endpoints that make them.
 import type { Db } from "mongodb";
 import { config } from "./config.ts";
 import { authDb } from "./db.ts";
@@ -40,6 +40,11 @@ export const AUDIT_ACTIONS = [
   "team.budget",
   "notifications.changed",
   "notifications.test",
+  "machine.linked",
+  "machine.refused",
+  "machine.token",
+  "machine.refused-token",
+  "machine.unlinked",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export const isAuditAction = (value: unknown): value is AuditAction => typeof value === "string" && (AUDIT_ACTIONS as readonly string[]).includes(value);
@@ -177,4 +182,9 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "team.budget": "Budget set",
   "notifications.changed": "Notification settings changed",
   "notifications.test": "Test email sent",
+  "machine.linked": "Machine linked",
+  "machine.refused": "Machine refused",
+  "machine.token": "Machine's token issued",
+  "machine.refused-token": "A machine's token refused",
+  "machine.unlinked": "Machine unlinked",
 };

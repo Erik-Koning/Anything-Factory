@@ -1,0 +1,9 @@
+#!/bin/sh
+# A fake security for the tests: a Keychain with nothing in it, so no test reads the operator's keys or the Mongo
+# connection string (a full watchdog run would report to that database). fakeKeychain() puts one that keeps items
+# ahead of it on PATH.
+case "$1" in
+  -i) cat > /dev/null ;;
+  find-generic-password | delete-generic-password) exit 44 ;;
+esac
+exit 0

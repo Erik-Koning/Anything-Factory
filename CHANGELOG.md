@@ -16,6 +16,31 @@
   task's page. Only work a member can take is a task card, so the editor's ready count and progress hold; proposals,
   questions, blocked work and approved work waiting on any of those have cards that say so. `levels` and `levelDiagram`
   in `lib/tasks/graph.ts`.
+- **Which machine runs what, on the web app.** `a6g connect app` links a Mac to the operator's account on the web app
+  with OAuth's device authorization grant (RFC 8628): it shows a code and opens the app, where they sign in as usual,
+  look the code up, check it, the machine and the address it asked from, and approve (typing the code when it was
+  asked for from another address). The Mac keeps a token, with the address it goes to, in the Keychain that only
+  reports that machine; the app keeps its hash, in the accounts database, never the task graphs agents read, and
+  emails the person whenever a machine is linked. The token is replaced every week, and an old one used after its
+  successor ends the link. The watchdog reports every team registered on the Mac at the end of each full run, those
+  in files too, checkouts under the home folder as `~/…` (`lib/fleet.ts`). The **Machines** page shows each person
+  theirs (an admin every one, and whose), and unlinks them; each team's card names the machines its members and
+  admins run it on. Admins and members link machines, ten each. A code is eight letters and works once, for ten
+  minutes; every look at one counts (ten per person, fifty per address, in 15 minutes); an address asks for five. A
+  link is replaced only by the CLI that shows its old token. A token ends when its machine is unlinked (from the page,
+  or by `a6g disconnect app`), when its person is banned or on no team as a member, or after 30 days without a report.
+  Every link, refusal, token, unlink and made-up token is in the audit log; `npm run create-indexes` makes their
+  indexes and expiries. The tests' PATH has an empty Keychain, so no test reads the operator's.
+- **A stakeholder's words are screened before they're work.** A request or a suggestion from the web app reaches
+  agents fenced and quoted, without control or format characters (`lib/untrusted.ts`), in `a6g request show`,
+  `a6g task show` and the planner's context. The planner screens each (`a6g request screen`, `a6g task screen`,
+  `clear|risky --note`) against `SCREEN_RISKS` before it's promoted or proposed, and the screen goes with the work.
+  Work from a stakeholder is the operator's to approve (`approval.stakeholders`, `"screened"` to let the approver
+  approve what's screened clear); the approver approves nothing risky. An admin's task approved from the web takes an
+  authenticator code.
+- **The `network` policy** (denied by default): from the shell, the team reaches only this machine and the hosts
+  `team.json` lists in `hosts`; Claude's own WebFetch and WebSearch, now under the guard, read the web but can't carry
+  much in a URL.
 
 ## 0.5.0: Anything Factory
 

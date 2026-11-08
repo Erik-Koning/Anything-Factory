@@ -5,7 +5,9 @@
 //   they've turned one on), then confirming, from their email, an IP address they haven't used before;
 // - member: the board, what's in progress, journeys, the graph, every request (senders by role), sending requests and
 //   suggesting tasks for the planner to triage;
-// - contributor: the team's overview (status, journeys, progress counts), their own requests, and sending requests.
+// - contributor: the team's overview (status, journeys, progress counts), their own requests, and sending requests;
+// - admins and members: the machines they've linked to their account (a6g connect app, server/machines.ts) and the
+//   teams each runs; an admin sees every machine. A team's card names only the machines of its members and admins.
 import { KINDS, type Kind, SEVERITIES, type Severity } from "../../lib/tasks/model.ts";
 
 export const TEAM_ROLES = ["member", "contributor"] as const;
@@ -43,6 +45,8 @@ export type Ability =
   | "senders:names"
   // Approve, reject, research and escalate proposals.
   | "proposals:decide"
+  // Every machine, whose it is, and the teams each runs (otherwise only one's own).
+  | "machines:all"
   // Read the audit log: everyone's sign-ins and changes.
   | "audit:read"
   // Invite people, set their roles, remove and ban them.
@@ -83,6 +87,23 @@ export function can(viewer: Viewer | null, ability: Ability, team?: string): boo
 
 // The teams `viewer` sees, of those there are.
 export const visibleTeams = (viewer: Viewer | null, teams: readonly string[]): string[] => teams.filter((team) => roleIn(viewer, team) !== null);
+
+// The machines `viewer` sees and may unlink: every one with machines:all, otherwise those they linked themselves.
+export function visibleMachines<M extends { userId: string }>(viewer: Viewer | null, machines: readonly M[]): M[] {
+  if (!viewer || blocked(viewer)) return [];
+  if (can(viewer, "machines:all")) return [...machines];
+  return machines.filter((machine) => machine.userId === viewer.userId);
+}
+
+// Who may link a machine to their account: an admin, or a member of a team (a contributor runs no team's work). A
+// machine whose person no longer may stops reporting.
+export const mayLinkMachines = (person: { admin: boolean; teams: Readonly<Record<string, TeamRole>> } | null | undefined): boolean =>
+  !!person && (person.admin || Object.values(person.teams).includes("member"));
+
+// Whether a machine's report says where `team` runs: its owner is an admin or one of the team's members. Anyone may
+// link a machine, and its report names whichever teams it likes; only theirs say anything about a team.
+export const runsTeam = (owner: { admin: boolean; teams: Readonly<Record<string, TeamRole>> } | undefined, team: string): boolean =>
+  owner !== undefined && (owner.admin || (Object.hasOwn(owner.teams, team) && owner.teams[team] === "member"));
 
 // Whether `viewer` sees a request: every one with requests:all, otherwise only one sent from their own stakeholder on
 // that team (`own`, or null when they have none there).

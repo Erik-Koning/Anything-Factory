@@ -5,6 +5,7 @@ import { answersMessage, answersSince } from "../../../lib/tasks/answer.ts";
 import { type Control, holdOf, holdReport } from "../../../lib/tasks/controls.ts";
 import { newTask, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { update } from "../../../lib/tasks/store.ts";
+import { DEFAULT_IP, ORIGIN_SECRET } from "../../playwright.config.ts";
 import { actionIdOn, closeDatabases, databases, errorOf, freshCode, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
@@ -226,6 +227,319 @@ test("a member opens the graph by level: the journeys first, a journey's tasks i
   await page.goto(`/t/shop/tasks/${at}`);
   await page.getByRole("link", { name: "In the graph" }).click();
   await expect(graph.getByText("Save the card for next time")).toBeVisible();
+});
+
+// A machine's card on the Machines page.
+const card = (page: Page, name: string) => page.getByRole("listitem").filter({ has: page.getByRole("heading", { name, exact: true }) });
+
+// What a6g connect app sends (lib/app.ts): through the CDN like any request, from `ip`, with no cookie; a form for
+// RFC 8628's endpoints, JSON for a report.
+async function cli(
+  path: string,
+  {
+    method = "POST",
+    form,
+    body,
+    token,
+    ip = DEFAULT_IP,
+  }: { method?: string; form?: Record<string, string>; body?: unknown; token?: string; ip?: string } = {}
+): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> {
+  const response = await fetch(`${state().baseURL}${path}`, {
+    method,
+    headers: {
+      "x-a6g-origin": ORIGIN_SECRET,
+      "x-a6g-viewer-ip": ip,
+      ...(form ? { "content-type": "application/x-www-form-urlencoded" } : body === undefined ? {} : { "content-type": "application/json" }),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    ...(form ? { body: new URLSearchParams(form).toString() } : body === undefined ? {} : { body: JSON.stringify(body) }),
+    redirect: "manual",
+  });
+  const text = await response.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {}
+  return { status: response.status, body: parsed, headers: response.headers };
+}
+const CLIENT = { client_id: "a6g-cli" };
+const poll = (deviceCode: unknown) =>
+  cli("/api/machines/token", { form: { ...CLIENT, grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: String(deviceCode) } });
+const shop = {
+  name: "shop",
+  title: "Shop",
+  part: "worker",
+  store: "mongo",
+  home: "~/shop",
+  factory: "0.4.0",
+  state: "active",
+  planner: null,
+  members: {},
+};
+const reportOf = (name: string, members: Record<string, number> = {}) => ({ name, factory: "0.4.0", teams: [{ ...shop, members }] });
+// Lets a machine report again at once, as if 20 seconds had passed; with `rotate`, as if its token were a week old.
+async function later(name: string, { rotate = false } = {}): Promise<void> {
+  const { accounts } = await databases();
+  await accounts
+    .collection("machines")
+    .updateOne({ name }, { $set: { at: new Date(Date.now() - 60_000), ...(rotate ? { issuedAt: new Date(Date.now() - 8 * 86_400_000) } : {}) } });
+}
+// The subjects of the emails to `to` so far.
+const subjectsTo = (to: string): string[] =>
+  readFileSync(state().log, "utf8")
+    .split("\n")
+    .flatMap((line) => {
+      const match = /\[mail\] to=(\S+) subject=(".*?") link=/.exec(line);
+      return match && match[1] === to ? [JSON.parse(match[2] ?? '""') as string] : [];
+    });
+
+// A machine linked the way a6g connect app links it, approved by the person on `page`: its token. The CLI asks from
+// `ip`; `token` is the link it had, which the new one replaces.
+async function linkMachine(page: Page, name: string, { ip = DEFAULT_IP, token }: { ip?: string; token?: string } = {}): Promise<string> {
+  const start = await cli("/api/machines/link", { form: { ...CLIENT, name }, ip, ...(token ? { token } : {}) });
+  expect(start.status, JSON.stringify(start.body)).toBe(200);
+  await page.goto(String(start.body["verification_uri_complete"]).replace(state().baseURL, ""));
+  await page.getByRole("button", { name: "Look it up" }).click();
+  if (ip !== DEFAULT_IP) await page.getByLabel("Type the code your terminal shows, to approve it").fill(String(start.body["user_code"]));
+  await page.getByRole("button", { name: `Link ${name} to my account` }).click();
+  await expect(page.getByText(`${name} is linked to your account.`)).toBeVisible();
+  await page.waitForTimeout(5_000);
+  const linked = await poll(start.body["device_code"]);
+  expect(linked.status, JSON.stringify(linked.body)).toBe(200);
+  return String(linked.body["access_token"]);
+}
+
+test("a person sees the machines linked to their account and the teams each runs; the admin sees every machine and whose it is", async () => {
+  const { page } = member;
+  await page.goto("/machines");
+  const studio = card(page, "studio");
+  await expect(studio.getByText("reporting", { exact: true })).toBeVisible();
+  await expect(studio.getByRole("link", { name: "Shop" })).toBeVisible();
+  // A team whose tasks are in files has no pages here: named, not linked.
+  await expect(studio.getByText("Notes", { exact: true })).toBeVisible();
+  await expect(studio.getByRole("link", { name: "Notes" })).toHaveCount(0);
+  await expect(studio.getByText("/Users/morgan/code/shop-a6g")).toBeVisible();
+  for (const other of ["attic", "kiosk"]) await expect(page.getByRole("heading", { name: other })).toHaveCount(0);
+  await expect(page.getByText("Owner", { exact: true })).toHaveCount(0);
+  // Each team's card says where it runs, its lead first: its members' and admins' machines, not the contributor's that
+  // says it leads Shop too.
+  await page.goto("/");
+  await expect(page.getByRole("listitem").filter({ hasText: "Shop" }).getByText("studio (lead), attic (worker, not reporting)")).toBeVisible();
+  await expect(page.getByText(/kiosk/)).toHaveCount(0);
+
+  await admin.page.goto("/machines");
+  await expect(card(admin.page, "attic").getByText("not reporting", { exact: true })).toBeVisible();
+  await expect(card(admin.page, "attic").getByText(state().admin.email)).toBeVisible();
+  await expect(card(admin.page, "studio").getByText("member@example.com")).toBeVisible();
+  await expect(card(admin.page, "kiosk").getByText("blake@example.com")).toBeVisible();
+
+  // A contributor has linked none, and isn't told where the team runs.
+  await contributor.page.goto("/machines");
+  await expect(contributor.page.getByText("None of your machines is linked yet.")).toBeVisible();
+  await contributor.page.goto("/");
+  await expect(contributor.page.locator("dt", { hasText: "Machines" })).toHaveCount(0);
+
+  // Nothing about machines is in the task graphs, which the teams' agents read.
+  const { graph } = await databases();
+  expect(await graph.collection("machines").countDocuments()).toBe(0);
+});
+
+test("a member links a machine from its terminal: a code they look up and check, a token that only reports it", async () => {
+  const { page } = member;
+  const { accounts } = await databases();
+  const emails = subjectsTo(state().member).length;
+  // The CLI asks for a code (RFC 8628, as a form), and polls while it waits.
+  const start = await cli("/api/machines/link", { form: { ...CLIENT, name: "laptop" } });
+  expect(start.status).toBe(200);
+  const { device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval } = start.body;
+  expect(user_code).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
+  expect(verification_uri).toBe(`${state().baseURL}/machines/link`);
+  expect(verification_uri_complete).toBe(`${String(verification_uri)}?code=${String(user_code)}`);
+  expect([expires_in, interval]).toEqual([600, 5]);
+  expect((await poll(device_code)).body["error"]).toBe("authorization_pending");
+  const polled = Date.now();
+  // The device code is kept only as its hash.
+  expect(await accounts.collection("machine_links").countDocuments({ _id: device_code as never })).toBe(0);
+
+  // The page the terminal opens only fills in the code: nothing is looked up, or counted, until the person asks.
+  await page.goto(String(verification_uri_complete).replace(state().baseURL, ""));
+  await expect(page.getByLabel("Code", { exact: true })).toHaveValue(String(user_code));
+  await expect(page.getByText("laptop", { exact: true })).toHaveCount(0);
+  await page.getByLabel("Code", { exact: true }).fill("BBBB-BBBB");
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await expect(page.getByText("No machine is waiting for that code.")).toBeVisible();
+  await page.getByLabel("Code", { exact: true }).fill(String(user_code));
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await expect(page.getByText(String(user_code), { exact: true })).toBeVisible();
+  await expect(page.getByText("laptop", { exact: true })).toBeVisible();
+  await expect(page.getByText(/from 198\.51\.100\.7, the address you're on now/)).toBeVisible();
+  // Asked for from the person's own address, it's approved by checking it.
+  await expect(page.getByLabel("Type the code your terminal shows, to approve it")).toHaveCount(0);
+  await page.getByRole("button", { name: "Link laptop to my account" }).click();
+  await expect(page.getByText("laptop is linked to your account.")).toBeVisible();
+  // A code works once.
+  await page.goto("/machines/link");
+  await page.getByLabel("Code", { exact: true }).fill(String(user_code));
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await expect(page.getByText("No machine is waiting for that code.")).toBeVisible();
+
+  // The CLI's next poll, no sooner than the interval, gets the token, once, never to be cached, with the account masked.
+  await page.waitForTimeout(Math.max(0, polled + Number(interval) * 1000 - Date.now()));
+  const linked = await poll(device_code);
+  expect(linked.status).toBe(200);
+  expect(linked.body).toMatchObject({ token_type: "Bearer", machine: { name: "laptop" }, account: "m•••@example.com" });
+  expect(linked.headers.get("cache-control")).toMatch(/\bno-store\b/);
+  const token = String(linked.body["access_token"]);
+  expect(token).toMatch(/^a6gm_[A-Za-z0-9_-]{43}$/);
+  expect((await poll(device_code)).body["error"]).toBe("invalid_grant");
+  // Kept only as its hash; the person is emailed; the token's issue is audited, with where it went.
+  expect(JSON.stringify(await accounts.collection("machines").findOne({ name: "laptop" }))).not.toContain(token.slice(5));
+  expect(subjectsTo(state().member).slice(emails)).toEqual(["A machine, laptop, was linked to your Anything Factory account"]);
+  expect(await accounts.collection("audit").countDocuments({ action: "machine.token", target: "laptop", ip: DEFAULT_IP })).toBe(1);
+
+  // It reports with its token, and nothing reports without one; a report that isn't one is refused whole.
+  const report = reportOf("laptop", { builder: 2 });
+  expect((await cli("/api/machines/report", { body: report })).status).toBe(401);
+  expect((await cli("/api/machines/report", { body: report, token: `a6gm_${"A".repeat(43)}` })).status).toBe(401);
+  expect((await cli("/api/machines/report", { body: { ...report, teams: [{ ...shop, home: "shop" }] }, token })).status).toBe(400);
+  expect((await cli("/api/machines/report", { body: { ...report, name: "renamed" }, token })).status).toBe(204);
+  expect((await cli("/api/machines/report", { body: report, token })).status).toBe(429);
+  // The token is no session: no page knows it.
+  expect((await cli("/machines", { method: "GET", token })).status).toBe(307);
+
+  await page.goto("/machines");
+  // A report doesn't rename its machine: it keeps the name the person approved.
+  const laptop = card(page, "laptop");
+  await expect(laptop.getByText("reporting", { exact: true })).toBeVisible();
+  await expect(laptop.getByText("2 builders at work")).toBeVisible();
+  await expect(laptop.getByText(/just now from 198\.51\.100\.7/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "renamed" })).toHaveCount(0);
+
+  // a6g disconnect app: the machine unlinks itself with its token, and the token is done.
+  expect((await cli("/api/machines/self", { method: "DELETE", token })).status).toBe(204);
+  expect((await cli("/api/machines/self", { method: "DELETE", token })).status).toBe(401);
+  await page.goto("/machines");
+  await expect(card(page, "laptop")).toHaveCount(0);
+});
+
+test("a code asked for from elsewhere must be typed; linking again replaces only with the old token; a refused code links nothing", async () => {
+  const { page } = admin;
+  const { accounts } = await databases();
+  // From another address: a warning, and the code must be typed, right, to approve it.
+  const desk = await cli("/api/machines/link", { form: { ...CLIENT, name: "desk" }, ip: "203.0.113.50" });
+  await page.goto(String(desk.body["verification_uri_complete"]).replace(state().baseURL, ""));
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await expect(page.getByText("This code was asked for from 203.0.113.50, not from the address you're on.")).toBeVisible();
+  await page.getByRole("button", { name: "Link desk to my account" }).click();
+  await expect(page.getByText("Type the code your terminal shows, to approve a machine that asked from another address.")).toBeVisible();
+  // (Each answer comes back before the next try: the form empties its fields as an answer comes.)
+  await expect(page.getByRole("button", { name: "Link desk to my account" })).toBeEnabled();
+  await page.getByLabel("Type the code your terminal shows, to approve it").fill("BBBB-BBBB");
+  await page.getByRole("button", { name: "Link desk to my account" }).click();
+  await expect(page.getByText("Type the code your terminal shows, to approve a machine that asked from another address.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Link desk to my account" })).toBeEnabled();
+  await page.getByLabel("Type the code your terminal shows, to approve it").fill(String(desk.body["user_code"]).toLowerCase());
+  await page.getByRole("button", { name: "Link desk to my account" }).click();
+  await expect(page.getByText("desk is linked to your account.")).toBeVisible();
+  await page.waitForTimeout(5_000);
+  const first = String((await poll(desk.body["device_code"])).body["access_token"]);
+  expect((await accounts.collection("audit").findOne({ action: "machine.linked", target: "desk" }))?.["detail"]).toMatch(
+    /another address than the person's/
+  );
+
+  // Linked again with its old token: the new link replaces it, and the old token is done.
+  const second = await linkMachine(page, "desk", { ip: "203.0.113.50", token: first });
+  expect(await accounts.collection("machines").countDocuments({ name: "desk" })).toBe(1);
+  expect((await cli("/api/machines/report", { body: reportOf("desk"), token: first })).status).toBe(401);
+  // Linked again without it (as a stranger's machine named after it would be): a second desk, not a replacement.
+  await linkMachine(page, "desk", { ip: "203.0.113.50" });
+  expect(await accounts.collection("machines").countDocuments({ name: "desk" })).toBe(2);
+  expect((await cli("/api/machines/report", { body: reportOf("desk"), token: second })).status).toBe(204);
+  await page.goto("/machines");
+  for (const _ of [1, 2]) {
+    await card(page, "desk").first().getByRole("button", { name: "Unlink desk" }).click();
+    await expect(page.getByText("desk is unlinked")).toBeVisible();
+  }
+  expect((await cli("/api/machines/report", { body: reportOf("desk"), token: second })).status).toBe(401);
+
+  // Refused: the CLI is told, and nothing is linked.
+  const spare = await cli("/api/machines/link", { form: { ...CLIENT, name: "spare" } });
+  await page.goto(`/machines/link?code=${String(spare.body["user_code"])}`);
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await page.getByRole("button", { name: "Refuse" }).click();
+  await expect(page.getByText("Refused: spare isn't linked")).toBeVisible();
+  expect((await poll(spare.body["device_code"])).body["error"]).toBe("access_denied");
+});
+
+test("a machine's token is replaced each week; the old one used after the new one ends the link", async () => {
+  const { accounts } = await databases();
+  const old = state().studioToken;
+  await later("studio", { rotate: true });
+  const rotated = await cli("/api/machines/report", { body: reportOf("studio"), token: old });
+  expect(rotated.status).toBe(200);
+  const next = String(rotated.body["access_token"]);
+  expect(next).toMatch(/^a6gm_/);
+  // A CLI that missed the answer still has the old one, for a day: it gets another, and the one it missed is done.
+  await later("studio");
+  const again = await cli("/api/machines/report", { body: reportOf("studio"), token: old });
+  expect(again.status).toBe(200);
+  const newest = String(again.body["access_token"]);
+  await later("studio");
+  expect((await cli("/api/machines/report", { body: reportOf("studio"), token: next })).status).toBe(401);
+  await later("studio");
+  expect((await cli("/api/machines/report", { body: reportOf("studio"), token: newest })).status).toBe(204);
+  // Once the newest has been used, the old one is a copy someone kept: the link ends, and it's audited.
+  await later("studio");
+  expect((await cli("/api/machines/report", { body: reportOf("studio"), token: old })).status).toBe(401);
+  expect(await accounts.collection("machines").countDocuments({ name: "studio" })).toBe(0);
+  expect((await cli("/api/machines/report", { body: reportOf("studio"), token: newest })).status).toBe(401);
+  expect((await accounts.collection("audit").findOne({ action: "machine.unlinked", target: "studio" }))?.["detail"]).toMatch(/a replaced token was used/);
+});
+
+test("nobody finds a code by guessing, contributors link nothing, and an address gets only a few codes", async () => {
+  const { page } = member;
+  const waiting = await cli("/api/machines/link", { form: { ...CLIENT, name: "guessed" }, ip: "198.51.100.88" });
+  // Every look counts, right or wrong, and nothing clears the count: then not even the right code shows.
+  await page.goto("/machines/link");
+  for (let n = 0; n < 10; n++) {
+    await page.getByLabel("Code", { exact: true }).fill(`BBBB-BBB${"BCDFGHJKLM"[n] ?? "B"}`);
+    await page.getByRole("button", { name: "Look it up" }).click();
+    if (await page.getByText(/looks at codes in 15 minutes/).isVisible()) break;
+  }
+  await page.getByLabel("Code", { exact: true }).fill(String(waiting.body["user_code"]));
+  await page.getByRole("button", { name: "Look it up" }).click();
+  await expect(page.getByText("That's 10 looks at codes in 15 minutes: wait, then try again.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Link guessed/ })).toHaveCount(0);
+
+  await contributor.page.goto("/machines/link");
+  await expect(contributor.page.getByText("Only a team's members and admins link machines")).toBeVisible();
+
+  // An address asks for five codes in 15 minutes; a request that isn't the CLI's, or names no machine, gets none.
+  const statuses: number[] = [];
+  for (let n = 0; n < 6; n++) statuses.push((await cli("/api/machines/link", { form: { ...CLIENT, name: `box-${n}` }, ip: "198.51.100.77" })).status);
+  expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+  expect((await cli("/api/machines/link", { form: { name: "laptop" }, ip: "198.51.100.78" })).status).toBe(401);
+  expect((await cli("/api/machines/link", { form: { ...CLIENT, name: "../etc" }, ip: "198.51.100.78" })).status).toBe(400);
+
+  // Each is in the audit log, a made-up token too (once per address).
+  const events = await (
+    await databases()
+  ).accounts
+    .collection("audit")
+    .find({ action: { $regex: "^machine\\." } })
+    .toArray();
+  expect(events.map((e) => `${String(e["action"])} ${String(e["outcome"])} ${String(e["target"] ?? "")}`)).toEqual(
+    expect.arrayContaining([
+      "machine.linked ok laptop",
+      "machine.token ok laptop",
+      "machine.unlinked ok laptop",
+      "machine.linked ok desk",
+      "machine.refused ok spare",
+      "machine.unlinked ok studio",
+      "machine.refused-token refused ",
+      "machine.linked failed ",
+    ])
+  );
 });
 
 test("a member follows the work on the board, and suggests a task, which goes to triage as theirs", async () => {
@@ -552,6 +866,11 @@ test("the admin adds a proposal, and a task approved under a journey after anoth
   // What was typed is still there.
   await expect(page.getByLabel("Title")).toHaveValue("Refund from the order page");
   await page.getByLabel("Comes after (task numbers)").fill(`#${paid?.id}`);
+  // Approved as it's added, it goes straight to the builders: it takes a code from the authenticator.
+  await page.getByRole("button", { name: "Add the task" }).click();
+  await expect(page.locator("main").getByRole("alert")).toContainText("Enter the 6-digit code the app shows.");
+  await page.getByLabel(/Approve it now/).check();
+  await page.getByLabel("Code from your authenticator, to approve it now").fill(await freshCode(page, state().admin.totpURI));
   await page.getByRole("button", { name: "Add the task" }).click();
   await expect(page.getByRole("status")).toContainText("added, approved.");
   await expect(page.getByRole("region", { name: "Where it stands" }).getByRole("link", { name: `#${journey?.id} Checkout` })).toBeVisible();
@@ -916,7 +1235,7 @@ test("an admin session without its second factor is refused every admin page and
   await unverified.page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(unverified.page).toHaveURL(/\/second-factor$/);
   await expect(unverified.page.getByRole("heading", { name: "Enter your authenticator's code" })).toBeVisible();
-  for (const path of ["/", "/t/shop/proposals", "/admin/people", "/account"]) {
+  for (const path of ["/", "/machines", "/machines/link", "/t/shop/proposals", "/admin/people", "/account"]) {
     await unverified.page.goto(path);
     await expect(unverified.page, path).toHaveURL(/\/second-factor$/);
   }
@@ -1000,6 +1319,8 @@ test("pages fit a phone's width without scrolling sideways", async ({ browser })
     "/inbox",
     "/admin/people",
     "/admin/audit",
+    "/machines",
+    "/machines/link",
     "/account",
     "/account/notifications",
   ]) {

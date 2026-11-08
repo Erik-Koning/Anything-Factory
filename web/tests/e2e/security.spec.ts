@@ -38,6 +38,13 @@ test("only requests through the CDN reach the app; its health check is open", as
     body: JSON.stringify({ email: "x@example.com", password: "x" }),
   });
   expect(forged.status).toBe(403);
+  // A machine's endpoints too, which take no session.
+  const machine = await fetch(`${base}/api/machines/link`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-a6g-viewer-ip": "10.9.8.7" },
+    body: JSON.stringify({ client_id: "a6g-cli", name: "laptop" }),
+  });
+  expect(machine.status).toBe(403);
   const health = await fetch(`${base}/api/health`);
   expect(health.status).toBe(200);
   expect(await health.text()).toBe("ok");

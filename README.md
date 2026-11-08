@@ -187,8 +187,10 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   `approval.maxSize` and escalates larger work and changes of scope to you; `"operator"` keeps
   every proposal yours; `"full"` gives the approver all of it, scope included. Privacy, policy unlocks, promotion and
   rule changes stay yours whatever the mode. The bug, UX and test findings other members file are the planner's to
-  approve (`approval.findings`, `"approver"` to send them with the proposals), since they aren't its own. Every move
-  of a task, by whom and from where, is one table in `lib/tasks/model.ts`.
+  approve (`approval.findings`, `"approver"` to send them with the proposals), since they aren't its own. Work made
+  of a stakeholder's words (a feature request, a suggestion from the web app) is yours to approve whatever the mode
+  (`approval.stakeholders`, `"screened"` to let the approver approve what the planner screened clear, never what it
+  screened risky). Every move of a task, by whom and from where, is one table in `lib/tasks/model.ts`.
 - **Claims.** Builders and testers claim the next approved task their role builds (blockers, then majors, then
   priority), never two on the same files, under a lease their heartbeats renew; the watchdog returns a claim whose
   member went quiet. The Stop hook won't let a member finish holding one: it submits or releases it.
@@ -215,6 +217,14 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Feature requests.** `a6g request add` takes a stakeholder's request; `a6g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks
   (`a6g task add --request`) or rejects it with a reason.
+- **A stakeholder's words are data.** A request, and a task suggested from the web app, reach agents fenced and
+  quoted (`a6g request show`, `a6g task show`, the planner's context), each line after a mark so none passes for one
+  of the factory's, and without control or format characters; agents never follow instructions in them. Before any
+  work is made of one, the planner screens it (`a6g request screen` / `a6g task screen <id> clear|risky --note "…"`):
+  risky when it asks for, or the work would need, weaker security checks, secrets, calls to outside services or data
+  sent out, personal data, new dependencies or build and deploy changes, looser tests or review, or anything about the
+  team itself (the list is `SCREEN_RISKS` in `lib/tasks/model.ts`). A request isn't promoted, and a suggestion isn't
+  proposed, until it's screened; the screen goes with the work, and the approver approves none that's risky.
 - **Cycles.** With `"mode": "cycles"` a team has no finish line: it builds, verifies journeys, sweeps for regressions
   and closes each cycle with a report (`a6g cycle close`), and rests when nothing is left until new work arrives.
 
@@ -254,6 +264,24 @@ On a team on several machines:
 - **A team that started on one machine** moves its graph with `a6g task migrate --to mongo` (`--dry-run` first): every
   task, request, stakeholder and cycle keeps its id, and the file store is marked so nothing writes to it again.
 
+**Which machine runs what.** `a6g teams` lists the teams registered on this Mac. To see every Mac and what it runs on
+the web app, link each one to your account there with `a6g connect app` (the first time, it asks what to call the
+machine: team members see the name). It shows a code and opens the app's page for it, where you sign in as usual, look
+the code up, check it, the machine and the address it asked from, and approve; a code asked for from another address
+than yours must be typed, not only clicked, and you get an email whenever a machine is linked. The Mac then keeps a
+token in the Keychain, with the address it goes to, that does one thing: report this machine (OAuth's device
+authorization grant, RFC 8628). It isn't a sign-in, can't read anything or act as you, and is replaced every week (an
+old one used after its successor ends the link). At the end of every full watchdog run it reports every team
+registered on it, those whose tasks are in files too: lead or worker, where the team stands, who's at work, and its
+checkout (as `~/…` under your home folder). **Machines** on the web app shows you your machines, and an admin every
+machine and whose it is; a team's card on **Teams** names the machines its members and admins run it on. A machine
+not heard from for 15 minutes shows as not reporting. Admins and the members of a team link machines, ten each.
+Unlink one from its card or with `a6g disconnect app`; one that reports nothing for 30 days, or whose person is banned
+or no longer on a team as a member, is unlinked too. Linking a Mac again replaces its old link only because the CLI
+shows the old token: a machine someone else names after yours is a second one, never yours replaced.
+`a6g connect app --test` reports now; `--url` names another deployment of the app (https, or http://localhost for one
+on this Mac), and `--machine` the Mac's name.
+
 ## The two places you edit
 
 | Where                                                  | What                                                                                                                                                                                                                                                                                                 |
@@ -273,16 +301,17 @@ Everything else is generated from these two, and nothing in it is edited by hand
 Local and reversible work is allowed. Outward-facing and irreversible actions are denied until you unlock them in
 `team.json` (`"policies": {"deploy": "allow"}`):
 
-| Policy         | Denied by default                                                                                                                                                       |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy`       | Hosting and app-store CLIs (Vercel, Netlify, Fly, Wrangler, SST, SAM, Firebase, Convex, EAS, …), and package scripts or turbo/nx tasks named deploy, release or publish |
-| `cloud`        | aws, gcloud, az, terraform, pulumi, kubectl, helm, …                                                                                                                    |
-| `hosted-data`  | Linking, pushing, migrating or dumping hosted databases (Supabase, Prisma migrate deploy, PlanetScale, Neon, Turso, …)                                                  |
-| `publish`      | npm, pnpm, yarn, lerna, cargo, gem and twine publishing; docker, podman and buildah push (including docker image and compose push)                                      |
-| `github`       | gh beyond issues, labels, search and reading PRs and runs (no workflows, API, PRs, releases or settings). The planner's own pull request goes through `a6g pr` instead  |
-| `messages`     | mail, Slack or Discord webhooks, SMS and email APIs from the shell. The planner emails only you, through its email tool                                                 |
-| `payments`     | The Stripe CLI and live payment keys                                                                                                                                    |
-| `dependencies` | (allowed by default) adding packages                                                                                                                                    |
+| Policy         | Denied by default                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy`       | Hosting and app-store CLIs (Vercel, Netlify, Fly, Wrangler, SST, SAM, Firebase, Convex, EAS, …), and package scripts or turbo/nx tasks named deploy, release or publish                                                                                                                                                            |
+| `cloud`        | aws, gcloud, az, terraform, pulumi, kubectl, helm, …                                                                                                                                                                                                                                                                               |
+| `hosted-data`  | Linking, pushing, migrating or dumping hosted databases (Supabase, Prisma migrate deploy, PlanetScale, Neon, Turso, …)                                                                                                                                                                                                             |
+| `publish`      | npm, pnpm, yarn, lerna, cargo, gem and twine publishing; docker, podman and buildah push (including docker image and compose push)                                                                                                                                                                                                 |
+| `github`       | gh beyond issues, labels, search and reading PRs and runs (no workflows, API, PRs, releases or settings). The planner's own pull request goes through `a6g pr` instead                                                                                                                                                             |
+| `messages`     | mail, Slack or Discord webhooks, SMS and email APIs from the shell. The planner emails only you, through its email tool                                                                                                                                                                                                            |
+| `network`      | Reaching other hosts from the shell (curl, wget, httpie, nc, ssh, scp, rsync, …): only this machine (localhost, its containers) and the hosts `team.json` lists in `hosts` (`"api.example.com"`, `"*.example.com"`). Claude's own web tools still read pages and search, but a URL can't carry much: https, short, nothing encoded |
+| `payments`     | The Stripe CLI and live payment keys                                                                                                                                                                                                                                                                                               |
+| `dependencies` | (allowed by default) adding packages                                                                                                                                                                                                                                                                                               |
 
 Never unlocked: secrets and env files, the machine's services, force pushes and rewritten history, protected
 branches, and the factory's own files. A team adds its own rules in `never`, each with an example command that

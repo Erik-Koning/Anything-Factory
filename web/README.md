@@ -23,6 +23,11 @@ role to anyone else.
 | **member** (of a team)      | the board, journeys, the graph, recent merges, each task and every request (senders by role, never by name); sends requests; suggests tasks for triage |
 | **contributor** (to a team) | the team's overview (status, journeys, progress counts) and their own requests; sends requests                                                         |
 
+Admins and members also see the machines they've linked to their account (`a6g connect app`) and the teams each runs,
+and may unlink them; an admin sees and may unlink every machine, and sees whose it is. A team's card names only the
+machines of its members and admins that run it: a member of another team may link a machine whose report names any
+team, but it says nothing about where this one runs.
+
 Roles are per team (a member of one team can be a contributor to another). The rules are in `server/access.ts`; every
 page and server action asks there, and `tests/unit/access.test.ts` proves them. The team's agents still see a request's
 stakeholder id and role only: names and emails live in the accounts and the stakeholder records, never in a task or a
@@ -30,8 +35,14 @@ request (Article 8).
 
 ## Pages
 
-- `/` Teams: the teams you can see, each with its state, planner, members at work by role, aim, last merge, and links
-  to its pages.
+- `/` Teams: the teams you can see, each with its state, planner, members at work by role, the machines it runs on
+  (for members and admins: its lead first, and any not reporting), aim, last merge, and links to its pages.
+- `/machines` Machines: your linked machines (an admin's: every one, with its owner), those reporting first, each with
+  its last report and the address it came from, when it was linked, and the teams registered on it: lead or worker,
+  state, planner, members at work and checkout (a team whose tasks are in files is named, with no pages here); and
+  Unlink. `/machines/link`: where `a6g connect app` sends you to look up its code, check it, and approve or refuse it.
+- `/t/<team>/add`, as an admin, **Approve it now** takes a code from your authenticator, as a pause does: the task goes
+  straight to the builders.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
   graph (the factory's own `layout`, as SVG) and recent merges. For admins, **Pause and resume**: pause the team now,
   after the work under way, or after chosen journeys (they finish, verification and polish included, and nothing else
@@ -103,6 +114,42 @@ request (Article 8).
   you're signed in, with each session's address; the IP addresses you've confirmed; your recent activity; sign out.
 - `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
   address to be confirmed by email; `/sign-in/confirm` is the email's page (“Was this you?”), no session needed.
+
+## Linking a machine
+
+`a6g connect app` (on the operator's Mac, `lib/app.ts`) links the Mac to the account of whoever approves it, with
+OAuth's device authorization grant (RFC 8628). The machine never sees the person's sign-in, and the person never
+handles the machine's token. Admins and the members of a team link machines, at most ten each; contributors don't.
+
+1. The CLI asks `POST /api/machines/link` (a form, or JSON: `client_id=a6g-cli`, `name`) for a code: a device code (32
+   random bytes, kept here only as their hash) and a user code (eight letters without vowels, shown as `BCDF-GHJK`),
+   for ten minutes. An address asks for at most five in 15 minutes. Linking again, the CLI sends its old token
+   (`Authorization: Bearer …`): the new link replaces that machine, and only that one.
+2. It shows the user code and opens `/machines/link?code=…`, which only fills the form in. The person signs in as
+   anywhere else (their second factor, a confirmed address) and looks the code up: a form post, so a link from
+   anywhere else can't spend their looks. Every look and every decision counts, right or wrong, and nothing clears the
+   count before it expires: ten per person and fifty per address in 15 minutes, so nobody signed in finds someone
+   else's code by guessing. The page shows the code, the machine's name, and the address and device it asked from; a
+   code asked for from another address than the person's comes with a warning, and must be typed to be approved.
+3. Meanwhile the CLI polls `POST /api/machines/token` (`grant_type`, `device_code`, `client_id`) every five seconds,
+   five more after a `slow_down`; it gets `authorization_pending`, then `access_denied`, `expired_token` or
+   `invalid_grant`, or once the token: `a6gm_` and 32 random bytes, kept here only as its hash, with the account it's
+   linked to, masked (`m•••@example.com`). The person is emailed that a machine was linked, from where, and where to
+   unlink it.
+4. The watchdog reports with it (`POST /api/machines/report`, `Authorization: Bearer …`): the report is rebuilt from
+   the fields it may have (`lib/fleet.ts parseReport`: no control or format characters, checkouts as absolute or
+   `~/` paths) and refused whole otherwise (400), over 256 KB (413), or sooner than 20 seconds after the last (429). It
+   doesn't rename the machine. When the token is a week old, the answer carries the next one (200); the old one keeps
+   working for a day, for a CLI that missed it, until the new one is used, and if it's used after that, the link ends
+   (RFC 9700's refresh token rotation). `DELETE /api/machines/self` unlinks it (`a6g disconnect app`).
+
+The token reports its machine and does nothing else: no page or Better Auth endpoint takes it, and these endpoints
+take no cookie and set none. It stops working when the machine is unlinked (from its card, or by itself), when its
+person is banned or is no longer a member of any team (an admin's change of their role or teams unlinks them at once),
+and after 30 days without a report; only an `invalid_token` tells the watchdog to forget it. The endpoints are behind
+the CDN like every other request, and their answers are never cached. Links and codes live in the accounts database
+(`machine_links`, `machines`), never in the task graphs the agents read. Linking, refusing, a token's issue, unlinking,
+a replaced token used again, and a made-up token (once per address in 15 minutes) go in the audit log.
 
 ## Signing in: two factors, new IP addresses, and the audit log
 
@@ -383,11 +430,15 @@ changing the domain means adding passkeys again.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
 - `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and
   no-journey kinds registered and the level kept in the address.
-- `app/`: the pages; `app/t/[team]/actions.ts`, `app/admin/people/actions.ts`, `app/account/actions.ts`: every write.
+- `server/machines.ts`: linked machines, their codes and reports; `server/machine-api.ts`: what the machines'
+  endpoints (`app/api/machines/`) share: no caching, OAuth's errors, bodies read up to a size, the bearer's machine.
+- `app/`: the pages; `app/t/[team]/actions.ts`, `app/admin/people/actions.ts`, `app/account/actions.ts`,
+  `app/machines/actions.ts`: every write a person makes.
 - `proxy.ts`: requests without the CDN's secret refused, a nonce-based Content Security Policy, and anyone without a
   session cookie off to sign in.
 - `sst.config.ts`, `Dockerfile`: the deployment (Lightsail behind CloudFront); `tsconfig.infra.json` checks it.
 
 The app imports only `model`, `store` (for `update`), `mongo`, `requests`, `decide`, `answer`, `add`, `teams`, `graph`
-and `controls` from `lib/tasks`; never the file store, the Keychain, migrations or machines, and it never calls `openStore`
+and `controls` from `lib/tasks`, and `lib/fleet.ts` (machines' reports and the link's protocol); never the file store,
+the Keychain, migrations or `lib/tasks/machines.ts`, and it never calls `openStore`
 (`tests/unit/boundaries.test.ts` keeps it so).

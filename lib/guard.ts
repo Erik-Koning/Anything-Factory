@@ -15,7 +15,7 @@ import { FACTORY_PATH, factoryWrite, instanceId, type Lane, laneAllows, normaliz
 import { messageKind, waitReason } from "./contact.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
-import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START } from "./policies.ts";
+import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, webRefusal } from "./policies.ts";
 import { type HookInput, inSetup, inTeam, setupRole, teamSession } from "./session.ts";
 import {
   expandPath,
@@ -580,9 +580,9 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     [a6g("env\\s+(?:up|reset|restart|down)"), ["planner"], "only the planner starts, resets or stops the team's environment."],
     [a6g("pages\\s+run"), ["planner"], "the planner records page results; use a6g pages shots to check anything yourself."],
     [
-      a6g("task\\s+(?:edit|score|status|import)"),
+      a6g("task\\s+(?:edit|score|status|import|screen)"),
       ["planner"],
-      "the planner shapes, scores and moves tasks; add a finding (a6g task add) or a note (a6g task note) instead.",
+      "the planner shapes, screens, scores and moves tasks; add a finding (a6g task add) or a note (a6g task note) instead.",
     ],
     [a6g("task\\s+ask"), ["planner", "approver"], "the planner and the approver raise tasks to the operator, with why and what they recommend."],
     [
@@ -597,7 +597,7 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
       "the approver (or the operator) decides on proposals, and nobody approves their own (Article 4).",
     ],
     [a6g("task\\s+(?:claim|release|submit)"), ["builder", "tester", "planner"], "builders and testers claim, release and submit tasks."],
-    [a6g("request\\s+(?:add|reject)|cycle\\s+close"), ["planner"], "the planner takes in feature requests and closes cycles."],
+    [a6g("request\\s+(?:add|reject|screen)|cycle\\s+close"), ["planner"], "the planner takes in and screens feature requests, and closes cycles."],
     [a6g("request\\s+note"), ["planner", "approver"], "the planner and the approver note what they found about a request."],
     [a6g("task\\s+fetch"), ["planner", "reviewer"], "the planner and the reviewer fetch a task's branch from the remote."],
     [a6g("request\\s+stakeholders"), [], "the stakeholders' names and addresses are the operator's to see (Article 8)."],
@@ -1120,4 +1120,9 @@ export function check(input: HookInput): void {
   else if (WRITE_TOOLS.includes(tool)) checkWrite(String(args.file_path ?? args.notebook_path ?? ""));
   else if (tool === "Read" || tool === "Grep") checkReads();
   else if (tool.startsWith("mcp__")) checkMcp();
+  else if (tool === "WebFetch" || tool === "WebSearch") {
+    // Past the shell, the network policy's own check (policies.ts webRefusal).
+    const why = webRefusal(team, tool, args);
+    if (why) refuse(why);
+  }
 }

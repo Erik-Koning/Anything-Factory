@@ -35,7 +35,9 @@ Set up and run a team (the operator)
                                       Resend (replies reach the planner), WhatsApp through your business number
   a6g connect heartbeat <url> [--test]  ping an outside check every watchdog run, so it tells you when this Mac stops
   a6g connect mongo [--machine <name>]  this machine's connection to a team's shared task graph (the string on stdin)
-                                      ·  a6g disconnect email|whatsapp|heartbeat
+  a6g connect app [--url <url>] [--machine <name>] [--test]   sign in to the web app in your browser and link this
+                                      machine to your account: the app shows you it and the teams it runs
+                                      ·  a6g disconnect email|whatsapp|heartbeat|app
   a6g self-install [--link] [--force] install this checkout's version into ~/.a6g  ·  a6g versions
 
 Team members (the guard decides who may run which)

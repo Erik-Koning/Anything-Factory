@@ -122,6 +122,11 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
       const missing = after.filter((id) => !known.has(id));
       if (missing.length) return again(`There's no task ${missing.map((id) => `#${id}`).join(", ")} on this team.`);
     }
+    // Approved as it's added, it goes straight to the builders: like a pause, it takes a code from the authenticator.
+    if (admin && fields.approved) {
+      const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+      if (wrong) return again(wrong);
+    }
     if (!admin && !(await takeRequestAllowance(viewer.userId, LIMITS.requestsPerDay)))
       return again(`You've sent ${LIMITS.requestsPerDay} requests and suggestions today, the most a day; send this one tomorrow.`);
     // Whoever adds it, admin or member, is on the task as their stakeholder record, as a request's sender is.
