@@ -30,6 +30,8 @@ import {
   unwrap,
   withoutExcludes,
 } from "./shell.ts";
+import { waitRefusal } from "./steer.ts";
+import { accounts } from "./subscriptions.ts";
 import { runningByInstance, T3_HOME, TOOLS } from "./t3.ts";
 import { escapeRegex } from "./util.ts";
 
@@ -734,7 +736,12 @@ export function check(input: HookInput): void {
   const PAUSED = "the operator paused the team: merge nothing and start no members until a6g resume. Finish your turn.";
   const nonEmpty = (path: string | undefined): path is string => Boolean(path);
   const scratch = [...new Set(["/tmp", "/private/tmp", process.env.TMPDIR].filter(nonEmpty).map(canonical))];
-  // The factory's, T3 Code's and Claude Code's own folders on this machine, and the team's run folder.
+  // The factory's, T3 Code's and Claude Code's own folders on this machine (every subscription's login among them:
+  // a member on one could otherwise change another's settings or hooks), and the team's run folder.
+  let logins: string[] = [];
+  try {
+    logins = accounts().flatMap((a) => (a.configDir ? [a.configDir] : []));
+  } catch {}
   const machine = [
     A6G_HOME,
     join(homedir(), ".a6g"),
@@ -742,6 +749,7 @@ export function check(input: HookInput): void {
     join(homedir(), ".t3"),
     join(homedir(), ".claude"),
     process.env.CLAUDE_CONFIG_DIR,
+    ...logins,
     run ?? undefined,
   ]
     .filter(nonEmpty)
@@ -1093,6 +1101,9 @@ export function check(input: HookInput): void {
       .map((r) => instanceId(team, r));
     if (!childRole) return refuse(`start members only on this team's instances (${known.join(", ")}); ${instance ?? "none"} gives no role.`);
     if (childRole === "planner") refuse("there is one planner.");
+    // No subscription open to the role on this machine (lib/steer.ts): its members wait until one opens.
+    const waits = waitRefusal(run, childRole);
+    if (waits) refuse(waits);
     const child = team.roles[childRole];
     if (child?.worktree && args.isolation !== "worktree")
       refuse(

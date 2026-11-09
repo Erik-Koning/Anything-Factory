@@ -18,7 +18,9 @@ export const isHoldScope = (value: unknown): value is HoldScope => typeof value 
 // (lib/budget.ts enforces them). In API-equivalent US dollars (lib/prices.ts), or with `unit` "subscription", in
 // percent of one Claude subscription's weekly limit (lib/subscriptions.ts measures what that comes to): 60 is three
 // fifths of a subscription's week, 150 one and a half subscriptions'. With `autoResume`, a team the budget paused for
-// a day or a week starts again when the next one does.
+// a day or a week starts again when the next one does. `accounts` limits what the team spends on one subscription, in
+// the same unit (percent of that subscription's week): reaching one moves the team to its next subscription
+// (lib/steer.ts), it doesn't pause it.
 export interface Limits {
   daily: number | null;
   weekly: number | null;
@@ -26,6 +28,12 @@ export interface Limits {
   since: string;
   autoResume: boolean;
   unit?: "usd" | "subscription";
+  accounts?: Record<string, AccountLimits>;
+}
+export interface AccountLimits {
+  daily: number | null;
+  weekly: number | null;
+  total: number | null;
 }
 
 export interface Control extends Doc {

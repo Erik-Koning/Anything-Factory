@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased: teams on several Claude subscriptions
+
+- **Each team, or each role in it, runs on the subscriptions you choose, in order.** `a6g subscriptions use <team>
+<sub>[,<sub>…] [--role <role>]` (this machine's choice, never `team.json`'s); a team without one runs on this Mac's own
+  login as before. A role runs on a subscription through T3 Code's own setting for a login of its own (each instance's
+  `homePath`, which sets `CLAUDE_CONFIG_DIR` for its Claude), so the factory doesn't touch the login.
+- **Limits per subscription and across all of them.** `a6g subscriptions limit <sub|all> [--weekly <n>%] [--session
+<n>%]`. A subscription closes at its limit, at the limit across all (their weekly percentages added up), and always
+  once its week or five hours are used up, until it resets, as T3 Code treats a used-up window. The watchdog reads
+  every subscription every quarter hour, every five minutes near a limit.
+- **A team's budget on one subscription.** `a6g budget <team> --account <sub> --daily|--weekly|--total`, in the
+  budget's unit (percent is of that subscription's own week): at the limit the team moves to its next subscription,
+  rather than pausing. The web app's budget form keeps these, and its spend panel shows what the team spent on each.
+- **Moving, and waiting.** The watchdog keeps every role on the first open subscription in its list (`lib/steer.ts`):
+  a role moves only when nothing of it is at work, since T3 Code would resume a session of it under a login that
+  doesn't have it. A member role moves once its members at work finish, starting none in between; the planner once
+  it's idle with no member running (its thread is retired and a fresh one starts on the new subscription at the next
+  run). A role goes back up its list once the earlier one is five points under its limits. A role none is open to
+  waits: the guard starts none of its members, a worker starts none of its builders, a waiting planner gets no tick,
+  no new thread and no message (replies, answers and controls are kept for it), and the planner's ticks name the
+  roles that wait or are moving. A wait is news once: readings that only change its figures send nothing. You're told of each change;
+  `a6g status`, `a6g subscriptions` and `a6g doctor` show where each role runs and what waits
+  (`<run>/subscription.json`).
+- **Spend by subscription.** Each request counts for the login whose transcripts it's in (rows from before count as
+  this Mac's own); `spend.json` gets each subscription's figures and week, and a budget in percent counts each
+  subscription's spend against that one's week. Each subscription's week in dollars is estimated on its own (else its
+  plan's, else all of them).
+- **A subscription is known by its login.** Readings record the login's account and plan; a name signed in to another
+  account starts its estimates again, `add` refuses a second name for the same account, `remove` refuses one a team
+  runs on, and `a6g doctor` checks each one is signed in. The guard keeps members out of every subscription's folder.
+- `a6g metrics` and the watchdog's spend read every subscription's transcripts, not only `~/.claude/projects`.
+
 ## 0.6.1: The web app's new address, and doctor on stale prompts
 
 - **`a6g connect app` goes to `https://app.anythingfactory.dev` by default**, the domain the factory moved to; 0.6.0's

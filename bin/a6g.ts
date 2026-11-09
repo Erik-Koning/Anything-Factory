@@ -19,11 +19,16 @@ Set up and run a team (the operator)
   a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
                                       stop a team now, or once the work (or journeys) under way is merged
   a6g resume <team> [--note "…"]      start it again; the note goes to the planner
-  a6g budget <team> [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
+  a6g budget <team> [--account <sub>] [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
                                       its spending limits, in API-equivalent $ or % of a subscription's week
-                                      (60%; over 100% for more than one): warned at 80%, paused at 100%
+                                      (60%; over 100% for more than one): warned at 80%, paused at 100%;
+                                      --account: its limits on one subscription, which it moves off at 100%
   a6g subscriptions [check | add <name> --config-dir <dir> | remove <name>]
                                       the Claude subscriptions, their usage, and what a subscription's week is in $
+  a6g subscriptions use <team> <sub>[,<sub>…] [--role <role>] [--clear]
+                                      what the team (or one role) runs on here, in order: the next when one closes
+  a6g subscriptions limit <sub|all> [--weekly <n>%] [--session <n>%]
+                                      how much of a subscription the teams may use (all: their weeks added up)
   a6g rotate <team>                   a fresh planner thread (refused while members run)
   a6g status [<team>]  ·  a6g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   a6g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role

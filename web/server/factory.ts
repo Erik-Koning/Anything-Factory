@@ -115,7 +115,8 @@ export const resumeFromWeb = (team: string, { note, from }: { note: string; from
 export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);
 
 // A budget from the web, by an admin's stakeholder id: each limit in dollars, or null for none (all null clears it). The
-// total keeps counting from when the budget began, unless `restart`.
+// total keeps counting from when the budget began, unless `restart`. The team's limits on one subscription (a6g budget
+// --account, which the form doesn't show) stay while the unit does, and go with a cleared budget.
 export async function budgetFromWeb(
   team: string,
   ask: {
@@ -131,9 +132,18 @@ export async function budgetFromWeb(
   const store = storeFor(team);
   const current = limitsOf(await store.controls.all());
   const { daily, weekly, total } = ask;
+  const kept = current?.accounts && Object.keys(current.accounts).length && (current.unit ?? "usd") === ask.unit ? current.accounts : null;
   const limits: Limits | null =
     daily === null && weekly === null && total === null
       ? null
-      : { daily, weekly, total, unit: ask.unit, autoResume: ask.autoResume, since: ask.restart || !current ? new Date().toISOString() : current.since };
+      : {
+          daily,
+          weekly,
+          total,
+          unit: ask.unit,
+          autoResume: ask.autoResume,
+          since: ask.restart || !current ? new Date().toISOString() : current.since,
+          ...(kept ? { accounts: kept } : {}),
+        };
   return store.controls.create(budgetControl(team, `web:${ask.from}`, limits));
 }

@@ -2,14 +2,14 @@
 //
 // What a team has cost, per role: agents (T3 threads), runs (T3 turns: one wake of the planner, one task of a
 // member), model requests and tool calls (from the Claude transcripts), tokens and wall time. Two sources that
-// should agree: T3 Code's database (per-turn token usage) and the transcripts under ~/.claude/projects.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+// should agree: T3 Code's database (per-turn token usage) and the transcripts under each subscription's login (~/.claude/projects).
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { roleForInstance, roleOfAgent } from "../config.ts";
 import { readRegistry } from "../paths.ts";
 import { teamSession } from "../session.ts";
-import { encodePath } from "../usage.ts";
+import { loginDirs } from "../subscriptions.ts";
+import { transcriptDirsByAccount } from "../usage.ts";
 import { turns as t3Turns, worktreesDir } from "../t3.ts";
 
 interface RoleRow {
@@ -89,16 +89,11 @@ export function run(args: string[]): number {
   }
 
   // --- Claude transcripts: the loop checkout and the T3 worktrees made from it. --------------------------------
-  const projects = join(homedir(), ".claude", "projects");
-  const encode = encodePath;
   const worktrees = worktreesDir(home);
   // Every transcript folder for the loop checkout or a worktree made from it, including worktrees the watchdog has
-  // already removed (their transcripts stay in ~/.claude/projects).
-  const worktreePrefix = `${encode(worktrees)}-`;
-  // No transcripts yet (Claude Code hasn't run on this machine, or under this HOME): T3 Code's counts stand alone.
-  const dirs = (existsSync(projects) ? readdirSync(projects) : [])
-    .filter((name) => name === encode(home) || name.startsWith(worktreePrefix))
-    .map((name) => join(projects, name));
+  // already removed (their transcripts stay in ~/.claude/projects), under every subscription's login. No transcripts
+  // yet (Claude Code hasn't run on this machine, or under this HOME): T3 Code's counts stand alone.
+  const dirs = Object.values(transcriptDirsByAccount(home, worktrees, loginDirs())).flat();
   const sinceMs = Date.parse(since);
   const untilMs = Date.parse(until);
   for (const dir of dirs) {

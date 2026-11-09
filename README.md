@@ -54,14 +54,46 @@ left out keeps its value, 0 removes it; `a6g budget my-app` shows them). Or as s
 subscription's worth. The watchdog reads each subscription's usage every quarter hour, from Claude Code's own usage
 report (`claude -p /usage`, a local command that uses nothing), and with what the Mac used that week, every session's,
 works out what one subscription's week comes to in API-equivalent dollars; `a6g subscriptions` shows it. Until there's
-a reading with 5% of the week used, a budget in shares isn't checked, and says so. Several subscriptions: give each its
-own Claude Code config folder (`CLAUDE_CONFIG_DIR`, as Claude Code's docs say for several accounts), then
-`a6g subscriptions add <name> --config-dir <dir>`. At 80% of a limit you're warned, once per day,
-week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now. Resume it
-and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the budget):
-you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when the next
-day or week does. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach, `a6g pause`
-still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
+a reading with 5% of the week used, a budget in shares isn't checked, and says so. At 80% of a limit you're warned, once
+per day, week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now.
+Resume it and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the
+budget): you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when
+the next day or week does. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach,
+`a6g pause` still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
+
+### Teams on several subscriptions
+
+Each subscription is a Claude Code login in a config folder of its own (`CLAUDE_CONFIG_DIR`, as Claude Code's docs say
+for several accounts); this Mac's own login (`~/.claude`) is `default`. A team's roles run on one through T3 Code's own
+setting for it (each instance's `homePath`), so the factory never touches the login itself:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-b claude auth login        # sign the second subscription in, once
+a6g subscriptions add b --config-dir ~/.claude-b
+a6g subscriptions use app default,b                     # app runs on default, and on b when default closes
+a6g subscriptions use site b,default                    # site the other way round
+a6g subscriptions use app b --role builder              # or one role on a list of its own
+a6g subscriptions limit default --weekly 85%            # keep 15% of default's week for yourself
+a6g subscriptions limit all --weekly 170%               # the two weeks added up
+a6g budget site --account b --weekly 40%                # site may take 40% of b's week, then it moves to default
+```
+
+A subscription closes at your limit for it, at the limit across all of them, once its week or five hours are used up
+(until it resets), or for one team at that team's own budget on it (`a6g budget --account`, in the budget's unit). The
+watchdog reads each one every quarter hour, every five minutes when one is near a limit, and keeps every role on the
+first open subscription in its list. A role moves only when nothing of it is at work, since T3 Code would resume a
+session under the new login, where it isn't: a member role once its members at work finish (none of it starts in
+between, which is soon: each does one task), and the planner once it's idle with no member running, when its thread
+is retired and a fresh one starts on the new subscription at the next run. A role goes back up its list once the
+earlier subscription is five points under its limits. A role none is open to waits: the guard starts none of its
+members, a waiting planner gets no ticks and keeps its messages for when it can work, the roles still open carry on,
+and it picks up by itself when one opens. You're told of every move and wait; `a6g subscriptions` shows each one's usage, limits and
+the teams on it, and `a6g status` each team's. A team's spend is counted on the subscription each request ran on, and
+a budget in percent counts each against that subscription's own week.
+
+The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
+list. The limits read each subscription's own usage, so they hold wherever it's used; what a week comes to in dollars
+counts what the reading Mac used, so for a subscription used on two Macs it's an underestimate.
 
 To stop a team gracefully, let what it's doing finish first: `a6g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets

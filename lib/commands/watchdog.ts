@@ -8,7 +8,7 @@
 // linked (a6g connect app, lib/fleet.ts), and pinging the heartbeat, if one is connected (lib/heartbeat.ts).
 //
 // Per team, in its run folder: watchdog.log, planner-thread, heartbeat/, outbox/, replies/, paused, hold.json,
-// budget.json, controls-applied, complete.
+// budget.json, controls-applied, complete, subscription.json (lib/steer.ts).
 //
 //   a6g watchdog install | remove | run [<team>]
 import { spawnSync } from "node:child_process";
@@ -21,7 +21,7 @@ import { type Channel, channels, failingSend, outboxMessage, recordSend, type Re
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
 import { budgetCheck } from "../budget.ts";
-import { applyControls, clearNotes, holdNote, markApplied, pendingNotes, progressHold, queueNote, readHold, readLimits } from "../holds.ts";
+import { applyControls, clearNotes, holdNote, markApplied, pendingNotes, progressHold, queueNote, readHold, readLimits, writeLimits } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
@@ -29,11 +29,12 @@ import { operatorOnly } from "../session.ts";
 import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
-import { type Control, describeHold, holdOf, settledControl } from "../tasks/controls.ts";
+import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
-import { dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
-import { observeSubscriptions, subscriptionState } from "../subscriptions.ts";
-import { collectUsage, transcriptDirs } from "../usage.ts";
+import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
+import { readSteering, steer, steeringNote } from "../steer.ts";
+import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
+import { collectUsage, transcriptDirsByAccount } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
@@ -284,8 +285,8 @@ export async function answers(target: string): Promise<boolean> {
 // slot as lib/lock.ts's, so a dead holder's lock is taken over safely, and a holder releases only its own.
 const acquireRun = (run: string): Promise<(() => void) | null> => acquireSlot([join(run, ".watch.lock")], { waitMin: 1, holder: "watchdog" });
 
-// A planner busy with a turn.
-export const BUSY = ["running", "starting", "preparing", "queued"];
+// A planner busy with a turn (lib/t3.ts).
+export const BUSY = t3.BUSY;
 
 // Whether T3 Code answers, restarting it when it hasn't for two checks a minute or more apart: one slow answer
 // isn't a crash, and a restart interrupts every member of every team.
@@ -334,9 +335,18 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
     glog(`couldn't read how the operator is connected: ${(error as Error).message}`);
   }
   if (!(await t3Answers(glog, reach))) return "T3 Code isn't answering (see ~/.a6g/watchdog.log)";
-  // The subscriptions' usage, every quarter hour (lib/subscriptions.ts): what a budget in shares of one is measured by.
+  // The subscriptions' usage, every quarter hour, or every five minutes while one is near a limit (lib/subscriptions.ts):
+  // what a budget in shares of one is measured by, and what keeps each team's roles on an open one (lib/steer.ts).
   const subscriptionsRead = join(A6G_HOME, ".stamp-subscriptions");
-  if (!only && minutesSince(subscriptionsRead) >= 15) {
+  let near = false;
+  try {
+    near = nearLimit(
+      subscriptionState(),
+      subscriptionLimits(),
+      accounts().map((a) => a.name)
+    );
+  } catch {}
+  if (!only && minutesSince(subscriptionsRead) >= (near ? 5 : 15)) {
     writeFileSync(subscriptionsRead, "");
     try {
       for (const line of observeSubscriptions()) glog(line);
@@ -495,6 +505,21 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   const spend = await trackUsage(entry, (text) => oncePer("usage-untracked", 60) && log(text));
   // The budget, against it (lib/budget.ts): a warning, a pause, or a new day's resume, applied at once.
   if (spend) await enforceBudget(entry, spend, log, alert);
+  // Each role on an open subscription (lib/steer.ts): members move at once, the planner once it's free, and a role
+  // none is open to waits.
+  let plannerMoved = false;
+  try {
+    const steered = steer(entry);
+    if (!steered) {
+      if (oncePer("steer-unread", 60)) log("couldn't read T3 Code's settings to keep the team on open subscriptions");
+    } else {
+      for (const line of steered.said) log(line);
+      plannerMoved = steered.plannerMoved;
+      if (steered.tell) await alert(steered.tell.key, steered.tell.text);
+    }
+  } catch (error) {
+    if (oncePer("steer-failed", 60)) log(`couldn't keep the team on open subscriptions: ${(error as Error).message.split("\n")[0]}`);
+  }
   // Where the team stands, for the web app (lib/tasks/teams.ts): the lead reports it every run, paused or not.
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
   if (existsSync(join(run, "paused"))) return;
@@ -557,7 +582,15 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
 
   const threadFile = join(run, "planner-thread");
   const plannerTitle = `${title} · planner`;
+  // A planner no subscription is open to gets no new thread and no tick until one opens (lib/steer.ts).
+  const plannerWait = readSteering(run)?.waiting["planner"] ?? null;
   const startPlanner = async (why: string): Promise<void> => {
+    if (plannerWait) {
+      if (oncePer("planner-waits", 60)) log(`no planner started (${why}): it waits for a subscription, ${describeWait(plannerWait)}`);
+      return;
+    }
+    // Retired this run to move it to another subscription: T3 Code reads the instance's new login before the next one.
+    if (plannerMoved) return log("the planner starts on its new subscription at the next run");
     // A planner started by an earlier run whose id never came back (a slow CLI): adopt it, never start a second. Only
     // a thread on the planner's instance with the planner's title, and only when the database could be read.
     const retiredFile = join(run, "planner-thread.retired");
@@ -592,11 +625,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   }
   const status = thread.status ?? "unknown";
   const pending = thread.pendingRequestCount ?? 0;
-  passReplies(replies, run, (text) => t3.threadSend(planner, text), seen, log);
+  passReplies(replies, run, (text) => tellPlanner(run, planner, text), seen, log);
   // What the planner should have heard and couldn't (a resume's note while there was no planner, or T3 Code was down).
   const notes = pendingNotes(run);
   let delivered = 0;
-  while (delivered < notes.length && t3.threadSend(planner, notes[delivered] ?? "")) delivered++;
+  // Kept while it waits for a subscription: a turn it can't run would lose them.
+  while (!plannerWait && delivered < notes.length && t3.threadSend(planner, notes[delivered] ?? "")) delivered++;
   if (delivered) {
     clearNotes(run, delivered);
     log(`passed ${delivered} held message${delivered === 1 ? "" : "s"} on to the planner`);
@@ -606,7 +640,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // The operator's answers from the web app, so the planner acts on them now rather than at its next wake.
   await relayAnswers(
     entry,
-    (text) => t3.threadSend(planner, text),
+    (text) => tellPlanner(run, planner, text),
     log,
     (text) => oncePer("answers-unread", 60) && log(text)
   );
@@ -670,7 +704,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     `planner ${status} (quiet ${quiet} min); members ${members.map((r) => `${r.instance}:${r.n}`).join(" ") || "none"}${quietMembers.length ? `; quiet members: ${quietMembers.join("; ")}` : ""}`
   );
 
-  const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}`;
+  const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}${steeringNote(run)}`;
   if (BUSY.includes(status)) {
     if (quiet >= (w.stuckAfterMin ?? 45) && oncePer("stuck", 60)) {
       log(`planner ${planner} has been ${status} with nothing happening for ${quiet} min`);
@@ -682,6 +716,8 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
       log("planner waiting on a person");
       await alert("waiting", "The planner is waiting for an answer in T3 Code.");
     }
+  } else if (plannerWait) {
+    if (oncePer("planner-waits", 60)) log(`no tick: the planner waits for a subscription, ${describeWait(plannerWait)}`);
   } else if (existsSync(join(run, "idle"))) {
     // An idle cycles team: woken by new work, else ticked like a finished one.
     if (arrived) {
@@ -706,6 +742,14 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // as the team's contact setting allows.
   await sendOutbox(reach, join(run, "outbox"), title, entry.name, log, registeredContact(entry.contact), (text) => notify(title, text));
   trimLog(run);
+}
+
+// A message for the planner: sent, or kept for it while it waits for a subscription (lib/steer.ts), since a turn it
+// can't run would lose it; the watchdog passes kept ones on once it can work. Resolves to whether it was taken.
+function tellPlanner(run: string, planner: string, text: string): boolean {
+  if (!readSteering(run)?.waiting["planner"]) return t3.threadSend(planner, text);
+  queueNote(run, text);
+  return true;
 }
 
 // The team's watchdog log, kept to its last 2,000 lines once it passes 5,000.
@@ -738,12 +782,20 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
+  // A planner that waits for a subscription gets them once it can work (lib/steer.ts), unless it's mid-turn anyway.
+  const waits = Boolean(readSteering(entry.run)?.waiting["planner"]);
   for (const { text, wake } of applied.tell) {
     if (!wake && !busy) continue;
-    if (planner && t3.threadSend(planner, text)) continue;
+    if (planner && (busy || !waits) && t3.threadSend(planner, text)) continue;
     // Kept for when there's a planner to take it (the watchdog passes it on); a pause now matters only mid-turn.
     if (wake) queueNote(entry.run, text);
-    log(planner ? "couldn't pass the operator's control on to the planner yet; it waits for the next run" : "no planner yet: the control waits for one");
+    log(
+      waits
+        ? "the planner waits for a subscription: the operator's control waits for it"
+        : planner
+          ? "couldn't pass the operator's control on to the planner yet; it waits for the next run"
+          : "no planner yet: the control waits for one"
+    );
   }
   return applied.log.length > 0;
 }
@@ -766,7 +818,7 @@ async function applyControlsOnce(): Promise<void> {
       if (planner && !existsSync(join(entry.run, "paused")))
         await relayAnswers(
           entry,
-          (text) => t3.threadSend(planner, text),
+          (text) => tellPlanner(entry.run, planner, text),
           log,
           () => {}
         );
@@ -783,28 +835,42 @@ async function trackUsage(entry: RegistryEntry, problem: (text: string) => void)
   if (!entry.tasks) return null;
   try {
     const worktrees = t3.worktreesDir(entry.home);
+    // Every subscription's transcripts, each request counted for the one it ran on (lib/subscriptions.ts).
     const days = collectUsage({
       run: entry.run,
       team: entry.name,
       machine: machineName(),
-      dirs: transcriptDirs(entry.home, worktrees),
+      dirs: transcriptDirsByAccount(entry.home, worktrees, loginDirs()),
       home: entry.home,
       worktrees,
     });
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
       if (days.length) await store.usage.publish(days);
-      if (entry.worker) return null;
+      // A worker applies none of the operator's controls, but keeps the team's budget for its limits on each
+      // subscription (lib/steer.ts); only the lead holds the team to it.
+      if (entry.worker) writeLimits(entry.run, limitsOf(await store.controls.all()));
       const now = new Date();
       const limits = readLimits(entry.run);
       const from = limits ? [dayOf(new Date(limits.since)), weekOf(now)].sort()[0] : "0000-00-00";
       const subs = subscriptionState();
+      const counted = spendOf(await store.usage.since(from ?? "0000-00-00"), now, limits?.since ?? null);
+      // Each subscription's week in dollars, and the team's: a budget in shares counts each subscription's spend
+      // against that one's week.
+      const accountsSpent = Object.fromEntries(
+        Object.entries(counted.accounts ?? {}).map(([name, spent]) => [name, { ...spent, subscriptionWeek: weekFor(subs, name) }])
+      );
+      const weeks = Object.fromEntries(Object.entries(accountsSpent).map(([name, spent]) => [name, spent.subscriptionWeek]));
       const spend = {
-        ...spendOf(await store.usage.since(from ?? "0000-00-00"), now, limits?.since ?? null),
-        subscriptionWeek: subs.week,
+        ...counted,
+        accounts: accountsSpent,
+        subscriptionWeek: blendedWeek(accountsSpent, weeks) ?? subs.week,
         subscriptions: Object.values(subs.readings).map(({ account, percent, resetsAt }) => ({ account, percent, resetsAt })),
       };
+      // A worker keeps it too, for the team's budget on each subscription (lib/steer.ts); only the lead holds the team
+      // to its budget.
       writeJson(join(entry.run, "spend.json"), spend);
+      if (entry.worker) return null;
       return spend;
     } finally {
       await store.close();
@@ -905,10 +971,7 @@ export const WORKER_PROMPT =
   "Claim a task from the team's task graph and build it: run a6g task claim first, then work as your role's instructions say, and hand it in with a6g task submit.";
 const WORKER_WINDOW_MIN = 30;
 type WorkerThreads = Record<string, { id: string; at: string }[]>;
-const workerBusy = (id: string): boolean => {
-  const status = t3.threadShow(id)?.status ?? "";
-  return BUSY.includes(status) || status === "waiting";
-};
+const workerBusy = t3.threadAtWork;
 async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void): Promise<void> {
   if (!entry.tasks || !entry.limits) return;
   const file = join(entry.run, "worker-threads.json");
@@ -922,7 +985,10 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
   } finally {
     await store.close();
   }
+  const waiting = readSteering(entry.run)?.waiting ?? {};
   for (const role of Object.keys(entry.limits)) {
+    // No subscription open to it on this machine (lib/steer.ts): none start until one opens.
+    if (waiting[role]) continue;
     const recent = (started[role] ?? []).filter(({ at }) => Date.now() - Date.parse(at) < WORKER_WINDOW_MIN * 60_000);
     const running = (started[role] ?? []).filter(({ id }) => workerBusy(id));
     const limit = entry.limits[role] ?? 0;

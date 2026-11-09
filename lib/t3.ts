@@ -39,7 +39,9 @@ export interface ProviderInstance {
   displayName?: string;
   enabled?: boolean;
   environment?: EnvironmentVariable[];
-  config?: { launchArgs?: string; autoCompactWindow?: string; [key: string]: unknown };
+  // homePath: the Claude Code config folder the instance's Claude runs on (T3 sets CLAUDE_CONFIG_DIR from it); left out,
+  // this Mac's own login.
+  config?: { launchArgs?: string; autoCompactWindow?: string; homePath?: string; [key: string]: unknown };
   [key: string]: unknown;
 }
 export interface ProjectScript {
@@ -59,6 +61,15 @@ export interface T3Settings {
   defaultProjectScripts?: ProjectScript[];
   [key: string]: unknown;
 }
+
+// A thread's statuses while it's busy with a turn.
+export const BUSY = ["running", "starting", "preparing", "queued"];
+
+// A thread at work: busy with a turn, or waiting on a person (a worker's builders, which aren't any thread's members).
+export const threadAtWork = (id: string): boolean => {
+  const status = threadShow(id)?.status ?? "";
+  return BUSY.includes(status) || status === "waiting";
+};
 
 // A thread as `t3 thread show --json` prints it (the fields the factory reads).
 export interface T3Thread {
@@ -382,25 +393,66 @@ export function removeInstances(team: string): number {
 }
 
 // A provider instance: one per role. T3 tokenises launchArgs with quotes, passes --append-system-prompt-file's
-// text into the system prompt after its own runtime instructions, and the rest to Claude Code as flags.
+// text into the system prompt after its own runtime instructions, and the rest to Claude Code as flags. homePath is
+// the subscription's Claude Code config folder (lib/subscriptions.ts), null for this Mac's own login.
 export function instance({
   displayName,
   launchArgs,
   environment,
   compactAt,
+  homePath,
 }: {
   displayName: string;
   launchArgs: string;
   environment: Record<string, string | number>;
   compactAt?: number | null | undefined;
+  homePath?: string | null | undefined;
 }): ProviderInstance {
   return {
     driver: "claudeAgent",
     displayName,
     enabled: true,
     environment: Object.entries(environment).map(([name, value]) => ({ name, value: String(value), sensitive: false })),
-    config: { launchArgs, ...(compactAt ? { autoCompactWindow: String(compactAt) } : {}) },
+    config: { launchArgs, ...(compactAt ? { autoCompactWindow: String(compactAt) } : {}), ...(homePath ? { homePath } : {}) },
   };
+}
+
+// A team's instances on this machine, by role (A6G_ROLE): each one's id and the config folder its Claude runs on
+// (null: this Mac's own login). Null when T3's settings can't be read.
+export function teamInstances(team: string, settings?: T3Settings): Record<string, { id: string; homePath: string | null }> | null {
+  let read: T3Settings;
+  try {
+    read = settings ?? readSettings();
+  } catch {
+    return null;
+  }
+  const found: Record<string, { id: string; homePath: string | null }> = {};
+  for (const [id, entry] of Object.entries(read.providerInstances ?? {})) {
+    if (!ofTeam(entry, team)) continue;
+    const role = (entry.environment ?? []).find((variable) => variable.name === "A6G_ROLE")?.value;
+    const home = entry.config?.homePath;
+    if (role) found[role] = { id, homePath: typeof home === "string" && home.trim() ? home : null };
+  }
+  return found;
+}
+
+// The settings with each named role's instance of the team running on `homes[role]` (null: this Mac's own login);
+// nothing else changes.
+export function withHomes(settings: T3Settings, team: string, homes: Record<string, string | null>): T3Settings {
+  const next: T3Settings = structuredClone(settings);
+  for (const entry of Object.values(next.providerInstances ?? {})) {
+    if (!ofTeam(entry, team)) continue;
+    const role = (entry.environment ?? []).find((variable) => variable.name === "A6G_ROLE")?.value;
+    if (!role || !Object.hasOwn(homes, role)) continue;
+    const { homePath: _old, ...config } = entry.config ?? {};
+    const home = homes[role];
+    entry.config = home ? { ...config, homePath: home } : config;
+  }
+  return next;
+}
+
+export function setHomes(team: string, homes: Record<string, string | null>): void {
+  updateSettings((settings) => withHomes(settings, team, homes));
 }
 
 // --- Contract ---------------------------------------------------------------------------------------------

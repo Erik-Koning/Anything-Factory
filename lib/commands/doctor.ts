@@ -9,6 +9,8 @@ import { emailSettings, readKey } from "../email.ts";
 import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
 import { promptFile, promptStale } from "../prompts.ts";
+import { readSteering } from "../steer.ts";
+import { accounts, configDirOf, describeWait, loginOf, sameLogins, teamUses } from "../subscriptions.ts";
 import * as t3 from "../t3.ts";
 import { localTime, readJson, which } from "../util.ts";
 import { readToken, whatsappSettings } from "../whatsapp.ts";
@@ -131,10 +133,34 @@ export async function doctor(): Promise<number> {
   const freeGb = df ? Math.round(Number(df[3]) / 1024 / 1024) : null;
   if (freeGb !== null) (freeGb >= 20 ? ok : warn)(`${freeGb} GB free (each member's worktree holds a copy of dependencies and build output)`);
 
+  // The subscriptions (lib/subscriptions.ts): each one's folder signed in, no two on one account, and every one a team
+  // is listed to run on known here.
+  const logins = accounts();
+  for (const account of logins) {
+    const folder = configDirOf(account);
+    if (!existsSync(folder)) fail(`subscription ${account.name}: ${folder} doesn't exist (CLAUDE_CONFIG_DIR=${folder} claude auth login)`);
+    else {
+      const login = loginOf(account);
+      login
+        ? ok(`subscription ${account.name}: signed in${login.plan ? ` (${login.plan})` : ""}`)
+        : warn(
+            `subscription ${account.name}: no Claude login in ${folder}${account.configDir ? ` (CLAUDE_CONFIG_DIR=${folder} claude auth login)` : " (claude auth login)"}`
+          );
+    }
+  }
+  for (const same of sameLogins(logins)) warn(`subscriptions ${same.join(" and ")} are the same Claude account: its usage counts once per name`);
+  const known = new Set(logins.map((a) => a.name));
+  for (const [team, roles] of Object.entries(teamUses())) {
+    const missing = [...new Set(Object.values(roles).flat())].filter((name) => !known.has(name));
+    if (missing.length) fail(`${team} is listed to run on ${missing.join(", ")}, which isn't a subscription here (a6g subscriptions add, or use)`);
+  }
+
   for (const name of teamNames()) {
     try {
       const entry = readRegistry(name);
       if (!entry) continue;
+      for (const [role, wait] of Object.entries(readSteering(entry.run)?.waiting ?? {}))
+        warn(`${name}: the ${role === "planner" ? "planner waits" : `${role}s wait`} for a subscription: ${describeWait(wait)}`);
       // Whether the rules load is the pinned version's to say (below); this version's loader only reads the pin.
       const team = loadTeam(entry.home, { strict: false });
       // Its agents run the registered version; a6g register would compile with the pinned one.
