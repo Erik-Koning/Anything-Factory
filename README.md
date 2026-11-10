@@ -196,6 +196,42 @@ recompiles it.
 **The stop gate** keeps a builder or tester from finishing with uncommitted work, a misnamed branch, or a failing
 quick gate. **The merge queue** (`a6g merge`) is the only way into the integration branch.
 
+## Checks that hold
+
+A team's work is checked by scripts as well as by agents, and the checks are run again after merges, so what was done
+stays done.
+
+- **Page checks from day one.** The factory carries its own Playwright and Chromium (`a6g self-install` downloads it).
+  `a6g pages` loads each page at desktop, laptop and phone, light and dark, signed in where it needs to be. It checks
+  the HTTP status, errors in the console, sideways scrolling, axe's WCAG A/AA violations, touch targets under
+  `pages.minTarget` on phones, text clipped by its box and controls with no visible focus, and takes screenshots with
+  animations off. When the UX specialist passes a page, its screenshots are kept, and later checks say which pages
+  look different since.
+- **The scaffolder** (`plugin/agents/scaffolder.md`) owns the means of checking: Playwright in the repository, a
+  sign-in for each kind of user, test data kept apart per run (`A6G_NAMESPACE`), stand-ins for outside services,
+  stable screenshots, and the harness manifest (`.a6g/harness.json`) that tells the factory the pages, sign-ins, colour
+  schemes and suite. It claims `scaffold` work (an empty repository's skeleton, a new app or package) and `test-infra`
+  work, and specs where the team has no tester. Setup drafts one for any app.
+- **Journeys as specs.** A journey's specs are Playwright tests tagged `@journey-<id>`, written by a tester or the
+  scaffolder, never by who built it (the merge queue refuses a builder's branch that touches one). A journey is done
+  only on a run of the suite that holds all its merges and where they passed, and `a6g finish` needs the whole suite
+  passing at the head (`harness.journeys`). `a6g complete` marks the work complete only when the finish line holds.
+- **After merges.** When the merge queue has merged the last of a burst, it checks the integration branch: every page
+  and the whole suite, with one retry, holding the merge and app locks so nothing moves under it. What newly fails
+  becomes a finding, naming the merges since it last passed; a test that passes only on its retry is filed as flaky;
+  journeys without specs are filed; and the planner is woken.
+- **Checking less is your call.** A branch that removes a page or the suite from the manifest, skips, filters or
+  retries a test, or leaves fewer tests merges only once you allow that exact commit:
+  `a6g harness allow <branch> --sha <commit> --why "…"`.
+- **One environment, used one run at a time.** Runs against the team's app (`a6g pages`, `a6g e2e`, and a member's own
+  `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them.
+
+```bash
+a6g pages status                     # each page: its checks, its UX verdict, and whether it looks different
+a6g e2e status                       # which journeys have specs, and how the last run went
+a6g harness check                    # does the manifest load
+```
+
 ## The task graph
 
 Every piece of work is a task: one document each, with a status, who holds it on which machine, and a history of who
@@ -354,10 +390,10 @@ branches, and the factory's own files. A team adds its own rules in `never`, eac
 
 `a6g help` lists them all.
 
-| For                                                    | Commands                                                                                                                                                                                                                              |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions` |
-| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `progress`, `pages`, `pr`, `task`, `request`, `cycle`, `blast`                                                                                                   |
+| For                                                    | Commands                                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions`, `harness allow` |
+| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `request`, `cycle`, `blast`                                                                                |
 
 ## T3 Code and Claude Code
 
@@ -433,7 +469,11 @@ To make a release:
 - **Platform:** macOS only for now. The watchdog is a launchd job, notifications use `osascript`, and the email
   key is kept in the Keychain.
 - **No interrupt:** T3 Code 0.1.x has no command to interrupt a thread, so the watchdog notifies you instead.
-- **One shared environment per team:** full runs and rebuilds are serialised by locks, not isolated.
+- **One shared environment per team:** runs, rebuilds and the checks after merges take turns under locks; they aren't
+  isolated. A branch that changes the database's schema can't be tried against it before it merges (prove it with
+  tests on an in-memory database); the check after its merge tries it.
+- **Page checks run after merges, not before.** Builders and reviewers run `a6g pages shots` on a branch's own
+  preview, but nothing yet enforces it.
 
 ## License
 

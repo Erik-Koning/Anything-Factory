@@ -1,7 +1,7 @@
 # Plan: the scaffolder, and checks that hold
 
-Status: planned and reviewed (see Review); Phase 1 built. Built on `subscriptions-accounts` (branch
-`scaffolder-harness`); ships with it, or after it.
+Status: built and tested (see Checklist). Built on `subscriptions-accounts` (branch `scaffolder-harness`); ships with
+it, or after it. Not released.
 
 ## Why
 
@@ -249,30 +249,30 @@ answers.
 
 ### Phase 2: the manifest, and Playwright in the factory
 
-- [ ] `lib/harness.ts`: parse and read the manifest; the page plan; `a6g check` validates it.
-- [ ] `playwright` dependency, `lib/browser.ts`, self-install's Chromium, doctor.
+- [x] `lib/harness.ts`: parse and read the manifest; the page plan; `a6g check` validates it.
+- [x] `playwright` dependency, `lib/browser.ts`, self-install's Chromium, doctor.
 
 ### Phase 3: page checks that see more
 
-- [ ] Schemes, sign-ins, masks, stable screenshots; targets, clipping and focus; a scheme that changes nothing.
-- [ ] Kept looks on a UX pass, and the pages that look different; `pages shots` with the worktree's manifest.
+- [x] Schemes, sign-ins, masks, stable screenshots; targets, clipping and focus; a scheme that changes nothing.
+- [x] Kept looks on a UX pass, and the pages that look different; `pages shots` with the worktree's manifest.
 
 ### Phase 4: journeys as specs
 
-- [ ] `a6g e2e run|try|status|done`; journeys done only on a passing run; `finish`, `complete`, the cycle's report.
+- [x] `a6g e2e run|try|status|done`; journeys done only on a passing run; `finish`, `complete`, the cycle's report.
 
 ### Phase 5: the merge queue
 
-- [ ] Lanes by kind; no journey tags from builders; scaffolder branches always reviewed; the manifest validated.
-- [ ] Narrowing refused without `a6g harness allow`.
-- [ ] The check after merges: coalesced, locked, discarded if moved, findings, flaky tests, gaps, the wake.
+- [x] Lanes by kind; no journey tags from builders; scaffolder branches always reviewed; the manifest validated.
+- [x] Narrowing refused without `a6g harness allow`.
+- [x] The check after merges: coalesced, locked, discarded if moved, findings, flaky tests, gaps, the wake.
 
 ### Phase 6: the shared environment
 
-- [ ] `a6g env use` and the guard looking through it; the app lock passed down; one lock order.
+- [x] `a6g env use` and the guard looking through it; the app lock passed down; one lock order.
 
 ### Phase 7: gaps, documents and release
 
-- [ ] `a6g harness check [--file]` at register; the UX specialist's and builder's sentences; README, CHANGELOG,
+- [x] `a6g harness check [--file]` at register; the UX specialist's and builder's sentences; README, CHANGELOG,
       `docs/team.md`, schema.
-- [ ] Every test passes; new tests for each part.
+- [x] Every test passes; new tests for each part.

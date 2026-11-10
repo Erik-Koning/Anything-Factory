@@ -137,8 +137,10 @@ that role's prompt.
 
 ## `pages`
 
-For teams whose finish line is a set of pages (`"finish": "a6g pages done"`). `list` is required and names at least
-one page; `a6g pages` refuses to call an empty list done.
+What `a6g pages` checks, and how: the operator's pages, and the settings that could loosen a check (the app's address,
+console messages to ignore, the smallest touch target). The team's harness manifest (`.a6g/harness.json`, below) adds
+its own pages; `list` may be left out when it does, and `a6g pages` refuses to call nothing done. For a finish line
+that's a set of pages, `"finish": "a6g pages done"`.
 
 ```json
 "pages": {
@@ -153,18 +155,57 @@ one page; `a6g pages` refuses to call an empty list done.
   "viewports": [{ "id": "desktop", "width": 1440, "height": 900 }],
   "schemes": ["light", "dark"],
   "ignoreConsole": ["/api/auth/get-session"],
-  "settleMs": 1500
+  "settleMs": 1500,
+  "minTarget": 44
 }
 ```
 
 - **What a page's result depends on:** the files under `content`, minus its own `exclude`, so a change to one
   page doesn't make another's verdict stale.
 - **A page:** `id` (letters, digits, `_` and `-`: it names the page's results, screenshots and UX verdict), `path`
-  (from `/`), an optional `title`, and `exclude`.
+  (from `/`), an optional `title`, `exclude`, `as` (the harness's sign-in it's seen with) and `mask` (CSS selectors
+  painted over in its screenshots).
+- **What's checked:** the HTTP status, uncaught and console errors, sideways scrolling, axe's WCAG A/AA violations,
+  touch targets under `minTarget` on phones (default 24, WCAG 2.2 AA; links in a sentence excepted), text clipped by
+  its box, and controls with no visible focus (on the first viewport and scheme), in the factory's own Chromium, with
+  screenshots taken with animations off.
 - **`allowedChanges`:** where the branch may differ from `base` (`pages.base`, else the team's `base`). Anything
   else keeps the finish line from holding.
 - **Defaults:** viewports are 1440, 1024 and 390 (the phone at device scale 2); schemes are light and dark
   (`no-preference` is the third).
+
+## `harness`
+
+`"harness": { "journeys": "required" }` (the default for a team with a scaffolder or a tester): a journey is done only
+while its specs pass, and `a6g finish` (so `a6g complete`) needs `a6g e2e done`: the suite passed at the integration
+branch's head, and every journey has a test tagged `@journey-<id>` that passed. `"optional"` turns both off.
+
+## The harness manifest: `.a6g/harness.json`
+
+The team's own means of checking, written by its scaffolder (the only lane that names it), reviewed and merged like
+code, and read from the team's checkout. It only adds to the operator's checks and holds no command: the factory runs
+the repository's own Playwright with the configuration it names.
+
+```json
+{
+  "e2e": { "config": "playwright.config.ts", "timeoutMin": 20 },
+  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json" } },
+  "pages": [{ "id": "admin", "path": "/admin", "as": "staff", "mask": ["[data-live]"] }],
+  "schemes": { "dark": { "htmlClass": "dark" } }
+}
+```
+
+- **`e2e`:** the suite's Playwright configuration, and how long a whole run may take (default 20 minutes). The
+  factory runs `playwright test --config <it>` with the JSON report written outside the checkout, `PLAYWRIGHT_BASE_URL`
+  set to the team's app and an `A6G_NAMESPACE` for the run's data.
+- **`auth`:** the Playwright project in that configuration that signs in and saves each state; pages and specs use
+  them by name.
+- **`pages`:** pages to check beside the operator's (an id the operator listed stays theirs).
+- **`schemes`:** how the app switches to a colour scheme when it doesn't follow the browser's setting: a class on
+  `<html>`, `localStorage` entries, or a cookie. A page that looks the same in both fails its check.
+- **Checking less is the operator's call.** The merge queue refuses a branch that removes a page, the suite or a
+  sign-in, changes the suite's configuration, adds a skip, `.only`, filter or retry, or leaves fewer tests (in all, or
+  for a journey), unless the operator allowed that exact commit: `a6g harness allow <branch> --sha <commit> --why "…"`.
 
 ## The `.a6g/` folder
 

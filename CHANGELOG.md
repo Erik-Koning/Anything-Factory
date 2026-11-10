@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased: the scaffolder, and checks that hold
+
+- **A new role, the scaffolder** (`plugin/agents/scaffolder.md`): it owns the team's means of checking (Playwright in
+  the repository, sign-ins, test data kept apart per run, stand-ins, stable screenshots) and the repository's
+  structure. It claims a new kind, `scaffold`, and `test-infra` (and `test` where the team has no tester); builders
+  claim neither. Branches `a6g/s<id>-…`, always reviewed; its test and test-infra branches may change test and harness
+  files only. Setup drafts one for any app or empty repository, and asks an empty repository's stack.
+- **The harness manifest, `.a6g/harness.json`**, the one factory file the scaffolder writes: pages beside the
+  operator's (with sign-ins and masks), the Playwright project that signs in, how the app switches colour scheme, and
+  the suite's configuration. It only adds checks and holds no command; `a6g check` and the merge queue validate it.
+  `team.json` gains `pages.minTarget`, pages with `as` and `mask`, `harness.journeys`, and `pages.list` may be left
+  out when the manifest names the pages.
+- **Page checks in the factory's own browser.** The factory ships Playwright (`self-install` downloads its Chromium;
+  `doctor` checks it). `a6g pages` now signs in, switches the app's own dark mode (a dark page that looks like the
+  light one fails), takes screenshots with animations off and masks painted over, and finds touch targets under
+  `minTarget` on phones, text clipped by its box and controls with no visible focus. **Pages that passed before may
+  fail these.** A UX pass keeps that commit's screenshots, and `a6g pages status` says which pages look different
+  since. `a6g pages shots` reads the worktree's manifest, so a branch can be checked on its own preview.
+- **Journeys as specs: `a6g e2e run|try|status|done`.** A journey's specs are tests tagged `@journey-<id>`. A journey
+  is done (by the planner, or settled by the merge queue; the watchdog no longer settles one) only on a recorded run
+  at a commit holding all its tasks' merges, where they passed. With `harness.journeys` required (the default with a
+  scaffolder or tester), `a6g finish` needs `a6g e2e done`, and **`a6g complete` writes the complete marker**, only
+  when the finish line holds: the planner can no longer write it by hand. A builder's branch that touches a journey's
+  tag is refused.
+- **After merges, one check of the newest commit.** The last merge of a burst checks the integration branch: every page
+  and the whole suite, with one retry, holding the merge lock, then the app lock, then a gate slot. What newly fails
+  becomes a finding by `merge-queue`, naming the merges since it last passed; a test that passes only on its retry is
+  filed as flaky; journeys without specs, and a missing harness, are filed once. `a6g status` shows the last check.
+- **Checking less is the operator's call** (Article 5). A branch that removes a page, the suite or a sign-in from the
+  manifest, changes the suite's configuration, adds a skip, `.only`, filter or retry, or leaves fewer tests merges
+  only once the operator runs `a6g harness allow <branch> --sha <commit> --why "…"`, which no agent may run.
+- **`a6g env use -- <command>`** runs a member's command against the team's app under its lock, with
+  `PLAYWRIGHT_BASE_URL` and an `A6G_NAMESPACE` of its own; the guard judges the command inside it. The after-merge
+  command passes its hold on the app down, so the checks it runs don't wait on it.
+
 ## Unreleased: teams on several Claude subscriptions
 
 - **Each team, or each role in it, runs on the subscriptions you choose, in order.** `a6g subscriptions use <team>

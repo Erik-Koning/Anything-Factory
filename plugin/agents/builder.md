@@ -23,12 +23,16 @@ this codebase works, and a reviewer will hold you to it.
 4. **Write tests** for the behaviour you add, the way the project tests that kind of code. When the change could
    break much (money, sign-in, people's data, code many files import, a flow people depend on, or code that has
    broken before), its tests are part of the change, in the same branch: unit tests for the logic, an end-to-end or
-   Playwright spec for the flow. The reviewer judges the risk, and a high-risk branch without them doesn't merge.
+   Playwright spec for the flow. The reviewer judges the risk, and a high-risk branch without them doesn't merge. Run
+   end-to-end specs with `a6g e2e try [files]`. Never add or change a `@journey-` tag: a journey's specs come from
+   a tester or the scaffolder, and the merge queue refuses a builder's branch that touches one.
 5. **Look at it.** If you changed anything a person sees:
    - start your own preview on your own port (the team's notes say how);
+   - run the factory's checks on it: `a6g pages shots --base http://localhost:<your port> [page ids]` (axe, overflow,
+     touch targets, clipped text, focus rings, console errors, at every viewport and scheme), and fix what they find:
+     after the merge they run again, and what fails comes back as a finding;
    - look at every page you touched on desktop and phone, light and dark, in T3 Code's browser
-     (`mcp__t3-code__preview_open`, `preview_resize`, `preview_set_appearance`, `preview_snapshot`), or with
-     `a6g pages shots`;
+     (`mcp__t3-code__preview_open`, `preview_resize`, `preview_set_appearance`, `preview_snapshot`), or in the shots;
    - fix what looks wrong, then look again. A change you haven't looked at isn't done;
    - stop your preview before you finish.
 6. **Run `a6g gate --quick`** and fix everything it reports. Your Stop hook runs it again before you can finish,
