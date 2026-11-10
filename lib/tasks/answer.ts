@@ -22,7 +22,12 @@ export async function answer(store: Store, id: string, { who, text }: { who: Act
   const task = await store.tasks.get(id.replace(/^#/, ""));
   if (!task) throw new Refused(`no task ${id}`);
   return update(store.tasks, task.id, (t) => {
-    if (!waitsOnOperator(t)) throw new Refused(`#${t.id} is ${t.status} now and doesn't wait on an answer: the planner moved it on`);
+    if (!waitsOnOperator(t))
+      throw new Refused(
+        t.kind === "design" && t.status !== "done" && t.status !== "rejected"
+          ? `#${t.id}, the design check-in, isn't with you now (it's ${t.status}): the planner raises it once the foundation is built, and again once any changes you asked for are made. To end it yourself: a6g task status ${t.id} done`
+          : `#${t.id} is ${t.status} now and doesn't wait on an answer: the planner moved it on`
+      );
     const at = nowIso();
     const note: Note = { at, by: who, text: said, kind: "answer" };
     return {
@@ -44,14 +49,15 @@ export interface PendingAnswer {
   key: string;
 }
 
+// An answer's key: the name of the watchdog's marker that it went to the planner.
+export const answerKey = (task: Pick<Task, "id">, note: Pick<Note, "at">): string => `answer-${task.id}-${Date.parse(note.at)}`;
+
 // The answers to pass to the planner: on tasks still waiting on the operator, given at or after `since` (ISO), oldest
 // first. The watchdog leaves out those it passed on already, by key.
 export function answersSince(tasks: Task[], since: string): PendingAnswer[] {
   return tasks
     .filter(waitsOnOperator)
-    .flatMap((task) =>
-      task.notes.filter((n) => n.kind === "answer" && n.at >= since).map((note) => ({ task, note, key: `answer-${task.id}-${Date.parse(note.at)}` }))
-    )
+    .flatMap((task) => task.notes.filter((n) => n.kind === "answer" && n.at >= since).map((note) => ({ task, note, key: answerKey(task, note) })))
     .sort((a, b) => a.note.at.localeCompare(b.note.at));
 }
 

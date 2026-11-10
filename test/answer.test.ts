@@ -5,11 +5,13 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { relayAnswers } from "../lib/answers.ts";
+import { answerCheckInByReply, relayAnswers } from "../lib/answers.ts";
+import type { Reply } from "../lib/channels.ts";
+import { passReplies } from "../lib/commands/watchdog.ts";
 import type { RegistryEntry } from "../lib/paths.ts";
 import { answer, answersMessage, answersOn, answersSince, waitingSince, waitsOnOperator } from "../lib/tasks/answer.ts";
 import { fileStore } from "../lib/tasks/files.ts";
-import { newTask, OPERATOR, Refused, type Status, type Task, withEvent } from "../lib/tasks/model.ts";
+import { MERGE, newTask, OPERATOR, Refused, type Status, statusRefusal, type Task, withEvent } from "../lib/tasks/model.ts";
 import { update } from "../lib/tasks/store.ts";
 
 async function graph() {
@@ -156,6 +158,94 @@ describe("passing answers to the planner", () => {
     );
     assert.equal(told.length, 2);
     assert.doesNotMatch(told[1] ?? "", /Use the draft/);
+  });
+
+  // The operator's replies, as a channel hands them over once it has checked they're theirs.
+  const reply = (id: string, subject: string, text: string): Reply => ({ id, team: "fixture", subject, text, via: "email" });
+  const CHECK_IN = "Re: [A6G-Planner] [Fixture] Urgent: Design check-in: is the foundation right?";
+
+  test("a reply to the design check-in's message is the operator's answer on the task, recorded once", async () => {
+    const { run, store, add } = await graph();
+    const design = await add("Design check-in: the operator agrees the foundation", "question", { kind: "design", by: MERGE });
+    const mine = reply("r-1", CHECK_IN, "(a) agreed as built");
+    const other = reply("r-2", "Re: [A6G-Planner] [Fixture] Which chart library?", "Whichever is smaller.");
+    const logs: string[] = [];
+    const answered = await answerCheckInByReply(entry(run), [mine, other], (t) => logs.push(t));
+    assert.deepEqual([...answered], [["r-1", design.id]]);
+    assert.match(logs.join("\n"), /recorded the operator's email reply to ".*Design check-in.*" as their answer on the design check-in \(#1\)/);
+    const after = (await store.tasks.get(design.id)) as Task;
+    assert.equal(after.status, "question", "the planner moves it on, as with any answer");
+    assert.deepEqual(
+      after.notes.map((n) => [n.by, n.text, n.kind]),
+      [[OPERATOR, "(a) agreed as built", "answer"]]
+    );
+    assert.equal(statusRefusal(after, "done", "planner", [after]), null, "the planner can close it on their word now");
+
+    // The planner couldn't be told: the reply comes again next run, and isn't recorded a second time.
+    const seen = new Set<string>();
+    const told: string[] = [];
+    passReplies(
+      [mine, other],
+      run,
+      () => false,
+      seen,
+      () => {},
+      answered
+    );
+    const again = await answerCheckInByReply(entry(run), [mine, other], (t) => logs.push(t));
+    assert.deepEqual([...again], [["r-1", design.id]]);
+    assert.equal((await store.tasks.get(design.id))?.notes.length, 1, "recorded once");
+    passReplies(
+      [mine, other],
+      run,
+      (text) => (told.push(text), true),
+      seen,
+      () => {},
+      again
+    );
+    assert.equal(told.length, 2);
+    assert.match(
+      told[0] ?? "",
+      /\(a\) agreed as built\n\nThe watchdog checked it came from them, and recorded it as their answer on the design check-in \(#1\): don't note it again\./
+    );
+    assert.match(
+      told[1] ?? "",
+      /Whichever is smaller\.\n\nThe watchdog checked it came from them\. Record the answer on the question's ticket and act on it\./
+    );
+    // The planner heard it with the reply: the answer isn't passed on a second time.
+    await relayAnswers(
+      entry(run),
+      (text) => (told.push(text), true),
+      () => {},
+      () => {}
+    );
+    assert.equal(told.length, 2);
+    // Passed on, the reply is done with.
+    assert.deepEqual([...(await answerCheckInByReply(entry(run), [mine], () => {}))], []);
+    assert.equal((await store.tasks.get(design.id))?.notes.length, 1);
+  });
+
+  test("a reply isn't an answer on the check-in unless it's to its message, while it's asked, on the lead", async () => {
+    const { run, store, add } = await graph();
+    // Not raised yet (or back with the planner while changes are made): nothing waits on the operator's word.
+    const design = await add("Design check-in: the operator agrees the foundation", "triage", { kind: "design", by: MERGE });
+    const mine = reply("r-1", CHECK_IN, "Agreed.");
+    assert.deepEqual([...(await answerCheckInByReply(entry(run), [mine], () => {}))], []);
+    await store.tasks.replace({ ...((await store.tasks.get(design.id)) as Task), status: "question" });
+    // A worker's watchdog doesn't answer for the team, and a reply about something else isn't about the check-in.
+    assert.deepEqual([...(await answerCheckInByReply(entry(run, { worker: true }), [mine], () => {}))], []);
+    assert.deepEqual([...(await answerCheckInByReply(entry(run), [reply("r-3", "Re: [A6G-Planner] [Fixture] Budget", "Agreed.")], () => {}))], []);
+    assert.equal((await store.tasks.get(design.id))?.notes.length, 0);
+    // The words that name it, however they're cased or joined.
+    assert.deepEqual(
+      [...(await answerCheckInByReply(entry(run), [reply("r-4", "RE: urgent: design checkin", "Agreed.")], () => {}))],
+      [["r-4", design.id]]
+    );
+    // Settled: a late reply goes to the planner as any reply does.
+    await store.tasks.replace({ ...((await store.tasks.get(design.id)) as Task), status: "done" });
+    assert.deepEqual([...(await answerCheckInByReply(entry(run), [mine], () => {}))], []);
+    // No task graph to record on: nothing breaks, and the reply still goes to the planner.
+    assert.deepEqual([...(await answerCheckInByReply({ name: "fixture", title: "Fixture", run } as RegistryEntry, [mine], () => {}))], []);
   });
 
   test("answers older than a day stay for the planner's own wakes", async () => {

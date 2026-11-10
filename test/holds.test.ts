@@ -114,6 +114,22 @@ describe("graceful pauses", () => {
     assert.match(now.stuck.join("\n"), /#14 waits for #30, which can't finish in this hold/);
   });
 
+  test("approved work an open design check-in holds waits on the operator, so the hold settles and says why", () => {
+    const begun = [...graph(), task({ id: "15", parent: "1", kind: "scaffold", branch: "a6g/s15-x", files: ["g/"] })];
+    const hold = holdOf([control(pauseControl(begun, "fixture", { scope: "tasks", by: "operator" }))]);
+    if (!hold) throw new Error("no hold");
+    const with_ = (done: string[], design: Task) => [...begun.map((t) => (done.includes(t.id) ? { ...t, status: "done" as const } : t)), design];
+    const design = task({ id: "5", kind: "design", status: "question", title: "Design check-in" });
+    // The foundation is still built while it's open; the feature sent back for changes is nobody's to claim until the
+    // operator answers, so waiting for it would hold the pause open for as long as they take.
+    const open = settling(hold, with_(["11", "12"], design), 0);
+    assert.deepEqual(open.left, ["#15 to build: task 15"]);
+    assert.deepEqual(open.stuck, ["#14 waits for the design check-in (#5), which is the operator's to answer: task 14"]);
+    assert.equal(settling(hold, with_(["11", "12", "15"], design), 0).settled, true);
+    // Agreed: it's work again, and the hold waits for it.
+    assert.deepEqual(settling(hold, with_(["11", "12", "15"], { ...design, status: "done" }), 0).left, ["#14 to build: task 14"]);
+  });
+
   test("a journey hold waits for the journey's verification, then settles; the report says what happened", () => {
     const since = new Date(Date.now() - 60_000).toISOString();
     const done = (t: Task): Task => ({

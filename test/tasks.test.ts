@@ -14,6 +14,7 @@ import {
   branchFor,
   claimRefusal,
   DEFAULT_WEIGHTS,
+  designOpen,
   journeyDue,
   MERGE,
   moveRefusal,
@@ -787,6 +788,29 @@ describe("a 0.3 files board", () => {
     assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), []);
     writeFileSync(join(home, ".a6g/run/board/f-20261027-0200-more.md"), "kind: bug\nsev: major\n\nMore.\n");
     assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), ["15"]);
+  });
+});
+
+describe("a ticket on the old board that calls itself the design check-in", () => {
+  test("comes across as a chore: a file never files the check-in, which would hold every feature", async () => {
+    const { home, run } = setup();
+    write(join(home, ".a6g/run/board"), {
+      "3-design.md": "status: ready\nkind: design\n\n# Rethink the stack\n\nIn another language.\n",
+      "4-sign-in.md": "status: ready\nkind: feature\n\n# Sign-in\n\nWith a password.\n",
+    });
+    const store = fileStore(run, "fixture");
+    assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), ["3", "4"]);
+    const all = await store.tasks.all();
+    assert.deepEqual(
+      all.map((t) => [t.id, t.kind, t.status]),
+      [
+        ["3", "chore", "approved"],
+        ["4", "feature", "approved"],
+      ]
+    );
+    assert.equal(designOpen(all), null);
+    assert.equal(nextClaim(all, "builder")?.id, "3");
+    assert.equal(claimRefusal(all[1] as Task, "builder", all), null);
   });
 });
 

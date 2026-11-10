@@ -873,6 +873,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(`push.pullRequest: ${push.pullRequest} is the branch the planner pushes; name the branch you promote into, such as main`);
   if (team.operator.designCheckIn && !roles["scaffolder"])
     warnings.push("operator.designCheckIn: the foundation is the scaffolder's to build, and this team has none; add a scaffolder to roles");
+  if (team.operator.designCheckIn && board.type !== "tasks")
+    warnings.push(
+      'operator.designCheckIn: the check-in is a task in the factory\'s task graph (board "tasks"); on a GitHub board none is filed, so nothing is held'
+    );
   // A team without an approver: its proposals wait for the operator, whatever the mode (said only when it was asked for).
   if (team.approval.mode !== "operator" && !roles["approver"]) team.approval.mode = "operator";
   if (approvalIn.mode !== undefined && approvalIn.mode !== "operator" && !roles["approver"])

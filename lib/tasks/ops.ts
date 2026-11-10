@@ -268,7 +268,9 @@ export async function importBoard(store: Store, board: string, run: string, team
       }
       const status = STATUS_OF[(field("status") ?? "triage").toLowerCase()] ?? "triage";
       const rawKind = (field("kind") ?? "bug").toLowerCase();
-      const kind: Kind = (KINDS as readonly string[]).includes(rawKind) ? (rawKind as Kind) : (KIND_OF[rawKind] ?? "chore");
+      // Never the design check-in: an open one holds every feature (model.ts claimRefusal), and it's the planner's or
+      // the operator's to add (add.ts), not a file's on the old board.
+      const kind: Kind = rawKind !== "design" && (KINDS as readonly string[]).includes(rawKind) ? (rawKind as Kind) : (KIND_OF[rawKind] ?? "chore");
       const rawSev = (field("sev") ?? field("severity") ?? "").toLowerCase();
       const severity = (SEVERITIES as readonly string[]).includes(rawSev) ? (rawSev as Severity) : null;
       const heading = /^#\s+(.+)$/m.exec(text)?.[1]?.trim();

@@ -211,31 +211,34 @@ function WaitingItem({ team, base, w, back, titles }: { team: string; base: stri
         </details>
       ) : null}
       <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} />
-      <details className="more">
-        <summary>{`Or decide #${t.id} yourself`}</summary>
-        <div className="verdicts">
-          {approvable(t) ? (
-            <Verdict
-              team={team}
-              id={t.id}
-              decision="approve"
-              label={t.status === "blocked" ? "Approve again" : "Approve"}
-              field="Note (optional)"
-              required={false}
-              className="approve"
-              back={back}
-            />
-          ) : null}
-          <Verdict team={team} id={t.id} decision="reject" label="Reject" field="Why it's rejected" required className="reject" back={back} />
-        </div>
-        {approvable(t) ? null : (
-          <p className="hint">
-            {t.kind === "research"
-              ? "A question has nothing to build: answer it, or reject it."
-              : "It isn't scored yet, so it can't be approved: answer it instead."}
-          </p>
-        )}
-      </details>
+      {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
+      {t.kind === "design" ? null : (
+        <details className="more">
+          <summary>{`Or decide #${t.id} yourself`}</summary>
+          <div className="verdicts">
+            {approvable(t) ? (
+              <Verdict
+                team={team}
+                id={t.id}
+                decision="approve"
+                label={t.status === "blocked" ? "Approve again" : "Approve"}
+                field="Note (optional)"
+                required={false}
+                className="approve"
+                back={back}
+              />
+            ) : null}
+            <Verdict team={team} id={t.id} decision="reject" label="Reject" field="Why it's rejected" required className="reject" back={back} />
+          </div>
+          {approvable(t) ? null : (
+            <p className="hint">
+              {t.kind === "research"
+                ? "A question has nothing to build: answer it, or reject it."
+                : "It isn't scored yet, so it can't be approved: answer it instead."}
+            </p>
+          )}
+        </details>
+      )}
     </li>
   );
 }

@@ -8,7 +8,7 @@
 //   journeys   the journeys under way (or those chosen) finish, verification and polish included; nothing else starts.
 // Either graceful scope ends in the same pause as "now" once nothing in it can move (it has settled), with a report of
 // where the team stands; work stays stopped until the operator resumes it.
-import { journeyDue, nowIso, Refused, type Doc, type Task } from "./model.ts";
+import { designOpen, FOUNDATION, journeyDue, nowIso, Refused, type Doc, type Task } from "./model.ts";
 
 export const HOLD_SCOPES = ["now", "tasks", "journeys"] as const;
 export type HoldScope = (typeof HOLD_SCOPES)[number];
@@ -194,6 +194,7 @@ export function settling(hold: Hold, all: Task[], membersAtWork: number, now = D
     else left.push(line);
   }
   const scoped = all.filter((t) => t.kind !== "journey" && inScope(t, hold) && !finished(t) && t.status !== "building" && t.status !== "review");
+  const design = designOpen(all);
   for (const t of scoped) {
     const waiting = t.after.filter((id) => byId.get(id)?.status !== "done");
     const outside = waiting.filter((id) => {
@@ -202,6 +203,9 @@ export function settling(hold: Hold, all: Task[], membersAtWork: number, now = D
     });
     if (t.status === "blocked" || t.status === "question") stuck.push(`#${t.id} ${t.status}: ${t.title}`);
     else if (outside.length) stuck.push(`#${t.id} waits for ${ids(outside)}, which can't finish in this hold`);
+    // Nobody claims it while the design check-in is open (model.ts claimRefusal), and that's the operator's to settle.
+    else if (t.status === "approved" && design && !FOUNDATION.includes(t.kind))
+      stuck.push(`#${t.id} waits for the design check-in (#${design.id}), which is the operator's to answer: ${t.title}`);
     else if (t.status === "approved") left.push(`#${t.id} to build${waiting.length ? ` after ${ids(waiting)}` : ""}: ${t.title}`);
     else if (now - Date.parse(t.updatedAt) >= UNDECIDED_MIN * 60_000) stuck.push(`#${t.id} ${t.status}, waiting for a decision: ${t.title}`);
     else left.push(`#${t.id} ${t.status}, for the planner or approver: ${t.title}`);

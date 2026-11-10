@@ -54,7 +54,7 @@ import {
   resumeControl,
 } from "../tasks/controls.ts";
 import { fileDesignCheckIn } from "../tasks/design.ts";
-import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
+import { designOpen, nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
 import { openTeamStore } from "../tasks/ops.ts";
@@ -135,6 +135,12 @@ async function fileAtRegister(home: string): Promise<void> {
     try {
       const design = await fileDesignCheckIn(store, team);
       if (design) console.info(`  the design check-in is #${design}: the team builds the foundation, then asks you; features wait until you've agreed it`);
+      // The setting turned off doesn't end a check-in already filed: the task holds the features, not the setting.
+      const open = team.operator.designCheckIn ? null : designOpen(await store.tasks.all());
+      if (open)
+        console.warn(
+          `  note: the design check-in #${open.id} is still open (${open.status}) and holds features, though operator.designCheckIn is off now: a6g task status ${open.id} done ends it`
+        );
       const filed = gaps ? await fileGaps(store, team, home, null) : [];
       if (filed.length) console.info(`  the harness's gaps, for the planner to triage: ${filed.map((id) => `#${id}`).join(", ")}`);
     } finally {

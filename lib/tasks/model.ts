@@ -406,12 +406,16 @@ const designAsked: Check = (t, to) =>
   t.kind === "design" && to !== "question"
     ? `#${t.id} is the design check-in, which only the operator settles: raise it once the foundation is built and its record written (a6g task status ${t.id} question --reason "…" --recommend "…")`
     : null;
+// What counts as the operator's answer on the check-in, for the planner that was refused: a note it writes itself
+// from a message it read doesn't.
+const ANSWERED_HOW =
+  "An answer is one they gave in the web app or with a6g task answer, or their reply to its message that the watchdog passed on as recorded; one you noted yourself isn't, so ask them to answer one of those ways";
 const designBack: Check = (t) =>
   t.kind !== "design"
     ? `task ${t.id} isn't the design check-in; a question goes on to proposed, approved, rejected or blocked`
     : answersOn(t).length
       ? null
-      : `the operator hasn't answered #${t.id} yet: it waits with them until they do`;
+      : `the operator hasn't answered #${t.id} on the task yet: it waits with them until they do. ${ANSWERED_HOW}`;
 // Code isn't done by anyone's say-so. Research is, when the planner says so; a journey, once its tasks are and the planner
 // has verified it; the design check-in, once the operator has answered it (agreed: the planner reads the answer).
 const plannerDone: Check = (t, _to, _actor, { all }) => {
@@ -419,7 +423,9 @@ const plannerDone: Check = (t, _to, _actor, { all }) => {
   if (t.kind === "design")
     return t.status === "question" && answersOn(t).length
       ? null
-      : `the design check-in is done on the operator's word: raise it (a6g task status ${t.id} question …), and close it when their answer agrees`;
+      : t.status === "question"
+        ? `the design check-in is done on the operator's word, and they haven't answered #${t.id} on the task yet. ${ANSWERED_HOW}`
+        : `the design check-in is done on the operator's word: raise it (a6g task status ${t.id} question …), and close it when their answer agrees`;
   if (t.kind !== "journey") return codeDone(t);
   return journeyDue(t, all) ? null : `journey ${t.id} is done once it's verified: its tasks done, then its audit, end-to-end spec and polish`;
 };
@@ -557,10 +563,15 @@ export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx:
   if (to === "building" && via !== "claim") return "a task is building only when a member claims it (a6g task claim)";
   // The design check-in takes no verdict from anyone. The operator answers it in words: a Reject beside it would read
   // as "not this design", and a rejected check-in is one the operator wants none of, so features would start.
-  if (task.kind === "design" && VERDICTS_VIA.includes(via))
-    return actor === OPERATOR
-      ? `#${task.id} is the design check-in, which you answer rather than approve or reject: a6g task answer ${task.id} "…" (agreed, or what to change). To end it yourself: a6g task status ${task.id} done (or rejected, to hold none)`
-      : `#${task.id} is the design check-in: the operator settles it, once the planner has raised it`;
+  if (task.kind === "design" && VERDICTS_VIA.includes(via)) {
+    if (actor !== OPERATOR) return `#${task.id} is the design check-in: the operator settles it, once the planner has raised it`;
+    if (task.status === "done" || task.status === "rejected") return `#${task.id} is the design check-in, and it's ${task.status} already`;
+    const how =
+      task.status === "question"
+        ? `a6g task answer ${task.id} "…" (agreed, or what to change)`
+        : `the planner raises it once the foundation is built (it's ${task.status} now)`;
+    return `#${task.id} is the design check-in, which you answer rather than approve or reject: ${how}. To end it yourself: a6g task status ${task.id} done (or rejected, to hold none)`;
+  }
   const theirs = RULES.filter((rule) => rule.via === via && rule.by.includes(actor));
   if (!theirs.length)
     return via === "status"

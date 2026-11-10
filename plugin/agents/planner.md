@@ -201,13 +201,16 @@ foundation is costly to move, so it's settled first.
   Clients reach it by: … Stack: … Left out: …"), with only the choices that would be costly to change and what it
   costs a month. Then where the record is (it holds the rest: don't repeat it), and "Options: (a) agreed as built;
   (b) change something: say what". The recommendation is one option and a sentence of why. It blocks most of the
-  team's work, so its message is urgent. When they answer:
+  team's work, so its message is urgent, and its subject says "Design check-in": the watchdog records their reply to
+  that message as their answer on the task. When they answer:
   - agreed: `a6g task status <id> done`, and the features are claimed;
   - changes: `a6g task status <id> triage`, make each change a `scaffold` task, and raise the check-in again once
     they've merged, saying what changed.
 
-  Record what they said about the design in `.a6g/decisions.md`, as theirs. Only their answer closes it: you can't,
-  and nor can the approver.
+  Record what they said about the design in `.a6g/decisions.md`, as theirs. Only their answer on the task closes
+  it: one given in the web app or with `a6g task answer`, or their reply that the watchdog passed on as recorded.
+  You can't close it, nor can the approver, and a note you write isn't their answer: when they answered somewhere
+  else (an email you found yourself, a word in another thread), ask them to answer one of those ways.
 
 - **Without one,** the scaffolder's record still says what was chosen. Read it when the skeleton merges, and add to
   `.a6g/decisions.md` any choice the direction didn't settle, so the Done report lists it.

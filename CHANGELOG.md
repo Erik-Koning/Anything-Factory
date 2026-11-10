@@ -31,6 +31,20 @@ question to the operator, with no feature claimed before the answer.
   costs, the data, how clients reach it, the stack, what's left out), the record's path for the rest, and the options
   written so the web app's inbox offers them as choices. The check-in task's own text, which the inbox and its emails
   show, says what the task is and how it ends; how the planner carries it is in the planner's rules.
+- **A reply settles the check-in too.** Where your replies reach the team (`a6g connect email`), a reply to the
+  check-in's message is recorded as your answer on the task: the planner puts "Design check-in" in that message's
+  subject, and the watchdog, which checks a reply came from you, writes it there before passing it on. Before, the
+  planner was told to act on the reply and then refused, since only an answer on the task counts, and the features
+  stayed held until you answered again somewhere else. A reply the planner reads for itself still isn't one: its
+  rules and the refusal now say so, and tell it to ask you to answer on the task.
+- **Found reading the change again.** A ticket on the old board with `kind: design` is imported as a chore, never as
+  a check-in that holds the whole team. A graceful pause no longer waits for approved work the open check-in holds:
+  it's listed as waiting for your answer, and the pause settles. The web app's inbox offers no Approve or Reject on
+  the check-in. `a6g task answer` and `a6g task note` keep everything after the id (`agreed -- but use Postgres` was
+  cut at the dashes and recorded as "agreed") and refuse `--text` with more words after the id. `a6g register` says
+  when a check-in is still open though `operator.designCheckIn` is off, `team.json` is warned about one asked for on
+  a GitHub board (none is filed there), a member with nothing to claim is told when the check-in is why, and the
+  refusals you get before the check-in is raised no longer point at `a6g task answer`, which can't take one yet.
 - **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
   agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
   role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time

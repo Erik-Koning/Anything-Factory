@@ -43,6 +43,13 @@ describe("team.json operator", () => {
     assert.match(plain.warnings.join("\n"), /^operator\.designCheckIn: a check-in on the platform and the stack is for a technical operator/m);
     const alone = norm({ roles: { planner: {}, builder: {} }, operator: { designCheckIn: true } });
     assert.match(alone.warnings.join("\n"), /^operator\.designCheckIn: the foundation is the scaffolder's to build, and this team has none/m);
+    // The check-in is a task in the factory's own graph: a GitHub board files none, so the setting would hold nothing.
+    const github = norm({ roles: ROLES, operator: { designCheckIn: true }, board: { github: { label: "a6g" } } });
+    assert.match(
+      github.warnings.join("\n"),
+      /^operator\.designCheckIn: the check-in is a task in the factory's task graph \(board "tasks"\); on a GitHub board none is filed/m
+    );
+    assert.ok(!norm({ roles: ROLES, operator: { designCheckIn: true } }).warnings.some((warning) => /GitHub board/.test(warning)));
   });
 
   test("anything but true or false is a problem, and a key it doesn't know is said", () => {
@@ -127,7 +134,23 @@ describe("who settles the design check-in", () => {
   test("it's done on the operator's answer, and goes back to the planner on one that asks for changes", () => {
     const waiting = asked();
     assert.match(statusRefusal(waiting, "done", "planner", [waiting]) ?? "", /is done on the operator's word/);
-    assert.match(statusRefusal(waiting, "triage", "planner", [waiting]) ?? "", /the operator hasn't answered #1 yet/);
+    // Asked and not answered on the task: the refusal says what counts as an answer, since a note the planner writes
+    // from an email it read itself doesn't.
+    assert.match(
+      statusRefusal(waiting, "triage", "planner", [waiting]) ?? "",
+      /the operator hasn't answered #1 on the task yet: it waits with them until they do\. An answer is one they gave in the web app or with a6g task answer, or their reply to its message that the watchdog passed on as recorded; one you noted yourself isn't/
+    );
+    assert.match(
+      statusRefusal(waiting, "done", "planner", [waiting]) ?? "",
+      /they haven't answered #1 on the task yet\. An answer is one they gave in the web app/
+    );
+    const noted = asked({ notes: [{ at: at(9), by: "planner", text: "They emailed: agreed." }] });
+    assert.match(statusRefusal(noted, "done", "planner", [noted]) ?? "", /one you noted yourself isn't, so ask them to answer one of those ways/);
+    const unraised = design();
+    assert.match(
+      statusRefusal(unraised, "done", "planner", [unraised]) ?? "",
+      /raise it \(a6g task status 1 question …\), and close it when their answer agrees/
+    );
     const answered = asked({ notes: [ANSWER] });
     assert.equal(statusRefusal(answered, "done", "planner", [answered]), null);
     assert.equal(statusRefusal(answered, "triage", "planner", [answered]), null);
@@ -158,6 +181,20 @@ describe("who settles the design check-in", () => {
         /which you answer rather than approve or reject: a6g task answer 1/,
         via
       );
+    // Before it's raised there's nothing to answer yet, and once it's settled there's nothing to do.
+    const early = moveRefusal(design(), "approved", "approve", OPERATOR, { all: [design()] }) ?? "";
+    assert.match(
+      early,
+      /which you answer rather than approve or reject: the planner raises it once the foundation is built \(it's triage now\)\. To end it/
+    );
+    assert.doesNotMatch(early, /a6g task answer/);
+    for (const status of ["done", "rejected"] as const) {
+      const over = design({ status });
+      assert.match(
+        moveRefusal(over, "approved", "approve", OPERATOR, { all: [over] }) ?? "",
+        new RegExp(`is the design check-in, and it's ${status} already`)
+      );
+    }
     assert.match(moveRefusal(design(), "approved", "approve", "planner", { all: [design()] }) ?? "", /the operator settles it/);
     assert.match(moveRefusal(asked(), "done", "merge", MERGE, { all: [asked()] }) ?? "", /is the design check-in, done on the operator's word/);
   });
@@ -209,6 +246,15 @@ describe("a6g task and the design check-in", () => {
     assert.notEqual(refused.code, 0);
     assert.match(refused.out, /task 3 waits for the operator to agree the design \(#1, triage\)/);
     assert.match((await a6g(["task", "list", "--claimable"], as("scaffolder"))).out, /Skeleton/);
+    // A builder with nothing to claim says why in its report: the work is there, and waits for the operator.
+    const idle = await a6g(["task", "claim"], as("builder", tree));
+    assert.equal(idle.code, 3);
+    assert.match(idle.out, /nothing to claim: .* Approved work waits for the operator to agree the design \(#1, triage\)\. Say so in your report/);
+    assert.doesNotMatch((await a6g(["task", "claim", "--kind", "bug"], as("scaffolder", worktree("s1")))).out, /waits for the operator/);
+    // Not raised yet: there's nothing for the operator to answer, and they're told when there will be.
+    const early = await a6g(["task", "answer", "1", "agreed"], as(null));
+    assert.equal(early.code, 2);
+    assert.match(early.out, /#1, the design check-in, isn't with you now \(it's triage\): the planner raises it once the foundation is built/);
 
     // A member can't add one (it would hold the team's work), and there's one at a time.
     const members = await a6g(
@@ -289,6 +335,46 @@ describe("a6g task and the design check-in", () => {
   });
 });
 
+describe("what the operator says is taken whole", () => {
+  const RAISE = ["task", "status", "1", "question", "--reason", "The skeleton runs. (a) agreed (b) change something", "--recommend", "(a) agreed"];
+  function setup() {
+    const home = makeRepo(baseTeam({ roles: ROLES, operator: { designCheckIn: true } }));
+    const run = tmp("a6g-run-");
+    const as = (role: string | null) => ({
+      cwd: home,
+      env: role ? { A6G_HOME_DIR: home, A6G_TEAM: "fixture", A6G_ROLE: role, A6G_RUN: run } : { A6G_RUN: run },
+    });
+    return { home, as, store: fileStore(run, "fixture") };
+  }
+
+  test("an answer with a bare -- in it keeps what follows, and --text beside words is refused", async () => {
+    const { home, as, store } = setup();
+    await fileDesignCheckIn(store, loadTeam(home));
+    assert.equal((await a6g(RAISE, as("planner"))).code, 0);
+    // Cut at the --, this would read as plain agreement, and the planner would close the check-in on it.
+    const both = await a6g(["task", "answer", "1", "agreed", "--text", "but use Postgres"], as(null));
+    assert.equal(both.code, 2);
+    assert.match(both.out, /say it once: in quotes after the id, or as --text "…", not both/);
+    assert.deepEqual(
+      (await store.tasks.get("1"))?.notes.filter((n) => n.kind === "answer"),
+      []
+    );
+    const whole = await a6g(["task", "answer", "1", "agreed", "--", "but", "use", "Postgres"], as(null));
+    assert.equal(whole.code, 0, whole.out);
+    assert.equal((await store.tasks.get("1"))?.notes.at(-1)?.text, "agreed -- but use Postgres");
+    assert.equal((await a6g(["task", "answer", "1", "--text", "and keep the container for tests"], as(null))).code, 0);
+    assert.equal((await store.tasks.get("1"))?.notes.at(-1)?.text, "and keep the container for tests");
+  });
+
+  test("a note is taken the same way", async () => {
+    const { home, as, store } = setup();
+    await fileDesignCheckIn(store, loadTeam(home));
+    assert.equal((await a6g(["task", "note", "1", "the", "record", "--", "docs/architecture.md"], as("planner"))).code, 0);
+    assert.equal((await store.tasks.get("1"))?.notes.at(-1)?.text, "the record -- docs/architecture.md");
+    assert.match((await a6g(["task", "note", "1", "see", "--text", "the record"], as("planner"))).out, /say it once/);
+  });
+});
+
 describe("the watchdog while the design waits for the operator", () => {
   const ticks = (w: { calls: () => string[] }) => w.calls().filter((c) => /thread send mcp:planner tick/.test(c));
   async function world(tasks: Task[]) {
@@ -360,6 +446,29 @@ describe("register", () => {
       assert.equal(again.code, 0, again.out);
       assert.doesNotMatch(again.out, /the design check-in is #/);
       assert.equal((await store.tasks.all()).filter((t) => t.kind === "design").length, 1);
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("says so when the setting is off and a check-in filed earlier still holds the features", async () => {
+    const w = await fakeWorld(baseTeam({ roles: ROLES, operator: { designCheckIn: true } }), { register: false });
+    try {
+      mkdirSync(join(w.a6gHome, "versions", PACKAGE.version, "plugin"), { recursive: true });
+      assert.equal((await w.a6g("register", w.home)).code, 0);
+      const raw = JSON.parse(readFileSync(join(w.home, ".a6g/team.json"), "utf8")) as Record<string, unknown>;
+      writeFileSync(join(w.home, ".a6g/team.json"), JSON.stringify({ ...raw, operator: { designCheckIn: false } }, null, 2));
+      const off = await w.a6g("register", w.home, "--force");
+      assert.equal(off.code, 0, off.out);
+      assert.match(
+        off.out,
+        /note: the design check-in #1 is still open \(triage\) and holds features, though operator\.designCheckIn is off now: a6g task status 1 done ends it/
+      );
+      // Ended: nothing more to say.
+      const store = fileStore(w.run, "fixture");
+      const filed = await store.tasks.get("1");
+      await store.tasks.replace({ ...(filed as Task), status: "done" });
+      assert.doesNotMatch((await w.a6g("register", w.home, "--force")).out, /is still open/);
     } finally {
       await w.close();
     }

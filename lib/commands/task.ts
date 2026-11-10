@@ -20,9 +20,11 @@ import {
   CONFIDENCE,
   conflictOf,
   type Dimension,
+  designOpen,
   DIMENSIONS,
   finished,
   finishedUnder,
+  FOUNDATION,
   fromStakeholder,
   heldHere,
   journeyDue,
@@ -254,18 +256,28 @@ const show: Handler = async ({ store, who }, [id], options) => {
   return 0;
 };
 
+// Text given after a task's id, or as --text: all of it. Unquoted words with a bare -- among them ("agreed -- but use
+// Postgres") are one text, and both forms at once are refused: an answer cut short could read as agreement.
+function saidIn(rest: string[], options: Options): string {
+  const after = options["--"];
+  const words = [...rest, ...(Array.isArray(after) ? ["--", ...after] : [])];
+  const flagged = optionText(options["text"]);
+  if (flagged !== undefined && words.length) throw new Refused('say it once: in quotes after the id, or as --text "…", not both');
+  return flagged ?? words.join(" ");
+}
+
 // The operator's answer in words to what waits on them, as the web app gives it (lib/tasks/answer.ts): a note marked as
 // the answer, which leaves the task where it is. The watchdog passes it to the planner, which moves the task on.
 const answerTask: Handler = async ({ store, who }, [id, ...rest], options) => {
   if (!id) throw new Refused('which task: a6g task answer <id> "<your answer>"');
-  const task = await answer(store, id, { who, text: optionText(options["text"]) ?? rest.join(" ") });
+  const task = await answer(store, id, { who, text: saidIn(rest, options) });
   console.info(`task ${task.id}: answered. The planner hears within a minute and moves it on.`);
   return 0;
 };
 
 const note: Handler = async ({ store, who }, [id, ...rest], options) => {
   if (who === "unknown") throw new Refused("only the team's members add notes");
-  const text = (optionText(options["text"]) ?? rest.join(" ")).trim();
+  const text = saidIn(rest, options).trim();
   if (!text) throw new Refused('say what: a6g task note <id> "<text>"');
   const task = await getTask(store, id);
   await update(store.tasks, task.id, (t) => withEvent({ ...t, notes: [...t.notes, { at: nowIso(), by: who, text }] }, who, "added a note"));
@@ -573,7 +585,12 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
     if (!target) {
       if (id) throw new Refused(`no task ${id}`);
       const why = hold ? ` the operator is pausing the team after ${describeHold(hold)}, and nothing in that is free.` : "";
-      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why} Say so in your report and stop.`);
+      // Approved work this role takes that the open design check-in holds (model.ts claimRefusal): said, so an idle
+      // team's reports say why.
+      const design = designOpen(all);
+      const held = design && all.some((t) => t.status === "approved" && CLAIMS[who]?.includes(t.kind) && !FOUNDATION.includes(t.kind));
+      const waits = held ? ` Approved work waits for the operator to agree the design (#${design.id}, ${design.status}).` : "";
+      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why}${waits} Say so in your report and stop.`);
       return 3;
     }
     const refusal = claimRefusal(target, who, all, hold);

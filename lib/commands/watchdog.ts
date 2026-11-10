@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { relayAnswers } from "../answers.ts";
+import { answerCheckInByReply, relayAnswers } from "../answers.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
@@ -254,11 +254,23 @@ async function readReplies(reach: Channel[], seen: Set<string>, glog: (text: str
 
 // Each reply to the team's planner (tell sends a message to its thread), once: the marker in replies/ is written under
 // the team's lock, so an overlapping run doesn't pass it on twice.
-export function passReplies(replies: Reply[], run: string, tell: (text: string) => boolean, seen: Set<string>, log: (text: string) => void): void {
+export function passReplies(
+  replies: Reply[],
+  run: string,
+  tell: (text: string) => boolean,
+  seen: Set<string>,
+  log: (text: string) => void,
+  // Replies recorded as the operator's answer on the design check-in already (lib/answers.ts), with its task.
+  answered: ReadonlyMap<string, string> = new Map()
+): void {
   for (const reply of replies) {
     const marker = join(run, "replies", reply.id);
     if (!existsSync(marker)) {
-      const text = `The operator answered by ${reply.via}, to "${reply.subject}":\n\n${reply.text}\n\nThe watchdog checked it came from them. Record the answer on the question's ticket and act on it.`;
+      const checkIn = answered.get(reply.id);
+      const then = checkIn
+        ? `The watchdog checked it came from them, and recorded it as their answer on the design check-in (#${checkIn}): don't note it again. Act on it as your rules say.`
+        : "The watchdog checked it came from them. Record the answer on the question's ticket and act on it.";
+      const text = `The operator answered by ${reply.via}, to "${reply.subject}":\n\n${reply.text}\n\n${then}`;
       if (!tell(text)) {
         log(`couldn't pass the operator's ${reply.via} reply to the planner; trying again next run`);
         continue;
@@ -617,7 +629,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   }
   const status = thread.status ?? "unknown";
   const pending = thread.pendingRequestCount ?? 0;
-  passReplies(replies, run, (text) => tellPlanner(run, planner, text), seen, log);
+  // A reply to the design check-in's message is the operator's answer on the task itself (lib/answers.ts).
+  const answered = await answerCheckInByReply(entry, replies, log);
+  passReplies(replies, run, (text) => tellPlanner(run, planner, text), seen, log, answered);
   // What the planner should have heard and couldn't (a resume's note while there was no planner, or T3 Code was down).
   const notes = pendingNotes(run);
   let delivered = 0;

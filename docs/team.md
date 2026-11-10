@@ -146,11 +146,12 @@ A new project's first choices (where it runs, its shape, what it's built on) cos
 team that builds features before you've seen them has made them for you. With `operator.designCheckIn`, `a6g register`
 files one `design` task. While it's open, only `scaffold` and `test-infra` tasks are claimed: the scaffolder builds
 the skeleton and the harness and writes the design record, and the planner plans. Then the planner raises the task
-as a question, with the design in a few lines and what it recommends, and you answer in the web app or with
-`a6g task answer <id> "…"`: agreed, or what to change. Agreed, it's done and features start. Changes go back to the
-scaffolder, and the planner asks again. Only your answer settles it: the approver doesn't decide it, and the planner
-can't close one you haven't answered. `a6g task status <id> done` (or `rejected`, for none) from you ends it at any
-time. It's answered, never approved or rejected: `a6g task approve` and `a6g task reject` refuse it, from you too
+as a question, with the design in a few lines and what it recommends, and you answer in the web app, with
+`a6g task answer <id> "…"`, or by replying to its message where your replies reach the team (`a6g connect email`):
+agreed, or what to change. Agreed, it's done and features start. Changes go back to the scaffolder, and the planner
+asks again. Only your answer settles it: the approver doesn't decide it, and the planner can't close one you haven't
+answered on the task (a reply it reads for itself in Gmail isn't one: it asks you to answer there).
+`a6g task status <id> done` (or `rejected`, for none) from you ends it at any time. It's answered, never approved or rejected: `a6g task approve` and `a6g task reject` refuse it, from you too
 (a rejected check-in is one you want none of, so a Reject beside the question would have started the features), and
 `a6g serve` shows it with what was asked and a box for your answer.
 
