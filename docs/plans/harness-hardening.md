@@ -214,5 +214,5 @@ Defaults are chosen; say if you'd choose otherwise.
 - [x] E. Page checks (22 to 27)
 - [x] F. The guard and Known limits (28)
 - [x] Tests from the audit's reproductions; a read-only run on a live team; README, CHANGELOG, `docs/team.md`
-- [ ] G. Security (29 to 33)
-- [ ] H. Numbers (34)
+- [x] G. Security (29 to 33)
+- [x] H. Numbers (34)

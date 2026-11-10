@@ -536,6 +536,12 @@ To make a release:
   command left behind: a stage exported before the store (`export SST_STAGE=production`), or a value typed into a
   variable first and piped in by name. Production secrets are safest where the constitution's Part IV puts them: off
   the machine, behind credentials the team doesn't hold.
+- **The security checks go by what can be named.** Who a page refuses is measured by where the page ends: an app
+  that refuses in place, with a 200 at the same address, can't be told from one that serves the page, so that page's
+  rule is proved by a test tagged `@access` instead. The security reviewer is asked for by a branch's paths, or by a
+  reviewer who sends the branch on: a change to who can do what in a file neither names merges on the review alone.
+  Secrets are kept out of merges by their shape, so a password or a signing secret with no shape of its own isn't
+  seen. The package audit reads npm and pnpm lockfiles; a repository on another package manager gets a log line.
 - **Platform:** macOS only for now. The watchdog is a launchd job, notifications use `osascript`, and the email
   key is kept in the Keychain.
 - **No interrupt:** T3 Code 0.1.x has no command to interrupt a thread, so the watchdog notifies you instead.

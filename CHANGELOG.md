@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased: security, and how the merged work went
+
+- **Secrets are stored through a secret manager, their values never in a command.** A new policy, `secrets`, allowed
+  by default (`"secrets": "deny"` turns it off): one command that stores one secret, with its value on standard input,
+  passes the rules that otherwise refuse the tool. `openssl rand -hex 32 | npx sst secret set AuthSecret`, and the same
+  form for `vercel env add <NAME> --environment <env>`, `gh secret set`, `doppler secrets set --silent` and
+  `gcloud secrets versions add --data-file=-`. The value is generated in the pipe or comes from the team's
+  environment by name. A store that names production, or a target the guard can't read, is left to the deploy policy,
+  and read-only roles store none. The prompts say it: a secret the work makes is generated in the pipe; one from a
+  third party is yours, asked for by name with the command you'd run.
+- **Never, whatever is unlocked:** a secret's value written in a command (an operand, `"$VAR"` as an argument,
+  `--value`, `--body`, literal text piped in), and commands that print stored values (`sst secret list`,
+  `vercel env pull`, `doppler secrets get`, `gcloud secrets versions access`, `aws secretsmanager get-secret-value`,
+  `op read`, `vault kv get`, `heroku config` and their kin). **A team that had unlocked `deploy` or `cloud` could run
+  some of these before; it no longer can.**
+- **Secrets don't merge.** `a6g task submit` and the merge queue read every commit a branch would bring in (the lines
+  each adds, its message, the files it adds or changes) and refuse a live credential by its shape (a private key, a
+  live Stripe key or webhook secret, an AWS access key id, a GitHub, Slack, Anthropic, OpenAI or SendGrid token) or a
+  secrets file, even when a later commit took it out. Nothing passes this refusal, so it fires only on what's real by
+  construction: test-mode keys, JWTs and text that only looks random are left alone, and `.env.example`, `.env.test`
+  and `.env.e2e` pass by name. The refusal names the file, the line and the commit, never the value; the task goes
+  back to be rebuilt without it, and the key is yours to rotate.
+- **A page says who it refuses.** A page in the harness manifest takes `refuses`: the sign-in states, and
+  `signed-out`, that must not be served it. `a6g pages` asks for the page as each of them; sent to another path, or
+  answered 401, 403 or 404, is refused, and a page that's served fails (a blocker finding of its own when the check
+  after merges files it). A refusal counts only from a sign-in the same run showed live, so a session that ran out
+  never reads as one; where nothing shows that, the refusal is "not checked", which fails. Taking a state out of a
+  page's `refuses` is checking less, and so yours to allow.
+- **Access tests are a gap the factory files.** With two or more sign-in states and a suite that ran, a suite with no
+  test tagged `@access` (signed in as one user, refused another's records by their address and through the API) is
+  filed once as a `test` task, like a journey with no spec.
+- **Vulnerable packages are a finding.** When a lockfile the repository tracks isn't the one last audited, and once a
+  week when it is, the check after merges runs the package manager's own audit of what ships (`npm audit --omit=dev`,
+  `pnpm audit --prod`). A package with an advisory of its own at high or critical becomes a `chore` task, severity
+  major, naming the advisories and what moves the app off it; at most five are open at once, the worst first. A
+  rejected one stays quiet until a new advisory names the package. Offline, or a report that can't be read, is a log
+  line, never a failed merge. Package names and versions go to the registry the install already uses;
+  `"security": { "audit": false }` in team.json turns it off.
+- **A new role, the security reviewer** (`plugin/agents/security-reviewer.md`), read-only, on a team whose `roles`
+  list it; setup drafts one for a repository with sign-in, payments or an API of its own. On such a team the merge
+  queue merges a branch only once the security reviewer has passed its tip
+  (`a6g verdict security <branch> pass|issues --sha <tip>`, which only that role records) when the branch changes a
+  security path (sign-in and sessions, permissions, payments and webhooks, migrations, any `.sql` or rules file, by a
+  path's whole words; `security.paths` in team.json adds your own, `"builtIn": false` leaves only yours), when a
+  reviewer sent it on (`a6g verdict review <branch> approve --security`), or when the security reviewer has judged it
+  before. Issues send the task back like a review's changes and count as a round; a rebased branch keeps its pass
+  when `git range-diff` shows the same change. `a6g task show`, `a6g blast` and the planner's context say which tasks
+  wait for one. Once a cycle, and before a finish line, the planner starts it with no branch, to sweep who can reach
+  which page and which record. A team without the role is asked for nothing.
+- **`a6g metrics --quality [--since] [--until] [--json]`: how the merged work went,** read from what the factory
+  records anyway, so no agent reports any of it. Tasks merged, by kind; reviews passed first time; the failures the
+  check after merges filed, per merged task (the harness's gaps, package advisories and findings about the checks
+  themselves counted apart); journeys the newest recorded run of the suite proves; flaky tests; the cost of a merged
+  task beside what the team spent; and the median time from claimed to merged. A number that can't be known says so
+  and why, never 0. It needs the task graph, and the planner may run it.
+
 ## Unreleased: the scaffolder, and checks that hold
 
 - **A new role, the scaffolder** (`plugin/agents/scaffolder.md`): it owns the team's means of checking (Playwright in

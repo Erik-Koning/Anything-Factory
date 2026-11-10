@@ -305,15 +305,16 @@ Each phase ends with its tests, `npm test` and `npx prettier --check .` passing,
 
 ## What a team sees on upgrade
 
-| Team                                       | What changes                                                 |
-| ------------------------------------------ | ------------------------------------------------------------ |
-| Any                                        | A branch carrying a live key or a secrets file doesn't merge |
-| Any                                        | Commands that print a manager's secrets are refused          |
-| Any (default)                              | The store forms of decision 35 pass                          |
-| With a lockfile and the check after merges | Advisories at high or critical become tasks                  |
-| With two sign-in states and a suite        | One task: no `@access` test                                  |
-| Whose manifest gains `refuses`             | Those pages are loaded as the refused states                 |
-| That adds `security-reviewer` to its roles | Branches on security paths, or sent on, need its pass        |
+| Team                                       | What changes                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| Any                                        | A branch carrying a live key or a secrets file doesn't merge                       |
+| Any                                        | Commands that print a manager's secrets are refused                                |
+| Any (default)                              | The store forms of decision 35 pass                                                |
+| With a lockfile and the check after merges | Advisories at high or critical become tasks                                        |
+| With two sign-in states and a suite        | One task: no `@access` test                                                        |
+| Whose manifest gains `refuses`             | Those pages are loaded as the refused states                                       |
+| That adds `security-reviewer` to its roles | Branches on security paths, or sent on, need its pass                              |
+| With the task graph                        | The planner's prompt names `a6g metrics --quality`; nothing runs unless it's asked |
 
 ## Later, and what would promote each
 
@@ -356,4 +357,4 @@ Defaults are chosen; say if you'd choose otherwise.
 - [x] G4. The package audit (32)
 - [x] G5. The security reviewer (33)
 - [x] H. The quality numbers (34)
-- [ ] README, CHANGELOG, `docs/team.md`
+- [x] README, CHANGELOG, `docs/team.md`
