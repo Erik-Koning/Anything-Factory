@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { param, type SearchParams } from "../../components/ui.tsx";
 import { blocked } from "../../server/access.ts";
@@ -14,7 +15,7 @@ const ERRORS: Record<string, string> = {
   INVALID_TOKEN: "That sign-in link has expired or was used already. Ask for a new one.",
   EXPIRED_TOKEN: "That sign-in link has expired. Ask for a new one.",
   failed_to_create_session: "That link doesn't sign this account in. Admins sign in with a passkey, or their password and authenticator.",
-  new_user_signup_disabled: "There's no account for that address: it's by invitation only.",
+  new_user_signup_disabled: "There's no account for that address: create one first.",
 };
 
 export default async function SignInPage({ searchParams }: { searchParams: SearchParams }) {
@@ -26,7 +27,9 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
   return (
     <div className="narrow">
       <h1>Sign in</h1>
-      <p className="lede">Anything Factory is by invitation. Use the address you were invited with.</p>
+      <p className="lede">
+        Use the address you were invited with or signed up with. No account yet? <Link href="/sign-up">Create one</Link>
+      </p>
       {error ? (
         <p className="notice error" role="alert">
           {ERRORS[error] ?? "That didn't sign you in. Try again."}

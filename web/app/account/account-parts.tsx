@@ -63,7 +63,8 @@ export function Passkeys({ passkeys }: { passkeys: { id: string; name: string; c
   );
 }
 
-// New backup codes: a current code from the authenticator, and an admin's password too. The codes show once.
+// New backup codes: a current code from the authenticator, and the password of an account that has one. The codes show
+// once.
 export function BackupCodes({ password }: { password: boolean }) {
   const [state, action, pending] = useActionState<BackupCodesState, FormData>(backupCodesAction, { error: null, codes: [] });
   return (

@@ -3,14 +3,15 @@
 // expires each after AUDIT_RETENTION_DAYS. It keeps names and addresses as the accounts do, so only admins read it
 // (and each person their own); the team's agents never see this database (Article 8).
 //
-// Sign-ins, sign-outs, second factors, new IP addresses, passkeys and authenticators are recorded from Better Auth's
-// hooks (auth.ts); people, tasks, decisions, requests, pauses, resumes, budgets and linked machines from the server
-// actions and endpoints that make them.
+// Sign-ups, sign-ins, sign-outs, second factors, new IP addresses, passkeys and authenticators are recorded from Better
+// Auth's hooks (auth.ts); people, tasks, decisions, requests, pauses, resumes, budgets, linked machines and a person's
+// own choices (the IP check, the authenticator put off) from the server actions and endpoints that make them.
 import type { Db } from "mongodb";
 import { config } from "./config.ts";
 import { authDb } from "./db.ts";
 
 export const AUDIT_ACTIONS = [
+  "sign-up",
   "sign-in",
   "sign-in-link",
   "sign-out",
@@ -20,10 +21,13 @@ export const AUDIT_ACTIONS = [
   "ip.confirmed",
   "ip.denied",
   "ip.forgotten",
+  "ip-check.on",
+  "ip-check.off",
   "passkey.added",
   "passkey.removed",
   "authenticator.on",
   "authenticator.off",
+  "authenticator.later",
   "backup-codes.new",
   "person.invited",
   "person.role",
@@ -153,6 +157,7 @@ export async function listAudit(query: AuditQuery = {}): Promise<AuditEvent[]> {
 
 // How an event reads in a list: "Signed in", "Confirmed a new IP address"…
 export const ACTION_LABEL: Record<AuditAction, string> = {
+  "sign-up": "Sign-up",
   "sign-in": "Sign-in",
   "sign-in-link": "Sign-in link asked for",
   "sign-out": "Signed out",
@@ -162,10 +167,13 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "ip.confirmed": "New IP address confirmed",
   "ip.denied": "New IP address reported: “it wasn't me”",
   "ip.forgotten": "IP address forgotten",
+  "ip-check.on": "Check of new IP addresses turned on",
+  "ip-check.off": "Check of new IP addresses turned off",
   "passkey.added": "Passkey added",
   "passkey.removed": "Passkey removed",
   "authenticator.on": "Authenticator turned on",
   "authenticator.off": "Authenticator turned off",
+  "authenticator.later": "Authenticator put off at sign-up",
   "backup-codes.new": "New backup codes",
   "person.invited": "Person invited",
   "person.role": "Role changed",

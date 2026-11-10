@@ -109,7 +109,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
         <p className="panel empty">
           {viewer.admin
             ? "No team has published its settings yet: a6g register publishes a team whose tasks are in Mongo."
-            : "You don't follow any team yet."}
+            : "You're on no team yet. An admin adds you to one; then it shows here."}
         </p>
       )}
     </>

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
+import { checksIp } from "../../server/access.ts";
+import { hasPassword } from "../../server/account-choices.ts";
 import { ACTION_LABEL, listAudit } from "../../server/audit.ts";
 import { auth } from "../../server/auth.ts";
 import { deviceOf } from "../../server/device.ts";
@@ -9,7 +11,14 @@ import { knownIps } from "../../server/known-ips.ts";
 import { authHeaders, requireViewer } from "../../server/viewer.ts";
 import { SignOutButton } from "../sign-out-button.tsx";
 import { BackupCodes, Passkeys } from "./account-parts.tsx";
-import { forgetIpAction, revokeOtherSessionsAction, revokeSessionAction, turnOffAuthenticatorAction } from "./actions.ts";
+import {
+  forgetIpAction,
+  revokeOtherSessionsAction,
+  revokeSessionAction,
+  turnOffAuthenticatorAction,
+  turnOffIpCheckAction,
+  turnOnIpCheckAction,
+} from "./actions.ts";
 import { AuthenticatorSetup } from "./authenticator.tsx";
 
 export const metadata: Metadata = { title: "Account" };
@@ -17,13 +26,16 @@ export const metadata: Metadata = { title: "Account" };
 export default async function AccountPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
   const requestHeaders = await authHeaders();
-  const [passkeys, sessions, addresses, activity] = await Promise.all([
+  const [passkeys, sessions, addresses, activity, password] = await Promise.all([
     auth().api.listPasskeys({ headers: requestHeaders }),
     auth().api.listSessions({ headers: requestHeaders }),
     knownIps(viewer.userId),
     listAudit({ userId: viewer.userId, limit: 15 }),
+    // Someone who signed up has a password, and Better Auth asks for it wherever the authenticator changes.
+    hasPassword(viewer.userId),
   ]);
   const teams = Object.entries(viewer.teams);
+  const checked = checksIp(viewer);
   return (
     <>
       <h1>Account</h1>
@@ -50,7 +62,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
         <section className="panel" aria-labelledby="passkeys">
           <h2 id="passkeys">Passkeys</h2>
           <p className="hint">
-            Sign in with your device instead of an email link.
+            Sign in with your device instead of an email link{password && !viewer.admin ? " or your password" : ""}.
             {viewer.admin ? " As an admin, a passkey counts once it checks it's you (PIN, fingerprint or face)." : ""}
           </p>
           <Passkeys passkeys={passkeys.map((p) => ({ id: p.id, name: p.name || "Passkey", createdAt: new Date(p.createdAt).toISOString() }))} />
@@ -69,10 +81,16 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
               <BackupCodes password />
             </>
           ) : (
-            <AuthenticatorSetup enabled={viewer.twoFactor}>
-              <p className="hint">Every sign-in asks for its code too, whether by passkey or email link.</p>
-              <BackupCodes password={false} />
+            <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
+              <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
+              <BackupCodes password={password} />
               <form action={turnOffAuthenticatorAction} className="inline">
+                {password ? (
+                  <label>
+                    Password, to turn it off
+                    <input name="password" type="password" required autoComplete="current-password" />
+                  </label>
+                ) : null}
                 <label>
                   A code from it, to turn it off
                   <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
@@ -115,7 +133,14 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
       <div className="grid">
         <section className="panel" aria-labelledby="addresses">
           <h2 id="addresses">Your IP addresses</h2>
-          <p className="hint">A sign-in from any other address asks you to confirm it by email first.</p>
+          <p>
+            <Chip tone={checked ? "ok" : "warn"}>{checked ? "new ones are checked" : "new ones aren't checked"}</Chip>
+          </p>
+          <p className="hint">
+            {checked
+              ? `A sign-in from any other address asks you to confirm it by email first.${viewer.admin ? " For an admin that's always so." : ""}`
+              : "A sign-in from an address you haven't used goes ahead without asking you. The ones here are those you confirmed before."}
+          </p>
           {addresses.length ? (
             <ul className="plain rows">
               {addresses.map((a) => (
@@ -137,6 +162,30 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             </ul>
           ) : (
             <p className="empty">None yet.</p>
+          )}
+          {viewer.admin ? null : viewer.ipCheck ? (
+            <details>
+              <summary>Turn the check off</summary>
+              <form action={turnOffIpCheckAction} className="stack">
+                <p className="hint">
+                  Then a sign-in from anywhere goes ahead without an email to you. It takes a sign-in from the last ten minutes
+                  {viewer.twoFactor ? " and a code from your authenticator" : ""}, and we email you that it was turned off.
+                </p>
+                {viewer.twoFactor ? (
+                  <label>
+                    Authenticator code, to stop checking
+                    <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
+                  </label>
+                ) : null}
+                <div>
+                  <SubmitButton className="danger">Stop checking new addresses</SubmitButton>
+                </div>
+              </form>
+            </details>
+          ) : (
+            <form action={turnOnIpCheckAction}>
+              <SubmitButton>Check new addresses again</SubmitButton>
+            </form>
           )}
         </section>
         <section className="panel" aria-labelledby="activity">

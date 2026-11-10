@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 
-const VERSION = "1.7.17";
+const VERSION = "1.7.20";
 const WEB = resolve(import.meta.dirname, "../..");
 // @better-auth/utils is the one with its own version line (0.x): better-auth pins it itself.
 const isBetterAuth = (name: string): boolean => name === "better-auth" || (name.startsWith("@better-auth/") && name !== "@better-auth/utils");

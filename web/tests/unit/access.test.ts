@@ -6,6 +6,7 @@ import {
   blocked,
   can,
   canSeeRequest,
+  checksIp,
   decisionProblem,
   invitationProblem,
   pendingStep,
@@ -23,7 +24,16 @@ import {
   visibleTeams,
 } from "../../server/access.ts";
 
-const admin: Viewer = { userId: "u-admin", admin: true, secondFactor: true, twoFactor: true, ipConfirmed: true, teams: {} };
+const admin: Viewer = {
+  userId: "u-admin",
+  admin: true,
+  secondFactor: true,
+  twoFactor: true,
+  ipConfirmed: true,
+  ipCheck: true,
+  authenticatorDue: false,
+  teams: {},
+};
 const adminWithoutSecondFactor: Viewer = { ...admin, secondFactor: false };
 const member: Viewer = {
   userId: "u-member",
@@ -31,6 +41,8 @@ const member: Viewer = {
   secondFactor: false,
   twoFactor: false,
   ipConfirmed: true,
+  ipCheck: true,
+  authenticatorDue: false,
   teams: { shop: "member", blog: "contributor" },
 };
 const contributor: Viewer = {
@@ -39,6 +51,8 @@ const contributor: Viewer = {
   secondFactor: false,
   twoFactor: false,
   ipConfirmed: true,
+  ipCheck: true,
+  authenticatorDue: false,
   teams: { shop: "contributor" },
 };
 
@@ -270,5 +284,29 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep({ ...withAuthenticator, secondFactor: true, ipConfirmed: false }), "confirm-ip");
     assert.equal(pendingStep(member), null, "no authenticator, no code asked for");
     assert.equal(pendingStep(null), null);
+  });
+  test("of someone who turned the IP check off isn't asked about a new address; an admin always is", () => {
+    const unchecked = { ...member, ipCheck: false, ipConfirmed: false };
+    assert.equal(checksIp(unchecked), false);
+    assert.equal(pendingStep(unchecked), null);
+    assert.deepEqual(allowedOn(unchecked, "shop"), allowedOn(member, "shop"));
+    assert.equal(pendingStep({ ...unchecked, twoFactor: true }), "second-factor", "their authenticator's code is still asked for");
+    const adminAway = { ...admin, ipCheck: false, ipConfirmed: false };
+    assert.equal(checksIp(adminAway), true, "an admin's choice isn't asked");
+    assert.equal(pendingStep(adminAway), "confirm-ip");
+    assert.equal(checksIp(member), true);
+  });
+  test("who chose two-factor authentication as they signed up sets up the authenticator, or puts it off, before anything opens", () => {
+    const due = { ...member, authenticatorDue: true };
+    assert.equal(pendingStep(due), "set-up-authenticator");
+    assert.equal(blocked(due), true);
+    assert.deepEqual(allowedOn(due, "shop"), []);
+    assert.equal(roleIn(due, "shop"), null);
+    assert.equal(pendingStep({ ...due, ipConfirmed: false }), "confirm-ip", "the address first, then the authenticator");
+    assert.equal(pendingStep({ ...due, ipCheck: false, ipConfirmed: false }), "set-up-authenticator");
+    assert.equal(pendingStep({ ...due, twoFactor: true }), "second-factor", "once it's on, its code is what's owed");
+    assert.equal(pendingStep({ ...due, twoFactor: true, secondFactor: true }), null);
+    assert.equal(pendingStep({ ...due, authenticatorDue: false }), null, "put off: nothing owed");
+    assert.equal(pendingStep({ ...admin, authenticatorDue: true, twoFactor: false }), null, "admins get theirs from create-admin");
   });
 });

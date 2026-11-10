@@ -1141,6 +1141,10 @@ code.path {
   font-stretch: 87.5%;
   font-variant-numeric: tabular-nums slashed-zero;
 }
+/* Whatever follows the codes (the button that goes on) stands off them. */
+.codes:where(:not(:last-child)) {
+  margin-bottom: 12px;
+}
 
 /* --- People ----------------------------------------------------------------------------------------------------- */
 /* A person: who they are on the left; on the right a line per team (team, role, save, remove), in columns that line
@@ -1787,6 +1791,11 @@ label.check.choice {
 }
 label.check.choice:hover {
   border-color: var(--edge);
+}
+/* A choice that says what it means: its name, then a line under it (the sign-up page's two). */
+label.check.choice .hint {
+  display: block;
+  margin-top: 2px;
 }
 label.check.choice:has(input:checked) {
   background: color-mix(in srgb, var(--solid) 7%, var(--surface));

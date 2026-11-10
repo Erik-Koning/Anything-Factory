@@ -1,13 +1,32 @@
-// Accounts and sign-in (Better Auth, on the app's own database). Invite only: nobody signs up.
+// Accounts and sign-in (Better Auth, on the app's own database).
 //
-// Everyone signs in with a passkey or a magic link by email. Admins sign in with two factors, by design:
+// Anyone may sign up, with an email address and a password of 12 characters or more. Nothing opens until the address
+// is confirmed: the sign-up emails a link, good for an hour, and opening it confirms the address and signs the person
+// in, once. A password sign-in before that is refused and sends the link again. A sign-up for an address that already
+// has an account answers exactly as a new one does, in the same time, and tells the address's owner by email instead.
+// What a sign-up may set is a name, an address, a password and the two choices below: never a role, a ban, a second
+// factor or "confirmed". An admin can also invite someone to a team (admin/people): an account with no password, which
+// signs in by link. A new account is on no team until an admin puts it on one.
+//
+// The two choices on the sign-up page, both on unless unticked, are kept on the account (authenticatorDue, ipCheck).
+// They're read from the sign-up's body here, as the account is made, and changed afterwards only by the app's own
+// server actions (account-choices.ts): no endpoint takes either.
+//   - Two-factor authentication: the person sets up an authenticator app as soon as their address is confirmed
+//     (/welcome), or puts it off there.
+//   - Check new IP addresses: a sign-in from an address they haven't used asks them by email first (below).
+// An account whose address is first proven by a sign-in link, not its confirmation link, loses the password it was
+// signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on.
+//
+// Everyone signs in with a passkey, a magic link by email, or their password when they have one. Admins sign in with
+// two factors, by design:
 //   - a password and an authenticator code (or one of their backup codes), enrolled by `npm run create-admin` on the
 //     operator's own machine, so an admin account never exists without its authenticator; or
 //   - a passkey whose authenticator verified the person (a PIN or biometrics: something they have and something they
 //     know or are). A passkey that didn't verify them gives no second factor.
-//   - never a magic link: none is sent to an admin, and a session from one is refused for an admin.
-// Anyone else may turn on an authenticator too (from the account page); from then on their sessions need its code as
-// well, whichever way they signed in.
+//   - never a link by email: no sign-in link is sent to an admin, and a session from one, or from a confirmation link,
+//     is refused for an admin. Nobody becomes an admin by signing up.
+// Anyone else may turn on an authenticator too (as they sign up, or from the account page); from then on their
+// sessions need its code as well, whichever way they signed in.
 // Each session records whether it began with a second factor (session.secondFactor, set here as it's made and never
 // by the client; a code entered later sets it, second-factor/actions.ts). Every page and server action checks it on
 // the server (viewer.ts, access.ts), and over HTTP a session without it can only sign out or sign in again (the guard
@@ -15,9 +34,10 @@
 //
 // Every session also records its IP address, as the CDN in front of the app reports it (CLIENT_IP_HEADER, trusted
 // because the app refuses requests without the CDN's ORIGIN_SECRET, proxy.ts). A session used from an address its
-// person hasn't confirmed can do nothing until they confirm it from an email (known-ips.ts); an email sign-in link
-// confirms the address it's opened from. Sign-ins, failures, sign-outs and changes to passkeys and backup codes go to
-// the audit log (audit.ts).
+// person hasn't confirmed can do nothing until they confirm it from an email (known-ips.ts); a sign-in link or a
+// confirmation link confirms the address it's opened from. An admin's addresses are always checked; anyone else may
+// turn the check off for their own account (access.ts checksIp). Sign-ups, sign-ins, failures, sign-outs and changes
+// to passkeys and backup codes go to the audit log (audit.ts).
 //
 // Better Auth's own admin endpoints aren't served over HTTP at all: the app calls them from its server actions, after
 // its own checks.
@@ -25,9 +45,10 @@ import { getIP } from "@better-auth/core/utils/ip";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { admin, magicLink, twoFactor } from "better-auth/plugins";
+import { checksIp } from "./access.ts";
 import { audit } from "./audit.ts";
 import { ensureAuthIndexes } from "./auth-indexes.ts";
 import { config } from "./config.ts";
@@ -36,7 +57,8 @@ import { originAllowed } from "./origin-check.ts";
 import { challenge, isKnownIp, rememberIp } from "./known-ips.ts";
 import { sendMail } from "./mail.ts";
 
-// How long every sign-in-link answer takes, sent or not; the names of teams, as the factory makes them.
+// How long every answer that may send an email takes, sent or not (a sign-in link, a sign-up, a confirmation asked for
+// again); the names of teams, as the factory makes them.
 const SEND_TIME_MS = 1500;
 const TEAM_NAME = /^[a-z][a-z0-9-]{0,30}$/;
 
@@ -48,6 +70,33 @@ const PASSKEY_SIGN_IN = "/passkey/verify-authentication";
 // A password sign-in for someone with an authenticator makes a session the two-factor plugin deletes at once, while
 // it waits for the code: a placeholder, which nothing here records or asks about. The code's own session is the one.
 const PASSWORD_SIGN_IN = "/sign-in/email";
+// Signing up, the confirmation link it emails (which signs the person in), and asking for that link again.
+const SIGN_UP = "/sign-up/email";
+const VERIFY_EMAIL = "/verify-email";
+const SEND_CONFIRMATION = "/send-verification-email";
+// Where a confirmation link lands: on to the app when it signed the person in, the reason when it didn't.
+const CONFIRMED_PAGE = "/sign-up/confirmed";
+// The links that sign someone in by proving their inbox.
+const EMAIL_LINK = new Set(["/magic-link/verify", VERIFY_EMAIL]);
+
+// Whether a new IP address is checked for this account (access.ts checksIp): accounts from before the choice read as on.
+function checksIpOf(user: object | null | undefined): boolean {
+  const { role, ipCheck } = (user ?? {}) as { role?: unknown; ipCheck?: unknown };
+  return checksIp({ admin: isAdminRole(role), ipCheck: ipCheck !== false });
+}
+
+// Why a request failed, for the audit log. A link's own endpoint answers with a redirect either way: only one that
+// carries an error failed (null otherwise).
+function failureOf(returned: APIError): string | null {
+  if (returned.status !== "FOUND") return returned.message || String(returned.status);
+  const to = new Headers(returned.headers as HeadersInit).get("location");
+  return to ? new URL(to, "http://local").searchParams.get("error") : null;
+}
+
+// Each sign-up, and each confirmation asked for again, from the guard below to the audit after it: when it began, so
+// its answer takes the same time whatever happened, and the account it made, if it made one.
+const mailed = new WeakMap<Request, { started: number; created: { id: string; email: string } | null }>();
+const settle = (started: number): Promise<void> => new Promise((done) => setTimeout(done, Math.max(0, SEND_TIME_MS - (Date.now() - started))));
 
 // Whether a passkey assertion says the authenticator verified the person: the UV bit (0x04) of the flags byte that
 // follows the 32-byte RP ID hash in authenticatorData. By the time a session is made, the passkey plugin has verified
@@ -66,6 +115,7 @@ const SIGN_IN_METHOD: Record<string, string> = {
   "/two-factor/verify-backup-code": "password and backup code",
   [PASSKEY_SIGN_IN]: "passkey",
   "/magic-link/verify": "email link",
+  [VERIFY_EMAIL]: "email confirmed",
 };
 
 // How a session someone ended was ended, for the audit log.
@@ -90,6 +140,9 @@ const OPEN_WHILE_PENDING = new Set([
   PASSKEY_SIGN_IN,
   // A new sign-in link, opened in a browser whose session is waiting: it makes a new session, at the address it's opened.
   "/magic-link/verify",
+  // Signing up needs no session, and its confirmation link makes one of its own.
+  SIGN_UP,
+  VERIFY_EMAIL,
 ]);
 const openWhilePending = (path: string): boolean => OPEN_WHILE_PENDING.has(path) || path.startsWith("/sign-in/") || path.startsWith("/two-factor/verify-");
 // Never over HTTP, for anyone: the admin plugin's endpoints (the app calls them from its own server actions); turning
@@ -109,7 +162,31 @@ function makeAuth() {
     basePath: "/api/auth",
     secret,
     database: mongodbAdapter(client.db(authDatabase), { client }),
-    emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 12 },
+    // Anyone signs up; nobody is signed in before their address is confirmed.
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 12,
+      requireEmailVerification: true,
+      autoSignIn: false,
+      onExistingUserSignUp: async ({ user }) => tellKnown(user),
+    },
+    // The confirmation: emailed as someone signs up, and again when they try their password before confirming. Its
+    // link works for an hour and signs them in the once.
+    emailVerification: {
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      autoSignInAfterVerification: true,
+      expiresIn: 60 * 60,
+      sendVerificationEmail: async ({ user, token }) => sendConfirmation(user, token),
+    },
+    // The two choices made on the sign-up page. Not input: no endpoint's body sets them (the hook below reads the
+    // sign-up's own two keys), and the app's server actions change them (account-choices.ts).
+    user: {
+      additionalFields: {
+        authenticatorDue: { type: "boolean", required: false, defaultValue: false, input: false },
+        ipCheck: { type: "boolean", required: false, defaultValue: true, input: false },
+      },
+    },
     // The viewer's address, from the one header the CDN sets (and nobody else can, proxy.ts): sessions record it, rate
     // limits count by it, and the new-IP check compares it. IPv6 by its /64.
     advanced: { ipAddress: { ipAddressHeaders: [config().ipHeader], ipv6Subnet: 64 } },
@@ -123,6 +200,8 @@ function makeAuth() {
       window: 60,
       max: 100,
       customRules: {
+        [SIGN_UP]: { window: 60, max: 3 },
+        [SEND_CONFIRMATION]: { window: 60, max: 3 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-in/magic-link": { window: 60, max: 5 },
         "/two-factor/*": { window: 60, max: 5 },
@@ -130,28 +209,52 @@ function makeAuth() {
       },
     },
     databaseHooks: {
+      user: {
+        create: {
+          // The sign-up page's two choices, on unless its box was unticked. Only a sign-up's: an account an admin
+          // invites, or create-admin makes, has the defaults (the IP check on, no authenticator due).
+          before: async (user, ctx) => {
+            if (ctx?.path !== SIGN_UP) return;
+            const body = (ctx.body ?? {}) as { setUpAuthenticator?: unknown; checkNewIps?: unknown };
+            return { data: { ...user, authenticatorDue: body.setUpAuthenticator !== false, ipCheck: body.checkNewIps !== false } };
+          },
+          after: async (user, ctx) => {
+            const mark = ctx?.request ? mailed.get(ctx.request) : undefined;
+            if (mark && ctx?.path === SIGN_UP) mark.created = { id: user.id, email: user.email };
+          },
+        },
+        update: {
+          // An address first proven by a sign-in link, not its confirmation link: whoever signed up with it hadn't
+          // proven the inbox, so their choice to leave new IP addresses unchecked goes with their password.
+          before: async (changes, ctx) => {
+            if (ctx?.path === "/magic-link/verify" && changes.emailVerified === true) return { data: { ...changes, ipCheck: true } };
+          },
+        },
+      },
       session: {
         create: {
           before: async (session, ctx) => {
             const path = ctx?.path ?? "";
-            if (path === "/magic-link/verify") {
+            if (EMAIL_LINK.has(path)) {
               const user = await ctx?.context.internalAdapter.findUserById(session.userId);
-              // Admins never sign in by a link: no session from one.
+              // Admins never sign in by a link, a confirmation's included: no session from one.
               if (isAdminRole((user as { role?: unknown } | null)?.role)) return false;
             }
             const secondFactor = SECOND_FACTOR.has(path) || (path === PASSKEY_SIGN_IN && userVerified((ctx?.body as { response?: unknown })?.response));
             return { data: { ...session, secondFactor } };
           },
-          // A new session from an address its person hasn't confirmed: they're asked by email. An email link's own
-          // session confirms where it was opened. Only sessions made by a request over HTTP: the ones the app's own
+          // A new session from an address its person hasn't confirmed: they're asked by email, unless they've turned
+          // the check off (never an admin). An email link's own session, a sign-in link's or a confirmation's,
+          // confirms where it was opened. Only sessions made by a request over HTTP: the ones the app's own
           // server code makes (create-admin's, the one Better Auth swaps in when an authenticator is turned on, from a
           // session already at a confirmed address) are asked about where they're used, like any other.
           after: async (session, ctx) => {
             if (!ctx?.request) return;
             const ip = (session as { ipAddress?: string | null }).ipAddress || null;
-            if (ctx.path === "/magic-link/verify") return rememberIp(session.userId, ip, "email link");
+            if (EMAIL_LINK.has(ctx.path)) return rememberIp(session.userId, ip, "email link");
             if (await isKnownIp(session.userId, ip)) return;
             const user = await ctx.context.internalAdapter.findUserById(session.userId);
+            if (!checksIpOf(user)) return;
             if ((user as { twoFactorEnabled?: boolean } | null)?.twoFactorEnabled && ctx.path === PASSWORD_SIGN_IN) return;
             if (user)
               await challenge({
@@ -202,11 +305,13 @@ function makeAuth() {
         // A person's or a passkey's name is shown to the admin: short, whatever the endpoint lets through.
         const name = (ctx.body as { name?: unknown } | undefined)?.name;
         if (typeof name === "string" && name.length > 120) throw new APIError("BAD_REQUEST", { message: "Keep the name under 120 characters." });
+        if (ctx.path === SIGN_UP && (typeof name !== "string" || !name.trim())) throw new APIError("BAD_REQUEST", { message: "Tell us your name." });
+        if (ctx.path === SIGN_UP || ctx.path === SEND_CONFIRMATION) mailed.set(ctx.request, { started: Date.now(), created: null });
         if (openWhilePending(ctx.path)) return;
         const current = await getSessionFromCtx(ctx);
         if (current && (isAdminRole(current.user.role) || current.user.twoFactorEnabled === true) && current.session.secondFactor !== true)
           throw new APIError("FORBIDDEN", { message: "Enter your authenticator's code first." });
-        if (current && !(await isKnownIp(current.user.id, getIP(ctx.request, ctx.context.options))))
+        if (current && checksIpOf(current.user) && !(await isKnownIp(current.user.id, getIP(ctx.request, ctx.context.options))))
           throw new APIError("FORBIDDEN", { message: "Confirm this sign-in from the email we sent first." });
         // A new passkey for an admin needs a sign-in from the last ten minutes, so a stolen session can't make itself last.
         if (current && isAdminRole(current.user.role) && ctx.path.startsWith("/passkey/generate-register-options"))
@@ -217,7 +322,8 @@ function makeAuth() {
       after: createAuthMiddleware(async (ctx) => {
         if (!ctx.request) return;
         const returned = ctx.context.returned;
-        const failed = returned instanceof APIError;
+        // Better Auth's own test: what's wrong with a body's shape is thrown as its router's error, not as APIError here.
+        const failed = isAPIError(returned);
         const fresh = ctx.context.newSession;
         const from = { ip: getIP(ctx.request, ctx.context.options), userAgent: ctx.request.headers.get("user-agent") };
         const body = (ctx.body ?? {}) as { email?: unknown; name?: unknown };
@@ -237,6 +343,9 @@ function makeAuth() {
             detail: verified ? `${method}, verified with a PIN or biometrics` : method,
           });
         } else if (method && failed) {
+          // A link opened again after it worked only sends its person on: nothing failed, nothing to record.
+          const why = failureOf(returned);
+          if (why === null) return;
           const pending = ctx.path.startsWith("/two-factor/") ? await twoFactorUser(ctx) : null;
           await audit({
             action: "sign-in",
@@ -244,8 +353,28 @@ function makeAuth() {
             userId: pending?.id ?? null,
             email: pending?.email ?? typed,
             ...from,
-            detail: `${method}: ${returned.message || returned.status}`,
+            detail: `${method}: ${why}`,
           });
+        } else if (ctx.path === SIGN_UP || ctx.path === SEND_CONFIRMATION) {
+          const mark = mailed.get(ctx.request);
+          if (ctx.path === SIGN_UP) {
+            // The log says which it was (a new account, or an address that has one); the answer never does.
+            const known =
+              failed || mark?.created ? null : ((await ctx.context.internalAdapter.findUserByEmail((typed ?? "").toLowerCase()))?.user ?? null);
+            await audit({
+              action: "sign-up",
+              outcome: failed ? "failed" : mark?.created ? "ok" : "refused",
+              userId: mark?.created?.id ?? known?.id ?? null,
+              email: mark?.created?.email ?? typed,
+              ...from,
+              detail: failed ? returned.message || String(returned.status) : mark?.created ? null : "the address already has an account",
+            });
+          }
+          // What was wrong with what was typed is said at once: it's the same whoever has the address. Anything else
+          // takes the same time and says the same thing, whether an account was made, one was there, or an email went.
+          if (failed) return;
+          if (mark) await settle(mark.started);
+          return ctx.json({ status: true });
         } else if (ctx.path === "/sign-in/magic-link") {
           // Asked for: whether one went is the sender's to know (sendLink), not the log's to say to whoever reads it.
           await audit({ action: "sign-in-link", outcome: failed ? "failed" : "ok", userId: null, email: typed, ...from });
@@ -279,12 +408,12 @@ function makeAuth() {
         expiresIn: 15 * 60,
         storeToken: "hashed",
         sendMagicLink: async ({ email, url, metadata }, ctx) => {
-          // Every answer takes the same time, so it doesn't say whether the address was invited.
+          // Every answer takes the same time, so it doesn't say whether the address has an account.
           const started = Date.now();
           try {
             await sendLink(email, url, metadata, ctx);
           } finally {
-            await new Promise((done) => setTimeout(done, Math.max(0, SEND_TIME_MS - (Date.now() - started))));
+            await settle(started);
           }
         },
       }),
@@ -292,6 +421,47 @@ function makeAuth() {
       nextCookies(),
     ],
   });
+
+  // At most one email of a kind to an address a minute: `key` names the kind and the address.
+  async function mayMail(key: string): Promise<boolean> {
+    const sends = client.db(authDatabase).collection<{ _id: string; at: Date }>("magic_link_sends");
+    const renewed = await sends.findOneAndUpdate({ _id: key, at: { $lt: new Date(Date.now() - 60_000) } }, { $set: { at: new Date() } }).catch(() => null);
+    if (renewed) return true;
+    return sends.insertOne({ _id: key, at: new Date() }).then(
+      () => true,
+      () => false
+    );
+  }
+
+  // The confirmation a sign-up waits on. Only for an account that signed up (it has a password): an invited person
+  // signs in by link, and an admin is confirmed as create-admin makes them. Its link is the app's own, whatever the
+  // request asked to be sent back to.
+  async function sendConfirmation(user: { id: string; email: string; role?: unknown; banned?: unknown }, token: string): Promise<void> {
+    if (user.banned === true || isAdminRole(user.role)) return;
+    const credential = await (await auth().$context).internalAdapter.findCredentialAccount(user.id);
+    if (!credential?.password) return;
+    if (!(await mayMail(`confirm:${user.email.toLowerCase()}`))) return;
+    const url = `${baseURL}/api/auth/verify-email?token=${encodeURIComponent(token)}&callbackURL=${encodeURIComponent(CONFIRMED_PAGE)}`;
+    await sendMail({
+      to: user.email,
+      subject: "Confirm your email for Anything Factory",
+      text: `Someone, we hope you, signed up to Anything Factory with this address.\n\nConfirm it's yours with this link within an hour; it signs you in, once: ${url}\n\nIf you didn't sign up, ignore this email: nothing opens for an address that isn't confirmed.`,
+      link: url,
+    });
+  }
+
+  // A sign-up for an address that has an account changes nothing and answers like any other; the address's owner is
+  // told here. An unconfirmed sign-up shares its minute with the confirmation it was just sent.
+  async function tellKnown(user: { email: string; emailVerified?: boolean; banned?: unknown }): Promise<void> {
+    if (user.banned === true) return;
+    if (!(await mayMail(`${user.emailVerified ? "known" : "confirm"}:${user.email.toLowerCase()}`))) return;
+    await sendMail({
+      to: user.email,
+      subject: "You already have an Anything Factory account",
+      text: `Someone, maybe you, tried to sign up to Anything Factory with this address. It already has an account, so nothing was changed.\n\nSign in at ${baseURL}/sign-in the way you usually do. If you signed up before and never confirmed your email, signing in with your password sends a new confirmation link.\n\nIf it wasn't you, ignore this email.`,
+      link: `${baseURL}/sign-in`,
+    });
+  }
 
   // Nobody unknown gets an email, nor a banned person, nor an admin a link, nor anyone a second within a minute. Only
   // the app's own invite (a server call, never a request over HTTP) makes it an invitation, naming a real team.
@@ -304,22 +474,7 @@ function makeAuth() {
     const found = await ctx?.context.internalAdapter.findUserByEmail(email);
     const user = found?.user as { role?: unknown; banned?: unknown } | undefined;
     if (!user || user.banned === true || isAdminRole(user.role)) return;
-    const renewed = await client
-      .db(authDatabase)
-      .collection<{ _id: string; at: Date }>("magic_link_sends")
-      .findOneAndUpdate({ _id: email.toLowerCase(), at: { $lt: new Date(Date.now() - 60_000) } }, { $set: { at: new Date() } })
-      .catch(() => null);
-    if (!renewed) {
-      const fresh = await client
-        .db(authDatabase)
-        .collection<{ _id: string; at: Date }>("magic_link_sends")
-        .insertOne({ _id: email.toLowerCase(), at: new Date() })
-        .then(
-          () => true,
-          () => false
-        );
-      if (!fresh) return;
-    }
+    if (!(await mayMail(email.toLowerCase()))) return;
     const team = metadata?.["team"];
     const invitation = !ctx?.request && typeof team === "string" && TEAM_NAME.test(team) ? team : null;
     await sendMail(

@@ -12,7 +12,7 @@ import { authDb } from "./db.ts";
 import { deviceOf } from "./device.ts";
 import { sendMail } from "./mail.ts";
 
-export type KnownVia = "email link" | "confirmed by email" | "invitation";
+export type KnownVia = "email link" | "confirmed by email" | "invitation" | "check turned on";
 interface KnownIp {
   _id: string;
   userId: string;

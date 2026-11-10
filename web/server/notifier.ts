@@ -107,6 +107,8 @@ const viewerOf = (person: Person, rows: Membership[]): Viewer => ({
   secondFactor: true,
   twoFactor: true,
   ipConfirmed: true,
+  ipCheck: true,
+  authenticatorDue: false,
   teams: Object.fromEntries(rows.filter((m) => m.userId === person.userId).map((m) => [m.team, m.role])),
 });
 const roleOn = (viewer: Viewer, team: string): "admin" | TeamRole | null => (viewer.admin ? "admin" : (viewer.teams[team] ?? null));
