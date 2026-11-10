@@ -226,6 +226,17 @@ audit --omit=dev --json` beside a `package-lock.json`, `pnpm audit --prod --json
   (the verdict), `lib/guard.ts` (the owner), `lib/commands/merge.ts`, `lib/commands/task.ts`, `lib/tasks/model.ts`,
   `lib/prompts.ts`, the planner's and reviewer's prompts, the review skill, `lib/detect.ts`, the setup prompt,
   `docs/team.md`.
+- **As built, beyond the above:** the factory's list goes by a path's words (`useAuth.ts`, `AuthProvider.tsx`,
+  `sign-in/` and `stripe_webhook.py` count; `author.ts` and `lesson.ts` don't), plus any `.sql` or store-rules file,
+  and never a test or a document. `security.paths` adds to that list instead of replacing it, so naming a folder
+  can't drop sign-in from what's read; `"builtIn": false` is what turns the factory's list off. A team's own
+  patterns match as written, tests included. A third kind of branch waits: one the security reviewer has judged
+  before, so a branch sent back with issues can't merge on a rework that leaves the security paths. A reviewer's
+  send-on holds for the branch: a later round's review doesn't take it back. `--security` is refused on a team with
+  no security reviewer, with what to do instead, since an approval that says "sent on" to nobody would lie; so is
+  `a6g verdict security`. Issues send the task back like a review's changes and count as a round. The task records
+  why it's theirs (the paths, sent on, or seen before) and the commit they last passed, and drops the record when
+  none of the three holds, so it says "needs the security reviewer" exactly when the merge queue would refuse.
 
 ## H. Numbers
 
@@ -278,7 +289,7 @@ Each phase ends with its tests, `npm test` and `npx prettier --check .` passing,
 | With a lockfile and the check after merges | Advisories at high or critical become tasks                  |
 | With two sign-in states and a suite        | One task: no `@access` test                                  |
 | Whose manifest gains `refuses`             | Those pages are loaded as the refused states                 |
-| That adds `security-reviewer` to its roles | Branches on `security.paths`, or sent on, need its pass      |
+| That adds `security-reviewer` to its roles | Branches on security paths, or sent on, need its pass        |
 
 ## Later, and what would promote each
 
@@ -319,6 +330,6 @@ Defaults are chosen; say if you'd choose otherwise.
 - [x] G2. Secrets don't merge (31)
 - [x] G3. `refuses` and the `@access` gap (29, 30)
 - [x] G4. The package audit (32)
-- [ ] G5. The security reviewer (33)
+- [x] G5. The security reviewer (33)
 - [ ] H. The quality numbers (34)
 - [ ] README, CHANGELOG, `docs/team.md`

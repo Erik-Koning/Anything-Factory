@@ -39,6 +39,11 @@ Record your verdict on that commit before you answer:
 The merge queue accepts only the exact commit you approved. If the branch moved while you reviewed, the command
 refuses: review the new commits (`git log <sha>..<branch>`) and record the verdict for the new tip.
 
+When your commands list `--security`, your team has a security reviewer. A branch whose blast radius lists security
+paths is theirs already. Add `--security` to your approval when a branch changes who can do what, what someone can
+see, or what moves money in a file no path names: it then merges once they've passed it too. Their review is beside
+yours, never instead of it: a hole you can see is a change you ask for.
+
 Answer with a first line of exactly `VERDICT: approve` or `VERDICT: changes`. For changes, follow it with a
 numbered list of what must change, most serious first, each with the file and line, why it matters and what would fix
 it. Then add any optional suggestions, marked as such. Don't ask for changes on taste alone. A problem outside the

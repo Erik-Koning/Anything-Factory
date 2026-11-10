@@ -18,6 +18,7 @@ import {
   move,
   type MoveContext,
   moveRefusal,
+  needsSecurity,
   nowIso,
   newTask,
   SEVERITIES,
@@ -341,7 +342,10 @@ export function summary(
         .join("; ")}.`
     );
   const review = by("review");
-  if (review.length) parts.push(`Waiting for review: ${review.map((t) => `${line(t)}${t.branch ? ` [${t.branch}]` : ""}`).join("; ")}.`);
+  if (review.length)
+    parts.push(
+      `Waiting for review: ${review.map((t) => `${line(t)}${t.branch ? ` [${t.branch}]` : ""}${needsSecurity(t) ? " (needs the security reviewer)" : ""}`).join("; ")}.`
+    );
   const due = all.filter((j) => journeyDue(j, all));
   if (due.length) parts.push(`Journeys due their verification: ${due.map(line).join("; ")}.`);
   // An approved journey with nothing left open and nothing done never comes due by itself: it needs tasks or an end.

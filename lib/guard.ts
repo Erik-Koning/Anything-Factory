@@ -606,10 +606,11 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     [a6g("task\\s+(?:claim|release|submit)"), [...CLAIMANTS, "planner"], "builders, testers and the scaffolder claim, release and submit tasks."],
     [a6g("request\\s+(?:add|reject|screen)|cycle\\s+close"), ["planner"], "the planner takes in and screens feature requests, and closes cycles."],
     [a6g("request\\s+note"), ["planner", "approver"], "the planner and the approver note what they found about a request."],
-    [a6g("task\\s+fetch"), ["planner", "reviewer"], "the planner and the reviewer fetch a task's branch from the remote."],
+    [a6g("task\\s+fetch"), ["planner", "reviewer", "security-reviewer"], "the planner and the reviewers fetch a task's branch from the remote."],
     [a6g("request\\s+stakeholders"), [], "the stakeholders' names and addresses are the operator's to see (Article 8)."],
     [a6g("task\\s+migrate"), [], "moving the task graph between stores is the operator's."],
     [a6g("verdict\\s+review"), ["reviewer"], "only a reviewer records a review (Article 4)."],
+    [a6g("verdict\\s+security"), ["security-reviewer"], "only the security reviewer records a security review (Article 4)."],
     [a6g("verdict\\s+ux"), ["ux-specialist"], "only the UX specialist records a UX verdict (Article 4)."],
     ...(script
       ? [

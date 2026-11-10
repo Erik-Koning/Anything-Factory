@@ -101,7 +101,7 @@ export interface RawTeam {
   progress?: string | null;
   pages?: PagesSettings;
   harness?: { journeys?: "required" | "optional"; lane?: string[] };
-  security?: { audit?: boolean };
+  security?: { audit?: boolean; paths?: string[]; builtIn?: boolean };
   policies?: Record<string, string>;
   never?: (NeverRule | [string, string])[];
   commandOwners?: (CommandOwner | [string, string[], string?])[];
@@ -177,7 +177,9 @@ export interface Team {
   // factory's own list (lib/commands/harness.ts).
   harness: { journeys: "required" | "optional" | "auto"; lane: string[] };
   // `audit`: whether the check after merges asks the package registry about the lockfile's packages (lib/packages.ts).
-  security: { audit: boolean };
+  // `paths`, `builtIn`: on a team with a security reviewer, the paths whose every change it passes before the merge:
+  // the team's own (regular expressions), and whether the factory's list counts too (lib/blast.ts securityFiles).
+  security: { audit: boolean; paths: string[]; builtIn: boolean };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -236,6 +238,13 @@ export const ROLES: Record<string, RoleDefaults> = {
     worktree: true,
   },
   reviewer: { summary: "reviews one finished branch before it merges", limit: 1, readOnly: true, write: [] },
+  // Asked for by the merge queue only where a branch changes a security path, or the reviewer sent it on.
+  "security-reviewer": {
+    summary: "reviews a branch that changes who can do what, or what moves money, before it merges; sweeps the access model",
+    limit: 1,
+    readOnly: true,
+    write: [],
+  },
   "ux-specialist": { summary: "audits pages and journeys, desktop and phone, light and dark", limit: 1, readOnly: true, write: [] },
   innovator: { summary: "finds what the brief misses and proposes it", limit: 1, readOnly: true, write: [] },
   approver: { summary: "approves or sends back the planner's proposals, within the team's approval rules", limit: 1, readOnly: true, write: [] },
@@ -728,8 +737,14 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     else
       problems.push('harness.journeys: "required" (a journey is done only while its specs pass) or "optional"; left out, required once there\'s a suite');
   }
-  const securityIn = object(input.security, "security", ["audit"]) ?? {};
+  const securityIn = object(input.security, "security", ["audit", "paths", "builtIn"]) ?? {};
   const securityAudit = flag(securityIn.audit, "security.audit") ?? true;
+  const securityPaths = list(securityIn.paths, "security.paths", regex) ?? [];
+  const securityBuiltIn = flag(securityIn.builtIn, "security.builtIn") ?? true;
+  if ((securityIn.paths !== undefined || securityIn.builtIn !== undefined) && !roles["security-reviewer"])
+    warnings.push(
+      `security.${securityIn.paths !== undefined ? "paths" : "builtIn"}: the team has no security reviewer, so no merge waits for one (add "security-reviewer": { "limit": 1 } to roles, then a6g register)`
+    );
 
   const team: Team = {
     raw,
@@ -786,7 +801,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     progress: input.progress === "" ? null : (textOrNull(input.progress, "progress") ?? (finish ? finish.replace(/\bdone$/, "status") : null)),
     pages,
     harness: { journeys: harnessJourneys, lane: harnessLane },
-    security: { audit: securityAudit },
+    security: { audit: securityAudit, paths: securityPaths, builtIn: securityBuiltIn },
     policies,
     never,
     commandOwners,

@@ -176,6 +176,7 @@ export function init(argv: string[]): number {
   console.info(
     `\na6g: detected ${found.packageManager ?? "no package manager"}, ${found.ci.length} CI workflow(s), ${found.surfaces.length} way(s) out: ${found.surfaces.map((s) => s.id).join(", ") || "none"}`
   );
+  if (found.security.length) console.info(`a6g: it has ${found.security.join(", ")}, so the draft team has a security reviewer`);
   if (!existsSync(versionDir(PACKAGE.version)))
     console.warn(`a6g: the draft pins Anything Factory ${PACKAGE.version}, which isn't installed yet; run a6g self-install before a6g register`);
   if (options["no-interview"]) {

@@ -87,6 +87,12 @@ const SURFACES: Surface[] = [
   },
 ];
 
+// What makes a security reviewer worth a slot (draftTeam): sign-in, payments, or an API of the repository's own.
+const SIGN_IN =
+  /^(next-auth$|@auth\/|@clerk\/|lucia$|better-auth$|passport(-|$)|@supabase\/(ssr$|auth-|supabase-js$)|jsonwebtoken$|jose$|bcrypt(js)?$|argon2$|@node-rs\/argon2$|@auth0\/|iron-session$|express-session$|cookie-session$|@openauthjs\/|@kinde-oss\/|@workos-inc\/|firebase-admin$|@aws-sdk\/client-cognito|amazon-cognito|@oslojs\/|oslo$)/;
+const SERVERS = ["express", "fastify", "hono", "koa", "@nestjs/core", "@trpc/server", "@hapi/hapi", "elysia", "graphql-yoga", "@apollo/server", "restify"];
+const API_FOLDERS = ["api", "app/api", "src/app/api", "pages/api", "src/pages/api", "server/api", "src/routes/api"];
+
 function workflows(root: string): Workflow[] {
   const dir = join(root, ".github", "workflows");
   if (!existsSync(dir)) return [];
@@ -123,12 +129,15 @@ export function detect(root: string) {
   const pkg = json(join(root, "package.json")) ?? {};
   const deps: Record<string, string> = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
   // A monorepo's packages declare their own dependencies; read the first level of the usual folders.
+  const packages = [""];
   for (const folder of ["packages", "apps"]) {
     const dir = join(root, folder);
     if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir)) {
       const child = json(join(dir, name, "package.json"));
-      if (child) Object.assign(deps, child.dependencies ?? {}, child.devDependencies ?? {});
+      if (!child) continue;
+      Object.assign(deps, child.dependencies ?? {}, child.devDependencies ?? {});
+      packages.push(join(folder, name));
     }
   }
   const packageManager = has(root, "pnpm-lock.yaml")
@@ -182,6 +191,12 @@ export function detect(root: string) {
   const html = (git(root, "ls-files", "--", "*.html") ?? "").split("\n").some((file) => file !== "" && !/(^|\/)(docs?|node_modules)\//.test(file));
   const e2e = ["@playwright/test", "playwright", "cypress", "@wdio/cli"].filter((dep) => dep in deps);
   const e2eDir = ["e2e", "tests/e2e", "test/e2e", "cypress", "playwright"].find((dir) => has(root, dir)) ?? null;
+  // Where a mistake lets someone in, or moves money: what a security reviewer is for.
+  const security = [
+    ...(Object.keys(deps).some((dep) => SIGN_IN.test(dep)) ? ["sign-in"] : []),
+    ...(surfaces.some((surface) => surface.policy === "payments") ? ["payments"] : []),
+    ...(SERVERS.some((dep) => dep in deps) || packages.some((at) => has(join(root, at), ...API_FOLDERS)) ? ["an API"] : []),
+  ];
 
   return {
     root,
@@ -208,6 +223,7 @@ export function detect(root: string) {
     html,
     e2e,
     e2eDir,
+    security,
     unitTests: ["vitest", "jest", "mocha", "ava"].filter((dep) => dep in deps),
     agentConfig: {
       claudeMd: has(root, "CLAUDE.md"),
@@ -243,6 +259,8 @@ export function draftTeam(found: Detected, { name, branch, owner }: { name: stri
     reviewer: { limit: 1 },
     approver: { limit: 1 },
     ...(found.ui.length ? { "ux-specialist": { limit: 1 } } : {}),
+    // Sign-in, payments or an API: a branch that changes one merges once a security reviewer has passed it.
+    ...(found.security.length ? { "security-reviewer": { limit: 1 } } : {}),
     ...(found.e2e.length && tests ? { tester: { limit: 1, write: [tests] } } : {}),
     // Anything with an app (or nothing yet) gets the harness's owner: it sets the browser checks up where the
     // repository has none, keeps them working, and makes an empty repository's skeleton.

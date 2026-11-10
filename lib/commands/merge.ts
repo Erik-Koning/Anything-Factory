@@ -27,7 +27,7 @@ import { entryOf, FACTORY_ROOT, readRegistry, stateDir, workDir } from "../paths
 import { leakRefusal, leaksInRange } from "../secrets.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { machineName } from "../machine.ts";
-import { isTest } from "../blast.ts";
+import { isTest, securityFiles } from "../blast.ts";
 import { branchRef, integrationDiverged, isLead, pushIntegration } from "../tasks/machines.ts";
 import { ticketOf, type Task } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
@@ -50,7 +50,8 @@ import {
 } from "./harness.ts";
 import { pruneWorktrees } from "./watchdog.ts";
 
-// What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/.
+// What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/ (the security
+// reviewer's, in state/security/).
 export interface MergeRecord {
   branch: string;
   result: string;
@@ -65,6 +66,8 @@ export interface Verdict {
   sha: string;
   // How much the reviewer judged the change could break (review approvals since 0.4.0).
   risk?: string;
+  // The reviewer sent the branch on to the security reviewer (a6g verdict review … approve --security).
+  security?: boolean;
   note: string;
   by: string;
   at: string;
@@ -587,40 +590,35 @@ async function mergeLocked({
     const pattern = new RegExp(removedPattern);
     required = removedLines(diff).some((line) => pattern.test(line));
   }
+  // A verdict on an earlier commit holds for the tip when the tip is only a rebase of it (--rebased-from <that commit>).
+  // What refuses that, in the verdict's own words, or null.
+  const notRebaseOf = (judged: string, say: { gone: string; moved: string; merges: string; changed: string }): string | null => {
+    if (rebasedFrom && g("cat-file", "-e", `${judged}^{commit}`).status !== 0) return say.gone;
+    if (!rebasedFrom || commit(rebasedFrom) !== judged) return say.moved;
+    // range-diff skips merge commits, so a "rebase" that merged the integration branch in could carry new code in
+    // the merge itself. A rebase has none.
+    const oldRange = `${out("merge-base", judged, integration)}..${judged}`;
+    const newRange = `${out("merge-base", tip, integration)}..${tip}`;
+    if (out("rev-list", "--merges", oldRange) || out("rev-list", "--merges", newRange)) return say.merges;
+    // Every commit in both ranges paired with one unchanged ("=") on the other side, and nothing else.
+    const commits = Number(out("rev-list", "--count", oldRange));
+    const lines = out("range-diff", "--no-color", oldRange, newRange).split("\n").filter(Boolean);
+    const same = lines.filter((line) => /^\s*\d+:\s+[0-9a-f]+\s+=\s+\d+:\s+[0-9a-f]+(\s|$)/.test(line)).length;
+    return !commits || Number(out("rev-list", "--count", newRange)) !== commits || lines.length !== commits || same !== commits ? say.changed : null;
+  };
   if (required) {
     const review = readJson<Verdict>(join(state, "reviews", `${safe}.json`));
     if (!review) return fail(2, "refused", `${branch} has no review; start a reviewer (it records one with a6g verdict review)`);
     if (review.verdict !== "approve") return fail(2, "refused", `the review of ${branch} asks for changes: ${review.note}`);
     if (review.sha !== tip) {
       const approved = review.sha.slice(0, 9);
-      if (rebasedFrom && g("cat-file", "-e", `${review.sha}^{commit}`).status !== 0)
-        return fail(
-          2,
-          "refused",
-          `the approved commit ${approved} is gone from the repository, so the rebase can't be compared; have ${branch} reviewed again`
-        );
-      if (!rebasedFrom || commit(rebasedFrom) !== review.sha)
-        return fail(
-          2,
-          "refused",
-          `the approval is for ${approved} but ${branch} is at ${tip.slice(0, 9)}: have it reviewed again, or pass --rebased-from ${approved} if it's only a rebase`
-        );
-      // range-diff skips merge commits, so a "rebase" that merged the integration branch in could carry new code in
-      // the merge itself. A rebase has none.
-      const oldRange = `${out("merge-base", review.sha, integration)}..${review.sha}`;
-      const newRange = `${out("merge-base", tip, integration)}..${tip}`;
-      if (out("rev-list", "--merges", oldRange) || out("rev-list", "--merges", newRange))
-        return fail(
-          2,
-          "refused",
-          `${branch} has merge commits, so it isn't a plain rebase of ${approved}; rebase it without merges, or have it reviewed again`
-        );
-      // Every commit in both ranges paired with one unchanged ("=") on the other side, and nothing else.
-      const commits = Number(out("rev-list", "--count", oldRange));
-      const lines = out("range-diff", "--no-color", oldRange, newRange).split("\n").filter(Boolean);
-      const same = lines.filter((line) => /^\s*\d+:\s+[0-9a-f]+\s+=\s+\d+:\s+[0-9a-f]+(\s|$)/.test(line)).length;
-      if (!commits || Number(out("rev-list", "--count", newRange)) !== commits || lines.length !== commits || same !== commits)
-        return fail(2, "refused", `${branch} isn't only a rebase of the approved ${approved} (git range-diff shows changes); have it reviewed again`);
+      const problem = notRebaseOf(review.sha, {
+        gone: `the approved commit ${approved} is gone from the repository, so the rebase can't be compared; have ${branch} reviewed again`,
+        moved: `the approval is for ${approved} but ${branch} is at ${tip.slice(0, 9)}: have it reviewed again, or pass --rebased-from ${approved} if it's only a rebase`,
+        merges: `${branch} has merge commits, so it isn't a plain rebase of ${approved}; rebase it without merges, or have it reviewed again`,
+        changed: `${branch} isn't only a rebase of the approved ${approved} (git range-diff shows changes); have it reviewed again`,
+      });
+      if (problem) return fail(2, "refused", problem);
     }
     // A change the reviewer judged high-risk merges with its tests: they come in the same branch, not after it.
     // Tests added or changed, that is: deleting one isn't testing the change.
@@ -630,6 +628,34 @@ async function mergeLocked({
         "refused",
         `the reviewer judged ${branch} high-risk, and it changes no tests: its tests come with it (unit tests for logic, end-to-end for a flow); send it back with changes`
       );
+  }
+
+  // On a team with a security reviewer, three kinds of branch merge only once they've passed its tip: one that changes
+  // a security path (team.json security), one a reviewer sent on (a6g verdict review … approve --security), and one
+  // they've judged before, so a branch sent back with issues can't merge on a later round that nobody sends on.
+  if (team.roles["security-reviewer"]) {
+    const security = readJson<Verdict>(join(state, "security", `${safe}.json`));
+    const onPaths = securityFiles(team.security, changed);
+    const sentOn = readJson<Verdict>(join(state, "reviews", `${safe}.json`))?.security === true;
+    if (!security && (onPaths.length || sentOn)) {
+      const why = onPaths.length
+        ? `it changes ${onPaths.slice(0, 3).join(", ")}${onPaths.length > 3 ? ` and ${onPaths.length - 3} more` : ""}`
+        : "its reviewer sent it on";
+      return fail(2, "refused", `${branch} has no security review, and ${why}; start a security reviewer (it records one with a6g verdict security)`);
+    }
+    if (security && security.verdict !== "pass")
+      return fail(2, "refused", `the security review of ${branch} found issues: ${security.note}; it merges once the security reviewer passes it`);
+    if (security && security.sha !== tip) {
+      const passed = security.sha.slice(0, 9);
+      const again = "have the security reviewer pass it again";
+      const problem = notRebaseOf(security.sha, {
+        gone: `the commit the security reviewer passed, ${passed}, is gone from the repository, so the rebase can't be compared; ${again}`,
+        moved: `the security review passed ${passed} but ${branch} is at ${tip.slice(0, 9)}: ${again}, or pass --rebased-from ${passed} if it's only a rebase`,
+        merges: `${branch} has merge commits, so it isn't a plain rebase of ${passed}; rebase it without merges, or ${again}`,
+        changed: `${branch} isn't only a rebase of ${passed}, which the security reviewer passed (git range-diff shows changes); ${again}`,
+      });
+      if (problem) return fail(2, "refused", problem);
+    }
   }
 
   const before = out("rev-parse", integration);

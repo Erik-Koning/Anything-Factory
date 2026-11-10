@@ -1,7 +1,8 @@
 // The blast radius of a change (a6g blast): the files it touches, the files that import them, the files that usually
 // change with them, the tests among all of those, whether it touches UI and how much, and which of the team's
 // critical paths it reaches. Reviewers and testers start from it, and a review's approval reads ui and uiLines to ask
-// for screenshots of a UI change that isn't trivial.
+// for screenshots of a UI change that isn't trivial. On a team with a security reviewer, also the security paths it
+// changes (team.json security): the merge queue asks for that reviewer's pass on those.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -17,6 +18,7 @@ export interface BlastRadius {
   uiFiles: string[]; // the changed UI files
   uiLines: number; // lines added + removed in the UI files (git diff --numstat base...ref)
   critical: string[]; // the critical regexes (as given) that match a changed file or one of its importers
+  security: string[]; // the changed files on a security path (team.json security), when the caller asks
   truncated: boolean; // more source files that might import a changed one than are read for imports, so importers may be missing
 }
 
@@ -58,6 +60,52 @@ const isUi = (path: string): boolean =>
   !SERVER.test(path) &&
   (UI_FILE.test(path) || STYLE.test(path) || COMPONENT.test(path) || (UI_SEGMENT.test(path) && TEMPLATE.test(path)));
 const isSource = (path: string): boolean => SOURCE_EXTENSIONS.includes(posix.extname(path));
+
+// The factory's own security paths: code that says who someone is, what they may do, or what moves money. By the words
+// in a path, so that useAuth.ts, AuthProvider.tsx, sign-in/ and stripe_webhook.py all count and author.ts doesn't.
+const SECURITY_WORD = new RegExp(
+  `^(?:${[
+    // Who someone is: sign-in, sessions, what proves it.
+    "auth|authn|authz|oauth|sso|saml|oidc|jwt|mfa|2fa|totp|authenticat\\w*|log(?:in|out)s?|sign(?:in|up|out)s?",
+    "passwords?|passkeys?|sessions?|cookies?|credentials?|secrets?|apikeys?|(?:access|refresh|bearer)tokens?",
+    // What they may do.
+    "permissions?|roles?|rbac|acl|rls|polic(?:y|ies)|guards?|authoriz\\w*|middlewares?|csrf|cors",
+    // Money, and who calls in from outside.
+    "payments?|billing|checkouts?|stripe|invoic\\w*|refunds?|payouts?|subscriptions?|webhooks?",
+    // The data's shape and its rules.
+    "migrat\\w*",
+  ].join("|")})$`
+);
+// SQL (a migration, a policy) and a store's rules (firestore.rules, database.rules.json), whatever they're called.
+const SECURITY_FILE = /\.sql$|\.rules(\.json)?$/;
+// A path's words: split at anything that isn't a letter or a digit, between letters and digits, and where a capital
+// starts a word (useAuth, SSOProvider).
+const words = (path: string): string[] =>
+  path
+    .split(/[^A-Za-z0-9]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+// A word alone, or joined with the next (sign-in is signin, web_hook is webhook). Never a test or a document: neither
+// changes who can do what.
+export const isSecurityPath = (path: string): boolean => {
+  if (isTest(path) || DOC.test(path)) return false;
+  if (SECURITY_FILE.test(path)) return true;
+  const all = words(path);
+  return all.some((word, i) => SECURITY_WORD.test(word) || SECURITY_WORD.test(word + (all[i + 1] ?? "")));
+};
+// The changed files on a team's security paths: the factory's own (unless the team turned them off) and the team's
+// patterns, which match as written (tests too, when one names them).
+export function securityFiles(security: { paths: string[]; builtIn: boolean }, changed: string[]): string[] {
+  const rules = security.paths.flatMap((source) => {
+    try {
+      return [new RegExp(source)];
+    } catch {
+      return []; // the team's loader reports it
+    }
+  });
+  return changed.filter((file) => (security.builtIn && isSecurityPath(file)) || rules.some((rule) => rule.test(file)));
+}
+
 const isString = (value: unknown): value is string => typeof value === "string";
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const sorted = (items: Iterable<string>): string[] => [...new Set(items)].sort();
@@ -89,7 +137,14 @@ function commitOf(top: string, name: string): string {
 // (MAX_SOURCES; a test's few).
 export function blastRadius(
   cwd: string,
-  options: { base: string; ref?: string; critical?: string[]; touches?: boolean; maxSources?: number }
+  options: {
+    base: string;
+    ref?: string;
+    critical?: string[];
+    security?: { paths: string[]; builtIn: boolean };
+    touches?: boolean;
+    maxSources?: number;
+  }
 ): BlastRadius {
   const top = gitOut(cwd, ["rev-parse", "--show-toplevel"]).trim();
   const git = (...args: string[]): string => gitOut(top, args);
@@ -140,7 +195,9 @@ export function blastRadius(
     })
   );
 
-  return { base, ref, changed, importers, related, tests, ui: uiFiles.length > 0, uiFiles, uiLines, critical, truncated };
+  const security = options.security ? securityFiles(options.security, changed) : [];
+
+  return { base, ref, changed, importers, related, tests, ui: uiFiles.length > 0, uiFiles, uiLines, critical, security, truncated };
 }
 
 // What a file imports, as files in the checkout, and whether it's a barrel.

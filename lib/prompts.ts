@@ -74,6 +74,8 @@ function laneText(team: Team, role: string): string {
 }
 
 function commandsFor(team: Team, role: string): string {
+  // Whether the team has a security reviewer: what its reviewer and the blast radius say about security paths.
+  const secured = Boolean(team.roles["security-reviewer"]);
   const lines = [
     "`a6g gate [--quick]`: the team's checks (what CI runs), in the checkout you're in.",
     "`a6g env status`: whether the team's environment is up, and its URLs.",
@@ -107,7 +109,7 @@ function commandsFor(team: Team, role: string): string {
       );
     if (role === "planner" && team.mode === "cycles")
       lines.push("`a6g cycle close --report-file <file>`: close the cycle; the report goes to the operator.");
-    if ((role === "planner" || role === "reviewer") && team.tasks.store === "mongo" && team.tasks.lead)
+    if (["planner", "reviewer", "security-reviewer"].includes(role) && team.tasks.store === "mongo" && team.tasks.lead)
       lines.push("`a6g task fetch <id>`: a task's branch as a worker pushed it, before its review (the verdict and the merge fetch it too).");
     if (CLAIMANTS.includes(role))
       lines.push('`a6g task claim [<id>]`, `a6g task submit <id>`, `a6g task release <id> [--blocked "…"]`: take, hand in or hand back your task.');
@@ -116,14 +118,21 @@ function commandsFor(team: Team, role: string): string {
         "`a6g task approve|reject|research|escalate <id>`: your verdicts on proposals. `a6g request show|note <id>`: what a stakeholder asked for, and what you found.",
         `A proposal made of a stakeholder's words carries the planner's screen (\`a6g task show\`). ${team.approval.stakeholders === "operator" ? "On this team the operator approves all of them: escalate each, with what you found." : "Escalate any screened risky, and any you'd screen risky yourself, whatever its screen says."} Risky: any of ${SCREEN_RISKS.join("; ")}.`
       );
-    if (role === "reviewer" || CLAIMANTS.includes(role))
+    if (role === "reviewer" || role === "security-reviewer" || CLAIMANTS.includes(role))
       lines.push(
-        "`a6g blast [<sha>] [--json]`: what a change touches (run it in the checkout of that commit): importers, related files, their tests, UI, critical paths."
+        `\`a6g blast [<sha>] [--json]\`: what a change touches (run it in the checkout of that commit): importers, related files, their tests, UI, critical paths${secured ? ", and the security paths it changes" : ""}.`
       );
   }
   if (role === "reviewer")
     lines.push(
-      '`a6g verdict review <branch> approve|changes --sha <the commit you reviewed> --note "<one line>"`: record your verdict on exactly that commit. An approval also takes `--risk low|medium|high`, how much the change could break (a high-risk change merges only with its tests), and `--shots "<what you looked at>"` when you looked. It\'s refused if the branch has moved past it; review what was added and record again. The merge queue merges only the commit you approved.'
+      '`a6g verdict review <branch> approve|changes --sha <the commit you reviewed> --note "<one line>"`: record your verdict on exactly that commit. An approval also takes `--risk low|medium|high`, how much the change could break (a high-risk change merges only with its tests), and `--shots "<what you looked at>"` when you looked. It\'s refused if the branch has moved past it; review what was added and record again. The merge queue merges only the commit you approved.' +
+        (secured
+          ? " Add `--security` to an approval to send the branch on to the security reviewer: when it changes who can do what, what someone can see, or what moves money, and `a6g blast` lists no security path for it (one that does is theirs already). It then merges once they've passed it too."
+          : "")
+    );
+  if (role === "security-reviewer")
+    lines.push(
+      "`a6g verdict security <branch> pass|issues --sha <the commit you reviewed> --note \"<one line>\"`: record your verdict on exactly that commit. It's refused if the branch has moved past it; read what was added and record again. `issues` sends the task back to its builder with your note; the merge queue merges the branch only once you've passed its tip."
     );
   if (role === "ux-specialist")
     lines.push(

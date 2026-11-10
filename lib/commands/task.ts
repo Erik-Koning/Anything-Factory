@@ -42,6 +42,7 @@ import {
   STATUSES,
   statusRefusal,
   type Screen,
+  securityLine,
   type Task,
   theirWords,
   ticketOf,
@@ -169,6 +170,8 @@ export function detail(t: Task): string {
   if (t.claim) out.push(`claimed by the ${t.claim.role} on ${t.claim.machine} until ${t.claim.until}`);
   if (t.rounds) out.push(`review rounds with changes: ${t.rounds}`);
   if (t.ui !== null || t.critical.length) out.push(`touches: ${[t.ui ? "UI" : null, ...t.critical].filter(Boolean).join(", ") || "no UI"}`);
+  const security = securityLine(t);
+  if (security) out.push(security);
   if (t.gate) out.push(`gate: asked ${t.gate.asked} · instead ${t.gate.simplify} · simplest ${t.gate.simplest}`);
   if (t.score)
     out.push(`score: ${DIMENSIONS.map((d) => `${d} ${t.score?.[d]}`).join(", ")}; confidence ${t.score.confidence}, size ${t.score.size}. ${t.score.why}`);
@@ -642,6 +645,9 @@ const toplevelOrNull = (): string | null => {
   }
 };
 
+// How many of a branch's security paths its task names (a6g blast has them all).
+const SECURITY_FILES_KEPT = 50;
+
 const submit: Handler = async ({ team, run, store, who }, [id]) => {
   if (!CLAIMS[who]) throw new Refused(`builders, testers and the scaffolder submit what they built; you're the ${who}`);
   const worktree = toplevel();
@@ -673,11 +679,24 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
     throw new Refused(`this branch doesn't hold the task's last round (${task.sha.slice(0, 9)}); start from it, then submit`);
   if (task.rounds > 0 && task.sha === sha)
     throw new Refused(`this is the commit the reviewer asked changes on (${sha.slice(0, 9)}); make the changes in its notes, then submit`);
-  // What it touches, for the reviewer and the planner: UI (a view check is due) and the team's critical paths.
-  let touches: Pick<Task, "ui" | "critical"> = { ui: null, critical: [] };
+  // What it touches, for the reviewer and the planner: UI (a view check is due), the team's critical paths, and, on a
+  // team with a security reviewer, the security paths that put it in their hands (where it stays, round after round).
+  const reviewed = Boolean(team.roles["security-reviewer"]);
+  let touches: Pick<Task, "ui" | "critical" | "security"> = { ui: null, critical: [], ...(reviewed ? { security: task.security ?? null } : {}) };
   try {
-    const radius = blastRadius(worktree, { base, critical: team.critical });
+    const radius = blastRadius(worktree, { base, critical: team.critical, ...(reviewed ? { security: team.security } : {}) });
     touches = { ui: radius.ui, critical: radius.critical };
+    const was = task.security;
+    if (reviewed)
+      touches.security =
+        radius.security.length || was?.sent || was?.seen
+          ? {
+              files: radius.security.slice(0, SECURITY_FILES_KEPT),
+              ...(was?.sent ? { sent: true } : {}),
+              ...(was?.seen ? { seen: true } : {}),
+              ...(was?.passed ? { passed: was.passed } : {}),
+            }
+          : null;
   } catch {}
   // On a team on several machines the branch goes to the remote, wherever it was built: the lead merges from there,
   // and a rework on another machine starts from it.
@@ -700,7 +719,7 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
 
 // The lead: a task's branch as its submit pushed it, fetched for review, and the commit to review.
 const fetchBranch: Handler = async ({ home, team, store, who }, [id]) => {
-  if (!may(who, ["planner", "reviewer"])) throw new Refused("the planner and the reviewer fetch a task's branch");
+  if (!may(who, ["planner", "reviewer", "security-reviewer"])) throw new Refused("the planner and the reviewers fetch a task's branch");
   const task = await getTask(store, id);
   if (!task.branch) throw new Refused(`task ${task.id} has no branch yet`);
   if (!multiMachine(team)) {

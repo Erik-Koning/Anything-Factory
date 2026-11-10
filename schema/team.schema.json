@@ -28,7 +28,7 @@
       "description": "45m, 6h, 2d, or minutes."
     },
     "roleName": {
-      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "ux-specialist", "innovator", "approver"]
+      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "security-reviewer", "ux-specialist", "innovator", "approver"]
     },
     "id": {
       "type": "string",
@@ -409,6 +409,10 @@
         "reviewer": {
           "$ref": "#/$defs/role"
         },
+        "security-reviewer": {
+          "$ref": "#/$defs/role",
+          "description": "Reviews a branch that changes a security path (security), or that a reviewer sent on, before it merges: a team with one merges such a branch only once it has passed the tip (a6g verdict security)."
+        },
         "ux-specialist": {
           "$ref": "#/$defs/role"
         },
@@ -590,6 +594,18 @@
         "audit": {
           "type": "boolean",
           "description": "Whether the check after merges runs the package manager's audit of what ships (npm audit --omit=dev, pnpm audit --prod) when a lockfile changed, and weekly, and files each package with an advisory at high or critical. It sends the registry the names and versions of the packages. Default true."
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "regex"
+          },
+          "description": "Regexes over paths: a branch that changes a file one matches merges only once the security reviewer has passed it (on a team with that role). They add to the factory's own list, and match a path as written, tests and documents included."
+        },
+        "builtIn": {
+          "type": "boolean",
+          "description": "Whether the factory's own list of security paths applies: files whose names say sign-in, sessions, permissions, payments, webhooks, migrations or policies (never tests or documents), and .sql and rules files. Default true; false leaves only paths."
         }
       }
     },

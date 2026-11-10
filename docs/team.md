@@ -124,11 +124,13 @@ Each entry in `roles` takes:
 | `deny`      | Regexes the role may never write, even inside `write`                                                                                                                                                                                                            |
 | `branch`    | The role's branch pattern (builders, testers and the scaffolder)                                                                                                                                                                                                 |
 | `mcp`       | Outside tools the role may call. The planner has the Gmail tools by default; the guard lets email go only to `owner`                                                                                                                                             |
-| `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, ux-specialist and innovator                                                                                                                                                   |
+| `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, security-reviewer, ux-specialist and innovator                                                                                                                                |
 | `compactAt` | (planner) T3 Code compacts the planner's context at this many tokens (default 160000)                                                                                                                                                                            |
 
-The roles are planner, builder, tester, scaffolder, reviewer, ux-specialist, innovator and approver (the reviewer, the
-UX specialist, the innovator and the approver are read-only). The scaffolder owns the means of checking: it sets up and
+The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer, ux-specialist, innovator and approver
+(the reviewer, the security reviewer, the UX specialist, the innovator and the approver are read-only). The security
+reviewer reads a branch for what it lets someone do that they shouldn't; a team with one merges some branches only
+once it has passed them (`security`, below). The scaffolder owns the means of checking: it sets up and
 keeps the test harness and its manifest (`.a6g/harness.json`, which only its lane names), makes a repository's
 skeleton, and claims `scaffold` and `test-infra` tasks (and `test` ones where the team has no tester). Its branches are
 `a6g/s<id>-…`, and a team with one has `review.required` default to `["builder", "scaffolder"]`. Their prompts are in the factory
@@ -209,6 +211,44 @@ On a team with the task graph, a scaffolder's branch merges only for its own app
 kind decides which of the two it is.
 
 ## `security`
+
+Two things: which branches wait for the security reviewer, and the package audit.
+
+### The security reviewer
+
+A team has one when `roles` lists it (`"security-reviewer": { "limit": 1 }`); `a6g init` drafts it for a repository
+with sign-in, payments or an API of its own. A team without the role is asked for nothing here. With it, the merge
+queue merges these branches only once the security reviewer has passed their tip
+(`a6g verdict security <branch> pass --sha <tip>`, which only that role records):
+
+- **One that changes a security path.** The factory's own list goes by a path's words: sign-in and sessions (`auth`,
+  `login`, `session`, `password`, `token` pairs like `accessToken`, `oauth`, `jwt`…), permissions (`permission`,
+  `role`, `policy`, `guard`, `middleware`, `acl`, `rls`…), money and callers from outside (`payment`, `billing`,
+  `checkout`, `stripe`, `invoice`, `refund`, `subscription`, `webhook`) and the data's shape (`migration`), plus every
+  `.sql` file and rules file (`.rules`, `.rules.json`). A word is matched whole, in any case and through camelCase
+  (`useAuth.ts`, `AuthProvider.tsx`, `api/stripe/webhook.ts`), so `author.ts` and `lesson.ts` aren't on it; tests and
+  documents never are.
+- **One matching `security.paths`:** your own regexes, which add to that list and match a path as written (tests
+  too). An API's own routes belong here (`"paths": ["^app/api/", "^server/routes/"]`): the factory's list leaves
+  them out, since not every route decides who sees what. `"builtIn": false` turns the factory's list off and leaves
+  only yours.
+- **One a reviewer sent on:** `a6g verdict review <branch> approve --security`, for a change that decides who can do
+  what in a file no path names. It stays sent for the branch's later rounds.
+- **One the security reviewer has judged before.** A branch it sent back with `issues` merges only once it passes,
+  whatever the next round changes.
+
+A rebased branch keeps its pass the way it keeps its review: `a6g merge <branch> --rebased-from <the commit passed>`
+merges it when `git range-diff` shows the same change. `issues` sends the task back to its builder with the note,
+like a review's changes, and counts as a round. The task records why it's the security reviewer's
+(`a6g task show <id>`: "needs the security reviewer: it changes …"), `a6g blast` lists the security paths a change
+touches, and the planner's context marks each task waiting for one. `a6g check` warns when `security.paths` or
+`builtIn` is set on a team with no security reviewer, since nothing then waits for anyone.
+
+Once a cycle, and before a finish line, the planner also starts the security reviewer with no branch, to sweep who
+can reach which page and which record across the whole app; what it finds is filed as tasks. That one is the
+planner's habit, not a rule: nothing refuses a cycle that skipped it.
+
+### The package audit
 
 `"security": { "audit": false }` turns off the package audit. Left out (the default), the check after merges runs the
 package manager's own audit of what ships, beside each lockfile the repository tracks: `npm audit --omit=dev` for a

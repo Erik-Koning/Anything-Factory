@@ -129,6 +129,10 @@ export interface Task extends Doc {
   critical: string[];
   // How much could break, as the reviewer judged it when it approved (a high-risk change merges with its tests).
   risk: Risk | null;
+  // On a team with a security reviewer, what makes the branch that reviewer's too: the security paths it changes (read
+  // at submit), whether the reviewer sent it on, and the commit that passed. The merge queue measures the branch
+  // itself; this is how the planner knows before it merges.
+  security?: SecurityDue | null;
   // Raised to the operator, and waiting on other tasks (above); cleared when it moves on.
   ask?: Ask | null;
   wait?: Wait | null;
@@ -222,6 +226,31 @@ export function priorityOf(score: Score, weights: Record<Dimension, number> = DE
 
 // What refuses a change; the commands print it as it is.
 export class Refused extends Error {}
+
+// Why a task's branch is the security reviewer's to pass before it merges (the merge queue's rule, a6g merge): the
+// security paths its last round changed, a reviewer who sent it on, or a verdict the security reviewer has recorded on
+// it already. The last two hold for every later round. `passed` is the commit they last passed.
+export interface SecurityDue {
+  files: string[];
+  sent?: boolean;
+  seen?: boolean;
+  passed?: string;
+}
+// Whether a task's branch still waits for the security reviewer: it's theirs, and they haven't passed this commit.
+export const needsSecurity = (t: Pick<Task, "security" | "sha">): boolean => Boolean(t.security) && (!t.security?.passed || t.security.passed !== t.sha);
+// In a few words, for the task's own page.
+export function securityLine(t: Pick<Task, "security" | "sha">): string | null {
+  const due = t.security;
+  if (!due) return null;
+  if (!needsSecurity(t)) return `security reviewer: passed ${due.passed?.slice(0, 9)}`;
+  const why = due.files.length
+    ? `it changes ${due.files.slice(0, 3).join(", ")}${due.files.length > 3 ? ` and ${due.files.length - 3} more` : ""}`
+    : due.sent
+      ? "the reviewer sent it on"
+      : "it has been in its hands";
+  const earlier = due.passed ? ` (it passed ${due.passed.slice(0, 9)}; a plain rebase of that merges with --rebased-from)` : "";
+  return `needs the security reviewer: ${why}${due.files.length && due.sent ? ", and the reviewer sent it on" : ""}${earlier}`;
+}
 
 // Who's acting on a task: a team role, the operator (a person, outside any team), or the factory itself.
 export type Actor = string;
@@ -440,7 +469,7 @@ const RULES: Rule[] = [
     check: holderOrPlanner,
   },
   { via: "submit", by: CLAIMANTS, from: ["building"], to: ["review"], check: holder },
-  { via: "changes", by: ["reviewer", OPERATOR], from: ["review"], to: ["approved", "blocked"], check: sameBranch },
+  { via: "changes", by: ["reviewer", "security-reviewer", OPERATOR], from: ["review"], to: ["approved", "blocked"], check: sameBranch },
   { via: "merge", by: [MERGE], from: ["approved", "blocked", "question", "review"], to: ["done"], check: merged },
   // A branch that conflicts goes back to be claimed again and rebased.
   { via: "conflict", by: [MERGE], from: ["review"], to: ["approved"], check: sameBranch },

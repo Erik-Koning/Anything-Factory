@@ -110,10 +110,17 @@ A high-risk change carries its own tests in the same branch: unit tests for its 
 spec for the flow, failing without the change (section 5). Without them it's "changes", and the merge queue refuses
 it anyway.
 
+**Where the team has a security reviewer** (your commands list `--security`), `a6g blast` also lists the security
+paths the change touches, and a branch with any merges only once they've passed it; you needn't send it. Send on one
+it lists none for, with `--security` on your approval, when the change decides who can do what, what someone can
+see, or what moves money: a permission check in a helper, a query that stops narrowing by the signed-in user, a
+price worked out from what the browser sent. Their review is beside yours, never instead of it: a hole you can see
+is a change you ask for.
+
 ## The verdict
 
-- Every section holds: `a6g verdict review <branch> approve --sha <sha> --risk low|medium|high [--shots <dir>] --note
-"<one line, with why that risk>"`.
+- Every section holds: `a6g verdict review <branch> approve --sha <sha> --risk low|medium|high [--shots <dir>]
+[--security] --note "<one line, with why that risk>"`.
 - Otherwise: `a6g verdict review <branch> changes --sha <sha> --note "<the gist>"`, and answer with `VERDICT: changes`
   and a numbered list: each item with the file and line, what's wrong, why it matters, and what would fix it in the
   codebase's own terms. Order it by severity. Optional suggestions go after it, marked as such; don't ask for changes
