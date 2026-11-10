@@ -484,6 +484,44 @@ describe("guard", () => {
       bash(home, "planner", "echo x >> .a6g/run/state/log.md", "refuse"),
     ]));
 
+  // The proofs are files (what ran and passed, the operator's allowance, the complete marker), and a program's own
+  // code writes a file where the guard reads no path: code that names one doesn't run, and reading stays plain.
+  test("a program's code that names the factory's records isn't run", async () => {
+    const run = `${home}-run`;
+    const names = (said: string) => assert.match(said, /written by its commands only\. To read one, use cat, jq or grep, or pipe it in/);
+    for (const command of [
+      `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`,
+      `python3 -c "open('.a6g/run/state/harness-allow.json', 'w').write('{}')"`,
+      `timeout 30 npx tsx -e "import('fs').then((fs) => fs.writeFileSync('${home}/.a6g/run/state/verdicts.json', '{}'))"`,
+      `perl -e 'open(F, ">.a6g/run/state/verify-suite.json"); print F "{}"'`,
+      `awk 'BEGIN { print "{}" > ".a6g/run/state/verify-suite.json" }'`,
+      "python3 - <<'EOF'\nimport json\njson.dump([], open('.a6g/run/state/e2e/history.json', 'w'))\nEOF",
+      "cat <<'EOF' | node\nrequire('fs').writeFileSync('.a6g/run/locks/merge/pid', '1')\nEOF",
+      `echo "require('fs').rmSync('.a6g/run/state', { recursive: true })" | node`,
+      `node --input-type=module <<< "import { writeFileSync } from 'node:fs'; writeFileSync('.a6g/run/state/tasks.json', '{}')"`,
+      `node -e "require('fs').writeFileSync('${run}/complete', 'now')"`,
+      `python3 -c "import os; open(os.path.expanduser('~/${run.split("/").slice(-2).join("/")}/complete'), 'w')"`,
+      `cd .a6g/run/state && node -e "require('fs').writeFileSync('e2e/history.json', '[]')"`,
+    ]) {
+      const { outcome, said } = await guardAsync(home, "builder", "Bash", { command }, { run });
+      assert.equal(outcome, "refuse", command);
+      names(said);
+    }
+    await holds([
+      bash(home, "planner", `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`, "refuse"),
+      bash(home, "tester", `python3 -c "open('.a6g/run/state/harness-allow.json', 'w')"`, "refuse"),
+      // Reading is cat's, jq's and grep's, and a program may be handed what they read.
+      bash(home, "builder", "cat .a6g/run/state/e2e/history.json | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))'", "allow"),
+      bash(home, "builder", "jq length .a6g/run/state/e2e/history.json", "allow"),
+      bash(home, "builder", "tail -n 20 .a6g/run/state/verify.log && ls .a6g/run/state", "allow"),
+      bash(home, "builder", "grep -c passed .a6g/run/state/e2e/history.json", "allow"),
+      // Code that names nothing of the factory's runs as before, in scratch too.
+      bash(home, "builder", `node -e "require('fs').writeFileSync('.a6g/run/scratch/notes.json', '{}')"`, "allow"),
+      bash(home, "builder", `python3 -c "print(open('src/state/store.ts').read())"`, "allow"),
+      bash(home, "builder", `node -e "console.log('the complete list')"`, "allow"),
+    ]);
+  });
+
   test("owned commands, however they're called", () =>
     holds([
       bash(home, "builder", "node /Users/x/.a6g/versions/0.2.0/bin/a6g.mjs merge a6g/b1-x", "refuse"),

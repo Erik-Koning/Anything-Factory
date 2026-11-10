@@ -25,6 +25,7 @@ import {
   NAMES_ONLY,
   operands,
   parseShell,
+  runsCode,
   type ShellCommand,
   stripGlob,
   unwrap,
@@ -974,6 +975,24 @@ export function check(input: HookInput): void {
         if (part && !/\s/.test(part) && (isSecretWord(part, exists) || isSecretWord(stripGlob(part), exists))) refuse(`${part} holds secrets; ${SECRET}`);
   }
 
+  // The factory's proofs are files its commands write: what ran and passed, what the operator allowed, the verdicts
+  // (.a6g/run/state), and that the work is complete (the run folder's marker). A program's own code writes a file
+  // where no rule here reads a path, so a command that runs code and names one of them is refused, whatever the code
+  // does with it. A seatbelt (README, Known limits): a path put together in the code gets through.
+  const PROOFS = /\.a6g\/run\/(?:state|locks|merge)(?![\w.-])/;
+  const marker = run ? `${basename(dirname(run))}/${basename(run)}/complete` : null;
+  function checkProofs(command: ShellCommand): void {
+    if (!runsCode(command.words)) return;
+    const text = [...command.words, ...command.fed].join("\n");
+    const named = PROOFS.exec(text)?.[0] ?? (marker !== null && text.includes(marker) ? "the complete marker" : null);
+    const cwd = canonical(command.cwd);
+    const within = ["state", "locks", "merge"].some((dir) => inside(cwd, join(work, dir))) || (run !== null && inside(cwd, run));
+    if (named === null && !within) return;
+    refuse(
+      `this runs a program's code ${named ? `that names ${named}` : "in the factory's own folder"}, and the factory's records (what ran, what passed, what was allowed, that the work is complete) are written by its commands only. To read one, use cat, jq or grep, or pipe it in (cat <file> | python3 -c …).`
+    );
+  }
+
   // A search that reads past what git skips (grep -r, rg -g '*' or -uu, git grep --no-index) mustn't reach a secret.
   function checkSearches(words: string[], cwd: string): void {
     const grep = grepSearch(words);
@@ -1014,6 +1033,7 @@ export function check(input: HookInput): void {
       if (broken) refuse(broken.reason);
       for (const line of lines(command)) for (const [rule, roles, reason] of owned) if (rule.test(line) && !roles.includes(role)) refuse(reason);
       checkSecrets(command);
+      checkProofs(command);
       // The command that actually runs, its wrappers (timeout, env, a6g lock … --) taken off.
       const words = unwrap(command.words).at(-1) ?? [];
       const git = basename(words[0] ?? "") === "git";

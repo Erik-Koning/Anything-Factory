@@ -139,7 +139,7 @@ describe("parseShell: what runs inside other commands", () => {
     reads(`node --eval="execSync('vercel deploy')"`, "vercel", "deploy");
     reads(`deno eval "Deno.run({cmd: ['sh', '-c', 'vercel deploy']})"`, "vercel", "deploy");
     const [, prose] = parseShell(`node -e "console.log('a > b')"`, "/w");
-    assert.deepEqual(prose, { words: ["a"], redirects: ["b"], reads: [], cwd: "/w", inCode: true });
+    assert.deepEqual(prose, { words: ["a"], redirects: ["b"], reads: [], cwd: "/w", inCode: true, fed: [] });
     assert.equal(parseShell(`node -e "console.log(1)"`, "/w")[0]?.inCode, false);
     assert.deepEqual(quotedIn(`run("a \\"b\\"", 'c\\nd', \`e\`)`), ['a "b"', "c\nd", "e"]);
   });

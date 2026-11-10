@@ -26,12 +26,15 @@ const SUBSTITUTED = "$(…)";
 // One simple command: its words with the quotes gone, the files its redirects write and read, and where it runs.
 // inCode: it was read from a string quoted in a program's code (node -e, python -c), so it's a command that code may
 // run, or just text: its > may be prose.
+// fed: the text it's given to read: its here-strings and here-documents, and what an echo or printf piped into it
+// prints. Data to most commands; to a program that runs code (runsCode), maybe the code.
 export interface ShellCommand {
   words: string[];
   redirects: string[];
   reads: string[];
   cwd: string;
   inCode: boolean;
+  fed: string[];
 }
 
 // While a command is read: the here-strings it's fed, and the command its output is piped to.
@@ -55,7 +58,7 @@ interface Place {
 export function parseShell(source: string, cwd = process.cwd()): ShellCommand[] {
   const out: Reading[] = [];
   read(source, resolve(cwd), 0, out, false);
-  return out.map(({ words, redirects, reads, cwd: dir, inCode }) => ({ words, redirects, reads, cwd: dir, inCode }));
+  return out.map(({ words, redirects, reads, cwd: dir, inCode, fed }) => ({ words, redirects, reads, cwd: dir, inCode, fed }));
 }
 
 const isDir = (path: string): boolean => {
@@ -73,7 +76,7 @@ function read(text: string, start: string, depth: number, out: Reading[], inCode
   const here = (): string => place().dir;
   // Folders earlier commands make (mkdir, git worktree add), which a later cd finds though they don't exist yet.
   const made = new Set<string>();
-  const fresh = (): Reading => ({ words: [], redirects: [], reads: [], cwd: start, inCode, stdin: [], next: null });
+  const fresh = (): Reading => ({ words: [], redirects: [], reads: [], cwd: start, inCode, fed: [], stdin: [], next: null });
   const inner = (script: string, dir = here(), code = inCode) => read(script, dir, depth + 1, out, code);
   let command = fresh();
   let piped: Reading | null = null;
@@ -86,8 +89,10 @@ function read(text: string, start: string, depth: number, out: Reading[], inCode
     if (word || quoted) {
       if (pending === "out") command.redirects.push(word);
       else if (pending === "in") command.reads.push(word);
-      else if (pending === "string") command.stdin.push(word);
-      else command.words.push(word);
+      else if (pending === "string") {
+        command.stdin.push(word);
+        command.fed.push(word);
+      } else command.words.push(word);
       pending = null;
     }
     word = "";
@@ -145,6 +150,7 @@ function read(text: string, start: string, depth: number, out: Reading[], inCode
       done.cwd = here();
       out.push(done);
       if (from) from.next = done;
+      if (from && /^(echo|printf)$/.test(basename(from.words[0] ?? ""))) done.fed.push(...printed(from.words));
       if (after === "|") piped = done;
       move(done.words, after);
       for (const script of scriptsOf(done.words)) inner(script, done.cwd);
@@ -175,7 +181,10 @@ function read(text: string, start: string, depth: number, out: Reading[], inCode
       }
       const body = lines.join("\n");
       let fed = false;
-      for (let c: Reading | null = doc.command; c; c = c.next) fed ||= readsCommands(c.words);
+      for (let c: Reading | null = doc.command; c; c = c.next) {
+        fed ||= readsCommands(c.words);
+        c.fed.push(body);
+      }
       if (fed) inner(body, doc.command.cwd);
       else if (!doc.literal) for (const script of substitutions(body)) inner(script, doc.command.cwd);
     }
@@ -698,6 +707,11 @@ const CODE: [RegExp, RegExp][] = [
   [/^(perl|ruby)$/, /^-[a-zA-Z]*[eE]$/],
   [/^php$/, /^-r$/],
 ];
+// A program that runs code of its own, from its arguments, a file or what it's fed: what that code does with a file
+// it names, no reader of shell commands can say.
+const RUNS_CODE = /^(node|nodejs|bun|deno|tsx|ts-node|python[\d.]*|pypy[\d.]*|perl|ruby|php|lua|[gmn]?awk|osascript|Rscript|swift)$/;
+export const runsCode = (words: string[]): boolean => unwrap(words).some((variant) => RUNS_CODE.test(basename(variant[0] ?? "")));
+
 function codeStrings(words: string[]): string[] {
   const strings: string[] = [];
   for (const variant of unwrap(words)) {

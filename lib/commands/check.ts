@@ -95,6 +95,7 @@ export function guardCases(team: Team): GuardCase[] {
     if (team.roles["builder"]) bash("builder", "a6g task claim", "allow", "a builder claiming a task");
   }
   bash(builder, "cat .env", "refuse", "reading an env file");
+  bash(builder, `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`, "refuse", "a program's code writing a record");
   bash(builder, "a6g register", "refuse", "an operator's command");
   if (team.environment.script && builder !== "planner") {
     bash(builder, `${team.environment.script.split(/\s+/)[0] ?? ""} reset`, "refuse", "resetting the environment by its script");

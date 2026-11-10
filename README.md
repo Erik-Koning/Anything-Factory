@@ -472,6 +472,12 @@ To make a release:
   get past a pattern. For hard guarantees, scope the credentials on the machine (for example, a GitHub token that
   can only read code and write issues) and protect production with required reviewers. See the constitution's
   Part IV.
+- **The factory's records are files, and every member runs as you.** What ran and passed, the verdicts, your
+  allowances and the complete marker live in `.a6g/run/state` and the team's run folder. The guard refuses the file
+  tools, shell writes and a program's code that names them (`node -e`, `python -c`, a here-document), which stops a
+  member that reaches for the quick way. A member that sets out to forge one (a script that builds the path in
+  pieces) can: nothing on the machine tells its writes from the factory's. Records a member can't write need a
+  second user on the machine, or a signature made with a key members can't read; that's not built.
 - **Platform:** macOS only for now. The watchdog is a launchd job, notifications use `osascript`, and the email
   key is kept in the Keychain.
 - **No interrupt:** T3 Code 0.1.x has no command to interrupt a thread, so the watchdog notifies you instead.
