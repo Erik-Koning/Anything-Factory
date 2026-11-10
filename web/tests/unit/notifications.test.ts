@@ -131,39 +131,39 @@ test("the digest's hour is the person's own, in their time zone", () => {
 const event = (fields: Partial<TeamEvent>): TeamEvent => ({
   id: "question:39:1",
   kind: "question",
-  team: "givenet",
+  team: "shop",
   at: "2026-11-01T23:12:00.000Z",
   title: "#39 Q: the consent words",
   detail: "consent wording is the operator's",
-  path: "/t/givenet/inbox#task-39",
+  path: "/t/shop/inbox#task-39",
   ...fields,
 });
 const titles = new Map([
-  ["givenet", "GiveNet"],
+  ["shop", "Shop"],
   ["blog", "Blog"],
 ]);
 const BASE = "https://a6g.example.com";
 
 test("nowMail: one event as its own email, with the link to answer it; several together", () => {
   const one = nowMail([event({})], titles, BASE);
-  assert.equal(one.subject, "[GiveNet] Question for you: #39 Q: the consent words");
-  assert.equal(one.link, `${BASE}/t/givenet/inbox#task-39`);
-  assert.match(one.text, /Answer it: https:\/\/a6g\.example\.com\/t\/givenet\/inbox#task-39/);
+  assert.equal(one.subject, "[Shop] Question for you: #39 Q: the consent words");
+  assert.equal(one.link, `${BASE}/t/shop/inbox#task-39`);
+  assert.match(one.text, /Answer it: https:\/\/a6g\.example\.com\/t\/shop\/inbox#task-39/);
   assert.match(one.text, /notification settings: https:\/\/a6g\.example\.com\/account\/notifications$/);
-  const two = nowMail([event({}), event({ id: "question:40:1", title: "#40 Q: open the staff pages?", path: "/t/givenet/inbox#task-40" })], titles, BASE);
-  assert.equal(two.subject, "[GiveNet] 2 questions for you");
+  const two = nowMail([event({}), event({ id: "question:40:1", title: "#40 Q: open the staff pages?", path: "/t/shop/inbox#task-40" })], titles, BASE);
+  assert.equal(two.subject, "[Shop] 2 questions for you");
   assert.equal(two.link, `${BASE}/inbox`);
-  assert.match(two.text, /- Question for you: #40 Q: open the staff pages\?\n {2}https:\/\/a6g\.example\.com\/t\/givenet\/inbox#task-40/);
+  assert.match(two.text, /- Question for you: #40 Q: open the staff pages\?\n {2}https:\/\/a6g\.example\.com\/t\/shop\/inbox#task-40/);
   const mixed = nowMail([event({}), event({ id: "blocked:7:1", kind: "blocked", team: "blog", title: "#7 Post", path: "/t/blog/tasks/7" })], titles, BASE);
-  assert.equal(mixed.subject, "[GiveNet, Blog] 2 updates");
-  assert.match(mixed.text, /GiveNet:\n- Question for you/);
+  assert.equal(mixed.subject, "[Shop, Blog] 2 updates");
+  assert.match(mixed.text, /Shop:\n- Question for you/);
   assert.match(mixed.text, /Blog:\n- Blocked: #7 Post/);
 });
 
 test("digestMail: what still waits, then what happened; summaryOf and testMail say the settings in words", () => {
   const mail = digestMail(
-    [event({ id: "merged:3:1", kind: "merged", title: "#3 Export", path: "/t/givenet/tasks/3" })],
-    [{ team: "givenet", items: [{ id: "39", title: "Q: the consent words", status: "question", since: "2026-11-01T23:12:00.000Z" }] }],
+    [event({ id: "merged:3:1", kind: "merged", title: "#3 Export", path: "/t/shop/tasks/3" })],
+    [{ team: "shop", items: [{ id: "39", title: "Q: the consent words", status: "question", since: "2026-11-01T23:12:00.000Z" }] }],
     titles,
     BASE,
     "Monday, November 2"

@@ -642,10 +642,10 @@ describe("the public repository (#19)", () => {
   );
   test("no traces of the projects the factory was first used on, tests included", () => {
     assert.match("app-" + "ride" + "net", traces, "the pattern still finds them");
-    const files = git(ROOT, "ls-files", "examples", "docs", "templates", "README.md", "CONSTITUTION.md", "schema", "plugin/agents", "test")
-      .split("\n")
-      .filter(Boolean);
-    assert.ok(files.includes("test/audit-setup.test.ts"));
+    // Every file in the repository: a fixture in the web app's tests once carried one where a list of folders didn't look.
+    const files = git(ROOT, "ls-files").split("\n").filter(Boolean);
+    for (const file of ["test/audit-setup.test.ts", "web/tests/unit/notifications.test.ts", "CHANGELOG.md", "lib/detect.ts"])
+      assert.ok(files.includes(file), file);
     for (const file of files) {
       const text = readFileSync(join(ROOT, file), "utf8");
       assert.doesNotMatch(text, traces, file);
