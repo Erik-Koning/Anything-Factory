@@ -262,6 +262,23 @@ describe("controls in the run folder", () => {
     assert.deepEqual(JSON.parse(readFileSync(join(run, "controls-applied"), "utf8")), [now.id, resume.id, graceful.id, budget.id]);
   });
 
+  test("the budget's pause tells the planner when auto-resume starts the team again", () => {
+    const all = graph();
+    const pausing = (autoResume: boolean, trigger: string) => {
+      const run = tmp("a6g-holds-");
+      write(run, { "budget.json": { daily: 10, weekly: 50, total: 500, since: "2026-11-01T00:00:00Z", autoResume } });
+      const pause = control({ ...pauseControl(all, "fixture", { scope: "tasks", by: "budget", note: "$10 of the $10 a day budget is spent" }), trigger });
+      return applyControls(run, [pause]).tell[0]?.text ?? "";
+    };
+    assert.match(
+      pausing(true, "daily:2026-11-09"),
+      /the team pauses until the budget starts it again \(auto-resume, tomorrow at the earliest\) or the operator resumes it\./
+    );
+    assert.match(pausing(true, "weekly:2026-11-09"), /auto-resume, on Monday at the earliest/);
+    assert.match(pausing(true, "total:2026-11-01"), /the team pauses until the operator resumes it\./, "a pause for the total waits for the operator");
+    assert.match(pausing(false, "daily:2026-11-09"), /the team pauses until the operator resumes it\./);
+  });
+
   test("a graceful hold records what's left, then pauses the team with its report", () => {
     const run = tmp("a6g-holds-");
     let all = graph();

@@ -5,18 +5,18 @@
 //   session) and says so. The planner also gets how the operator is connected (a6g connect), the members running
 //   against the limits, the team's context commands (team.json "context") and its latest log entries.
 // - UserPromptSubmit, planner only (every wake): the real time, members running, merge results it hasn't seen,
-//   whether the environment is draining, when it may next write to the operator (team.json contact), and whether the
-//   operator paused the team.
+//   whether the environment is draining, when it may next write to the operator (team.json contact), the task graph
+//   with the ideas queue and the pace (whose caps it saves for the guard), and whether the operator paused the team.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { reachSummary } from "../../lib/channels.ts";
-import { instanceId } from "../../lib/config.ts";
+import { DEFAULT_MIN_QUEUE, instancesOf } from "../../lib/config.ts";
 import { contactStatus } from "../../lib/contact.ts";
 import { stateDir } from "../../lib/paths.ts";
 import { promptFile, promptStale, writePrompt } from "../../lib/prompts.ts";
 import { type HookInput, inTeam, teamSession } from "../../lib/session.ts";
-import { runningByInstance } from "../../lib/t3.ts";
+import { lastFinished, runningByInstance } from "../../lib/t3.ts";
 import { localTime } from "../../lib/util.ts";
 
 if (!inTeam()) process.exit(0);
@@ -39,11 +39,14 @@ const runCommand = (command: string): string => {
   }
 };
 
+const members = Object.keys(team.roles).filter((r) => r !== "planner");
+// Members at work by instance (a role's legacy instances too), read once per hook; null when T3 Code's database
+// couldn't be read.
+const counts = role === "planner" ? runningByInstance(members.flatMap((r) => instancesOf(team, r))) : null;
+const atWork = (r: string): number => instancesOf(team, r).reduce((sum, id) => sum + (counts?.[id] ?? 0), 0);
 function slots() {
-  const roles = Object.keys(team.roles).filter((r) => r !== "planner");
-  const counts = runningByInstance(roles.map((r) => instanceId(team, r)));
   if (!counts) return "Members running: unknown (T3 Code's database couldn't be read).";
-  return `Members running / limit: ${roles.map((r) => `${r} ${counts[instanceId(team, r)] ?? 0}/${team.roles[r]?.limit}`).join(", ")}.`;
+  return `Members running / limit: ${members.map((r) => `${r} ${atWork(r)}/${team.roles[r]?.limit}`).join(", ")}.`;
 }
 
 // Merge results the queue finished since the planner last looked; each is shown once.
@@ -59,14 +62,37 @@ function merges() {
     });
 }
 
-// The task graph in a few lines (lib/tasks/ops.ts summary), for the planner.
+// The task graph in a few lines (lib/tasks/ops.ts summary), with the ideas queue and the pace (lib/pace.ts), for the
+// planner. The pace goes to the run folder, where the guard holds the planner's starts to it. A pace that can't be worked
+// out leaves the summary, and clears what the guard holds the planner to: the role limits alone, as without a budget.
 async function graph(): Promise<string | null> {
   if (team.board.type !== "tasks") return null;
   try {
-    const { openTeamStore, summary } = await import("../../lib/tasks/ops.ts");
+    const { measurePace, openTeamStore, summary } = await import("../../lib/tasks/ops.ts");
+    const { clearPace, writePace } = await import("../../lib/pace.ts");
     const store = await openTeamStore(team, run, home);
     try {
-      return clip(summary(await store.tasks.all(), { approval: team.approval.mode, requests: await store.requests.all() }), 2500);
+      const all = await store.tasks.all();
+      let pace: Awaited<ReturnType<typeof measurePace>> | null = null;
+      let paceText: string;
+      try {
+        pace = await measurePace(team, run, store, { all, counts });
+        writePace(run, pace, pace.started);
+        paceText = pace.text;
+      } catch (error) {
+        clearPace(run);
+        paceText = `Pace: couldn't be worked out (${String((error as Error).message).split("\n")[0]}), so only the role limits hold; a6g task pace tries again.`;
+      }
+      const innovator = team.roles["innovator"];
+      const ideas = innovator
+        ? {
+            min: innovator.minQueue ?? DEFAULT_MIN_QUEUE,
+            running: counts ? atWork("innovator") : null,
+            budgetBound: pace?.waiting != null,
+            lastPass: lastFinished(instancesOf(team, "innovator")),
+          }
+        : undefined;
+      return [clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas }), 2500), paceText].join("\n");
     } finally {
       await store.close();
     }

@@ -1,5 +1,5 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
-import { claimOrder, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
+import { claimRank, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
 import type { Control } from "../../lib/tasks/controls.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
@@ -125,11 +125,13 @@ export function kanban(tasks: Task[], { now = Date.now(), doneLimit = 8, rejecte
     }),
     since: task.status === "building" && task.claim ? task.claim.at : enteredAt(task),
   });
+  const claims = claimRank(tasks);
   const order: Record<Lane, (a: Card, b: Card) => number> = {
     triage: (a, b) => b.task.createdAt.localeCompare(a.task.createdAt),
     // Escalated first, then by priority, as on the Decisions page.
     proposed: (a, b) => PROPOSALS.indexOf(a.task.status) - PROPOSALS.indexOf(b.task.status) || (b.task.priority ?? -1) - (a.task.priority ?? -1),
-    approved: (a, b) => claimOrder(a.task, b.task),
+    // In the order builders will claim them.
+    approved: (a, b) => claims(a.task, b.task),
     building: (a, b) => a.since.localeCompare(b.since),
     review: (a, b) => a.since.localeCompare(b.since),
     blocked: (a, b) => b.since.localeCompare(a.since),

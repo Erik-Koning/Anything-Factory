@@ -22,7 +22,11 @@ export interface RoleSettings {
   compactAt?: number;
   // The model the role runs on: an id, or fable, opus, sonnet or haiku (lib/models.ts).
   model?: string;
+  minQueue?: number;
 }
+
+// The ideas the planner keeps queued by starting the innovator (roles.innovator.minQueue), unless the team says.
+export const DEFAULT_MIN_QUEUE = 5;
 
 export interface PageSpec {
   id: string;
@@ -140,6 +144,7 @@ export interface Lane extends RoleDefaults {
   compactAt?: number;
   // The model its members start on: the role's own in team.json, else the team's, else the role's default.
   model: string;
+  minQueue?: number;
 }
 
 export interface Team {
@@ -257,7 +262,12 @@ export const ROLES: Record<string, RoleDefaults> = {
     write: [],
   },
   "ux-specialist": { summary: "audits pages and journeys, desktop and phone, light and dark", limit: 1, readOnly: true, write: [] },
-  innovator: { summary: "finds what the brief misses and proposes it", limit: 1, readOnly: true, write: [] },
+  innovator: {
+    summary: "researches users, the market and the product; files ideas with a suggested score",
+    limit: 1,
+    readOnly: true,
+    write: [],
+  },
   approver: { summary: "approves or sends back the planner's proposals, within the team's approval rules", limit: 1, readOnly: true, write: [] },
 };
 
@@ -473,7 +483,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const where = `roles.${id}`;
     // The lane is the factory's defaults plus only these settings, so any other key (such as "worktree") is ignored and
     // can't change what the factory gives the role.
-    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt", "model"]) ?? {};
+    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt", "model", "minQueue"]) ?? {};
     const written = list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at)));
     const lane: Lane = {
       ...base,
@@ -489,6 +499,9 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     if (readOnly !== undefined) lane.readOnly = readOnly;
     const compactAt = whole(settings.compactAt, `${where}.compactAt`, 1);
     if (compactAt !== undefined) lane.compactAt = compactAt;
+    const minQueue = whole(settings.minQueue, `${where}.minQueue`, 0);
+    if (minQueue !== undefined && id !== "innovator") warnings.push(`${where}.minQueue: only the innovator's keeps ideas queued (ignored)`);
+    else if (minQueue !== undefined) lane.minQueue = minQueue;
     const pattern = settings.branch === undefined ? undefined : regex(settings.branch, `${where}.branch`);
     if (base.worktree) lane.branch = pattern ?? regex(`^${prefix}/${BRANCH_STEM[id] ?? "b\\d+-"}`, `${where}.branch`);
     // Only roles that work on their own branch have one; a pattern here would let the merge queue take its branches.
@@ -893,6 +906,13 @@ export const modelsOf = (team: Pick<Team, "roles">): Record<string, string> =>
 
 // One T3 provider instance per role; its id carries the team and the role.
 export const instanceId = (team: Pick<Team, "name">, role: string): string => `a6g-${team.name}-${role}`;
+// Every instance a role's members may run on: its own, and those it had under older names (team.json legacyInstances).
+export const instancesOf = (team: Pick<Team, "name" | "legacyInstances">, role: string): string[] => [
+  instanceId(team, role),
+  ...Object.entries(team.legacyInstances ?? {})
+    .filter(([, r]) => r === role)
+    .map(([id]) => id),
+];
 // Own properties only: an instance named "constructor" is no role.
 export function roleForInstance(team: Team, id: string): string | null {
   for (const role of Object.keys(team.roles)) if (instanceId(team, role) === id) return role;

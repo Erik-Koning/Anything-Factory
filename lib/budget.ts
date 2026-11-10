@@ -2,8 +2,9 @@
 // operator is warned, once per limit and period. At the limit the team pauses after the work under way; past it by a
 // tenth it pauses now, since finishing that work costs too. A pause the budget made that the operator then resumed
 // stays resumed for that limit and period, until they change the budget: they chose to carry on. With autoResume, a
-// team only the budget paused, for a day or a week, starts again when the next one does, if nothing else is over. Pure: the watchdog applies what this
-// decides, as controls in the team's store, the same as the operator's.
+// team only the budget paused starts again once nothing is over: when the next day or week starts, for a pause for a
+// day or a week, or when the operator changes the budget so that nothing is (raising the total included). Pure: the
+// watchdog applies what this decides, as controls in the team's store, the same as the operator's.
 import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "./tasks/controls.ts";
 import type { Task } from "./tasks/model.ts";
 import { type AccountSpend, dollars, limitDollars, percentOf, type Spend, weekOf } from "./tasks/spend.ts";
@@ -70,6 +71,28 @@ export function accountClosures(limits: Limits | null, spend: Spend | null): Rec
   return closed;
 }
 
+// When a pause for these limits ends by itself, in words ("tomorrow", "on Monday"): with autoResume, at the end of the
+// longest period among them; null without autoResume, or when the total is among them (that waits for the operator).
+export function resumesWhen(names: string[], limits: Pick<Limits, "autoResume"> | null): string | null {
+  if (!limits?.autoResume || !names.length || names.some((name) => name !== "daily" && name !== "weekly")) return null;
+  return names.includes("weekly") ? "on Monday" : "tomorrow";
+}
+const nameOf = (trigger: string | null | undefined): string => (trigger ?? "").split(":")[0] ?? "";
+// The pauses since the last resume, but the watchdog's record of a hold that settled.
+const pausesSinceResume = (controls: Control[]): Control[] =>
+  controls.slice(controls.findLastIndex((c) => c.kind === "resume") + 1).filter((c) => c.kind === "pause" && c.by !== "watchdog");
+// When the team's pause ends by itself, at the earliest (another limit may be over by then): only one the budget alone
+// made, with autoResume. Null otherwise.
+export function pausedUntil(controls: Control[], limits: Limits | null): string | null {
+  const pauses = pausesSinceResume(controls);
+  return pauses.length && pauses.every((c) => c.by === "budget")
+    ? resumesWhen(
+        pauses.map((c) => nameOf(c.trigger)),
+        limits
+      )
+    : null;
+}
+
 export function budgetCheck(team: string, limits: Limits | null, spend: Spend, controls: Control[], all: Task[], paused: boolean): BudgetMove {
   const move: BudgetMove = { warn: [], control: null, why: null };
   if (!limits) return move;
@@ -94,6 +117,7 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
   let hard: BudgetMove["control"] = null;
   let why: string | null = null;
   let over = false;
+  const overNames: string[] = [];
   for (const limit of LIMITS) {
     const cap = limits[limit.name];
     if (!cap) continue;
@@ -119,6 +143,7 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
       });
     if (share < 1 || overridden(trigger)) continue;
     over = true;
+    overNames.push(limit.name);
     if (share >= HARD_AT && !paused && hold?.scope !== "now" && !hard) {
       hard = { ...pauseControl(all, team, { scope: "now", by: "budget", note: `${said} is spent, and more` }), trigger: `${trigger}:hard` };
       why = `The team has spent ${said}, a tenth past it: it's paused now.`;
@@ -151,25 +176,35 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
     );
   }
   move.control = hard ?? graceful;
-  move.why = move.control ? why : null;
-  // A new day or week: a team only the budget paused, for the last one, starts again unless another limit is over. A
-  // pause of the operator's since the last resume keeps it paused; the watchdog's record of a settled hold is neither.
-  const pauses = controls.slice(controls.findLastIndex((c) => c.kind === "resume") + 1).filter((c) => c.kind === "pause" && c.by !== "watchdog");
+  // The operator hears when it starts again by itself, if it does: at the end of the longest period that's over.
+  const when = resumesWhen(overNames, limits);
+  move.why = move.control && why ? `${why}${when ? ` With auto-resume, it starts again ${when}.` : ""}` : null;
+  // A team only the budget paused, since the last resume, starts again once nothing is over: a new day or week ends a
+  // pause for the last one, and a change to the budget since the last pause ends any (the operator chose the new
+  // limits). A pause of the operator's keeps it paused; the watchdog's record of a settled hold is neither.
+  const pauses = pausesSinceResume(controls);
   const last = pauses.at(-1);
   const onlyBudget = pauses.length > 0 && pauses.every((c) => c.by === "budget");
-  // Every one of them for a day or week that's over (a pause for the total waits for the operator).
+  // For a day or week that's over (a pause for the total waits for the operator).
   const ended = (c: Control): boolean => {
-    const [name] = (c.trigger ?? "").split(":");
+    const name = nameOf(c.trigger);
     return (name === "daily" || name === "weekly") && !(c.trigger ?? "").startsWith(periodOf(name, spend, limits));
   };
-  if (!move.control && !over && limits.autoResume && onlyBudget && last?.trigger && pauses.every(ended)) {
-    const [name] = last.trigger.split(":");
-    const period = name === "daily" ? "day" : "week";
-    move.control = {
-      ...resumeControl(team, "budget", `a new ${period}: the ${name} budget starts again`),
-      trigger: periodOf(name as "daily", spend, limits),
-    };
-    move.why = `A new ${period}, so the team the ${name} budget paused starts again.`;
+  const changed = last !== undefined && lastChange > controls.indexOf(last);
+  if (!move.control && !over && limits.autoResume && onlyBudget && last?.trigger && (changed || pauses.every(ended))) {
+    if (changed) {
+      move.control = { ...resumeControl(team, "budget", "the budget changed, and nothing is over it now"), trigger: "budget" };
+      move.why = "The budget changed, and the team is under every limit now, so it starts again.";
+    } else {
+      // The longest period that ended: a new week ends a daily pause too.
+      const name = pauses.some((c) => nameOf(c.trigger) === "weekly") ? "weekly" : "daily";
+      const period = name === "daily" ? "day" : "week";
+      move.control = {
+        ...resumeControl(team, "budget", `a new ${period}: the ${name} budget starts again`),
+        trigger: periodOf(name, spend, limits),
+      };
+      move.why = `A new ${period}, so the team the ${name} budget paused starts again.`;
+    }
   }
   return move;
 }

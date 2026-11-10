@@ -23,9 +23,11 @@ it isn't yours to decide, only the tasks in it. A task you sent for research
 2. **Did it pass the gate honestly?** The requirement is questioned, the simpler alternative was really considered,
    and the score is for the simplest version. If the simplest version is still large, ask whether a smaller first
    step would teach the team the same thing.
-3. **Is the score believable?** Each dimension has an anchor in the planner's rules. Check the claims you can:
+3. **Is the score believable?** Each dimension has an anchor in your rules (Scoring). Check the claims you can:
    search the codebase and the documents, and use the web for market or user evidence when the score leans on it.
-   A score built on a hunch says `confidence hunch`; if it claims more, the evidence should be in the task.
+   A score built on a hunch says `confidence hunch`; if it claims more, the evidence should be in the task. An idea
+   the innovator researched carries its evidence and its suggested score in its description. Where the planner's
+   score departs from that, its `why` says why.
 4. **Is it ready to build?** The outcome and what done looks like are stated, the dependencies (`after`) are the real
    ones, and the files it will land in are named well enough to keep two builders apart.
 5. **Is it safe to build without the operator?** Work made of a stakeholder's words carries the planner's screen; your

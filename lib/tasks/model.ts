@@ -1,7 +1,7 @@
 // The task graph's model: what a task and a feature request are, which statuses a task moves between and who may move
 // it, how a task is scored, and which task a member claims. Pure: the stores (files.ts, mongo.ts) keep the documents
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
-import { type Hold, holdRefusal } from "./controls.ts";
+import { type Hold, holdRefusal, journeysUnderWay } from "./controls.ts";
 
 // "design" is the design check-in: a new project's foundation, put to the operator before features are built on it.
 export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "scaffold", "chore", "research", "journey", "design"] as const;
@@ -17,6 +17,18 @@ export type Risk = (typeof RISKS)[number];
 export const DIMENSIONS = ["pain", "reach", "revenue", "wow", "distribution", "leverage", "urgency", "risk"] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
 export const DEFAULT_WEIGHTS: Record<Dimension, number> = { pain: 3, reach: 2, revenue: 2, wow: 2, distribution: 1, leverage: 2, urgency: 1, risk: 1 };
+// What 0, 1, 2 and 3 mean on each dimension: compiled into the rules of everyone who scores or checks a score (the
+// planner, the approver and the innovator), so they all score against the same anchors.
+export const SCORE_ANCHORS: Record<Dimension, [string, string, string, string]> = {
+  pain: ["nobody misses it", "a minor annoyance", "a job done badly today", "an important job that fails today"],
+  reach: ["almost nobody", "a few users a month", "many users a month", "nearly everyone the product serves"],
+  revenue: ["none", "protects a little", "helps win or keep customers", "unlocks or saves real revenue"],
+  wow: ["expected", "nicer than most", "clearly better than the alternatives", "ten times better; worth a demo"],
+  distribution: ["nobody would mention it", "users might mention it", "users show it to others", "a launch story in itself"],
+  leverage: ["stands alone", "helps a little later", "unlocks other planned work", "compounds: data, network effects, switching costs"],
+  urgency: ["can wait indefinitely", "better soon", "loses value within weeks", "loses most of its value if late"],
+  risk: ["removes no risk", "some tech debt", "a reliability or security weakness", "a real security, data or reliability risk"],
+};
 export const CONFIDENCE = { hunch: 0.5, asks: 0.8, data: 1 } as const;
 export type Confidence = keyof typeof CONFIDENCE;
 export const SIZES = { S: 1, M: 2, L: 4, XL: 8 } as const;
@@ -662,16 +674,68 @@ const OWN: Record<string, Kind[]> = { tester: ["test"], scaffolder: ["scaffold",
 export const FOUNDATION: Kind[] = ["scaffold", "test-infra"];
 
 const SEVERITY_ORDER: Record<string, number> = { blocker: 0, major: 1, minor: 3 };
-// Claim order: blockers, then majors, then the rest by priority (unscored work after scored) with minor findings last
-// (polish is bounded, Article 9), then the oldest.
+const tierOf = (t: Task): number => SEVERITY_ORDER[t.severity ?? ""] ?? 2;
+const oldestFirst = (a: Task, b: Task): number => Number(a.id) - Number(b.id) || a.id.localeCompare(b.id);
+// A list's order on its own, without the graph: blockers, then majors, then the rest by priority (unscored work after
+// scored) with minor findings last (polish is bounded, Article 9), then the oldest. Claims follow claimRank.
 export function claimOrder(a: Task, b: Task): number {
-  const sev = (t: Task) => SEVERITY_ORDER[t.severity ?? ""] ?? 2;
-  if (sev(a) !== sev(b)) return sev(a) - sev(b);
+  if (tierOf(a) !== tierOf(b)) return tierOf(a) - tierOf(b);
   const pa = a.priority ?? -1;
   const pb = b.priority ?? -1;
   if (pa !== pb) return pb - pa;
-  return Number(a.id) - Number(b.id) || a.id.localeCompare(b.id);
+  return oldestFirst(a, b);
 }
+
+// Work sent back to its own branch (a rebase, or changes a review asked for): begun, so finishing it comes first.
+export const sentBack = (t: Task): boolean => t.status === "approved" && t.branch !== null;
+
+// The order claims follow, over the whole graph, so work goes in order: blockers, then majors; within each, work sent
+// back to its own branch, since finishing comes before starting; then work in a journey already under way, before work
+// that starts another; then priority; then the oldest. A task other open tasks wait on (their `after`) takes the most
+// urgent severity, the journey under way and the highest priority of all that waits on it, so a prerequisite goes
+// before the work it unblocks, and at the same priority what others wait on goes first.
+export function claimRank(all: Task[]): (a: Task, b: Task) => number {
+  const open = (t: Task): boolean => t.status !== "done" && t.status !== "rejected";
+  const waiters = new Map<string, Task[]>();
+  for (const t of all.filter(open)) for (const id of t.after) waiters.set(id, [...(waiters.get(id) ?? []), t]);
+  const underWay = new Set(journeysUnderWay(all).map((j) => j.id));
+  type Rank = { tier: number; continues: number; priority: number };
+  // Over everything that waits on `t`, however far down; a cycle (which nothing claims) stops where it closes.
+  const inherited = new Map<string, Rank>();
+  const inherit = (t: Task, seen: Set<string>): Rank => {
+    const known = inherited.get(t.id);
+    if (known) return known;
+    const own = { tier: tierOf(t), continues: t.parent !== null && underWay.has(t.parent) ? 0 : 1, priority: t.priority ?? -1 };
+    if (seen.has(t.id)) return own;
+    seen.add(t.id);
+    const result = (waiters.get(t.id) ?? []).reduce((best, w) => {
+      const theirs = inherit(w, seen);
+      return {
+        tier: Math.min(best.tier, theirs.tier),
+        continues: Math.min(best.continues, theirs.continues),
+        priority: Math.max(best.priority, theirs.priority),
+      };
+    }, own);
+    inherited.set(t.id, result);
+    return result;
+  };
+  const of = (t: Task) => inherit(t, new Set());
+  const resumes = (t: Task): number => (sentBack(t) ? 0 : 1);
+  const waitedOn = (t: Task): number => (waiters.get(t.id)?.length ? 0 : 1);
+  return (a, b) =>
+    of(a).tier - of(b).tier ||
+    resumes(a) - resumes(b) ||
+    of(a).continues - of(b).continues ||
+    of(b).priority - of(a).priority ||
+    waitedOn(a) - waitedOn(b) ||
+    oldestFirst(a, b);
+}
+
+// Ideas waiting to be built: features from triage to approved, or waiting on the operator's decision, that no builder
+// has begun (no branch). The planner keeps the innovator at work while fewer than the team's roles.innovator.minQueue
+// wait. An idea the approver escalated (a change of scope, say) is still queued: another pass would only add to them.
+const QUEUED: Status[] = ["triage", "proposed", "researching", "question", "approved"];
+export const ideasQueued = (all: Task[]): Task[] => all.filter((t) => t.kind === "feature" && QUEUED.includes(t.status) && t.branch === null);
 
 // Two path prefixes overlap when either contains the other ("src/a/" and "src/a/b.ts").
 const overlaps = (a: string, b: string): boolean => a.startsWith(b) || b.startsWith(a);
@@ -706,15 +770,17 @@ export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold |
   return holdRefusal(task, hold);
 }
 
-// The task `role` should claim next, of those it may: the first in claim order.
-export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
+// The order `role` claims in: the kinds that are its own first (OWN), then claim order (claimRank).
+export function claimRankFor(role: string, all: Task[]): (a: Task, b: Task) => number {
   const own = OWN[role] ?? CLAIMS[role] ?? [];
+  const rank = claimRank(all);
   const first = (t: Task): number => (own.includes(t.kind) ? 0 : 1);
-  return (
-    all
-      .filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null)
-      .sort((a, b) => first(a) - first(b) || claimOrder(a, b))[0] ?? null
-  );
+  return (a, b) => first(a) - first(b) || rank(a, b);
+}
+
+// The task `role` should claim next, of those it may: the first in its claim order (claimRankFor).
+export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
+  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null).sort(claimRankFor(role, all))[0] ?? null;
 }
 
 // The branch name a claimant uses, matching its role's pattern (a6g/b142-resume-a-recording, a6g/t-142-…, a6g/s142-…).

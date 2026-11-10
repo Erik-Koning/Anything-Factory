@@ -12,9 +12,11 @@ import { addTask } from "../lib/tasks/add.ts";
 import { update } from "../lib/tasks/store.ts";
 import {
   branchFor,
+  claimRank,
   claimRefusal,
   DEFAULT_WEIGHTS,
   designOpen,
+  ideasQueued,
   journeyDue,
   MERGE,
   moveRefusal,
@@ -248,6 +250,83 @@ describe("the task model", () => {
     assert.equal(nextClaim(all, "tester")?.id, "1", "a tester takes specs first");
     assert.equal(branchFor(task({ id: "7", title: "Set up Playwright" }), "scaffolder", "a6g"), "a6g/s7-set-up-playwright");
     assert.equal(ticketOf("a6g/s7-set-up-playwright", "a6g"), "7");
+  });
+
+  test("claims go in order: what others wait on before it, journeys under way before new ones", () => {
+    const prerequisite = [
+      task({ id: "1", priority: 80 }),
+      task({ id: "2", priority: 10 }),
+      task({ id: "3", status: "proposed", priority: 95, after: ["2"] }),
+    ];
+    assert.equal(nextClaim(prerequisite, "builder")?.id, "2", "a prerequisite takes the priority of what waits on it");
+    const farther = [...prerequisite, task({ id: "4", status: "triage", priority: null, after: ["3"] }), task({ id: "5", priority: 5, after: [] })];
+    assert.equal(nextClaim(farther, "builder")?.id, "2", "however far down the wait goes");
+    const finished = prerequisite.map((t) => (t.id === "3" ? { ...t, status: "done" as const } : t));
+    assert.equal(nextClaim(finished, "builder")?.id, "1", "what waits on it is done: its own priority again");
+
+    const journey = [
+      task({ id: "10", kind: "journey", status: "approved" }),
+      task({ id: "11", parent: "10", status: "done" }),
+      task({ id: "12", parent: "10", priority: 20 }),
+      task({ id: "13", priority: 70 }),
+      task({ id: "14", kind: "journey", status: "approved" }),
+      task({ id: "15", parent: "14", priority: 90 }),
+    ];
+    assert.equal(nextClaim(journey, "builder")?.id, "12", "the journey under way goes on before new work starts");
+    assert.equal(nextClaim([...journey, task({ id: "16", priority: 1, severity: "major" })], "builder")?.id, "16", "a major still comes first");
+
+    const severity = [
+      task({ id: "20", severity: "minor" }),
+      task({ id: "21", severity: "major", status: "proposed", after: ["20"] }),
+      task({ id: "22", priority: 50 }),
+    ];
+    assert.equal(nextClaim(severity, "builder")?.id, "20", "a minor finding a major waits on goes as a major");
+
+    // A prerequisite of journey work goes with that journey, though it isn't in it.
+    const prerequisiteOfJourney = [
+      ...journey.filter((t) => t.id !== "15"),
+      task({ id: "17", parent: "10", priority: 80, after: ["18"] }),
+      task({ id: "18", priority: 5 }),
+    ];
+    assert.deepEqual(
+      prerequisiteOfJourney
+        .filter((t) => claimRefusal(t, "builder", prerequisiteOfJourney) === null)
+        .sort(claimRank(prerequisiteOfJourney))
+        .map((t) => t.id),
+      ["18", "12", "13"]
+    );
+
+    // Work sent back to its own branch comes first within its severity: finishing before starting.
+    const rework = [task({ id: "40", priority: 90 }), task({ id: "41", priority: 10, branch: "a6g/b41-x" }), task({ id: "42", severity: "blocker" })];
+    assert.deepEqual(
+      [...rework].sort(claimRank(rework)).map((t) => t.id),
+      ["42", "41", "40"]
+    );
+
+    const tie = [task({ id: "30", priority: 40 }), task({ id: "31", priority: 40 }), task({ id: "32", status: "proposed", priority: 40, after: ["31"] })];
+    assert.equal(nextClaim(tie, "builder")?.id, "31", "at the same priority, what others wait on first");
+    assert.deepEqual(
+      [...tie].sort(claimRank(tie)).map((t) => t.id),
+      ["31", "30", "32"]
+    );
+  });
+
+  test("the ideas queue is the features no builder has begun, those waiting on the operator included", () => {
+    const all = [
+      task({ id: "1", status: "triage" }),
+      task({ id: "2", status: "proposed" }),
+      task({ id: "3", status: "researching" }),
+      task({ id: "4", status: "approved" }),
+      task({ id: "5", status: "approved", branch: "a6g/b5-x" }),
+      task({ id: "6", status: "building" }),
+      task({ id: "7", status: "question" }),
+      task({ id: "8", status: "done" }),
+      task({ id: "9", status: "approved", kind: "bug", severity: "minor" }),
+    ];
+    assert.deepEqual(
+      ideasQueued(all).map((t) => t.id),
+      ["1", "2", "3", "4", "7"]
+    );
   });
 
   test("branch names carry the task's number, which the merge reads back", () => {
@@ -836,6 +915,39 @@ describe("the planner's summary and the guard", () => {
     assert.match(text, /#1 task 1 \(builder@studio, lease (29|30) min\)/);
     assert.match(text, /Waiting for review: #2 task 2 \[a6g\/b2-x\]/);
     assert.match(text, /Proposals for the approver: 1 \(#4 unscored\)/);
+    assert.doesNotMatch(text, /Ideas queued/, "no line without an innovator");
+  });
+
+  test("the summary counts the ideas queue against the minimum, and names work that lands nowhere", () => {
+    const all = [
+      task({ id: "1", status: "triage" }),
+      task({ id: "2", status: "approved", files: ["src/a/"] }),
+      task({ id: "3", status: "approved", kind: "bug", severity: "minor" }),
+      task({ id: "4", status: "approved", area: "checkout" }),
+    ];
+    const ideas = (fields: { running?: number | null; budgetBound?: boolean; min?: number } = {}) =>
+      summary(all, { approval: "thresholds", ideas: { min: fields.min ?? 5, running: fields.running ?? 0, budgetBound: fields.budgetBound ?? false } });
+    assert.match(ideas(), /Ideas queued \(features not yet started\): 3 \(#1, #2, #4\), under the 5 the team keeps: start the innovator\./);
+    assert.match(ideas({ running: 1 }), /under the 5 the team keeps; an innovator is at work\./);
+    assert.match(ideas({ budgetBound: true }), /room only for the work under way: no innovator/);
+    assert.match(ideas({ min: 3 }), /Ideas queued \(features not yet started\): 3 \(#1, #2, #4\); the team keeps at least 3\./);
+    // A pass that filed nothing isn't asked for again for a while; one that filed something is.
+    const now = Date.parse("2026-11-09T15:00:00Z");
+    const lastPass = { started: "2026-11-09T13:00:00.000Z", ended: "2026-11-09T14:00:00.000Z" };
+    const after = (fields: { by?: string; createdAt?: string }) =>
+      summary([...all, task({ id: "9", status: "rejected", by: fields.by ?? "planner", createdAt: fields.createdAt ?? "2026-11-09T13:30:00.000Z" })], {
+        now,
+        approval: "thresholds",
+        ideas: { min: 5, running: 0, budgetBound: false, lastPass },
+      });
+    assert.match(after({}), /the innovator's last pass \(ended .+\) filed nothing: start it again after .+, or now with a focus\./);
+    assert.match(after({ by: "innovator" }), /under the 5 the team keeps: start the innovator\./, "it filed #9, rejected since");
+    assert.match(
+      summary(all, { now: now + 6 * 3600_000, approval: "thresholds", ideas: { min: 5, running: 0, budgetBound: false, lastPass } }),
+      /: start the innovator\./,
+      "six hours on"
+    );
+    assert.match(ideas(), /Approved with no --files or --area, so the claim can't keep them off other work: #3 \(/);
   });
 
   test("each role runs its own task commands", async () => {

@@ -11,8 +11,19 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { FACTORY_PATH, factoryWrite, instanceId, type Lane, laneAllows, normalize as normalizeTeam, roleForInstance, type Team } from "./config.ts";
+import {
+  FACTORY_PATH,
+  factoryWrite,
+  instanceId,
+  instancesOf,
+  type Lane,
+  laneAllows,
+  normalize as normalizeTeam,
+  roleForInstance,
+  type Team,
+} from "./config.ts";
 import { messageKind, waitReason } from "./contact.ts";
+import { paceAllowance } from "./pace.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
 import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, storeOf, webRefusal } from "./policies.ts";
@@ -34,7 +45,7 @@ import {
 import { waitRefusal } from "./steer.ts";
 import { CLAIMANTS } from "./tasks/model.ts";
 import { accounts } from "./subscriptions.ts";
-import { runningByInstance, T3_HOME, TOOLS } from "./t3.ts";
+import { runningByInstance, startedByInstance, T3_HOME, TOOLS } from "./t3.ts";
 import { escapeRegex } from "./util.ts";
 
 // What the guard says when it refuses a call; the hook turns it into exit 2.
@@ -587,7 +598,7 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     [a6g("complete"), ["planner"], "the planner marks the work complete, once the finish line holds."],
     [a6g("harness\\s+allow"), [], "allowing a branch that checks less is the operator's call (Article 5): say why in your report."],
     [
-      a6g("task\\s+(?:edit|score|status|import|screen)"),
+      a6g("task\\s+(?:edit|score|status|import|screen|pace)"),
       ["planner"],
       "the planner shapes, screens, scores and moves tasks; add a finding (a6g task add) or a note (a6g task note) instead.",
     ],
@@ -1110,9 +1121,9 @@ export function check(input: HookInput): void {
     }
   }
 
-  // The planner's limits, enforced: one of this team's instances, on its role's model, in a worktree for the roles that build, no more
-  // members of a role than team.json allows, none of a draining role while the environment resets, and nothing at
-  // all while the operator has the team paused.
+  // The planner's limits, enforced: one of this team's instances, on its role's model, in a worktree for the roles that
+  // build, no more members of a role than team.json allows, or than the budget's pace can finish, none of a draining role
+  // while the environment resets, and nothing at all while the operator has the team paused.
   function checkDelegate(): void {
     if (paused()) refuse(PAUSED);
     const target = args.target;
@@ -1148,16 +1159,22 @@ export function check(input: HookInput): void {
     if (existsSync(drain) && readFileSync(drain, "utf8").split(/\s+/).includes(childRole))
       refuse(`the environment is draining for a reset; start no ${childRole} until a6g drain off.`);
     const limit = child?.limit ?? 0;
-    const ids = [
-      instanceId(team, childRole),
-      ...Object.entries(team.legacyInstances ?? {})
-        .filter(([, r]) => r === childRole)
-        .map(([id]) => id),
-    ];
+    const ids = instancesOf(team, childRole);
     const counts = runningByInstance(ids);
     if (!counts) return; // T3's database unreadable: don't stop the team on the guard's own blind spot
     const running = Object.values(counts).reduce((sum, n) => sum + n, 0);
     if (running >= limit) refuse(`${running} ${childRole} members are running and the limit is ${limit}; start the next one when one finishes.`);
+    // The budget's pace (lib/pace.ts), as the planner's context last worked it out: how many new members the budget can
+    // finish the work of. Counted as starts since then, not heads: a member that finishes frees a slot, not the money.
+    const paced = run ? paceAllowance(run, childRole) : null;
+    const ever = paced ? startedByInstance(ids) : null;
+    if (paced && ever) {
+      const started = Object.values(ever).reduce((sum, n) => sum + n, 0) - paced.started;
+      if (started >= paced.allow)
+        refuse(
+          `${paced.allow ? `${started} new ${childRole} member${started === 1 ? " has" : "s have"} started since the pace was worked out, as many as the budget can finish` : `the budget can finish no new ${childRole}'s work`} now: ${paced.why} Start the next once it has room.`
+        );
+    }
   }
 
   // -------------------------------------------------------------------------------------------------------------

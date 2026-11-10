@@ -55,6 +55,41 @@ describe("prompts", () => {
     assert.match(compile(team, "reviewer"), /change nothing in it/);
   });
 
+  test("the scoring matrix goes to those who score, check or suggest a score; the innovator gets its research commands", () => {
+    const withIdeas = loadTeam(
+      makeRepo(
+        baseTeam({ roles: { planner: {}, builder: {}, reviewer: {}, approver: {}, innovator: { minQueue: 3 } }, priorities: { weights: { pain: 4 } } })
+      )
+    );
+    for (const role of ["planner", "approver", "innovator"]) {
+      const prompt = compile(withIdeas, role);
+      assert.match(prompt, /## Scoring\n\nEvery proposal is scored 0 to 3/, `${role}: the matrix`);
+      assert.match(prompt, /\| `pain` \| nobody misses it \| a minor annoyance \| a job done badly today \| an important job that fails today \|/);
+      assert.match(
+        prompt,
+        /weighted score ÷ 45, the most it could be\) × confidence ÷ size, with this team's weights \(team\.json priorities\): pain 4, reach 2/
+      );
+    }
+    for (const role of ["builder", "reviewer"]) assert.doesNotMatch(compile(withIdeas, role), /## Scoring/, `${role}: no matrix`);
+    const planner = compile(withIdeas, "planner");
+    assert.match(planner, /Ideas: keep at least 3 features queued that no builder has started/);
+    assert.match(planner, /`a6g task pace`/);
+    assert.match(
+      planner,
+      /\| innovator \| `a6g-fixture-innovator` \| `"claude-fable-5-1"` \| `"shared"` \| 1 \| researches users, the market and the product/
+    );
+    const innovator = compile(withIdeas, "innovator");
+    assert.match(innovator, /`a6g task add "<the outcome, in a few words>" --kind feature --body-file <file>/);
+    assert.match(innovator, /`a6g request list --all`, `a6g request show <id>`/);
+    assert.match(innovator, /`WebSearch` and `WebFetch`/);
+    assert.match(innovator, /You file ideas, not work to build/);
+    assert.match(innovator, /works to a finish line, so an idea beyond the documents is a change of scope/);
+    assert.doesNotMatch(compile(team, "planner"), /Ideas: keep at least/, "no ideas line without an innovator");
+    const cycles = loadTeam(makeRepo(baseTeam({ mode: "cycles", roles: { planner: {}, builder: {}, reviewer: {}, innovator: {} } })));
+    assert.match(compile(cycles, "innovator"), /beyond the documents is welcome when it follows the direction/);
+    assert.match(compile(cycles, "planner"), /Ideas: keep at least 5 features/);
+  });
+
   test("role notes go to their role; lessons go to everyone", () => {
     assert.match(compile(team, "builder"), /blue components/);
     assert.doesNotMatch(compile(team, "reviewer"), /blue components/);

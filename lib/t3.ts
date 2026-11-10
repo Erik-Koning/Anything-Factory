@@ -150,6 +150,27 @@ export function runningByInstance(ids: string[]): Record<string, number> | null 
   return Object.fromEntries(ids.map((id) => [id, rows.find((row) => row.instance === id)?.n ?? 0]));
 }
 
+// Every member ever started on each instance, whatever became of it: a count that only grows, so the guard can tell how
+// many started since a moment (lib/pace.ts). null when the database can't be read.
+export function startedByInstance(ids: string[]): Record<string, number> | null {
+  if (!ids.length) return {};
+  const rows = query<{ instance: string; n: number }>(
+    `select provider_instance_id as instance, count(*) as n from orchestration_v2_projection_subagents where provider_instance_id in (${ids.map((id) => `'${q(id)}'`).join(",")}) group by 1`
+  );
+  if (!rows) return null;
+  return Object.fromEntries(ids.map((id) => [id, rows.find((row) => row.instance === id)?.n ?? 0]));
+}
+
+// The latest member on these instances that has finished: when it started and when it ended (ISO). null when there's
+// none, or the database can't be read.
+export function lastFinished(ids: string[]): { started: string; ended: string } | null {
+  if (!ids.length) return null;
+  const rows = query<{ started: string; ended: string }>(
+    `select coalesce(s.started_at, t.created_at, s.updated_at) as started, coalesce(s.completed_at, s.updated_at) as ended from orchestration_v2_projection_subagents s left join orchestration_v2_projection_threads t on t.thread_id = s.child_thread_id where s.provider_instance_id in (${ids.map((id) => `'${q(id)}'`).join(",")}) and s.status not in ${RUNNING} order by ended desc limit 1`
+  );
+  return rows?.[0] ?? null;
+}
+
 // Whether a thread exists and is live, from the database: the CLI can fail for a moment, and a failed read must
 // never look like a missing planner (that once started a second planner beside a live one).
 export function threadExists(id: string): boolean | null {

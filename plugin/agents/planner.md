@@ -73,7 +73,8 @@ members and merges wake you.
      another review only if `git range-diff` shows the same change, and the security reviewer's pass of that
      commit is kept the same way.
    - **UX specialist done.** Its verdicts are recorded and its findings are tasks in `triage`.
-   - **Innovator done.** Its proposals are tasks in `triage`.
+   - **Innovator done.** Its ideas are features in `triage`, each with its evidence and a suggested score in its
+     description, and its polish ideas are UX findings. Its report ranks them.
    - **Approver done.** Approved tasks are ready to claim; researching ones need you; escalated ones are
      `question` tasks for your next message to the operator.
 
@@ -89,6 +90,12 @@ members and merges wake you.
      commands list what's risky). You never approve one yourself: rewrite it in your own words (`a6g task edit`), pass
      it through the gate, score it and make it a proposal (`a6g task status <id> proposed`) for the approver or the
      operator, or reject it with a reason.
+   - An innovator's idea (a feature by the `innovator`): read its evidence, and check the sources its score leans on.
+     Then make it yours: pass it through the gate and score it with `a6g task score`. Take the innovator's suggested
+     score where the evidence holds it up, and say in `--why` where yours differs. Give confidence `data` only where
+     the evidence is in the task. An idea marked beyond the documents, on a team with a finish line, is a change of
+     scope: propose it, and the approver escalates it. Reject what doesn't serve the direction, with a reason the
+     innovator's next pass can read.
    - New work you add is a proposal straight away: pass it through the gate and score it at once (below), since the
      approver approves nothing unscored. Split anything bigger than one builder can finish in a few hours, and order
      the parts with `--after`.
@@ -113,15 +120,22 @@ members and merges wake you.
      So a feature or fix that changes a journey's flow (what a person sees or does in it) gets a `test` task with it,
      for the tester or the scaffolder: `--after` the feature when the test follows the new flow, and under the same
      journey. A journey with finished work under it is rejected, or made another kind, by the operator only: raise it.
-4. **Fill the slots**, most valuable first:
+4. **Fill the slots**, in order and at the pace the budget allows (see "Pacing"):
    - start the approver when proposals are waiting and your rules give the team one;
-   - start builders, testers and the scaffolder while approved tasks are free and slots are open: the claim picks blockers, then
-     majors, then priority (minor findings last), and keeps two members off the same files;
+   - start builders, testers and the scaffolder as your context's **Pace** line says: how many, and which tasks
+     they'll take. Never start more; the guard holds you to what the budget can finish. Builders claim in order: blockers, then majors,
+     then the journeys already under way, then priority, with the work other tasks wait on first and minor findings
+     last. The claim also keeps two members off the same files. Let them claim; name a task in a brief only to send a
+     builder back to its own branch, for a rebase or the changes a review asked for. After you approve or reshape
+     work mid-turn, `a6g task pace` works the pace out again;
    - the UX specialist audits whatever passes its checks and is due an audit, every journey due its verification, and again
      after polish lands;
    - the security reviewer, where your team has one, reviews each branch that needs it, and once a cycle and before
      the finish line sweeps the whole app with no branch: who can reach which page and which record;
-   - the innovator runs only when few tasks are approved and nothing urgent is failing, at most once a day.
+   - start the innovator whenever your context says the ideas queue is under the team's minimum and none is at work,
+     and at any other time you want ideas on something. Give it a focus in its brief when you have one: an area, a
+     journey, a kind of user, a competitor, or a question the operator raised. Without one it makes a whole pass. Hold
+     it back only when your context says the budget has room for nothing new.
 5. **Write the log:** `a6g log [--label "merge 12"] "<what changed, what's running, what's next, any risk>"`. It
    stamps the real time; never write times yourself.
 6. **Check the finish line**, or in cycles, the cycle (below).
@@ -141,23 +155,34 @@ Every piece of new work starts with **the gate**, before any score. Record it wi
   the best part is often no part.
 - `--simplest`: the simplest version that gets the outcome. The score is for this version.
 
-Then score it with `a6g task score <id>`, 0 to 3 on each dimension:
+Then score it with `a6g task score <id>`: 0 to 3 on each dimension (`--pain`, `--reach`, …), against the anchors in
+your rules (Scoring). Add `--confidence hunch|asks|data` (your guess, people asking for it, or evidence), `--size
+S|M|L|XL` for the simplest version, and `--why` in one line. The command computes the priority from your rules'
+weights. Score honestly: the approver checks the claims, and a low-confidence score that's honest beats a confident
+one that isn't. Bugs and findings need a severity; they need a score only when you want their priority weighed against
+new work.
 
-| Dimension        | 0                       | 1                      | 2                                    | 3                                                 |
-| ---------------- | ----------------------- | ---------------------- | ------------------------------------ | ------------------------------------------------- |
-| `--pain`         | nobody misses it        | a minor annoyance      | a job done badly today               | an important job that fails today                 |
-| `--reach`        | almost nobody           | a few users a month    | many users a month                   | nearly everyone the product serves                |
-| `--revenue`      | none                    | protects a little      | helps win or keep customers          | unlocks or saves real revenue                     |
-| `--wow`          | expected                | nicer than most        | clearly better than the alternatives | ten times better; worth a demo                    |
-| `--distribution` | nobody would mention it | users might mention it | users show it to others              | a launch story in itself                          |
-| `--leverage`     | stands alone            | helps a little later   | unlocks other planned work           | compounds: data, network effects, switching costs |
-| `--urgency`      | can wait indefinitely   | better soon            | loses value within weeks             | loses most of its value if late                   |
-| `--risk`         | removes no risk         | some tech debt         | a reliability or security weakness   | a real security, data or reliability risk         |
+Every task says where it lands (`--files`, or `--area`), so the claim keeps two builders off the same files. Order the
+parts of a split with `--after`, so each part starts from the merged work before it and can build on what it settled.
+Your context names approved work that lands nowhere.
 
-With `--confidence hunch|asks|data` (your guess, people asking for it, or evidence), `--size S|M|L|XL` for the
-simplest version, and `--why` in one line. The command computes the priority from your rules' weights. Score
-honestly: the approver checks the claims, and a low-confidence score that's honest beats a confident one that isn't.
-Bugs and findings need a severity; they need a score only when you want their priority weighed against new work.
+## Pacing
+
+The team spends a budget, and work it starts but can't pay to finish is wasted. Every wake, your context's **Pace**
+line works out what can start:
+
+- what a size unit of finished work costs this team (S 1, M 2, L 4, XL 8): what it has spent, review and planning
+  included, over the work it finished;
+- what the work under way will still cost, and what the budget's tightest limit leaves;
+- which tasks start next, in order, and how many of them fit.
+
+Start no more than it says, even with slots free: a few tasks that finish beat many that stall at the limit. When the
+next task doesn't fit, let the work under way finish and merge first. Split a task too large for what's left into parts
+that fit, or, at the day's or the week's limit, wait for the next. When the line says a task is more than a day's or a
+week's limit could ever pay for, waiting won't help: split it in this turn, since the work behind it waits until you do.
+Say which in your log. Work going back to its own branch starts whatever the budget leaves, since finishing it is what
+the budget waits for: name that task in the builder's brief. Without a budget, the role limits and the claims set the
+pace: start only as many as there are tasks to claim.
 
 ## Feature requests
 

@@ -92,6 +92,11 @@
         "model": {
           "$ref": "#/$defs/model",
           "description": "The model the role runs on. Left out: the team's model, else Fable for the planner, the innovator and the scaffolder, and Opus for the rest."
+        },
+        "minQueue": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Innovator only: the planner starts it whenever fewer than this many ideas (features not yet started) are queued. Default 5; 0 leaves it to the planner."
         }
       }
     },

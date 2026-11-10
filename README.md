@@ -92,7 +92,9 @@ a reading with 5% of the week used, a budget in shares isn't checked, and says s
 per day, week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now.
 Resume it and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the
 budget): you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when
-the next day or week does. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach,
+the next day or week does, and you and the planner are told when that will be. With it, changing the budget so that
+nothing is over (raising the total too) starts the team again at the watchdog's next run; without it, the team stays
+paused until `a6g resume`. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach,
 `a6g pause` still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
 
 ### Teams on several subscriptions
@@ -128,6 +130,21 @@ a budget in percent counts each against that subscription's own week.
 The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
 list. The limits read each subscription's own usage, so they hold wherever it's used; what a week comes to in dollars
 counts what the reading Mac used, so for a subscription used on two Macs it's an underestimate.
+
+Within a budget, the planner paces its starts so that what it starts can finish. Every wake it's told what a size unit
+of finished work has cost the team (S 1, M 2, L 4, XL 8; all of its spending over the work it finished, so review and
+planning are in it), what the work under way still needs, and what the budget's tightest limit leaves. From that it
+starts only the next tasks in order that fit, and the guard refuses more new builders or testers than that, counting
+starts rather than heads. Work sent back to its own branch goes back whatever the budget leaves, and a task bigger than
+a day's or a week's limit could ever pay for is to be split, not waited for. `a6g task pace` works it out again
+mid-turn. Builders claim in order: blockers, then majors, then journeys already under way, then
+priority, with work other tasks wait on (`--after`) going before what waits on it.
+
+With an innovator on the team (`"innovator": {"limit": 1}`), the planner keeps ideas coming. It starts one whenever
+fewer than five features are queued and not yet started (`roles.innovator.minQueue`), and whenever it wants ideas on
+something. The innovator researches users' problems, feedback, the market and competitors, UX blind spots and UI
+improvements. It files its best ideas, at most five a pass, each with its evidence and a suggested score on the
+team's matrix in the description. The planner checks the evidence and records the score that counts.
 
 To stop a team gracefully, let what it's doing finish first: `a6g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets

@@ -240,6 +240,50 @@ question to the operator, with no feature claimed before the answer.
   runs on, and `a6g doctor` checks each one is signed in. The guard keeps members out of every subscription's folder.
 - `a6g metrics` and the watchdog's spend read every subscription's transcripts, not only `~/.claude/projects`.
 
+## 0.7.0: Researched ideas, work in order, and pacing to the budget
+
+- **The innovator researches what to build next and scores it.** A pass looks at the product as built, users' problems
+  and pain points, customer feedback (`a6g request list|show` is in its commands), the market and competitors (the
+  web, within the guard's network rules), UX blind spots and UI improvements. It scores each candidate on the team's
+  matrix, ranks them by the team's weights, and files at most five, best first. Each one's description has fixed
+  sections: who needs it, the evidence with sources, the simplest version, its scope, where it lands, and a
+  **Suggested score** table with a reason per dimension, a confidence, a size and a suggested priority. The planner
+  checks the evidence and records the score that counts; polish goes in as UX findings. On a team with a finish line,
+  an idea beyond the documents is marked as a change of scope, which the operator decides.
+- **The planner keeps ideas queued.** Every wake its context counts the features queued that no builder has started
+  (triage to approved, or waiting on the operator's decision, with no branch). Under the team's minimum
+  (`roles.innovator.minQueue`, default 5) it says to start the innovator, unless one is at work, the budget has room
+  for nothing new, or the last pass filed nothing in the past six hours. The planner may also start one any time, with
+  a focus in its brief. The once-a-day rule is gone.
+- **The score anchors are in the rules of everyone who uses them.** A Scoring section, compiled from
+  `SCORE_ANCHORS`, gives the planner, the approver and the innovator the same table, the confidence and size factors,
+  and the priority formula with the team's weights. The approver's prompt had pointed at the planner's rules, which it
+  never saw.
+- **Claims go in order.** Builders claim blockers, then majors, then work in a journey already under way, then by
+  priority. A task other open tasks wait on (`--after`) takes the most urgent severity, the journey under way and the
+  highest priority of what waits on it, and goes first at the same priority (`claimRank` in `lib/tasks/model.ts`). The
+  web board's approved column, `a6g serve`'s board and `a6g task list --claimable` show that order. The planner's
+  context names approved work with no `--files` or `--area`, which the claim can't keep apart from other work.
+- **The planner paces its starts to the budget** (`lib/pace.ts`). Every wake its context has a Pace line:
+  - what a size unit of finished work has cost the team (all its spending over the work it finished, so review and
+    planning are in it; $3 until three tasks are done);
+  - what the work under way still needs;
+  - what the budget's tightest limit leaves;
+  - which tasks start next, in order, and how many fit.
+
+  When the budget is what stops the next start, the guard refuses more new builders or testers than fit, for two hours
+  or until the next wake. It counts starts since the pace was worked out, not members at work, since a member that
+  finishes frees a slot but not the money its work still needs. `a6g task pace` works it out again mid-turn. Work sent
+  back to its own branch goes back whatever the budget leaves, and claims take it first within its severity. A task
+  bigger than a day's or a week's limit could ever pay for is to be split now, not waited for. Only merged work counts
+  as finished in the cost per unit, and `spend.json` from before midnight counts as nothing spent today.
+
+- **Auto-resume, audited.** With `--auto-resume`, the operator's alert, the planner's message and `a6g start` on a paused
+  team say when the budget starts the team again (tomorrow, or on Monday). A change to the budget that leaves nothing
+  over now starts a team only the budget paused, at the watchdog's next run, a raised total included; without
+  auto-resume, `a6g budget` says the team stays paused and how to start it. When a daily and a weekly pause end
+  together, the resume says it's a new week.
+
 ## 0.6.1: The web app's new address, and doctor on stale prompts
 
 - **`a6g connect app` goes to `https://app.anythingfactory.dev` by default**, the domain the factory moved to; 0.6.0's

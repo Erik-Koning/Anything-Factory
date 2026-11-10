@@ -129,6 +129,7 @@ Each entry in `roles` takes:
 | `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, security-reviewer, ux-specialist and innovator                                                                                                                                |
 | `compactAt` | (planner) T3 Code compacts the planner's context at this many tokens (default 160000)                                                                                                                                                                            |
 | `model`     | The model the role runs on: `fable`, `opus`, `sonnet` or `haiku`, or a model id. See [Models](#models)                                                                                                                                                           |
+| `minQueue`  | (innovator) The planner starts the innovator whenever fewer than this many ideas (features not yet started) are queued (default 5; 0 leaves it to the planner)                                                                                                   |
 
 The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer, ux-specialist, innovator and approver
 (the reviewer, the security reviewer, the UX specialist, the innovator and the approver are read-only). The security

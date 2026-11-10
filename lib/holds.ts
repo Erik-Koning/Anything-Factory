@@ -5,6 +5,7 @@
 // ones on every run, and a6g pause, resume and budget at once.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resumesWhen } from "./budget.ts";
 import { type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
 import { dollars } from "./tasks/spend.ts";
@@ -93,16 +94,19 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
       log.push(
         `${whoAsked(control.by)} paused the team ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}${budget ? ` (${hold.note})` : ""}`
       );
-      // The budget's own pauses say so, and why: the planner's next report should say what it got done.
+      // The budget's own pauses say so, and why, and when auto-resume starts the team again (at the earliest: another
+      // limit may be over too): the planner's next report should say what it got done.
       const who = budget ? `The team's budget (${hold.note})` : "The operator";
+      const when = budget ? resumesWhen([(control.trigger ?? "").split(":")[0] ?? ""], readLimits(run)) : null;
+      const until = when ? `the budget starts it again (auto-resume, ${when} at the earliest) or the operator resumes it` : "the operator resumes it";
       tell.push(
         hold.scope === "now"
-          ? { text: `${who} paused the team: merge nothing and start no members until the operator resumes it. Finish your turn.`, wake: false }
+          ? { text: `${who} paused the team: merge nothing and start no members until ${until}. Finish your turn.`, wake: false }
           : {
               text:
                 `${who} is pausing the team after ${describeHold(hold)}${hold.note && !budget ? `, and wrote: "${hold.note}"` : ""}. ` +
                 "Finish that work and merge it, its verification and polish included; claim, start and plan nothing outside it. " +
-                "Once nothing in it can move, the team pauses until they resume it.",
+                `Once nothing in it can move, the team pauses until ${until}.`,
               wake: true,
             }
       );
