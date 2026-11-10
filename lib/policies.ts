@@ -184,6 +184,7 @@ export const POLICIES: Policy[] = [
       "npx prisma db push",
       "pnpm drizzle-kit push",
       "a6g lock app -- npx supabase db push",
+      "a6g env use -- npx supabase db push",
       "pnpm -C packages/db exec drizzle-kit push",
       "supabase --workdir app db push",
       'mongosh "mongodb://team:secret@cluster0.abc12.mongodb.net/a6g"',

@@ -78,7 +78,7 @@ export async function suiteCounts(dir: string, config: string, work: string): Pr
   if (!existsSync(join(dir, config))) return null;
   const listed = await runPlaywright(dir, { config, args: ["--list"], timeoutMin: 3, work });
   if (!listed.report) return null;
-  const specs = specsOf(listed.report);
+  const specs = specsOf(listed.report, dir);
   const byJourney: Record<string, number> = {};
   for (const spec of specs) for (const id of journeysOf(spec)) byJourney[id] = (byJourney[id] ?? 0) + 1;
   return { total: specs.length, byJourney };

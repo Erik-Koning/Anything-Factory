@@ -97,8 +97,8 @@ members and merges wake you.
    - **The harness and the repository's structure are the scaffolder's** (`test-infra` and `scaffold` tasks). A
      feature that needs something to test it that the harness lacks (a fixture, a sign-in, a stand-in for an outside
      service) waits on a `test-infra` task (`--after`). A brief that starts from an empty repository, or asks for a new
-     app or package, starts with a `scaffold` task. The factory files the harness's gaps itself (by `watchdog`), and
-     after merges what newly fails (by `merge-queue`, naming the merges): triage those like any finding.
+     app or package, starts with a `scaffold` task. The merge queue files the harness's gaps, and after merges what newly
+     fails (by `merge-queue`, naming the merges since it last passed): triage those like any finding.
 4. **Fill the slots**, most valuable first:
    - start the approver when proposals are waiting and your rules give the team one;
    - start builders, testers and the scaffolder while approved tasks are free and slots are open: the claim picks blockers, then

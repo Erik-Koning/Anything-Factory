@@ -55,6 +55,8 @@ import {
 import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
+import { openTeamStore } from "../tasks/ops.ts";
+import { fileGaps } from "../verify.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
 
@@ -93,6 +95,7 @@ export async function register(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["force", "worker"] });
   const home = homeFrom(positional[0]);
   const code = registerTeam(home, { force: Boolean(options["force"]), worker: Boolean(options["worker"]) });
+  if (code === 0 && !options["worker"]) await fileRegisterGaps(home);
   if (code === 0) await publishTeam(home);
   return code;
 }
@@ -114,6 +117,25 @@ async function publishTeam(home: string): Promise<void> {
     }
   } catch (error) {
     console.warn(`  couldn't publish ${team.name}'s settings for the web app: ${(error as Error).message.split("\n")[0]}`);
+  }
+}
+
+// The harness's gaps the factory can see without running anything, filed for the planner's triage: a team with a
+// scaffolder and no manifest yet (lib/verify.ts fileGaps; the merge queue files the rest after merges).
+async function fileRegisterGaps(home: string): Promise<void> {
+  const team = loadTeam(home);
+  const run = readRegistry(team.name)?.run;
+  if (team.board.type !== "tasks" || !team.roles["scaffolder"] || !run) return;
+  try {
+    const store = await openTeamStore(team, run, home);
+    try {
+      const filed = await fileGaps(store, team, home, null);
+      if (filed.length) console.info(`  the harness's gaps, for the planner to triage: ${filed.map((id) => `#${id}`).join(", ")}`);
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    console.warn(`  note: couldn't file the harness's gaps (${(error as Error).message.split("\n")[0]})`);
   }
 }
 

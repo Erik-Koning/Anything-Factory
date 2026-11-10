@@ -32,6 +32,7 @@ import { ticketOf } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
+import { pendingDir, verifyAfterMerge } from "../verify.ts";
 import { journeyProofFor } from "./e2e.ts";
 import { allowed, fewerTests, inTestLane, journeyTagProblems, manifestNarrowing, narrowingLines, suiteCounts, testLaneProblems } from "./harness.ts";
 import { pruneWorktrees } from "./watchdog.ts";
@@ -219,12 +220,16 @@ export async function run(argv: string[]): Promise<number> {
   if (queue !== undefined && !["false", "0", "no"].includes(String(queue)) && !process.env.A6G_MERGE_QUEUED) {
     const rest = argv.filter((arg) => !/^--queue(=.*)?$/.test(arg));
     const log = openSync(join(state, "merges", `${safe}.log`), "w");
-    spawn(process.execPath, [entryOf(FACTORY_ROOT), "merge", ...rest], {
+    const child = spawn(process.execPath, [entryOf(FACTORY_ROOT), "merge", ...rest], {
       cwd: home,
       detached: true,
       stdio: ["ignore", log, log],
       env: { ...process.env, A6G_MERGE_QUEUED: "1" },
-    }).unref();
+    });
+    // Marked as queued until it finishes, so the check after merges waits for the last of a burst (lib/verify.ts).
+    mkdirSync(pendingDir(state), { recursive: true });
+    writeJson(join(pendingDir(state), `${safe}.json`), { pid: child.pid, at: new Date().toISOString() });
+    child.unref();
     closeSync(log);
     console.info(`merge: ${branch} queued. The result comes as a message and in your next wake's context; the log is .a6g/run/state/merges/${safe}.log.`);
     return 0;
@@ -266,6 +271,8 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   const light = Boolean(options["light"] || options["no-journeys"]);
+  // Whether the app is up on the merged result: no after-merge command to run, or it ran and passed.
+  let afterOk = true;
   if (code === 0 && team.afterMerge && !options["no-after"] && !options["skip-after"]) {
     const after = spawnSync("git", ["rev-parse", "HEAD"], { cwd: home, encoding: "utf8" }).stdout.trim();
     const output: string[] = [];
@@ -274,7 +281,8 @@ export async function run(argv: string[]): Promise<number> {
       slots: 1,
       waitMin: waitMin(120),
       cwd: home,
-      env: { BEFORE: before ?? "", AFTER: after, A6G_LIGHT: light ? "1" : "0", JOURNEYS: light ? "0" : "1" },
+      // A6G_APP_LOCK: the command holds the app lock, so the checks it runs (a6g pages, a6g e2e) don't wait on it.
+      env: { BEFORE: before ?? "", AFTER: after, A6G_LIGHT: light ? "1" : "0", JOURNEYS: light ? "0" : "1", A6G_APP_LOCK: "held" },
       stdio: ["ignore", "pipe", "pipe"],
       onOutput: (chunk) => {
         process.stdout.write(chunk);
@@ -289,6 +297,7 @@ export async function run(argv: string[]): Promise<number> {
       .slice(-3)
       .join(" ");
     const outcome = busy ? `didn't run, the app lock stayed busy for ${waitMin(120)} min` : status === 0 ? "ok" : `FAILED, exit ${status}`;
+    afterOk = !busy && status === 0;
     const last = kept.last;
     if (last) {
       kept.last = { ...last, message: `${last.message} after merge: ${outcome} ${summary}`.trim() };
@@ -304,6 +313,17 @@ export async function run(argv: string[]): Promise<number> {
     } catch (error) {
       console.error(`merge: pruning finished worktrees failed: ${(error as Error).message}`);
     }
+    rmSync(join(pendingDir(state), `${safe}.json`), { force: true });
+    // The check after merges: the pages and the suite on the merged result, unless the app may be down or the planner
+    // asked for a light merge. The next merge's check covers what this one skips.
+    if (code === 0 && afterOk && !light && runDir)
+      try {
+        const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
+        await verifyAfterMerge(home, team, runDir, branch, { wake: (text) => planner && threadSend(planner, text) });
+      } catch (error) {
+        console.error(`merge: the check after merges failed: ${(error as Error).message}`);
+      }
+    else if (code === 0 && !afterOk) console.info("merge: no check after this merge: the after-merge command didn't pass, so the app may be down");
   }
   return code;
 }

@@ -64,6 +64,15 @@ describe("guard", () => {
       bash(scaffolded, "scaffolder", "echo x >> .a6g/brief.md", "refuse"),
       bash(scaffolded, "scaffolder", "a6g task claim", "allow"),
       bash(scaffolded, "scaffolder", "a6g merge a6g/s1-x", "refuse"),
+      // a6g env use runs its command, so the guard judges that command, as it does a6g lock's.
+      bash(scaffolded, "builder", "a6g env use -- pnpm exec playwright test e2e/a.spec.ts", "allow"),
+      bash(scaffolded, "builder", "a6g env use -- git push origin a6g/next", "refuse"),
+      bash(scaffolded, "builder", "a6g env use --wait-min 2 -- rm -rf .a6g", "refuse"),
+      bash(scaffolded, "builder", "a6g env use -- a6g merge a6g/b1-x", "refuse"),
+      bash(scaffolded, "planner", "a6g e2e run", "allow"),
+      bash(scaffolded, "builder", "a6g e2e run", "refuse"),
+      bash(scaffolded, "builder", "a6g e2e try e2e/a.spec.ts", "allow"),
+      bash(scaffolded, "planner", "a6g harness allow a6g/s1-x --sha abc1234 --why x", "refuse"),
     ]);
   });
 

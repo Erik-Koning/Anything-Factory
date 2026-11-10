@@ -853,9 +853,10 @@ function peel(words: string[]): string[] | null {
       return ["bun", ...after];
     }
     case "a6g": {
-      // a6g lock <name> [--slots N] [--wait-min M] -- <command>
+      // a6g lock <name> [--slots N] [--wait-min M] -- <command>, and a6g env use [--wait-min M] -- <command>: the
+      // command runs, so the guard judges it.
       const dash = rest.indexOf("--");
-      return rest[0] === "lock" && dash >= 0 ? rest.slice(dash + 1) : null;
+      return (rest[0] === "lock" || (rest[0] === "env" && rest[1] === "use")) && dash >= 0 ? rest.slice(dash + 1) : null;
     }
     case "find": {
       const at = rest.findIndex((arg) => /^-(exec|execdir|ok|okdir)$/.test(arg));

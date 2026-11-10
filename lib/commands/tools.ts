@@ -4,8 +4,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withLock } from "../lock.ts";
-import { e2eDone } from "./e2e.ts";
-import { keepLooks } from "./pages.ts";
+import { pagePlan, readHarness } from "../harness.ts";
+import { e2eDone, namespaceOf } from "./e2e.ts";
+import { holdingApp, keepLooks } from "./pages.ts";
 import { stateDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { blastRadius } from "../blast.ts";
@@ -259,8 +260,11 @@ export async function gate(argv: string[]): Promise<number> {
 }
 
 // a6g env up|reset|restart|down|status: the team's environment script, run from the team's checkout.
-export function env(argv: string[]): number {
+// a6g env use [--wait-min M] -- <command>: anyone's command against the team's app, where it's run, holding the app
+// lock (so a merge doesn't restart the app under it), with PLAYWRIGHT_BASE_URL and an A6G_NAMESPACE of its own.
+export async function env(argv: string[]): Promise<number> {
   const sub = argv[0] ?? "status";
+  if (sub === "use") return envUse(argv.slice(1));
   if (sub !== "status" && plannerOnly(`env ${sub}`)) return 2;
   const { home, team } = teamSession();
   if (!team.environment.script) {
@@ -268,6 +272,31 @@ export function env(argv: string[]): number {
     return sub === "status" ? 0 : 2;
   }
   return runIn(home, team.environment.script, [sub, ...argv.slice(1)]);
+}
+
+async function envUse(argv: string[]): Promise<number> {
+  const dash = argv.indexOf("--");
+  const command = dash >= 0 ? argv.slice(dash + 1) : [];
+  if (!command.length) {
+    console.error("usage: a6g env use [--wait-min M] -- <command>");
+    return 2;
+  }
+  const { home, team } = teamSession();
+  const appUrl = pagePlan(team, readHarness(home).harness).appUrl;
+  const here = process.cwd();
+  const namespace = namespaceOf(here, team.branchPrefix);
+  const run = () =>
+    spawnSync(command[0] ?? "", command.slice(1), {
+      cwd: here,
+      stdio: "inherit",
+      env: { ...process.env, A6G_NAMESPACE: namespace, ...(appUrl ? { PLAYWRIGHT_BASE_URL: appUrl } : {}) },
+    }).status ?? 1;
+  try {
+    return await holdingApp(home, `env use (${namespace})`, async () => run());
+  } catch (error) {
+    console.error(`env use: ${(error as Error).message}`);
+    return 75;
+  }
 }
 
 // a6g finish / a6g progress: the team's finish line and its status, run from the team's checkout. Where the team's

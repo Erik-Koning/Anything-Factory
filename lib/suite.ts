@@ -4,7 +4,7 @@
 // the run's data in the environment, and its output folder outside the checkout, so a run never leaves it dirty.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { readJson } from "./util.ts";
 
 // The repository's Playwright command-line entry, or null when it has none installed.
@@ -48,6 +48,7 @@ interface ReportSuite {
   suites?: ReportSuite[];
 }
 export interface Report {
+  config?: { rootDir?: string };
   suites?: ReportSuite[];
   errors?: { message?: string }[];
 }
@@ -112,14 +113,17 @@ export interface SpecResult {
   error?: string;
 }
 
-// Every test in a report, once per project. A listing (--list) has no results: each test is "listed".
-export function specsOf(report: Report | null): SpecResult[] {
+// Every test in a report, once per project. A listing (--list) has no results: each test is "listed". With the
+// repository's folder (`dir`), files are named from its root (e2e/pay.spec.ts), not from the suite's own folder.
+export function specsOf(report: Report | null, dir?: string): SpecResult[] {
   const found: SpecResult[] = [];
+  const root = report?.config?.rootDir;
+  const named = (file: string): string => (dir && root && file ? relative(dir, join(root, file)) || file : file);
   const walk = (suite: ReportSuite, titles: string[], file: string): void => {
     const here = suite.file ?? file;
     const path = suite.title && suite.title !== here ? [...titles, suite.title] : titles;
     for (const spec of suite.specs ?? []) {
-      const specFile = spec.file ?? here;
+      const specFile = named(spec.file ?? here);
       for (const test of spec.tests?.length ? spec.tests : [{}]) {
         const results = test.results ?? [];
         const status = test.status;
@@ -157,15 +161,19 @@ export function specsOf(report: Report | null): SpecResult[] {
 // A test's journeys, by tag: exactly @journey-<id> (so @journey-1 isn't @journey-12).
 export const journeysOf = (spec: Pick<SpecResult, "tags">): string[] => spec.tags.flatMap((tag) => /^@journey-(\d+)$/.exec(tag)?.[1] ?? []);
 
-// The first line of an error, without colour codes, and without anything that looks like a secret's value.
+// The first lines of an error (what failed, and the locator or values it names), without colour codes, and without
+// anything that looks like a secret's value.
 export function scrub(text: string): string {
-  const line =
-    text
-      .replace(/\u001b\[[0-9;]*m/g, "")
-      .split("\n")
-      .map((l) => l.trim())
-      .find(Boolean) ?? "";
-  return line.replace(/\b([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*)=\S+/gi, "$1=…").slice(0, 300);
+  const lines = text
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  return lines
+    .join(" · ")
+    .replace(/\b([A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*)=\S+/gi, "$1=…")
+    .slice(0, 300);
 }
 
 // The config's folder holds the suite: a run's report file names tests relative to it.

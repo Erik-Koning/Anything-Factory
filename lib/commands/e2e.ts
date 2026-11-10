@@ -73,7 +73,7 @@ export async function recordSuite(home: string, team: Team, { retries = 0, names
     at: new Date().toISOString(),
     timedOut: ran.timedOut,
     status: ran.status,
-    specs: specsOf(ran.report),
+    specs: specsOf(ran.report, home),
     errors: [
       ...(ran.report?.errors ?? []).map((error) => (error.message ?? "").split("\n")[0] ?? ""),
       ...(!ran.report ? [`no report: ${ran.tail.split("\n").slice(-3).join(" ")}`] : []),
@@ -222,7 +222,7 @@ export async function e2e(argv: string[]): Promise<number> {
       });
     const shared = appUrl !== undefined && new URL(base).origin === new URL(appUrl).origin;
     const ran = shared ? await holdingApp(home, "e2e try", go) : await go();
-    const specs = specsOf(ran.report);
+    const specs = specsOf(ran.report, dir);
     const tried = { specs, errors: ran.report ? [] : [ran.tail], timedOut: ran.timedOut };
     console.info(
       `e2e try (${namespace}, against ${base}): ${specs.filter(ok).length} passed, ${specs.filter((s) => s.outcome === "failed").length} failed${ran.timedOut ? ", and it timed out" : ""}`

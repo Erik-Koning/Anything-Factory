@@ -54,7 +54,7 @@ describe("the suite's report", () => {
       specs.map((s) => [s.id, s.outcome, s.error ?? ""]),
       [
         ["j1.spec.ts › signs up [chromium]", "passed", ""],
-        ["j1.spec.ts › pays [chromium]", "failed", "Expected 2"],
+        ["j1.spec.ts › pays [chromium]", "failed", "Expected 2 · Received 3"],
         ["j1.spec.ts › admin › approves", "flaky", ""],
       ]
     );
