@@ -25,7 +25,7 @@ import { type PageCheck, type PagePlan, pagePlan, readHarness } from "../harness
 import { acquire } from "../lock.ts";
 import { FACTORY_ROOT, stateDir, workDir } from "../paths.ts";
 import { teamSession } from "../session.ts";
-import { runPlaywright } from "../suite.ts";
+import { browserMissing, runPlaywright, specsOf } from "../suite.ts";
 import { readJson, writeJson } from "../util.ts";
 
 // The part of Playwright this uses.
@@ -187,7 +187,8 @@ async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<R
     timeoutMin: 5,
     work: join(workDir(home), "pages-auth"),
   });
-  const failed = ran.status === 0 ? "" : `the sign-in project ${auth.project} ${ran.timedOut ? "timed out" : `exited ${ran.status}`}`;
+  const missing = browserMissing(specsOf(ran.report, dir));
+  const failed = ran.status === 0 ? "" : `the sign-in project ${auth.project} ${ran.timedOut ? "timed out" : (missing ?? `exited ${ran.status}`)}`;
   if (failed) console.error(`pages: ${failed}\n${ran.tail}`);
   for (const name of stale) {
     if (failed) problems[name] = `the sign-in ${name} failed (${failed}), so the page wasn't checked`;

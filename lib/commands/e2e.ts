@@ -15,7 +15,18 @@ import type { LoadedTeam, Team } from "../config.ts";
 import { type Harness, journeysRequired, pagePlan, readHarness } from "../harness.ts";
 import { stateDir, workDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
-import { journeysOf, lastSaid, passed as ok, reachedTests, runPlaywright, scrub, type SpecResult, specsOf, type SuiteRecord } from "../suite.ts";
+import {
+  browserMissing,
+  journeysOf,
+  lastSaid,
+  passed as ok,
+  reachedTests,
+  runPlaywright,
+  scrub,
+  type SpecResult,
+  specsOf,
+  type SuiteRecord,
+} from "../suite.ts";
 import type { Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
@@ -69,14 +80,16 @@ export async function recordSuite(home: string, team: Team, { retries = 0, names
     })
   );
   const specs = specsOf(ran.report, home);
+  const missing = browserMissing(specs);
   const record: SuiteRecord = {
     commit,
     at: new Date().toISOString(),
-    ran: !ran.timedOut && reachedTests(ran.report),
+    ran: !ran.timedOut && reachedTests(ran.report) && missing === null,
     timedOut: ran.timedOut,
     status: ran.status,
     specs,
     errors: [
+      ...(missing ? [missing] : []),
       ...(ran.timedOut ? [`it ran past ${timeoutMin} minutes (e2e.timeoutMin) and was stopped`] : []),
       ...(ran.report?.errors ?? []).map((error) => scrub(error.message ?? "")),
       ...(!ran.report && !ran.timedOut ? [`no report: ${lastSaid(ran.tail)}`] : []),
@@ -255,7 +268,11 @@ export async function e2e(argv: string[]): Promise<number> {
     const shared = appUrl !== undefined && new URL(base).origin === new URL(appUrl).origin;
     const ran = shared ? await holdingApp(home, "e2e try", go) : await go();
     const specs = specsOf(ran.report, dir);
-    const errors = ran.report ? (ran.report.errors ?? []).map((error) => scrub(error.message ?? "")).filter(Boolean) : [ran.tail];
+    const missing = browserMissing(specs);
+    const errors = [
+      ...(missing ? [missing] : []),
+      ...(ran.report ? (ran.report.errors ?? []).map((error) => scrub(error.message ?? "")).filter(Boolean) : [ran.tail]),
+    ];
     console.info(
       `e2e try (${namespace}, against ${base}): ${tally(specs)}${ran.timedOut ? `, and it ran past ${timeoutMin} minutes and was stopped` : ""}`
     );

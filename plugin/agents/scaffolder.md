@@ -105,7 +105,9 @@ This is the first task on most teams, and what a `test-infra` task usually exten
 ```
 
 - It holds no command: the factory runs the repository's own Playwright with `e2e.config`, so install
-  `@playwright/test` in the repository.
+  `@playwright/test` in the repository, and its browser on this machine (`npx playwright install chromium`, again
+  whenever you change Playwright's version: each version asks for its own build, and the factory's browser is its own
+  Playwright's). A run whose tests find no browser counts as not run.
 - It only adds checks. Whatever could loosen one is the operator's, in `team.json pages`: the app's address, the
   console messages to ignore, the smallest touch target (from the rubric), the viewports and schemes. If one of those
   is wrong, say so in your report.

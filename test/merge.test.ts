@@ -1,6 +1,6 @@
 import { baseTeam, commit, a6g, git, makeRepo, ROOT, write } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { startOf } from "../lib/lock.ts";
@@ -403,6 +403,43 @@ describe("merge queue", { concurrency: true }, () => {
     assert.ok(!existsSync(join(state, "verify-due.json")), "the check ran");
     assert.equal(readFileSync(join(state, "verify.log"), "utf8").trim().split("\n").length, 2);
   });
+
+  // The audit's lost check: the first of two leaves the check to the one queued behind it, which then merges nothing.
+  for (const how of ["fails its gate", "merges light", "is paused"] as const)
+    test(`a merge leaves the check to the one queued behind it, which runs it though it ${how}`, async () => {
+      const home = makeRepo(baseTeam({ gate: { full: "test ! -f FAILGATE", quick: "true" } }));
+      const state = join(home, ".a6g/run/state");
+      const queued = { A6G_HOME_DIR: home, A6G_RUN: `${home}-run`, A6G_MERGE_QUEUED: "1" };
+      mkdirSync(`${home}-run`, { recursive: true });
+      branch(home, "a6g/b1-a", { "src/a.ts": "export const a = 2;\n" });
+      branch(home, "a6g/b2-b", how === "fails its gate" ? { FAILGATE: "x\n", "src/b.ts": "1\n" } : { "src/b.ts": "export const b = 2;\n" });
+      await approve(home, "a6g/b1-a");
+      await approve(home, "a6g/b2-b");
+      // The second is queued behind the first: its mark names a live process, as a6g merge --queue writes it.
+      const mark = join(state, "merges", "pending", "a6g_b2-b.json");
+      mkdirSync(join(state, "merges", "pending"), { recursive: true });
+      writeFileSync(mark, JSON.stringify({ pid: process.pid, started: startOf(process.pid), at: new Date().toISOString() }));
+      const first = await a6g(["merge", "a6g/b1-a"], { cwd: home, env: queued });
+      assert.equal(first.code, 0, first.out);
+      assert.ok(existsSync(join(state, "verify-due.json")), "the check is left to the merge behind");
+      assert.ok(!existsSync(join(state, "verify.log")));
+
+      rmSync(mark);
+      if (how === "is paused") writeFileSync(join(`${home}-run`, "paused"), "x");
+      const second = await a6g(["merge", "a6g/b2-b", ...(how === "merges light" ? ["--light"] : [])], {
+        cwd: home,
+        env: { ...queued, ...(how === "is paused" ? { A6G_TEAM: "fixture", A6G_ROLE: "planner" } : {}) },
+      });
+      if (how === "is paused") {
+        // Nothing runs under a pause: the check stays due, and a6g status says so, for the first merge after it.
+        assert.notEqual(second.code, 0);
+        assert.ok(existsSync(join(state, "verify-due.json")), "still due");
+        return;
+      }
+      assert.equal(second.code, how === "fails its gate" ? 4 : 0, second.out);
+      assert.ok(!existsSync(join(state, "verify-due.json")), "the check ran");
+      assert.match(readFileSync(join(state, "verify.log"), "utf8"), /^\S+ \S+ [0-9a-f]{9} nothing to check\n$/);
+    });
 
   test("closes the tickets it's told to, and refuses a dirty checkout", async () => {
     const home = makeRepo(baseTeam(), { ".a6g/run/board/7-seven.md": "status: review\n" });

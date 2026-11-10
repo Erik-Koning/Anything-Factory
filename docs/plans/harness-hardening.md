@@ -1,7 +1,8 @@
 # Plan: make the checks true, then cover what nothing checks
 
-Status: planned, not started. Follows `harness.md` (built) and answers `harness-audit.md` (38 findings). Part 1 ships
-with the scaffolder as 0.7.0; Part 2 is 0.8.0.
+Status: Part 1 is built on the branch `scaffolder-harness`, not released: it answers 37 of the 38 findings in
+`harness-audit.md` (P9 is left on purpose, below). Part 2 is planned in full in `harness-security.md`. Follows
+`harness.md` (built). Part 1 ships with the scaffolder as 0.7.0; Part 2 is 0.8.0.
 
 ## What decides the order
 
@@ -126,6 +127,29 @@ Then the same read-only run against a live team's app as last time.
 
 A, B, C, D, E, F. B before C and D because both read the record. E is the largest and stands alone.
 
+### Built differently, and why
+
+- **Decision 11 holds where someone else can write the tests:** a team with a tester or a scaffolder. On a team with
+  neither, the builder is the only one who can, and the reviewer reads them.
+- **Decision 12 lists the suite before the gate too,** so a branch that checks less is refused before the gate's
+  minutes are spent. Where the suite can't be listed in the merge's worktree, the merge says so and goes on.
+- **Decision 14 compares with the check's own last run** (`state/verify-suite.json`), not the last recorded run, which
+  a planner's `a6g e2e run` on another commit would have moved.
+- **Decisions 6 and 9 gained an outcome, `unreached`:** a test a cut-short run never got to is neither a pass nor a
+  failure. And a run whose tests found no browser (the repository's Playwright asks for its own version's build)
+  counts as not run, with what downloads it: the audit's S8, which this plan had left out.
+- **Decision 17:** a failed after-merge command still marks a check as due, since the app's health decides what the
+  check does. A run recorded while the checkout moved is taken back out, and the next merge takes the check.
+  `a6g status` shows a check that's due.
+- **Decision 18's reason for a suite that didn't run** is the error's message, not the last lines of its stack.
+- **Decision 19 tells failures apart without their numbers,** so a page that answers 500 and then 404 is the same
+  failure, and stays quiet once rejected.
+- **Decision 21's `--max-min` stops at 120:** a longer hold is a merge queue that doesn't move.
+- **Decision 25 needed no bypass of the page's content security policy:** the factory's scripts run through the
+  browser's own evaluation, which the policy doesn't govern. A test holds a page with a strict policy.
+- **Decision 28 reads more than arguments:** a here-document, a here-string and what an echo pipes into a program,
+  the locks and merge folders beside the state, and a program started from inside any of them.
+
 ## Part 2: what nothing checks yet (0.8.0)
 
 `harness.md` named six needs. Two are missing from it: **the software does no harm** to the people it's for (their
@@ -183,12 +207,12 @@ Defaults are chosen; say if you'd choose otherwise.
 
 ## Checklist
 
-- [ ] A. Nothing stalls (1 to 5)
-- [ ] B. One reading of a run (6 to 10)
-- [ ] C. Nobody makes their own proof (11 to 16)
-- [ ] D. The check after merges (17 to 21)
-- [ ] E. Page checks (22 to 27)
-- [ ] F. The guard and Known limits (28)
-- [ ] Tests from the audit's reproductions; a read-only run on a live team; README, CHANGELOG, `docs/team.md`
+- [x] A. Nothing stalls (1 to 5)
+- [x] B. One reading of a run (6 to 10)
+- [x] C. Nobody makes their own proof (11 to 16)
+- [x] D. The check after merges (17 to 21)
+- [x] E. Page checks (22 to 27)
+- [x] F. The guard and Known limits (28)
+- [x] Tests from the audit's reproductions; a read-only run on a live team; README, CHANGELOG, `docs/team.md`
 - [ ] G. Security (29 to 33)
 - [ ] H. Numbers (34)

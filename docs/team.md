@@ -225,7 +225,9 @@ the repository's own Playwright with the configuration it names.
 
 - **`e2e`:** the suite's Playwright configuration, and how long a whole run may take (default 20 minutes). The
   factory runs `playwright test --config <it>` with the JSON report written outside the checkout, `PLAYWRIGHT_BASE_URL`
-  set to the team's app and an `A6G_NAMESPACE` for the run's data.
+  set to the team's app and an `A6G_NAMESPACE` for the run's data. That Playwright needs its own version's browser on
+  the machine (`npx playwright install chromium`, which the scaffolder runs); a run whose tests find none counts as
+  not run, and says so.
 - **`auth`:** the Playwright project in that configuration that signs in and saves each state; pages and specs use
   them by name.
 - **`pages`:** pages to check beside the operator's (an id the operator listed stays theirs).

@@ -245,6 +245,16 @@ export function lastSaid(tail: string): string {
   return scrub((said.length ? said : lines).slice(-3).join("\n"));
 }
 
+// A test that found no browser says nothing about the app. The repository's Playwright asks for the browser build of
+// its own version, and the factory installs only its own's: what's missing and what downloads it, or null when every
+// test that asked for a browser had one.
+export function browserMissing(specs: Pick<SpecResult, "error">[]): string | null {
+  const error = specs.map((spec) => spec.error ?? "").find((text) => /Executable doesn't exist at /.test(text));
+  if (error === undefined) return null;
+  const build = /Executable doesn't exist at \S*?\/([\w.]+-\d+)\//.exec(error)?.[1];
+  return `the repository's Playwright has no browser to run${build ? ` (${build.replaceAll("_", " ")})` : ""}: npx playwright install, run where the suite's configuration is, downloads the build its version asks for`;
+}
+
 // The config's folder holds the suite: a run's report file names tests relative to it.
 export const configDir = (dir: string, config: string): string => dirname(join(dir, config));
 
@@ -252,8 +262,9 @@ export const configDir = (dir: string, config: string): string => dirname(join(d
 export interface SuiteRecord {
   commit: string;
   at: string;
-  // Whether the suite ran: it wrote a report, inside its time limit, with a result for at least one test. A run that
-  // didn't proves nothing and disproves nothing: no journey is proven by it, and none of its tests failed.
+  // Whether the suite ran: it wrote a report, inside its time limit, with a result for at least one test, and its
+  // tests had their browser. A run that didn't proves nothing and disproves nothing: no journey is proven by it, and
+  // none of its tests failed.
   ran: boolean;
   timedOut: boolean;
   status: number | null;

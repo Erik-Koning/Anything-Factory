@@ -9,7 +9,17 @@ import { browserProblem } from "../lib/browser.ts";
 import { historyFile, journeyProofFor, namespaceOf, recordSuite, runFor, suiteGaps, suiteHistory, summary, unprovenIn } from "../lib/commands/e2e.ts";
 import { loadTeam, type RawTeam } from "../lib/config.ts";
 import { journeysRequired } from "../lib/harness.ts";
-import { journeysOf, playwrightCli, reachedTests, runPlaywright, scrub, type SpecResult, specsOf, type SuiteRecord } from "../lib/suite.ts";
+import {
+  browserMissing,
+  journeysOf,
+  playwrightCli,
+  reachedTests,
+  runPlaywright,
+  scrub,
+  type SpecResult,
+  specsOf,
+  type SuiteRecord,
+} from "../lib/suite.ts";
 import { writeJson } from "../lib/util.ts";
 import { moveRefusal, newTask, type Task } from "../lib/tasks/model.ts";
 
@@ -287,6 +297,40 @@ describe("journeys as specs, in a real browser", { skip: noBrowser ?? false }, (
     assert.match(proof(journeys[0] as Task, moved) ?? "", /no recorded run of the suite holds all of journey 1's merges/);
     assert.match(suiteGaps(home, journeys).join("\n"), /the last run was at .*, not the head/);
     assert.equal(suiteHistory(home).length, 1);
+  });
+
+  // The audit's S8: the repository's Playwright asks for its own version's browser build, which nothing installed.
+  test("a run whose tests found no browser didn't run: it says what's missing, and proves and disproves nothing", async () => {
+    const team = { ...baseTeam({ board: "tasks" }), roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} }, pages: { appUrl: url } } as RawTeam;
+    const home = makeRepo(team, {
+      ".a6g/harness.json": { e2e: { config: "playwright.config.mjs", timeoutMin: 3 } },
+      "playwright.config.mjs": "export default { testDir: 'e2e', workers: 1 };\n",
+      "e2e/a.spec.mjs": [
+        'import { test, expect } from "playwright/test";',
+        'test("opens the page", { tag: "@journey-1" }, async ({ page }) => { await page.goto("/"); });',
+        "test('needs no browser', async () => { expect(1).toBe(1); });",
+        "",
+      ].join("\n"),
+      ".gitignore": "node_modules\n",
+    });
+    mkdirSync(join(home, "node_modules"), { recursive: true });
+    for (const name of ["playwright", "playwright-core"]) symlinkSync(join(ROOT, "node_modules", name), join(home, "node_modules", name));
+    const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.PLAYWRIGHT_BROWSERS_PATH = tmp("a6g-no-browsers-");
+    try {
+      const record = await recordSuite(home, loadTeam(home));
+      assert.equal(record.ran, false);
+      assert.match(
+        summary(record),
+        /^the suite didn't run: the repository's Playwright has no browser to run \(chromium[\w ]*-\d+\): npx playwright install, run where the suite's configuration is, downloads the build its version asks for$/
+      );
+      const journey = task({ id: "1", kind: "journey", status: "approved" });
+      const all = [journey, task({ id: "2", parent: "1", sha: record.commit })];
+      assert.match(journeyProofFor(home, loadTeam(home))(journey, all) ?? "", /the suite didn't run at .*isn't proven yet/);
+    } finally {
+      process.env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+    }
+    assert.equal(browserMissing([{ error: "Error: expect(locator).toBeVisible() failed" }, {}]), null);
   });
 
   test("a recorded run sets its own retries and forbids .only, whatever the repository's configuration says", async () => {
