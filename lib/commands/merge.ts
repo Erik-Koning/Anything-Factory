@@ -28,13 +28,25 @@ import { inTeam, teamSession } from "../session.ts";
 import { machineName } from "../machine.ts";
 import { isTest } from "../blast.ts";
 import { branchRef, integrationDiverged, isLead, pushIntegration } from "../tasks/machines.ts";
-import { ticketOf } from "../tasks/model.ts";
+import { ticketOf, type Task } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
 import { pendingDir, verifyAfterMerge } from "../verify.ts";
 import { journeyProofFor } from "./e2e.ts";
-import { allowed, fewerTests, inTestLane, journeyTagProblems, manifestNarrowing, narrowingLines, suiteCounts, testLaneProblems } from "./harness.ts";
+import {
+  allowed,
+  CODE,
+  fewerTests,
+  holdsJourneyTest,
+  importsRunner,
+  listSuite,
+  type Listing,
+  manifestNarrowing,
+  narrowingAdded,
+  SUITE_MENTIONS,
+  testLaneProblems,
+} from "./harness.ts";
 import { pruneWorktrees } from "./watchdog.ts";
 
 // What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/.
@@ -68,24 +80,35 @@ const waitMin = (minutes: number): number => Number(process.env.A6G_MERGE_WAIT_M
 // on part of it.
 const MAX_BUFFER = 256 * 1024 * 1024;
 
-// The paths in a diff that a role may not change: outside its lane, the factory's own files, or the paths only the
-// team's scripts write (team.json protect).
-// The kind of the task a branch is named for, or null when the team keeps no task graph or it can't be read.
-async function taskKind(team: Team, run: string, home: string, branch: string): Promise<string | null> {
+// The task a scaffolder's branch is named for, or why the branch can't merge (teams with a task graph). What the branch
+// may change comes from its task's kind, so it has to name a task of its own that's approved and still open: named
+// for none, or for one that's finished, it would take the widest lane there is.
+const OPEN: readonly string[] = ["approved", "building", "review", "blocked", "question"];
+async function ownTask(team: Team, run: string, home: string, branch: string): Promise<Task | string> {
   const id = ticketOf(branch, team.branchPrefix);
-  if (team.board.type !== "tasks" || !id) return null;
+  if (!id)
+    return `${branch} isn't named for a task (a6g task claim names a scaffolder's branch, ${team.branchPrefix}/s<task>-…), and what a scaffolder's branch may change comes from its task's kind`;
+  let task: Task | null;
   try {
     const store = await openTeamStore(team, run, home);
     try {
-      return (await store.tasks.get(id))?.kind ?? null;
+      task = await store.tasks.get(id);
     } finally {
       await store.close();
     }
-  } catch {
-    return null;
+  } catch (error) {
+    return `the team's tasks couldn't be read (${(error as Error).message.split("\n")[0] ?? ""}), so what ${branch} may change isn't known; nothing was merged, queue it again`;
   }
+  if (!task) return `${branch} is named for task ${id}, and there's no such task: what a scaffolder's branch may change comes from its task's kind`;
+  if (!OPEN.includes(task.status))
+    return `${branch} is named for task ${id}, which is ${task.status}: a scaffolder's branch merges for its own approved, open task`;
+  if (task.branch && task.branch !== branch)
+    return `${branch} is named for task ${id}, which was submitted as ${task.branch}: a scaffolder's branch merges for its own task`;
+  return task;
 }
 
+// The paths in a diff that a role may not change: outside its lane, the factory's own files, or the paths only the
+// team's scripts write (team.json protect).
 export function outsideLane(team: Team, role: string, paths: string[]): string[] {
   return paths.filter(
     (path) => factoryWrite(team, role, path) || !laneAllows(team, role, path) || team.protect.some((rule) => new RegExp(rule).test(path))
@@ -417,43 +440,107 @@ async function mergeLocked({
     if (problem) return fail(2, "refused", `${branch} (${role}): ${problem}`);
   }
 
-  // The harness (lib/harness.ts, ./harness.ts). A branch's manifest must load. A scaffolder's test and test-infra work
-  // stays in test and harness files, and a builder's branch touches no journey's tag: nobody makes their own proof.
+  // The harness (lib/harness.ts, ./harness.ts). A branch's manifest must load.
   const touchesHarness = changed.includes(HARNESS_FILE);
   if (touchesHarness) {
     const problems = readHarness(home, tip).problems;
     if (problems.length) return fail(2, "refused", `${branch}'s ${HARNESS_FILE} doesn't load: ${problems.slice(0, 3).join("; ")}`);
   }
   const diff = raw("diff", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", `${integration}...${tip}`);
-  if (role === "scaffolder") {
-    const kind = await taskKind(team, run, home, branch);
-    const outside = kind && kind !== "scaffold" ? testLaneProblems(changed) : [];
+  // Where the branch started: what it changed is judged against that, not against what merged since.
+  const base = out("merge-base", integration, tip);
+  const show = (ref: string, path: string): string | null => {
+    const blob = g("cat-file", "blob", `${ref}:${path}`);
+    return blob.error || blob.status !== 0 ? null : blob.stdout;
+  };
+
+  // A scaffolder's test and test-infra work stays in test and harness files. Which kind of work a branch is comes from
+  // its own task, so on a team with a task graph it has to name one.
+  if (role === "scaffolder" && team.board.type === "tasks") {
+    const task = await ownTask(team, run, home, branch);
+    if (typeof task === "string") return fail(2, "refused", task);
+    const outside =
+      task.kind === "scaffold"
+        ? []
+        : testLaneProblems(
+            changed,
+            team.harness.lane.map((rule) => new RegExp(rule)),
+            (path) => ({ before: show(base, path), after: show(tip, path) })
+          );
     if (outside.length)
       return fail(
         2,
         "refused",
-        `${branch} is ${kind} work, which changes test and harness files only, and it changes ${outside.slice(0, 5).join(" ")}: a product change is a builder's task`
+        `${branch} is ${task.kind} work, which changes test and harness files only, and it changes ${outside.slice(0, 5).join(" ")}: a product change is a builder's task`
       );
   }
-  if (role === "builder") {
-    const tagged = journeyTagProblems(diff);
-    if (tagged.length)
-      return fail(
-        2,
-        "refused",
-        `${branch} (a builder's) adds or changes @journey- tags in ${tagged.slice(0, 5).join(" ")}: a journey's specs come from a tester or the scaffolder, not from who built it`
-      );
+
+  // The changed files that could be the suite's, by what they mention where the branch started, on the integration
+  // branch or on the branch: git finds them, and only those are read.
+  const mentions = (ref: string): string[] => {
+    const found = g("grep", "-l", "-z", "-I", "-F", ...SUITE_MENTIONS.flatMap((text) => ["-e", text]), ref, "--");
+    // Exit 1: no file mentions them.
+    if (found.error || (found.status !== 0 && found.status !== 1))
+      throw new GitFailed(`git grep in ${ref} failed: ${(found.error?.message ?? found.stderr ?? "").trim().split("\n")[0] ?? ""}`.trim());
+    return found.stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((entry) => entry.slice(ref.length + 1));
+  };
+  const mentioned = new Set([base, integration, tip].flatMap(mentions));
+  const suiteFiles = changed
+    .filter((path) => CODE.test(path) && mentioned.has(path))
+    .map((path) => ({ path, base: show(base, path), mid: show(integration, path), tip: show(tip, path) }));
+
+  // A builder's branch changes no file that holds a journey's test: nobody makes their own proof. On a team with
+  // someone else to write them, that is.
+  const proofIsOthers = role === "builder" && Boolean(team.roles["tester"] || team.roles["scaffolder"]);
+  const ownProof = (held: string[]): string =>
+    `${branch} (a builder's) changes ${held.slice(0, 5).join(" ")}, where a journey's tests are: a journey's proof comes from a tester or the scaffolder, not from who built it. Take those changes out of the branch, and ask the planner for a test task for them`;
+  if (proofIsOthers) {
+    const held = suiteFiles.filter((file) => [file.base, file.mid, file.tip].some((text) => holdsJourneyTest(file.path, text)));
+    if (held.length) return fail(2, "refused", ownProof(held.map((file) => file.path)));
   }
-  // Checking less is the operator's call (Article 5): only once the team has a suite to narrow.
+
+  // Checking less is the operator's call (Article 5): only once the team has a suite to narrow. Here, what the text of
+  // the suite's files says (those that import Playwright's test runner, and its configuration); below, in the scratch
+  // worktree, what the suite's own listing says.
   const suiteBefore = readHarness(home, integration).harness?.e2e;
-  const narrows = [...(touchesHarness ? manifestNarrowing(home, integration, tip) : []), ...(suiteBefore ? narrowingLines(diff) : [])];
   const allowance = allowed(state, branch, tip);
-  if (narrows.length && !allowance)
-    return fail(
-      2,
-      "refused",
-      `${branch} checks less than ${integration}: ${narrows.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`
-    );
+  const checksLess = (found: string[]): string =>
+    `${branch} checks less than ${integration}: ${found.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`;
+  const configs = [suiteBefore?.config, readHarness(home, tip).harness?.e2e?.config];
+  const suiteTexts = !suiteBefore
+    ? []
+    : [
+        ...suiteFiles
+          .filter((file) => importsRunner(file.base) || importsRunner(file.tip))
+          .map((file) => ({ path: file.path, before: file.base, after: file.tip })),
+        ...changed
+          .filter(
+            (path) => configs.includes(path) && !suiteFiles.some((file) => file.path === path && (importsRunner(file.base) || importsRunner(file.tip)))
+          )
+          .map((path) => ({ path, before: show(base, path), after: show(tip, path) })),
+      ];
+  const narrows = [...(touchesHarness ? manifestNarrowing(home, base, tip) : []), ...narrowingAdded(suiteTexts)];
+  if (narrows.length && !allowance) return fail(2, "refused", checksLess(narrows));
+  // What the suite's listings say of a branch: the tests that run before it (`was`) and with it merged (`now`).
+  const measured = (was: Listing, now: Listing | string): string | null => {
+    if (typeof now === "string")
+      return allowance
+        ? null
+        : `${branch} breaks the suite's listing (${now.slice(0, 300)}), so its tests can't be counted: fix that. If the suite is meant to go, that's the operator's call: they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`;
+    // A tag can come from a helper or a variable; the listing names the files whichever way.
+    const held = proofIsOthers ? changed.filter((path) => was.journeyFiles.includes(path) || now.journeyFiles.includes(path)) : [];
+    if (held.length) return ownProof(held);
+    if (allowance) return null;
+    const fewer = fewerTests(was, now);
+    if (fewer.length) return checksLess(fewer);
+    // The suite's files that the text above didn't find (a spec that takes `test` from the suite's own fixtures).
+    const more = changed.filter((path) => (was.files.includes(path) || now.files.includes(path)) && !suiteTexts.some((file) => file.path === path));
+    const added = more.length ? narrowingAdded([...suiteTexts, ...more.map((path) => ({ path, before: show(base, path), after: show(tip, path) }))]) : [];
+    return added.length ? checksLess(added) : null;
+  };
 
   // Every scaffolder branch, and any that changes the manifest, is reviewed, whatever review.required says.
   let required = team.review.required.includes(role) || role === "scaffolder" || touchesHarness;
@@ -511,6 +598,10 @@ async function mergeLocked({
   cleanup();
   if (g("worktree", "add", "--detach", "--quiet", scratch, integration).status !== 0) return fail(2, "refused", "couldn't make the scratch worktree");
   try {
+    // The suite's own count of its tests, in the same worktree before the merge and with it.
+    const listWork = join(workDir(home), "merge-list");
+    const listMerged = (config: string): Promise<Listing | string> => listSuite(scratch, readHarness(scratch).harness?.e2e?.config ?? config, listWork);
+    let was = suiteBefore ? await listSuite(scratch, suiteBefore.config, listWork) : null;
     // The commit that was checked and approved, not whatever the branch points at by now.
     const merged = spawnSync("git", ["merge", "--no-ff", "--no-edit", "-m", `Merge ${branch} into ${integration}`, tip], {
       cwd: scratch,
@@ -534,6 +625,21 @@ async function mergeLocked({
           back = ` (task ${id} couldn't be sent back: ${(error as Error).message})`;
         }
       return fail(3, "conflict", `${branch} conflicts with ${integration}; rebase it onto ${integration}${back}`);
+    }
+    // Two changes to the manifest can merge into one that doesn't load, and with no manifest nothing here checks.
+    const mergedProblems = touchesHarness ? readHarness(scratch).problems : [];
+    if (mergedProblems.length)
+      return fail(
+        3,
+        "conflict",
+        `${HARNESS_FILE} doesn't load once ${branch} is merged into ${integration} (${mergedProblems.slice(0, 3).join("; ")}); rebase it onto ${integration}`
+      );
+    // Where the suite lists as git has it, the branch is measured before the gate's time is spent.
+    let now = suiteBefore && was && typeof was !== "string" ? await listMerged(suiteBefore.config) : null;
+    const counted = Boolean(was && now && typeof was !== "string" && typeof now !== "string");
+    if (was && now && typeof was !== "string" && typeof now !== "string") {
+      const refusal = measured(was, now);
+      if (refusal) return fail(2, "refused", refusal);
     }
     if (team.gate.full) {
       const gateLog = join(state, "merges", `${safe}.gate.log`);
@@ -570,20 +676,22 @@ async function mergeLocked({
       }
     }
     const result = out("-C", scratch, "rev-parse", "HEAD");
-    // Fewer tests in the merged suite than in the integration branch's: checking less, the operator's call too.
-    if (suiteBefore && !allowance && changed.some(inTestLane)) {
-      const work = join(workDir(home), "merge-list");
-      const [was, now] = [
-        await suiteCounts(home, suiteBefore.config, work),
-        await suiteCounts(scratch, readHarness(scratch).harness?.e2e?.config ?? suiteBefore.config, work),
-      ];
-      const fewer = was && now ? fewerTests(was, now) : [];
-      if (fewer.length)
-        return fail(
-          2,
-          "refused",
-          `${branch} checks less than ${integration}: ${fewer.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`
+    // Where it didn't, the gate may have set up what the suite needs (packages installed per folder, generated files):
+    // the same two listings in the worktree as the gate left it, the integration branch's files last.
+    if (suiteBefore && !counted) {
+      if (team.gate.full) {
+        now = await listMerged(suiteBefore.config);
+        const back = spawnSync("git", ["checkout", "--force", "--detach", "--quiet", before], { cwd: scratch });
+        was = back.status === 0 ? await listSuite(scratch, suiteBefore.config, listWork) : "the scratch worktree couldn't go back to it";
+      }
+      if (!was || typeof was === "string")
+        console.error(
+          `merge: the suite couldn't be listed at ${integration} (${(was ?? "").slice(0, 200)}), so ${branch}'s tests weren't counted against it`
         );
+      else {
+        const refusal = measured(was, now ?? "it wasn't listed");
+        if (refusal) return fail(2, "refused", refusal);
+      }
     }
 
     // The gate took a while: the team's checkout must still be on the integration branch and clean.

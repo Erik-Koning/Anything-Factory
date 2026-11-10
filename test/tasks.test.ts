@@ -127,6 +127,22 @@ describe("the task model", () => {
     assert.match(statusRefusal(task({ id: "8", status: "proposed" }), "rejected", "builder") ?? "", /only the planner/);
   });
 
+  test("a journey with finished work under it is rejected by the operator only", () => {
+    const journey = task({ id: "3", status: "approved", kind: "journey" });
+    const open = task({ id: "4", status: "approved", parent: "3" });
+    assert.equal(statusRefusal(journey, "rejected", "planner", [journey, open]), null, "nothing finished under it: the planner's to reject");
+    const done = task({ id: "5", status: "done", parent: "3" });
+    assert.match(
+      statusRefusal(journey, "rejected", "planner", [journey, open, done]) ?? "",
+      /journey 3 has finished work under it \(#5\), so its tests are still owed, and rejecting it is the operator's call: raise it/
+    );
+    // Merged once and reopened since: reopening its work isn't a way to drop the journey.
+    const reopened = task({ id: "6", status: "approved", parent: "3", history: [{ at: "x", by: MERGE, what: "merged", to: "done", sha: "abc1234" }] });
+    assert.match(statusRefusal(journey, "rejected", "planner", [journey, reopened]) ?? "", /finished work under it \(#6\)/);
+    assert.equal(statusRefusal(journey, "rejected", OPERATOR, [journey, done]), null, "the operator may");
+    assert.equal(statusRefusal(task({ id: "7", status: "approved" }), "rejected", "planner", [done]), null, "only a journey is owed tests");
+  });
+
   test("the move table, walked whole, keeps the rules nobody may break", () => {
     const VIAS: Via[] = ["status", "approve", "reject", "research", "escalate", "claim", "release", "submit", "changes", "merge", "expire", "settle"];
     const ACTORS = ["planner", "approver", "builder", "tester", "reviewer", "ux-specialist", OPERATOR, MERGE, WATCHDOG];
@@ -963,11 +979,28 @@ describe("the audit's findings stay fixed", () => {
     await a6g(["task", "score", "3", ...SCORE, ...GATE, "--confidence", "data", "--size", "S", "--why", "x"], as("planner"));
     assert.equal((await a6g(["task", "approve", "3"], as("approver"))).code, 0, "no journey approval first");
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
+    assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks \(--parent 2\); move them out first/);
     await update(store().tasks, "3", (t) => ({ ...t, status: "done" as const }));
     // The operator requires this team's journeys to be proven by their specs (harness.journeys "required"): with no
     // suite yet, the journey isn't done. The operator's call is still theirs.
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /the team's harness has no suite yet/);
-    assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks/);
+    // With finished work under it, the journey's tests are owed: no longer being a journey, losing that work, or being
+    // rejected would each stop them being asked for, so each is the operator's call.
+    assert.match(
+      (await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out,
+      /journey 2 has finished work under it, so its tests are still owed: what kind it is, is the operator's call/
+    );
+    assert.match(
+      (await a6g(["task", "edit", "3", "--parent", "none"], as("planner"))).out,
+      /task 3 is finished work under journey 2, whose tests it's owed: moving it out is the operator's call/
+    );
+    const rejecting = await a6g(["task", "status", "2", "rejected", "--reason", "we dropped it"], as("planner"));
+    assert.notEqual(rejecting.code, 0);
+    assert.match(rejecting.out, /journey 2 has finished work under it \(#3\), so its tests are still owed, and rejecting it is the operator's call/);
+    assert.deepEqual(
+      [(await store().tasks.get("2"))?.kind, (await store().tasks.get("2"))?.status, (await store().tasks.get("3"))?.parent],
+      ["journey", "proposed", "2"]
+    );
     assert.equal((await a6g(["task", "status", "2", "done"], as(null))).code, 0, "the operator closes it");
     // Left out, journeys are required only once there's a suite: until then (and where they're optional) the planner
     // closes one once its tasks are done, as before, tester or not.

@@ -340,6 +340,23 @@ const stakeholdersOperator: Check = (t, _to, _actor, { approval }) => {
     return `work from a stakeholder is the operator's to approve (team.json approval.stakeholders): a6g task escalate ${t.id} --reason "…"`;
   return null;
 };
+// Whether a task's work is finished: done now, or merged once (and reopened since).
+export const finished = (t: Task): boolean => t.status === "done" || t.history.some((e) => e.to === "done" && Boolean(e.sha));
+// The finished tasks under a journey: what was built for it is merged, so its proof is still owed.
+export const finishedUnder = (journey: Task, all: Task[]): Task[] =>
+  journey.kind === "journey" ? all.filter((t) => t.parent === journey.id && finished(t)) : [];
+// So a journey with finished work under it is rejected only by the operator: rejected, its tests stop being asked for.
+const journeyKept: Check = (t, to, _actor, { all }) => {
+  const finished = to === "rejected" ? finishedUnder(t, all) : [];
+  return finished.length
+    ? `journey ${t.id} has finished work under it (${finished
+        .slice(0, 5)
+        .map((c) => `#${c.id}`)
+        .join(
+          ", "
+        )}), so its tests are still owed, and rejecting it is the operator's call: raise it (a6g task status ${t.id} question --reason "…" --recommend "…")`
+    : null;
+};
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;
 // Code isn't done by anyone's say-so. Research is, when the planner says so; a journey, once its tasks are and the planner
 // has verified it.
@@ -393,7 +410,7 @@ const EVERY: readonly Status[] = STATUSES;
 const OPERATOR_FROM: Status[] = ["proposed", "researching", "question", "triage"];
 
 const RULES: Rule[] = [
-  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(wasApproved, screened) })),
+  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(wasApproved, screened, journeyKept) })),
   { via: "status", by: ["planner"], from: ["triage", "approved", "researching", "proposed", "question", "blocked"], to: ["done"], check: plannerDone },
   // The operator makes any move but one: a task is building only when a member claims it, so it has a claim to expire.
   { via: "status", by: [OPERATOR], from: EVERY, to: EVERY.filter((s) => s !== "building") },

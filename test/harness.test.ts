@@ -2,7 +2,16 @@ import { baseTeam, commit, makeRepo, write } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { normalize, type RawTeam } from "../lib/config.ts";
-import { fewerTests, inTestLane, journeyTagProblems, narrowingLines } from "../lib/commands/harness.ts";
+import {
+  fewerTests,
+  holdsJourneyTest,
+  inTestFolder,
+  inTestLane,
+  narrowingAdded,
+  packageOutside,
+  testLaneProblems,
+  withoutComments,
+} from "../lib/commands/harness.ts";
 import { narrowing, pagePlan, parseHarness, readHarness } from "../lib/harness.ts";
 
 const manifest = {
@@ -109,49 +118,133 @@ describe("the harness manifest", () => {
     assert.deepEqual(readHarness(makeRepo()), { harness: null, problems: [] });
   });
 
-  test("what test work may change, what touches a journey's tag, and lines that check less", () => {
+  test("what test work may change: test files and folders, the suite's own files, and a package.json by key", () => {
     for (const path of [
       "e2e/home.spec.ts",
       "tests/fixtures/users.ts",
+      "src/pay.test.ts",
+      "src/__mocks__/stripe.ts",
+      "mocks/handlers.ts",
       "playwright.config.ts",
+      "tsconfig.e2e.json",
+      "apps/web/global-setup.ts",
+      ".env.test",
+      ".env.e2e.example",
+      "scripts/seed.e2e.ts",
+      "db/seeds/users.sql",
+      ".github/workflows/e2e.yml",
       "pnpm-lock.yaml",
       "apps/web/package.json",
       ".gitignore",
       ".a6g/harness.json",
     ])
       assert.ok(inTestLane(path), path);
-    for (const path of ["src/app.tsx", "apps/web/src/pay.ts", ".a6g/team.json", "README.md"]) assert.ok(!inTestLane(path), path);
-    const diff = [
-      "diff --git a/e2e/pay.spec.ts b/e2e/pay.spec.ts",
-      "--- a/e2e/pay.spec.ts",
-      "+++ b/e2e/pay.spec.ts",
-      "@@ -1,2 +1,3 @@",
-      "-test('pays', { tag: '@journey-3' }, async () => {});",
-      "+test.skip('pays', async () => {});",
-      "+test('refunds', async () => {});",
-      "diff --git a/playwright.config.ts b/playwright.config.ts",
-      "--- a/playwright.config.ts",
-      "+++ b/playwright.config.ts",
-      "@@ -1 +1,3 @@",
-      "+  retries: process.env.CI ? 2 : 0,",
-      "+  retries: 0,",
-      "+  grepInvert: /@slow/,",
-      "diff --git a/src/skip.ts b/src/skip.ts",
-      "--- a/src/skip.ts",
-      "+++ b/src/skip.ts",
-      "@@ -0,0 +1 @@",
-      "+export const skip = list.skip(1);",
-    ].join("\n");
-    assert.deepEqual(journeyTagProblems(diff), ["e2e/pay.spec.ts"], "a removed tag counts too");
-    assert.deepEqual(narrowingLines(diff), [
-      "e2e/pay.spec.ts: test.skip('pays', async () => {});",
-      "playwright.config.ts: retries: process.env.CI ? 2 : 0,",
-      "playwright.config.ts: grepInvert: /@slow/,",
+    for (const path of [
+      "src/app.tsx",
+      "apps/web/src/pay.ts",
+      ".a6g/team.json",
+      "README.md",
+      ".env",
+      ".env.production",
+      "tsconfig.json",
+      ".github/workflows/deploy.yml",
+      // A folder under an app's routes is a page of the app, whatever it's called.
+      "app/test/page.tsx",
+      "apps/web/app/(shop)/fixtures/page.tsx",
+      "src/pages/e2e/index.astro",
+      "src/routes/tests/+page.svelte",
+    ])
+      assert.ok(!inTestLane(path), path);
+    assert.ok(inTestFolder("apps/web/e2e/pages/home.ts"), "a pages folder inside a test folder is the suite's");
+    assert.ok(inTestLane("tools/smoke/run.ts", [/^tools\/smoke\//]), "the operator's own patterns add to it");
+
+    const pkg = (value: object): string => JSON.stringify(value);
+    const before = pkg({ name: "web", scripts: { build: "next build", test: "vitest" }, dependencies: { next: "15" }, devDependencies: {} });
+    assert.deepEqual(
+      packageOutside(
+        before,
+        pkg({
+          name: "web",
+          scripts: { build: "next build", test: "vitest run", "test:e2e": "playwright test", "db:seed": "tsx seed.ts", pretest: "tsc" },
+          dependencies: { next: "15" },
+          devDependencies: { "@playwright/test": "1.50.0" },
+        })
+      ),
+      [],
+      "test dependencies and test scripts"
+    );
+    assert.deepEqual(
+      packageOutside(
+        before,
+        pkg({ name: "web", scripts: { build: "true", test: "vitest", postinstall: "node x.js" }, dependencies: { next: "15", leftpad: "1" } })
+      ),
+      ["scripts.build", "scripts.postinstall", "dependencies"],
+      "what the product ships with, builds with or runs on install"
+    );
+    assert.deepEqual(packageOutside(null, pkg({ devDependencies: { vitest: "3" }, scripts: { test: "vitest" } })), [], "a new one with tests only");
+    assert.deepEqual(packageOutside(before, null), ["removed"]);
+    assert.deepEqual(packageOutside(before, "{ not json"), ["not JSON"]);
+    assert.deepEqual(packageOutside(pkg({ scripts: { contest: "x", attest: "y" } }), pkg({ scripts: { contest: "z", attest: "y" } })), [
+      "scripts.contest",
     ]);
+
+    const versions = (path: string) => ({ before, after: path.startsWith("apps/") ? pkg({ name: "web", main: "x.js" }) : before });
+    assert.deepEqual(testLaneProblems(["e2e/a.spec.ts", "src/pay.ts", "package.json"], [], versions), ["src/pay.ts"]);
+    assert.deepEqual(testLaneProblems(["apps/web/package.json"], [], versions), [
+      "apps/web/package.json (scripts.build, dependencies, main: test work changes its devDependencies and test scripts only)",
+    ]);
+    assert.deepEqual(testLaneProblems(["apps/web/package.json"], [/^apps\/web\/package\.json$/], versions), [], "allowed whole by the operator");
+    assert.deepEqual(
+      testLaneProblems(["e2e/package.json"], [], () => ({ before: null, after: pkg({ main: "x" }) })),
+      [],
+      "the suite's own package"
+    );
+  });
+
+  test("a file holds a journey's test by its text, wherever the tag sits and whatever lines changed", () => {
+    const spec = 'import { test } from "./fixtures";\ntest("pays", { tag: "@journey-3" }, async () => {});\n';
+    assert.ok(holdsJourneyTest("e2e/pay.spec.ts", spec), "a test by its name");
+    assert.ok(holdsJourneyTest("e2e/flows/pay.ts", spec), "in a test folder");
+    assert.ok(holdsJourneyTest("src/flows/pay.ts", 'import { test } from "@playwright/test";\ntest("pays @journey-3", async () => {});'), "by its import");
+    assert.ok(!holdsJourneyTest("src/pay.ts", "// see @journey-3\nexport const pay = 1;"), "product code that mentions one");
+    assert.ok(!holdsJourneyTest("e2e/pay.spec.ts", 'import { test } from "./fixtures";\ntest("pays", async () => {});'), "a test with no journey");
+    assert.ok(!holdsJourneyTest("e2e/pay.spec.ts", null), "no such file");
+  });
+
+  test("lines that check less: counted net, outside comments, in the suite's files", () => {
+    assert.equal(
+      withoutComments("const glob = \"**/*.spec.ts\"; // test.only(\n/* test.skip( */ const b = `/* ${a} */`;\nconst c = '//x';"),
+      "const glob = \"**/*.spec.ts\"; \n const b = `/* ${a} */`;\nconst c = '//x';"
+    );
+    const config = 'export default {\n  testMatch: "**/*.spec.ts",\n  retries: 3,\n  /* a note */\n};\n';
+    assert.deepEqual(narrowingAdded([{ path: "playwright.config.ts", before: null, after: config }]), [], "a glob, retries and a comment narrow nothing");
+    const spec = (body: string): string => `import { test } from "@playwright/test";\n${body}\n`;
+    assert.deepEqual(
+      narrowingAdded([
+        { path: "e2e/a.spec.ts", before: spec('test("a", async () => {});'), after: spec('test.skip("a", async () => {});\n// was test.only("a")') },
+        { path: "e2e/b.spec.ts", before: spec('test("b", async () => {});'), after: spec('test("b", async () => {\n  test.fail();\n});') },
+        { path: "playwright.config.ts", before: config, after: config.replace("retries: 3", "grepInvert: /@slow/") },
+      ]),
+      ['e2e/a.spec.ts: test.skip("a", async () => {});', "e2e/b.spec.ts: test.fail();", "playwright.config.ts: grepInvert: /@slow/,"]
+    );
+    const skipped = spec('test.skip("old", async () => {});\ntest.fixme("later", async () => {});');
+    assert.deepEqual(
+      narrowingAdded([
+        { path: "e2e/old.spec.ts", before: skipped, after: null },
+        { path: "e2e/flows/new.spec.ts", before: null, after: skipped },
+      ]),
+      [],
+      "a file that moved adds nothing"
+    );
+    assert.deepEqual(
+      narrowingAdded([{ path: "e2e/a.spec.ts", before: skipped, after: `${skipped}test.skip("old", async () => {});\n` }]),
+      ['e2e/a.spec.ts: test.skip("old", async () => {});'],
+      "the same line once more is one more"
+    );
     assert.deepEqual(fewerTests({ total: 10, byJourney: { "1": 3, "2": 1 } }, { total: 10, byJourney: { "1": 3, "2": 1 } }), []);
     assert.deepEqual(fewerTests({ total: 10, byJourney: { "1": 3, "2": 1 } }, { total: 9, byJourney: { "1": 3 } }), [
-      "the suite has 9 tests, 1 fewer than before",
-      "journey 2 has 0 tests, not 1",
+      "the suite runs 9 tests, 1 fewer than before",
+      "journey 2 has 0 tests that run, not 1",
     ]);
   });
 });

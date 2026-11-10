@@ -96,7 +96,7 @@ export interface RawTeam {
   finish?: string | null;
   progress?: string | null;
   pages?: PagesSettings;
-  harness?: { journeys?: "required" | "optional" };
+  harness?: { journeys?: "required" | "optional"; lane?: string[] };
   policies?: Record<string, string>;
   never?: (NeverRule | [string, string])[];
   commandOwners?: (CommandOwner | [string, string[], string?])[];
@@ -168,7 +168,9 @@ export interface Team {
   pages: PagesSettings | null;
   // Whether a journey needs its specs passing to be done, and the finish line every journey's (a6g e2e done). Left out
   // ("auto"), that's exactly when the team's checkout has a suite to prove them with (journeysRequired, lib/harness.ts).
-  harness: { journeys: "required" | "optional" | "auto" };
+  // `lane`: paths (regular expressions) that count as test and harness files for a scaffolder's test work, beyond the
+  // factory's own list (lib/commands/harness.ts).
+  harness: { journeys: "required" | "optional" | "auto"; lane: string[] };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -709,7 +711,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   }
   if (finish && PAGES_DONE.test(finish) && input.pages === undefined)
     problems.push('pages: the finish line is a6g pages done, so "pages" must list the pages it checks');
-  const harnessIn = object(input.harness, "harness", ["journeys"]) ?? {};
+  const harnessIn = object(input.harness, "harness", ["journeys", "lane"]) ?? {};
+  const harnessLane = list(harnessIn.lane, "harness.lane", regex) ?? [];
   let harnessJourneys: "required" | "optional" | "auto" = "auto";
   if (harnessIn.journeys !== undefined) {
     if (harnessIn.journeys === "required" || harnessIn.journeys === "optional") harnessJourneys = harnessIn.journeys;
@@ -771,7 +774,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     // Left out or null: the finish command with done→status. "": none, as 0.2.0 read it.
     progress: input.progress === "" ? null : (textOrNull(input.progress, "progress") ?? (finish ? finish.replace(/\bdone$/, "status") : null)),
     pages,
-    harness: { journeys: harnessJourneys },
+    harness: { journeys: harnessJourneys, lane: harnessLane },
     policies,
     never,
     commandOwners,

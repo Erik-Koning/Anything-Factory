@@ -181,6 +181,15 @@ that's a set of pages, `"finish": "a6g pages done"`.
 tagged `@journey-<id>` that passed. `"optional"` turns both off. Left out (the default), journeys are required once
 the team has a suite (the manifest's `e2e`), so a team with a tester and no harness yet closes its journeys as before.
 
+`"lane": ["^tools/e2e/", "^docker-compose\\.test\\.yml$"]`: more paths (regular expressions) that count as test and
+harness files. A scaffolder's `test` and `test-infra` branches change only those: tests and their folders (fixtures,
+mocks, seeds), test runners' configuration, the suite's set-up files, `.env.test`, its CI workflow, lockfiles,
+`.gitignore`, the manifest, and in a `package.json` its `devDependencies` and test scripts (`test`, `e2e:ui`,
+`db:seed`). A folder under an app's own routes (`app/`, `pages/`, `routes/`) isn't a test folder, whatever it's
+called. A pattern that matches a `package.json` allows all of it. Its `scaffold` branches change what its lane allows.
+On a team with the task graph, a scaffolder's branch merges only for its own approved, open task, since that task's
+kind decides which of the two it is.
+
 ## The harness manifest: `.a6g/harness.json`
 
 The team's own means of checking, written by its scaffolder (the only lane that names it), reviewed and merged like
@@ -204,9 +213,16 @@ the repository's own Playwright with the configuration it names.
 - **`pages`:** pages to check beside the operator's (an id the operator listed stays theirs).
 - **`schemes`:** how the app switches to a colour scheme when it doesn't follow the browser's setting: a class on
   `<html>`, `localStorage` entries, or a cookie. A page that looks the same in both fails its check.
-- **Checking less is the operator's call.** The merge queue refuses a branch that removes a page, the suite or a
-  sign-in, changes the suite's configuration, adds a skip, `.only`, filter or retry, or leaves fewer tests (in all, or
-  for a journey), unless the operator allowed that exact commit: `a6g harness allow <branch> --sha <commit> --why "…"`.
+- **Checking less is the operator's call.** The merge queue lists the suite (`playwright test --list`) before a
+  branch and with it merged, and refuses one that leaves fewer tests that run (in all, or for a journey), or a suite
+  that no longer lists. It also refuses a branch that removes a page, the suite or a sign-in from the manifest, or
+  changes the suite's configuration there, and one that adds a skip, `.only`, expected failure or filter to the
+  suite's files (a listing can't see one inside a test). All unless the operator allowed that exact commit:
+  `a6g harness allow <branch> --sha <commit> --why "…"`. Where the suite can't be listed in the merge's worktree,
+  before the gate or after it, the merge says so and goes on; the check after merges compares what passed.
+- **Nobody makes their own proof.** On a team with a tester or a scaffolder, a builder's branch that changes a file
+  holding a journey's tests (one that names an `@journey-` tag, or that the listing shows a tagged test in) doesn't
+  merge, allowed or not: a flow that changes gets a test task with it.
 
 ## The `.a6g/` folder
 

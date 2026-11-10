@@ -51,6 +51,8 @@ const COMPONENT = /(^|\/)(pages|components|views|ui|layouts)\/.*\.[cm]?js$/;
 const SERVER = /(^|\/)(api|server)\/|(^|\/)\+?(route|server)\.[cm]?[jt]sx?$|\.server\.[cm]?[jt]sx?$/;
 
 export const isTest = (path: string): boolean => (TEST_DIR.test(path) && !DOC.test(path)) || TEST_NAME.test(path);
+// A test by its own name alone, wherever it is.
+export const namedTest = (path: string): boolean => TEST_NAME.test(path);
 const isUi = (path: string): boolean =>
   !isTest(path) &&
   !SERVER.test(path) &&

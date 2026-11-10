@@ -20,6 +20,8 @@ import {
   conflictOf,
   type Dimension,
   DIMENSIONS,
+  finished,
+  finishedUnder,
   fromStakeholder,
   heldHere,
   journeyDue,
@@ -289,6 +291,9 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   if (parent !== undefined) {
     if (parent !== "none" && (byId.get(parent)?.kind !== "journey" || parent === task.id))
       throw new Refused(`--parent names a journey; #${parent} isn't one`);
+    // Finished work stays under its journey, whose tests it's owed: moved out, the journey could be dropped with it.
+    if (who !== OPERATOR && finished(task) && task.parent && (parent === "none" ? null : parent) !== task.parent)
+      throw new Refused(`task ${task.id} is finished work under journey ${task.parent}, whose tests it's owed: moving it out is the operator's call`);
     changes.parent = parent === "none" ? null : parent;
   }
   if (options["after"] !== undefined) {
@@ -303,7 +308,11 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   }
   if (!Object.keys(changes).length) throw new Refused("nothing to change; see a6g task help");
   if (changes.kind && changes.kind !== "journey" && task.kind === "journey" && all.some((t) => t.parent === task.id))
-    throw new Refused(`journey ${task.id} has tasks (--parent ${task.id}); move them out first`);
+    throw new Refused(
+      finishedUnder(task, all).length && who !== OPERATOR
+        ? `journey ${task.id} has finished work under it, so its tests are still owed: what kind it is, is the operator's call`
+        : `journey ${task.id} has tasks (--parent ${task.id}); move them out first`
+    );
   // What the task is (its title, body and kind) is what was approved: changed, it's approved again before it's built.
   const substance = (["title", "body", "kind"] as const).filter((key) => key in changes);
   const moved = await update(store.tasks, task.id, (t) => {

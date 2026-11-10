@@ -101,6 +101,10 @@ members and merges wake you.
      service) waits on a `test-infra` task (`--after`). A brief that starts from an empty repository, or asks for a new
      app or package, starts with a `scaffold` task. The merge queue files the harness's gaps, and after merges what newly
      fails (by `merge-queue`, naming the merges since it last passed): triage those like any finding.
+   - **Nobody makes their own proof.** A builder's branch that changes a file holding a journey's tests doesn't merge.
+     So a feature or fix that changes a journey's flow (what a person sees or does in it) gets a `test` task with it,
+     for the tester or the scaffolder: `--after` the feature when the test follows the new flow, and under the same
+     journey. A journey with finished work under it is rejected, or made another kind, by the operator only: raise it.
 4. **Fill the slots**, most valuable first:
    - start the approver when proposals are waiting and your rules give the team one;
    - start builders, testers and the scaffolder while approved tasks are free and slots are open: the claim picks blockers, then

@@ -558,6 +558,13 @@
         "journeys": {
           "enum": ["required", "optional"],
           "description": "Whether a journey is done only while its specs pass, and the finish line needs every journey's (a6g e2e done). Left out, that's exactly when the team's harness manifest has a suite."
+        },
+        "lane": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regex"
+          },
+          "description": "Paths that count as test and harness files for a scaffolder's test and test-infra work, beyond the factory's own list (tests and their folders, runner configuration, lockfiles, a package.json's devDependencies and test scripts)."
         }
       }
     },
