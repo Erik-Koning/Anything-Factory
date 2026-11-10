@@ -32,6 +32,8 @@ Set up and run a team (the operator)
   a6g rotate <team>                   a fresh planner thread (refused while members run)
   a6g status [<team>]  ·  a6g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   a6g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role
+  a6g metrics --quality [--since] [--until] [--json]
+                                      how the merged work went: first-time reviews, found after merge, cost per task
   a6g prompt <team> <role>            the text a role works under
   a6g upgrade <team> [<version>] [--force]   move a team to another installed factory version
   a6g unregister <team>               remove its T3 instances and registry entry (keeps its files)

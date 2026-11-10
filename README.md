@@ -1,9 +1,10 @@
 # Anything Factory
 
 Anything Factory provisions a software engineering team of Claude Code agents in any code repository, fast. You give
-as much direction as the project needs. A planner then runs builders, a reviewer, an approver, a UX specialist,
-testers and an innovator, until a checkable finish line holds or, for open-ended work, cycle after cycle. The team
-contacts you only when the work is done or a cycle closes, or when a decision would change the outcome a lot.
+as much direction as the project needs. A planner then runs builders, testers, a scaffolder, a reviewer, a UX
+specialist, an approver and an innovator (and a security reviewer, where the app has sign-in, payments or an API of
+its own), until a checkable finish line holds or, for open-ended work, cycle after cycle. The team contacts you only
+when the work is done or a cycle closes, or when a decision would change the outcome a lot.
 
 It's built on [T3 Code](https://github.com/pingdotgg/t3code), which runs the agents' threads, gives each one its own
 worktree, and wakes the planner when a member finishes. Claude Code is each agent. Anything Factory adds the roles, the
@@ -41,12 +42,35 @@ To watch a team:
 a6g teams                  # every team on this Mac, its version, and whether it's active, pausing, paused or complete
 a6g status                 # each team: planner, members running, its environment, what it spent, what's drained
 a6g metrics --team my-app  # agents, runs, model requests, tokens and time per role
+a6g metrics --quality --team my-app --since 2026-03-01   # how the merged work went (below)
 a6g pause my-app           # and a6g resume my-app; a6g rotate my-app for a fresh planner
 ```
 
 What a team spends is counted from its agents' Claude transcripts each watchdog run: tokens by day, role, model and
 task, priced at the API-equivalent rate (`lib/prices.ts`; on a subscription, how fast it uses your limits). `a6g status`
 shows today, this week and in all; the web app adds each day and the costliest journeys and tasks.
+
+How the merged work went is `a6g metrics --quality [--since <time>] [--until <time>] [--json]`, read from what the
+factory records anyway (each task's history, what the check after merges filed, the suite's recorded runs, the spend
+on each task's branch), so no agent reports any of it:
+
+- **Merged:** the tasks the merge queue merged in the period, by kind. A task counts once, at its last merge.
+- **Reviews passed first time:** of the merged tasks a review approved, the share that never had a round of changes
+  (a reviewer's, or the security reviewer's issues).
+- **Found after merge:** the failures the check after merges filed in the period (a page, a test, who a page is
+  served to, the app down), per merged task, and how many of them the planner has rejected since. The harness's gaps,
+  package advisories and findings about the checks themselves (a suite that didn't run, a flaky test, fewer tests) are
+  counted apart: no merge broke those.
+- **Journeys proven:** of the team's journeys, those whose tagged tests all passed in the newest recorded run of the
+  suite.
+- **Flaky tests:** the tests that passed only on a retry in the period's recorded runs (the last 20 runs are kept).
+- **Cost per merged task:** what ran on the merged tasks' branches, on any day, at the API-equivalent rate and as the
+  watchdog last counted it, beside all the team spent in the period.
+- **Claimed to merged:** the median time from a task's first claim to its merge.
+
+A number that can't be known says so, and why, rather than read 0: the suite's runs are kept on the team's lead
+machine, so journeys and flaky tests are known there. A date alone is its first moment in UTC, so `--until 2026-04-01`
+takes in all of March. The numbers need the task graph: a team on a GitHub board is told so.
 
 To hold a team to a budget: `a6g budget my-app --daily 40 --weekly 200 --total 1500` (dollars, API-equivalent; a limit
 left out keeps its value, 0 removes it; `a6g budget my-app` shows them). Or as shares of a Claude subscription:
@@ -154,7 +178,7 @@ whatever else uses the number.
  launchd ─ watchdog (every 5 min, every team) ─── tick ───▶ PLANNER (a T3 Code thread)
             restarts T3, Docker · stuck? · prunes worktrees              │ delegate_task (the guard counts the limits)
                                                                          ▼
-          builders and testers (own worktrees) · reviewer · UX specialist · innovator
+ builders, testers, scaffolder (own worktrees) · reviewer · security reviewer · UX specialist · innovator
                     │ a branch                     │ a6g verdict … @ the exact commit
                     ▼                              ▼
    a6g merge --queue: lane ✓ · approval of this commit ✓ · full gate on the merged result ✓
@@ -232,9 +256,27 @@ stays done.
   fail) unless you allowed the commit. A test that passes only on its retry is filed as flaky, journeys without specs
   are filed, journeys whose tests now pass are closed, and the planner is woken. Rejecting a finding quiets that
   failure, not that page: a different failure, or the same one after a pass, is filed again.
-- **Checking less is your call.** A branch that removes a page or the suite from the manifest, skips, filters or
-  retries a test, or leaves fewer tests merges only once you allow that exact commit:
-  `a6g harness allow <branch> --sha <commit> --why "…"`.
+- **Who a page refuses.** A page in the manifest says who must not be served it
+  (`"refuses": ["member", "signed-out"]`), and `a6g pages` asks for it as each of them. Sent to another path, or
+  answered 401, 403 or 404, is refused; served is a failure, and a blocker finding when the check after merges files
+  it. A refusal counts only from a sign-in the same run showed live, so a session that ran out never reads as one.
+  Where the app has two or more kinds of user, a suite with no test tagged `@access` (one user opening another's
+  record by its address) is a gap the factory files once.
+- **Vulnerable packages are a finding.** When a lockfile changes, and once a week when none does, the check after
+  merges runs the package manager's own audit of what ships (`npm audit --omit=dev`, `pnpm audit --prod`). A package
+  with an advisory of its own at high or critical becomes a task, at most five open at once, the worst first. It
+  never fails a merge, package names and versions go to the registry the install already uses, and
+  `"security": { "audit": false }` in team.json turns it off.
+- **A security reviewer** (`plugin/agents/security-reviewer.md`), on a team whose roles list it. A branch that changes
+  sign-in, permissions, payments, webhooks or the data's shape (by its paths, and by your own `security.paths`), or
+  that a reviewer sent on (`a6g verdict review <branch> approve --security`), merges only once the security reviewer
+  has passed its tip: `a6g verdict security <branch> pass --sha <tip>`. Its `issues` send the task back like a
+  review's changes. Once a cycle the planner also starts it with no branch, to sweep who can reach which page and
+  which record. Setup drafts one for an app with sign-in, payments or an API of its own; a team without the role is
+  asked for nothing. [docs/team.md](docs/team.md) has the paths.
+- **Checking less is your call.** A branch that removes a page or the suite from the manifest, takes a state out of a
+  page's `refuses`, skips, filters or retries a test, or leaves fewer tests merges only once you allow that exact
+  commit: `a6g harness allow <branch> --sha <commit> --why "…"`.
 - **One environment, used one run at a time.** Runs against the team's app (`a6g pages`, `a6g e2e`, and a member's own
   `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them. `a6g env use` waits
   `--wait-min` minutes for it (8 unless said), and ends a command that holds it past `--max-min` (30 unless said, 120

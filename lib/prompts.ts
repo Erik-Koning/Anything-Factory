@@ -93,6 +93,10 @@ function commandsFor(team: Team, role: string): string {
       "`a6g drain <role…>` / `a6g drain off`: stop new members of those roles starting while the environment resets.",
       "`a6g metrics [--since <ISO time>]`: what the team has cost so far."
     );
+    if (team.board.type === "tasks")
+      lines.push(
+        "`a6g metrics --quality [--since <ISO time>]`: how the merged work went: reviews passed first time, what the check after merges found, journeys proven, flaky tests, and the cost and time of a merged task."
+      );
     if (team.pages) lines.push("`a6g pages run [ids…]`: check the pages on the team's app and record the results.");
     if (team.push?.pullRequest)
       lines.push(

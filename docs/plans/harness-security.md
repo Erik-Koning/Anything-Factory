@@ -257,6 +257,30 @@ From what's already recorded, for the period `--since`/`--until` name:
 to build after it.
 
 - **Where:** `lib/commands/metrics.ts`, reading the task store, the suite's history and `spendByWork`.
+- **As built, beyond the above:** the numbers and their text are `lib/quality.ts`; the command only opens the store
+  and prints. Each number is read from a record no member writes for the purpose:
+  - **A merge is the merge queue's move to done that carries a commit**, so a task folded into another and a journey
+    closed on its tests aren't merged tasks. A reopened task counts once, at its last merge, and what's read for it
+    (was it reviewed, when was it claimed) starts after its previous close. Its rounds are the task's own count over
+    its whole life: one that ever needed a round didn't pass first time.
+  - **A finding is classed by the key it was filed under.** Failures are `verify:page`, `verify:access`,
+    `verify:spec` and `verify:app`; gaps, advisories and findings about the checks themselves are counted apart, with
+    a count of "a kind this version doesn't know" for a key a later version adds. A test reads `lib/verify.ts` and
+    fails when it gains a key the count doesn't class. The failures the planner rejected since are said beside them:
+    a rejected failure was the check's mistake or the team's choice, and the number shouldn't hide which.
+  - **Journeys are measured by the newest recorded run at or before `--until`,** never by an older pass standing in.
+    No run, or a newest run that didn't run, is "not known" with the reason.
+  - **Cost is two numbers:** what ran on the merged tasks' branches on any day (a task merged in the period may have
+    been built before it), and all the team spent on the period's days. Requests with no known price are said.
+  - **A number that can't be known is null in `--json` and says why in the text,** never 0. The suite's runs are kept
+    where the merge queue runs, so on another of the team's machines journeys and flaky tests say to ask the lead.
+  - **Limits, stated:** a task's history keeps its last 200 events and the suite's history its last 20 runs, so a
+    long period reads flaky tests from what's kept, and says since when. A team on a GitHub board has no task graph
+    to read and is refused with that reason. A date alone is its first moment in UTC.
+  - The planner's prompt names the command (it may run `a6g metrics` already), on a team with the task graph.
+  - It wasn't tried on a live team's data: the one at hand keeps its tasks in a database, and reading it would have
+    meant using the team's own credentials. The tests build a month of tasks, runs and usage by hand, file findings
+    with the check's own functions, and run two tasks through the real commands end to end.
 
 ## Build order
 
@@ -331,5 +355,5 @@ Defaults are chosen; say if you'd choose otherwise.
 - [x] G3. `refuses` and the `@access` gap (29, 30)
 - [x] G4. The package audit (32)
 - [x] G5. The security reviewer (33)
-- [ ] H. The quality numbers (34)
+- [x] H. The quality numbers (34)
 - [ ] README, CHANGELOG, `docs/team.md`
