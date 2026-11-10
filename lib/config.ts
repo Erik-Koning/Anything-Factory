@@ -96,6 +96,7 @@ export interface RawTeam {
   finish?: string | null;
   progress?: string | null;
   pages?: PagesSettings;
+  harness?: { journeys?: "required" | "optional" };
   policies?: Record<string, string>;
   never?: (NeverRule | [string, string])[];
   commandOwners?: (CommandOwner | [string, string[], string?])[];

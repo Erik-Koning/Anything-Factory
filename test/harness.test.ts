@@ -2,6 +2,7 @@ import { baseTeam, commit, makeRepo, write } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { normalize, type RawTeam } from "../lib/config.ts";
+import { fewerTests, inTestLane, journeyTagProblems, narrowingLines } from "../lib/commands/harness.ts";
 import { narrowing, pagePlan, parseHarness, readHarness } from "../lib/harness.ts";
 
 const manifest = {
@@ -106,5 +107,51 @@ describe("the harness manifest", () => {
     write(home, { ".a6g/harness.json": { pages: [{ id: "a", path: "/a" }], extra: true } });
     assert.match(readHarness(home).problems.join(""), /\.a6g\/harness\.json harness\.json\.extra: not one of/);
     assert.deepEqual(readHarness(makeRepo()), { harness: null, problems: [] });
+  });
+
+  test("what test work may change, what touches a journey's tag, and lines that check less", () => {
+    for (const path of [
+      "e2e/home.spec.ts",
+      "tests/fixtures/users.ts",
+      "playwright.config.ts",
+      "pnpm-lock.yaml",
+      "apps/web/package.json",
+      ".gitignore",
+      ".a6g/harness.json",
+    ])
+      assert.ok(inTestLane(path), path);
+    for (const path of ["src/app.tsx", "apps/web/src/pay.ts", ".a6g/team.json", "README.md"]) assert.ok(!inTestLane(path), path);
+    const diff = [
+      "diff --git a/e2e/pay.spec.ts b/e2e/pay.spec.ts",
+      "--- a/e2e/pay.spec.ts",
+      "+++ b/e2e/pay.spec.ts",
+      "@@ -1,2 +1,3 @@",
+      "-test('pays', { tag: '@journey-3' }, async () => {});",
+      "+test.skip('pays', async () => {});",
+      "+test('refunds', async () => {});",
+      "diff --git a/playwright.config.ts b/playwright.config.ts",
+      "--- a/playwright.config.ts",
+      "+++ b/playwright.config.ts",
+      "@@ -1 +1,3 @@",
+      "+  retries: process.env.CI ? 2 : 0,",
+      "+  retries: 0,",
+      "+  grepInvert: /@slow/,",
+      "diff --git a/src/skip.ts b/src/skip.ts",
+      "--- a/src/skip.ts",
+      "+++ b/src/skip.ts",
+      "@@ -0,0 +1 @@",
+      "+export const skip = list.skip(1);",
+    ].join("\n");
+    assert.deepEqual(journeyTagProblems(diff), ["e2e/pay.spec.ts"], "a removed tag counts too");
+    assert.deepEqual(narrowingLines(diff), [
+      "e2e/pay.spec.ts: test.skip('pays', async () => {});",
+      "playwright.config.ts: retries: process.env.CI ? 2 : 0,",
+      "playwright.config.ts: grepInvert: /@slow/,",
+    ]);
+    assert.deepEqual(fewerTests({ total: 10, byJourney: { "1": 3, "2": 1 } }, { total: 10, byJourney: { "1": 3, "2": 1 } }), []);
+    assert.deepEqual(fewerTests({ total: 10, byJourney: { "1": 3, "2": 1 } }, { total: 9, byJourney: { "1": 3 } }), [
+      "the suite has 9 tests, 1 fewer than before",
+      "journey 2 has 0 tests, not 1",
+    ]);
   });
 });

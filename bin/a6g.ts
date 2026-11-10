@@ -43,6 +43,7 @@ Set up and run a team (the operator)
   a6g connect app [--url <url>] [--machine <name>] [--test]   sign in to the web app in your browser and link this
                                       machine to your account: the app shows you it and the teams it runs
                                       ·  a6g disconnect email|whatsapp|heartbeat|app
+  a6g harness allow <branch> --sha <commit> --why "…"   let that commit of a branch check less (the operator's call)
   a6g self-install [--link] [--force] install this checkout's version into ~/.a6g  ·  a6g versions
 
 Team members (the guard decides who may run which)
@@ -50,14 +51,14 @@ Team members (the guard decides who may run which)
   a6g verdict review <branch> approve|changes --sha <commit> --note "…"   ·   a6g verdict ux <subject> pass|issues --ref <commit> --note "…"
   a6g log [--label …] "<entry>"   a6g lock <name> [--slots N] [--wait-min M] -- <cmd>   a6g drain <role…>|off
   a6g gate [--quick]   a6g env up|down|restart|reset|status   a6g finish   a6g progress
-  a6g pages run|shots|status|done   a6g e2e run|try|status|done   a6g complete
+  a6g pages run|shots|status|done   a6g e2e run|try|status|done   a6g harness check   a6g complete
   a6g pr --title "…" --body-file <file>   the planner's pull request into the branch you promote (push.pullRequest)
 
 The task graph (a6g task help lists every form)
   a6g task add|list|show|note|graph   anyone on the team: findings go to triage, the planner's work is proposed
   a6g task edit|score|status|import   the planner: shape, score (the gate and the matrix) and move tasks
   a6g task approve|reject|research|escalate <id>   the approver (or you), within team.json approval
-  a6g task claim [<id>]  ·  release <id>  ·  submit <id>   builders and testers take the next task, and hand it in
+  a6g task claim [<id>]  ·  release <id>  ·  submit <id>   builders, testers and the scaffolder take the next task
   a6g request add|list|show|note|reject   stakeholders' feature requests (you add them; the planner promotes them)
   a6g cycle close --report-file <f> | list   a cycles team's cycles (team.json mode "cycles")
   a6g blast [<ref>] [--base <branch>] [--json]   what a change touches: importers, related files, tests, UI, critical paths
@@ -152,6 +153,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   finish: () => import("../lib/commands/tools.ts").then((m) => m.finish()),
   complete: () => import("../lib/commands/tools.ts").then((m) => m.complete()),
   e2e: () => import("../lib/commands/e2e.ts").then((m) => m.e2e(args)),
+  harness: () => import("../lib/commands/harness.ts").then((m) => m.harness(args)),
   progress: () => import("../lib/commands/tools.ts").then((m) => m.progress()),
   drain: () => import("../lib/commands/tools.ts").then((m) => m.drain(args)),
   pages: () => import("../lib/commands/pages.ts").then((m) => m.run(args)),

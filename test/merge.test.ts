@@ -133,6 +133,85 @@ describe("merge queue", { concurrency: true }, () => {
     assert.match(record(home, "a6g/t-fewer").message, /has no review/);
   });
 
+  test("a scaffolder's branch is always reviewed, keeps test work to test files, and builders leave journey tags alone", async () => {
+    const roles = { planner: {}, builder: {}, reviewer: {}, scaffolder: {} };
+    const home = makeRepo(baseTeam({ roles, review: { required: ["builder"] } }), {
+      ".a6g/run/board/5-harness.md": "status: review\nkind: test-infra\n\nSet the browser checks up.\n",
+      ".a6g/run/board/6-skeleton.md": "status: review\nkind: scaffold\n\nMake the app's skeleton.\n",
+    });
+    // review.required names only builders here; the scaffolder's branches are reviewed anyway.
+    branch(home, "a6g/s5-harness", { "e2e/home.spec.ts": "test('home', () => {});\n", "playwright.config.ts": "export default {};\n" });
+    let result = await merge(home, "a6g/s5-harness");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s5-harness").message, /has no review/);
+    await approve(home, "a6g/s5-harness");
+    assert.equal((await merge(home, "a6g/s5-harness")).code, 0);
+    // Test-infra work that changes product code is refused; scaffold work may change anything a builder may.
+    branch(home, "a6g/s5-more", { "e2e/b.spec.ts": "test('b', () => {});\n", "src/app.ts": "export const fixed = true;\n" });
+    await approve(home, "a6g/s5-more");
+    result = await merge(home, "a6g/s5-more");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s5-more").message, /is test-infra work, which changes test and harness files only, and it changes src\/app\.ts/);
+    branch(home, "a6g/s6-skeleton", { "src/app.ts": "export const app = 1;\n", "package.json": "{}\n" });
+    await approve(home, "a6g/s6-skeleton");
+    assert.equal((await merge(home, "a6g/s6-skeleton")).code, 0);
+    // A builder's branch that touches a journey's tag is refused: its proof comes from someone else.
+    branch(home, "a6g/b7-pay", { "src/pay.ts": "export const pay = 1;\n", "src/pay.spec.ts": "test('pays', { tag: '@journey-3' }, () => {});\n" });
+    await approve(home, "a6g/b7-pay");
+    result = await merge(home, "a6g/b7-pay");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/b7-pay").message, /adds or changes @journey- tags in src\/pay\.spec\.ts/);
+  });
+
+  test("a branch that checks less merges only once the operator allows its exact commit", async () => {
+    const roles = { planner: {}, builder: {}, reviewer: {}, scaffolder: {} };
+    const manifest = {
+      e2e: { config: "playwright.config.ts" },
+      pages: [
+        { id: "home", path: "/" },
+        { id: "admin", path: "/admin" },
+      ],
+    };
+    const home = makeRepo(baseTeam({ roles }), { ".a6g/harness.json": manifest, "e2e/a.spec.ts": "test('a', () => {});\n" });
+    // A manifest that doesn't load is refused.
+    branch(home, "a6g/s1-broken", { ".a6g/harness.json": "{ nope" });
+    await approve(home, "a6g/s1-broken");
+    let result = await merge(home, "a6g/s1-broken");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s1-broken").message, /harness\.json doesn't load: .*not JSON/);
+    // A page gone from the manifest, or a test skipped, checks less.
+    const fewer = branch(home, "a6g/s2-drop", { ".a6g/harness.json": { ...manifest, pages: [{ id: "home", path: "/" }] } });
+    await approve(home, "a6g/s2-drop");
+    result = await merge(home, "a6g/s2-drop");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s2-drop").message, /checks less than a6g\/next: page admin is no longer checked\. That's the operator's call/);
+    branch(home, "a6g/s3-skip", { "e2e/a.spec.ts": "test.skip('a', () => {});\n" });
+    await approve(home, "a6g/s3-skip");
+    result = await merge(home, "a6g/s3-skip");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s3-skip").message, /e2e\/a\.spec\.ts: test\.skip\('a'/);
+    // No agent allows it; the operator allows that commit, and it merges.
+    const asAgent = await a6g(["harness", "allow", "a6g/s2-drop", "--sha", fewer, "--why", "x"], {
+      cwd: home,
+      env: { A6G_HOME_DIR: home, A6G_TEAM: "fixture", A6G_ROLE: "planner", A6G_RUN: `${home}-run` },
+    });
+    assert.notEqual(asAgent.code, 0);
+    assert.match(asAgent.out, /operator's call/);
+    const asOperator = await a6g(["harness", "allow", "a6g/s2-drop", "--sha", fewer, "--why", "the admin page moved to its own app"], { cwd: home });
+    assert.equal(asOperator.code, 0, asOperator.out);
+    result = await merge(home, "a6g/s2-drop");
+    assert.equal(result.code, 0, result.out);
+    // An allowance is for that commit only: a commit added after it checks less again, and waits for the operator.
+    assert.equal((await a6g(["harness", "allow", "a6g/s3-skip", "--sha", tip(home, "a6g/s3-skip"), "--why", "x"], { cwd: home })).code, 0);
+    git(home, "checkout", "-q", "a6g/s3-skip");
+    commit(home, { "e2e/b.spec.ts": "test.only('b', () => {});\n" }, "only b");
+    git(home, "checkout", "-q", "a6g/next");
+    await approve(home, "a6g/s3-skip");
+    result = await merge(home, "a6g/s3-skip");
+    assert.equal(result.code, 2, result.out);
+    assert.match(record(home, "a6g/s3-skip").message, /checks less than a6g\/next: .*test\.only/);
+  });
+
   test("closes the tickets it's told to, and refuses a dirty checkout", async () => {
     const home = makeRepo(baseTeam(), { ".a6g/run/board/7-seven.md": "status: review\n" });
     branch(home, "a6g/b10-ten", { "src/ten.ts": "10\n" });

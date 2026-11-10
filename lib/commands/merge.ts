@@ -21,6 +21,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { join, posix } from "node:path";
 import { FACTORY_PATH, factoryWrite, laneAllows, roleForBranch, type Team } from "../config.ts";
+import { HARNESS_FILE, readHarness } from "../harness.ts";
 import { acquire, TIMED_OUT, withLock } from "../lock.ts";
 import { entryOf, FACTORY_ROOT, readRegistry, stateDir, workDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
@@ -32,6 +33,7 @@ import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
 import { journeyProofFor } from "./e2e.ts";
+import { allowed, fewerTests, inTestLane, journeyTagProblems, manifestNarrowing, narrowingLines, suiteCounts, testLaneProblems } from "./harness.ts";
 import { pruneWorktrees } from "./watchdog.ts";
 
 // What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/.
@@ -67,6 +69,22 @@ const MAX_BUFFER = 256 * 1024 * 1024;
 
 // The paths in a diff that a role may not change: outside its lane, the factory's own files, or the paths only the
 // team's scripts write (team.json protect).
+// The kind of the task a branch is named for, or null when the team keeps no task graph or it can't be read.
+async function taskKind(team: Team, run: string, home: string, branch: string): Promise<string | null> {
+  const id = ticketOf(branch, team.branchPrefix);
+  if (team.board.type !== "tasks" || !id) return null;
+  try {
+    const store = await openTeamStore(team, run, home);
+    try {
+      return (await store.tasks.get(id))?.kind ?? null;
+    } finally {
+      await store.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
 export function outsideLane(team: Team, role: string, paths: string[]): string[] {
   return paths.filter(
     (path) => factoryWrite(team, role, path) || !laneAllows(team, role, path) || team.protect.some((rule) => new RegExp(rule).test(path))
@@ -379,13 +397,50 @@ async function mergeLocked({
     if (problem) return fail(2, "refused", `${branch} (${role}): ${problem}`);
   }
 
-  let required = team.review.required.includes(role);
+  // The harness (lib/harness.ts, ./harness.ts). A branch's manifest must load. A scaffolder's test and test-infra work
+  // stays in test and harness files, and a builder's branch touches no journey's tag: nobody makes their own proof.
+  const touchesHarness = changed.includes(HARNESS_FILE);
+  if (touchesHarness) {
+    const problems = readHarness(home, tip).problems;
+    if (problems.length) return fail(2, "refused", `${branch}'s ${HARNESS_FILE} doesn't load: ${problems.slice(0, 3).join("; ")}`);
+  }
+  const diff = raw("diff", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", `${integration}...${tip}`);
+  if (role === "scaffolder") {
+    const kind = await taskKind(team, run, home, branch);
+    const outside = kind && kind !== "scaffold" ? testLaneProblems(changed) : [];
+    if (outside.length)
+      return fail(
+        2,
+        "refused",
+        `${branch} is ${kind} work, which changes test and harness files only, and it changes ${outside.slice(0, 5).join(" ")}: a product change is a builder's task`
+      );
+  }
+  if (role === "builder") {
+    const tagged = journeyTagProblems(diff);
+    if (tagged.length)
+      return fail(
+        2,
+        "refused",
+        `${branch} (a builder's) adds or changes @journey- tags in ${tagged.slice(0, 5).join(" ")}: a journey's specs come from a tester or the scaffolder, not from who built it`
+      );
+  }
+  // Checking less is the operator's call (Article 5): only once the team has a suite to narrow.
+  const suiteBefore = readHarness(home, integration).harness?.e2e;
+  const narrows = [...(touchesHarness ? manifestNarrowing(home, integration, tip) : []), ...(suiteBefore ? narrowingLines(diff) : [])];
+  const allowance = allowed(state, branch, tip);
+  if (narrows.length && !allowance)
+    return fail(
+      2,
+      "refused",
+      `${branch} checks less than ${integration}: ${narrows.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`
+    );
+
+  // Every scaffolder branch, and any that changes the manifest, is reviewed, whatever review.required says.
+  let required = team.review.required.includes(role) || role === "scaffolder" || touchesHarness;
   const removedPattern = team.review.removedPattern;
   if (!required && removedPattern) {
     const pattern = new RegExp(removedPattern);
-    required = removedLines(raw("diff", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", `${integration}...${tip}`)).some((line) =>
-      pattern.test(line)
-    );
+    required = removedLines(diff).some((line) => pattern.test(line));
   }
   if (required) {
     const review = readJson<Verdict>(join(state, "reviews", `${safe}.json`));
@@ -495,6 +550,21 @@ async function mergeLocked({
       }
     }
     const result = out("-C", scratch, "rev-parse", "HEAD");
+    // Fewer tests in the merged suite than in the integration branch's: checking less, the operator's call too.
+    if (suiteBefore && !allowance && changed.some(inTestLane)) {
+      const work = join(workDir(home), "merge-list");
+      const [was, now] = [
+        await suiteCounts(home, suiteBefore.config, work),
+        await suiteCounts(scratch, readHarness(scratch).harness?.e2e?.config ?? suiteBefore.config, work),
+      ];
+      const fewer = was && now ? fewerTests(was, now) : [];
+      if (fewer.length)
+        return fail(
+          2,
+          "refused",
+          `${branch} checks less than ${integration}: ${fewer.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`
+        );
+    }
 
     // The gate took a while: the team's checkout must still be on the integration branch and clean.
     if (out("rev-parse", "--abbrev-ref", "HEAD") !== integration || out("status", "--porcelain", "--untracked-files=no") !== "")
