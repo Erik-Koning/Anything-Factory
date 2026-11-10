@@ -26,7 +26,7 @@ export default async function AddTaskPage({ params, searchParams }: { params: Pr
         <Link href={`/t/${team.name}/board`}>← Board</Link>
       </p>
       <Notice searchParams={searchParams} />
-      <div className="grid">
+      <div className="grid uneven">
         <section className="panel" aria-labelledby="new-task">
           <h2 id="new-task">{admin ? "Add a task" : "Suggest a task"}</h2>
           <TaskForm team={team.name} admin={admin} journeys={journeys} />

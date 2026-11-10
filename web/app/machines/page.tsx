@@ -91,7 +91,7 @@ function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer:
       )}
       <form action={unlinkMachineAction}>
         <input type="hidden" name="id" value={machine.id} />
-        <SubmitButton className="linkish">{`Unlink ${machine.name}`}</SubmitButton>
+        <SubmitButton className="quiet danger s">{`Unlink ${machine.name}`}</SubmitButton>
       </form>
     </li>
   );

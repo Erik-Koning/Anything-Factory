@@ -129,7 +129,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                   ) : (
                     <form action={forgetIpAction}>
                       <input type="hidden" name="ip" value={a.ip} />
-                      <SubmitButton className="linkish">{`Forget ${a.ip}`}</SubmitButton>
+                      <SubmitButton className="quiet s">{`Forget ${a.ip}`}</SubmitButton>
                     </form>
                   )}
                 </li>
