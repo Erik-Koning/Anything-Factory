@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { instanceId, type Lane, type LoadedTeam, loadTeam, ROLES, type Team } from "../config.ts";
 import { contactRule } from "../contact.ts";
+import { HARNESS_FILE, readHarness } from "../harness.ts";
 import { FACTORY_ROOT, findHome, versionDir } from "../paths.ts";
 import { ALLOWED_EXAMPLES, policyStates } from "../policies.ts";
 import { compile } from "../prompts.ts";
@@ -254,6 +255,14 @@ export async function check(argv: string[]): Promise<number> {
   for (const warning of team.warnings) line("warn", `team.json: ${warning}`);
   if (team.problems.length) return summary(team, failures);
   line("ok", `team.json loads: ${Object.keys(team.roles).length} roles, integration branch ${team.branch}`);
+  // The team's harness manifest, once its scaffolder has written one.
+  const manifest = readHarness(home);
+  for (const problem of manifest.problems) line("FAIL", problem);
+  if (manifest.harness && !manifest.problems.length)
+    line(
+      "ok",
+      `${HARNESS_FILE} loads: ${manifest.harness.pages.length} pages${manifest.harness.e2e ? `, the suite in ${manifest.harness.e2e.config}` : ""}${manifest.harness.auth ? `, sign-ins ${Object.keys(manifest.harness.auth.states).join(", ")}` : ""}`
+    );
 
   const scripts = [team.environment.script, team.gate.full, team.gate.quick, team.afterMerge]
     .filter((command) => command !== null)

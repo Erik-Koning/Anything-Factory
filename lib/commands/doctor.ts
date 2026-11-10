@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { browserProblem } from "../browser.ts";
 import { loadTeam, TeamError } from "../config.ts";
 import { emailSettings, readKey } from "../email.ts";
 import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
@@ -86,7 +87,11 @@ export async function doctor(): Promise<number> {
   const launcherDir = join(homedir(), ".local", "bin");
   const current = readJson<FactoryPackage>(join(A6G_HOME, "current", "package.json"));
   if (!current) fail("Anything Factory isn't installed: a6g self-install (from a clone of the factory)");
-  else ok(`Anything Factory ${current.version} is the current version in ${A6G_HOME}`);
+  else {
+    ok(`Anything Factory ${current.version} is the current version in ${A6G_HOME}`);
+    const browser = browserProblem(join(A6G_HOME, "current"));
+    browser ? warn(`page checks (a6g pages) can't run: ${browser}`) : ok("the factory's Playwright and Chromium check pages (a6g pages)");
+  }
   if (!existsSync(join(launcherDir, "a6g"))) fail(`the launcher isn't at ${launcherDir}/a6g: a6g self-install`);
   else if (!existsSync(plist))
     warn(`T3 Code's service isn't a launchd job here (${plist}), so whether its agents can run a6g and the hooks' node can't be checked`);

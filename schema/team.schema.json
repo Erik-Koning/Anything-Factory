@@ -109,6 +109,17 @@
             "$ref": "#/$defs/regex"
           },
           "description": "Source paths that belong only to other pages."
+        },
+        "as": {
+          "$ref": "#/$defs/text",
+          "description": "The sign-in state the page is seen with (the harness manifest's auth.states)."
+        },
+        "mask": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "description": "CSS selectors masked in its screenshots."
         }
       }
     },
@@ -480,7 +491,6 @@
     "pages": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["list"],
       "properties": {
         "appUrl": {
           "type": "string",
@@ -507,7 +517,8 @@
           "minItems": 1,
           "items": {
             "$ref": "#/$defs/page"
-          }
+          },
+          "description": "The operator's pages; the team's harness manifest (.a6g/harness.json) adds its own."
         },
         "viewports": {
           "type": "array",
@@ -532,6 +543,21 @@
         "settleMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "minTarget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The smallest touch target on a phone, in CSS pixels (default 24, WCAG 2.2 AA)."
+        }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "journeys": {
+          "enum": ["required", "optional"],
+          "description": "Whether the finish line needs every journey's specs passing (a6g e2e done); required by default with a scaffolder or tester."
         }
       }
     },

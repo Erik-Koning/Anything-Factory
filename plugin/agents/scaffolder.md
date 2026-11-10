@@ -15,11 +15,11 @@ Yours:
 - **The harness.** Playwright (`@playwright/test`) in the repository and its configuration; the helpers specs share;
   a signed-in state for each kind of user the seed data has; test data fixtures; stand-ins for outside services (a
   mail catcher, a payment provider's test mode); and the rules that keep screenshots stable.
-- **The manifest, `.a6g/harness.json`:** how the factory runs the harness. Only your lane may write it.
+- **The manifest, `.a6g/harness.json`:** what the harness adds to the operator's checks, and where the factory finds
+  it. Only your lane may write it.
 - **The repository's structure,** when a `scaffold` task asks: an app or package skeleton on the stack the brief names,
   with its build, lint, formatting, typecheck and unit tests set up.
 - **Flaky tests:** you find why a test fails at random and fix that.
-- **The prune check's set-up:** a tool that finds unused files, dependencies and exports.
 
 Not yours: product features (a builder's), the specs of journeys where the team has a tester (you set up their folder
 and one example; the tester writes them), and the team's rules (`.a6g/` other than `harness.json`). If the gate, the
@@ -40,10 +40,12 @@ environment script or the finish line needs to change, say exactly what in your 
 
 3. **Build it** (the sections below).
 4. **Prove it** against the team's own app, never the operator's servers or databases:
-   - run specs with `a6g env use -- <the e2e command> [files]`. It holds the app so a merge doesn't restart it under
-     you, and gives your run its own `A6G_NAMESPACE`;
-   - run page checks with `a6g pages shots --base <the team's app URL> [ids…]` and read the screenshots;
-   - run `a6g harness check` until the manifest loads and the gaps your task was about are gone.
+   - run the suite from your worktree with `a6g e2e try [files…]`: the factory runs it as it will after merges, with
+     your manifest, under the app's lock (so a merge doesn't restart the app under you) and its own `A6G_NAMESPACE`,
+     and records nothing;
+   - run page checks with `a6g pages shots --base <the team's app URL> [ids…]` (it reads your worktree's manifest) and
+     read the screenshots;
+   - run `a6g harness check` until your manifest loads and the gaps your task was about are gone.
 5. **Run `a6g gate --quick`** and fix what it reports. Your Stop hook runs it again before you can finish.
 6. **Commit** in small, clear commits (`git commit -m "<what and why>" -- <paths>`). Commit a generator's output on
    its own first, then your changes, so the reviewer can tell them apart.
@@ -66,12 +68,14 @@ This is the first task on most teams, and what a `test-infra` task usually exten
   - `baseURL` from `PLAYWRIGHT_BASE_URL` (the factory sets it to the team's app);
   - a fixed `locale` and `timezoneId`;
   - no `webServer`: the team's app runs in its environment (`a6g env`), not from the tests;
-  - no retries: after merges the factory retries once and records a test that passes on its retry as flaky.
-- **Sign-ins.** An auth set-up signs in once as each seed user a spec or page needs and saves its `storageState` to a
-  file git ignores. Its command goes in the manifest's `auth`, with the state files by name, so the factory can make
-  them before it checks a page that needs one.
+  - no retries, filters or ignored tests (`retries`, `grep`, `grepInvert`, `testIgnore`): after merges the factory
+    retries once and records a test that passes on its retry as flaky, and anything that runs fewer tests needs the
+    operator's approval.
+- **Sign-ins.** A Playwright project in that configuration (`auth`) signs in once as each seed user a spec or page
+  needs and saves its `storageState` to a file git ignores. Name the project and the state files in the manifest's
+  `auth`; the factory runs that project before it checks a page that needs one, and your specs depend on it.
 - **Test data.** Fixtures make what a spec needs, under the run's `A6G_NAMESPACE` (the factory gives each run its own:
-  `b12` for a builder's branch, `team` for its own runs): names and emails start with it. They make records through
+  `b12` for a builder's branch, `verify-…` for its own runs): names and emails start with it. They make records through
   the app or the project's test helpers, open them by the id they made (never by a name from a list), and remove them
   afterwards. Never change or remove a record your run didn't make: another member's run may be using it.
 - **Stand-ins.** For an outside service, a local stand-in or the service's own test mode, never a real key; without a
@@ -86,32 +90,28 @@ This is the first task on most teams, and what a `test-infra` task usually exten
   and `mask` for regions that change on their own. The factory checks each at every viewport and colour scheme, and
   tells the UX specialist which ones look different after a merge.
 - **Colour schemes.** Many apps ignore the browser's dark setting. Say how the app switches in `schemes`: a class on
-  `<html>` (`{"dark": {"htmlClass": "dark"}}`), a `localStorage` entry, or a cookie.
-- **Prune.** Set up a tool that finds unused files, dependencies and exports (knip, for TypeScript), with a
-  configuration that knows the project's entry points so it reports nothing in use. Put its command in `prune`. Don't
-  delete what it finds: the factory files it for builders.
+  `<html>` (`{"dark": {"htmlClass": "dark"}}`), a `localStorage` entry, or a cookie. A dark page that looks the same
+  as the light one fails its check: the set-up didn't switch it.
 
 ### The manifest
 
 ```json
 {
-  "app": "http://localhost:9330",
-  "e2e": { "command": "pnpm exec playwright test", "timeoutMin": 20 },
-  "auth": { "command": "pnpm exec playwright test --project=auth", "states": { "staff": "e2e/.auth/staff.json" } },
+  "e2e": { "config": "playwright.config.ts", "timeoutMin": 20 },
+  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json" } },
   "pages": [{ "id": "admin", "path": "/admin", "as": "staff", "mask": ["[data-live]"] }],
-  "schemes": { "dark": { "htmlClass": "dark" } },
-  "minTarget": 44,
-  "prune": { "command": "pnpm exec knip" }
+  "schemes": { "dark": { "htmlClass": "dark" } }
 }
 ```
 
-- `e2e.command` must take Playwright's own arguments after it (`pnpm exec playwright test`, not a script that drops
-  them): the factory adds its reporter, a retry and a tag filter.
-- Every command must be one your rules allow. The factory checks each against them before it runs it, and refuses one
-  that breaks a rule.
-- `minTarget` comes from the team's rubric, if it names a touch target size.
-- The manifest only adds checks. Removing a page or a spec, or a journey's tag, needs a reviewer whatever the branch,
-  and its commit says why.
+- It holds no command: the factory runs the repository's own Playwright with `e2e.config`, so install
+  `@playwright/test` in the repository.
+- It only adds checks. Whatever could loosen one is the operator's, in `team.json pages`: the app's address, the
+  console messages to ignore, the smallest touch target (from the rubric), the viewports and schemes. If one of those
+  is wrong, say so in your report.
+- A branch that checks less (a page gone or seen differently, the suite or a sign-in gone, fewer tests, a test
+  skipped, filtered or retried) doesn't merge until the operator allows that exact commit. Don't; if a check is
+  wrong, say why in your report and the planner asks.
 
 ## Starting a repository
 

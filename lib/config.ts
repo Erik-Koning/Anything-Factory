@@ -25,6 +25,9 @@ export interface PageSpec {
   path: string;
   title?: string;
   exclude?: string[];
+  // The sign-in state (the harness's auth.states) the page is seen with, and selectors masked in its screenshots.
+  as?: string;
+  mask?: string[];
 }
 export interface Viewport {
   id: string;
@@ -44,6 +47,8 @@ export interface PagesSettings {
   settleMs?: number;
   base?: string;
   allowedChanges?: string[];
+  // The smallest touch target on a phone, in CSS pixels (the rubric's, else WCAG 2.2 AA's 24).
+  minTarget?: number;
 }
 
 export interface NeverRule {
@@ -160,6 +165,9 @@ export interface Team {
   finish: string | null;
   progress: string | null;
   pages: PagesSettings | null;
+  // Whether the finish line needs every journey's specs passing (a6g e2e done): "required" by default for a team with
+  // a scaffolder or a tester, who write them.
+  harness: { journeys: "required" | "optional" };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -191,6 +199,9 @@ export const GMAIL = [
   "mcp__claude_ai_Gmail__get_message",
 ];
 
+// The scaffolder's rule for the harness manifest (lib/harness.ts), the one factory path its lane names.
+export const HARNESS_RULE = "^\\.a6g/harness\\.json$";
+
 // What a worktree role's branches start with after the prefix: a6g/b12-…, a6g/t-12-…, a6g/s12-… (lib/tasks/model.ts
 // branchFor names them the same way).
 export const BRANCH_STEM: Record<string, string> = { builder: "b\\d+-", tester: "t-", scaffolder: "s\\d+-" };
@@ -211,7 +222,7 @@ export const ROLES: Record<string, RoleDefaults> = {
     summary: "sets up and keeps the test harness and the repository's structure, on its own branch",
     limit: 1,
     readOnly: false,
-    write: ["*", "^\\.a6g/harness\\.json$"],
+    write: ["*", HARNESS_RULE],
     worktree: true,
   },
   reviewer: { summary: "reviews one finished branch before it merges", limit: 1, readOnly: true, write: [] },
@@ -248,6 +259,7 @@ const KNOWN_KEYS = new Set([
   "finish",
   "progress",
   "pages",
+  "harness",
   "policies",
   "never",
   "commandOwners",
@@ -420,9 +432,11 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     // The lane is the factory's defaults plus only these settings, so any other key (such as "worktree") is ignored and
     // can't change what the factory gives the role.
     const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt"]) ?? {};
+    const written = list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at)));
     const lane: Lane = {
       ...base,
-      write: list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at))) ?? base.write,
+      // The scaffolder keeps the manifest whatever its write says: it's the only lane that names it.
+      write: written ? (id === "scaffolder" ? [...new Set([...written, HARNESS_RULE])] : written) : base.write,
       deny: list(settings.deny, `${where}.deny`, regex) ?? [],
       mcp: list(settings.mcp, `${where}.mcp`, text) ?? base.mcp ?? [],
     };
@@ -612,10 +626,11 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     "schemes",
     "ignoreConsole",
     "settleMs",
+    "minTarget",
   ]);
   if (pagesIn) {
     const page = (value: unknown, where: string): PageSpec | undefined => {
-      const spec = object(value, where, ["id", "path", "title", "exclude"]);
+      const spec = object(value, where, ["id", "path", "title", "exclude", "as", "mask"]);
       if (!spec) return undefined;
       const id = need(spec.id, `${where}.id`, (id, at) =>
         typeof id === "string" && ID.test(id) ? id : bad(at, "letters, digits, _ and - (it names the page's files)")
@@ -625,8 +640,17 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       );
       const title = text(spec.title, `${where}.title`);
       const exclude = list(spec.exclude, `${where}.exclude`, regex);
+      const as = text(spec.as, `${where}.as`);
+      const mask = list(spec.mask, `${where}.mask`, text);
       if (id === undefined || path === undefined) return undefined;
-      return { id, path, ...(title === undefined ? {} : { title }), ...(exclude === undefined ? {} : { exclude }) };
+      return {
+        id,
+        path,
+        ...(title === undefined ? {} : { title }),
+        ...(exclude === undefined ? {} : { exclude }),
+        ...(as === undefined ? {} : { as }),
+        ...(mask === undefined ? {} : { mask }),
+      };
     };
     const viewport = (value: unknown, where: string): Viewport | undefined => {
       const spec = object(value, where, ["id", "width", "height", "isMobile", "deviceScaleFactor"]);
@@ -649,9 +673,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const nonEmpty = <T>(value: unknown, where: string, item: (value: unknown, where: string) => T | undefined, what: string): T[] | undefined =>
       Array.isArray(value) && !value.length ? bad(where, what) : list(value, where, item);
     pages = {};
-    if (!Array.isArray(pagesIn.list) || !pagesIn.list.length)
-      bad("pages.list", 'the pages to check, at least one (e.g. [{"id": "landing", "path": "/"}])');
-    else pages.list = list(pagesIn.list, "pages.list", page) ?? [];
+    // The operator's pages; the team's harness manifest adds its own, so a team may list none here.
+    if (pagesIn.list !== undefined && (!Array.isArray(pagesIn.list) || !pagesIn.list.length))
+      bad("pages.list", 'the pages to check, at least one (e.g. [{"id": "landing", "path": "/"}]), or leave it out');
+    else if (pagesIn.list !== undefined) pages.list = list(pagesIn.list, "pages.list", page) ?? [];
     const ids = (pages.list ?? []).map((spec) => spec.id);
     for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) problems.push(`pages.list: more than one page is named ${id}`);
     const appUrl =
@@ -678,9 +703,17 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     if (ignoreConsole !== undefined) pages.ignoreConsole = ignoreConsole;
     const settleMs = whole(pagesIn.settleMs, "pages.settleMs", 0);
     if (settleMs !== undefined) pages.settleMs = settleMs;
+    const minTarget = whole(pagesIn.minTarget, "pages.minTarget", 1);
+    if (minTarget !== undefined) pages.minTarget = minTarget;
   }
   if (finish && PAGES_DONE.test(finish) && input.pages === undefined)
     problems.push('pages: the finish line is a6g pages done, so "pages" must list the pages it checks');
+  const harnessIn = object(input.harness, "harness", ["journeys"]) ?? {};
+  let harnessJourneys: "required" | "optional" = roles["scaffolder"] || roles["tester"] ? "required" : "optional";
+  if (harnessIn.journeys !== undefined) {
+    if (harnessIn.journeys === "required" || harnessIn.journeys === "optional") harnessJourneys = harnessIn.journeys;
+    else problems.push('harness.journeys: "required" (the finish line needs every journey\'s specs passing) or "optional"');
+  }
 
   const team: Team = {
     raw,
@@ -736,6 +769,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     // Left out or null: the finish command with done→status. "": none, as 0.2.0 read it.
     progress: input.progress === "" ? null : (textOrNull(input.progress, "progress") ?? (finish ? finish.replace(/\bdone$/, "status") : null)),
     pages,
+    harness: { journeys: harnessJourneys },
     policies,
     never,
     commandOwners,

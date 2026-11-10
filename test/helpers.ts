@@ -16,6 +16,8 @@ process.env.T3CODE_HOME = tmp("a6g-t3-");
 // HOME too, for whatever resolves homedir(): ~/.local/bin, ~/Library/LaunchAgents, ~/.claude. Repositories made here
 // set their own git identity, since a fresh HOME has no ~/.gitconfig.
 process.env.HOME = tmp("a6g-user-");
+// No test downloads a browser: self-install skips the factory's Chromium (lib/browser.ts).
+process.env.A6G_SKIP_BROWSER = "1";
 for (const key of ["A6G_TEAM", "A6G_HOME_DIR", "A6G_RUN", "A6G_ROLE", "A6G_SETUP", "A6G_VERSION", "A6G_MERGE_QUEUED", "CLAUDE_PROJECT_DIR"])
   delete process.env[key];
 // Stand-ins for t3, launchctl, docker, osascript, open and an empty Keychain's security first on PATH (test/fake-t3/),
