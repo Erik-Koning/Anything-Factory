@@ -23,6 +23,7 @@ export function playwrightCli(from: string): string | null {
 export interface SuiteRun {
   // The command's exit, null when it was stopped (timedOut).
   status: number | null;
+  // It ran past its limit, and everything it started was ended.
   timedOut: boolean;
   report: Report | null;
   // The last lines it printed, for a run with no report.
@@ -35,7 +36,12 @@ interface ReportResult {
 }
 interface ReportTest {
   projectName?: string;
+  // How it went against what was expected: expected, unexpected, flaky or skipped.
   status?: string;
+  // What the test declared: passed, or failed (test.fail, test.info().fail()) or skipped.
+  expectedStatus?: string;
+  // What it was marked with where it's declared (fail, skip, fixme, slow): all a listing knows of it.
+  annotations?: { type?: string }[];
   results?: ReportResult[];
 }
 interface ReportSpec {
@@ -57,12 +63,26 @@ export interface Report {
   errors?: { message?: string }[];
 }
 
+const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
 // Runs `playwright test --config <config> [args…]` in `dir`. `env` adds to the environment (the base URL, the
 // namespace); `work` is where the report and Playwright's output go, outside the checkout. Asynchronous, so a process
 // that serves something itself (a test's own app) keeps answering while it runs.
+//
+// The time limit is a limit: the suite runs in a process group of its own, and past `timeoutMin` the whole group is
+// asked to stop, ended `graceMs` later, and no longer waited for half as long again after that, whatever is left.
+// Whenever the run ends, so does the rest of its group, and a process that left the group and still holds the output
+// open (a server started for good) isn't waited for.
 export async function runPlaywright(
   dir: string,
-  { config, args = [], env = {}, timeoutMin, work }: { config: string; args?: string[]; env?: Record<string, string>; timeoutMin: number; work: string }
+  {
+    config,
+    args = [],
+    env = {},
+    timeoutMin,
+    work,
+    graceMs = 10_000,
+  }: { config: string; args?: string[]; env?: Record<string, string>; timeoutMin: number; work: string; graceMs?: number }
 ): Promise<SuiteRun> {
   const cli = playwrightCli(configDir(dir, config));
   if (!cli)
@@ -77,9 +97,21 @@ export async function runPlaywright(
   rmSync(reportFile, { force: true });
   const child = spawn(process.execPath, [cli, "test", "--config", config, "--reporter=json", "--output", join(work, "output"), ...args], {
     cwd: dir,
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile, CI: "1", FORCE_COLOR: "0" },
   });
+  const signalGroup = (signal: NodeJS.Signals): void => {
+    try {
+      if (child.pid) process.kill(-child.pid, signal);
+    } catch {}
+  };
+  // A group of its own doesn't hear the terminal's Ctrl-C, or a signal sent to this process: pass it on, and go.
+  const passOn = (signal: NodeJS.Signals): void => {
+    signalGroup(signal);
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  };
+  for (const signal of SIGNALS) process.on(signal, passOn);
   let printed = "";
   const keep = (chunk: Buffer) => {
     printed = (printed + chunk.toString()).slice(-8000);
@@ -87,16 +119,29 @@ export async function runPlaywright(
   child.stdout?.on("data", keep);
   child.stderr?.on("data", keep);
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill("SIGTERM");
-    setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
-  }, timeoutMin * 60_000);
+  const timers: NodeJS.Timeout[] = [];
   const status = await new Promise<number | null>((done) => {
     child.on("error", () => done(1));
     child.on("close", (code) => done(code));
+    // Its output can stay open after it has gone (something it started holds it): what it printed is in by then.
+    child.on("exit", (code) => timers.push(setTimeout(() => done(code), 1000)));
+    timers.push(
+      setTimeout(() => {
+        timedOut = true;
+        signalGroup("SIGTERM");
+        timers.push(setTimeout(() => signalGroup("SIGKILL"), graceMs));
+        timers.push(setTimeout(() => done(null), graceMs * 1.5));
+      }, timeoutMin * 60_000)
+    );
   });
-  clearTimeout(timer);
+  for (const timer of timers) clearTimeout(timer);
+  for (const signal of SIGNALS) process.off(signal, passOn);
+  // Nothing the run started in its group outlives it: what a test left running, or what ignored the limit's request.
+  signalGroup("SIGKILL");
+  // Whatever outlived the group's end keeps nothing of ours open.
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
   let report: Report | null = null;
   try {
     report = existsSync(reportFile) ? (JSON.parse(readFileSync(reportFile, "utf8")) as Report) : null;
@@ -104,7 +149,10 @@ export async function runPlaywright(
   return { status: timedOut ? null : status, timedOut, report, tail: printed.trim().split("\n").slice(-12).join("\n") };
 }
 
-export type Outcome = "passed" | "failed" | "flaky" | "skipped" | "listed";
+// How a test went. `excused` is one declared to fail (test.fail, test.info().fail()) that did: Playwright calls that
+// expected, and it proves nothing. `flaky` passed on a retry. `listed` has no result (a listing, or a run that never
+// reached it).
+export type Outcome = "passed" | "failed" | "flaky" | "skipped" | "excused" | "listed";
 export interface SpecResult {
   // file › describe › title [project]: the same test across runs.
   id: string;
@@ -128,21 +176,9 @@ export function specsOf(report: Report | null, dir?: string): SpecResult[] {
     const path = suite.title && suite.title !== here ? [...titles, suite.title] : titles;
     for (const spec of suite.specs ?? []) {
       const specFile = named(spec.file ?? here);
-      for (const test of spec.tests?.length ? spec.tests : [{}]) {
-        const results = test.results ?? [];
-        const status = test.status;
-        const outcome: Outcome = !results.length
-          ? status === "skipped"
-            ? "skipped"
-            : "listed"
-          : status === "flaky"
-            ? "flaky"
-            : status === "skipped"
-              ? "skipped"
-              : status === "expected"
-                ? "passed"
-                : "failed";
-        const error = results.find((r) => r.error?.message)?.error?.message;
+      for (const test of spec.tests?.length ? spec.tests : [{} as ReportTest]) {
+        const outcome = outcomeOf(test);
+        const error = (test.results ?? []).find((r) => r.error?.message)?.error?.message;
         const project = test.projectName ?? "";
         const title = [...path, spec.title].join(" › ");
         found.push({
@@ -160,6 +196,26 @@ export function specsOf(report: Report | null, dir?: string): SpecResult[] {
   };
   for (const suite of report?.suites ?? []) walk(suite, [], suite.file ?? "");
   return found;
+}
+
+// A test's outcome from Playwright's own account of it: how it went (status) against what it declared
+// (expectedStatus), so a test that was told to fail or skip never reads as a pass, however that was spelled. With no
+// result (a listing), what it's declared with is all there is: skipped, expected to fail, or just listed.
+function outcomeOf({ status, expectedStatus: expected, annotations = [], results = [] }: ReportTest): Outcome {
+  if (expected === "skipped") return "skipped";
+  if (!results.length) return annotations.some((a) => a.type === "fail") ? "excused" : "listed";
+  if (status === "skipped") return "skipped";
+  if (status === "unexpected") return "failed";
+  if (expected === "failed") return "excused";
+  if (status === "flaky") return "flaky";
+  return status === "expected" ? "passed" : "failed";
+}
+
+// Whether a report holds a result for any test: the run got as far as running one.
+export function reachedTests(report: Report | null): boolean {
+  const any = (suite: ReportSuite): boolean =>
+    (suite.specs ?? []).some((spec) => (spec.tests ?? []).some((test) => (test.results ?? []).length > 0)) || (suite.suites ?? []).some(any);
+  return (report?.suites ?? []).some(any);
 }
 
 // A test's journeys, by tag: exactly @journey-<id> (so @journey-1 isn't @journey-12).
@@ -187,10 +243,14 @@ export const configDir = (dir: string, config: string): string => dirname(join(d
 export interface SuiteRecord {
   commit: string;
   at: string;
+  // Whether the suite ran: it wrote a report, inside its time limit, with a result for at least one test. A run that
+  // didn't proves nothing and disproves nothing: no journey is proven by it, and none of its tests failed.
+  ran: boolean;
   timedOut: boolean;
   status: number | null;
   specs: SpecResult[];
   // What went wrong outside any test (the config didn't load, the app didn't answer).
   errors: string[];
 }
+export const passed = (spec: Pick<SpecResult, "outcome">): boolean => spec.outcome === "passed" || spec.outcome === "flaky";
 export const readSuiteRecord = (file: string): SuiteRecord | null => readJson<SuiteRecord | null>(file, null);

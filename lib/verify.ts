@@ -10,12 +10,12 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { differentLooks, recordPages, type PageResult } from "./commands/pages.ts";
-import { recordSuite, suiteHistory } from "./commands/e2e.ts";
+import { recordSuite, suiteHistory, summary, tally } from "./commands/e2e.ts";
 import type { LoadedTeam, Team } from "./config.ts";
 import { HARNESS_FILE, pagePlan, readHarness } from "./harness.ts";
 import { acquire } from "./lock.ts";
 import { stateDir } from "./paths.ts";
-import { journeysOf, type SuiteRecord } from "./suite.ts";
+import { journeysOf, passed, type SuiteRecord } from "./suite.ts";
 import { threadSend } from "./t3.ts";
 import { addTask } from "./tasks/add.ts";
 import { type Kind, MERGE, type Severity } from "./tasks/model.ts";
@@ -144,9 +144,7 @@ async function fileFailures(
   for (const spec of failing) byFile.set(spec.file, [...(byFile.get(spec.file) ?? []), spec]);
   const history = suite ? suiteHistory(home).slice(1) : [];
   for (const [file, specs] of byFile) {
-    const lastPass = history.find((record) =>
-      specs.every((spec) => record.specs.some((s) => s.id === spec.id && (s.outcome === "passed" || s.outcome === "flaky")))
-    );
+    const lastPass = history.find((record) => specs.every((spec) => record.specs.some((s) => s.id === spec.id && passed(s))));
     const merges = mergesBetween(home, lastPass?.commit ?? null, at).slice(0, 10);
     const journeys = [...new Set(specs.flatMap(journeysOf))];
     const task = await fileOnce(store, team, `verify:spec:${file}`, {
@@ -201,10 +199,7 @@ async function checkOnce(home: string, team: LoadedTeam, run: string): Promise<s
         if (harness?.e2e)
           try {
             suite = await recordSuite(home, team, { retries: 1, namespace: `verify-${Date.now().toString(36)}` });
-            const count = (o: string) => suite?.specs.filter((s) => s.outcome === o).length ?? 0;
-            said.push(
-              `the suite ${count("passed")} passed, ${count("failed")} failed${count("flaky") ? `, ${count("flaky")} flaky` : ""}${suite.timedOut ? ", timed out" : ""}`
-            );
+            said.push(suite.ran ? `the suite ${tally(suite.specs)}` : summary(suite));
           } catch (error) {
             said.push(`the suite didn't run: ${(error as Error).message.split("\n")[0]}`);
           }

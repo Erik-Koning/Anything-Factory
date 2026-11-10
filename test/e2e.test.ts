@@ -1,15 +1,16 @@
-import { baseTeam, git, makeRepo, ROOT, tmp, write } from "./helpers.ts";
+import { baseTeam, commit, git, makeRepo, ROOT, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { browserProblem } from "../lib/browser.ts";
-import { journeyProofFor, namespaceOf, recordSuite, suiteGaps, suiteHistory } from "../lib/commands/e2e.ts";
+import { historyFile, journeyProofFor, namespaceOf, recordSuite, runFor, suiteGaps, suiteHistory, summary, unprovenIn } from "../lib/commands/e2e.ts";
 import { loadTeam, type RawTeam } from "../lib/config.ts";
 import { journeysRequired } from "../lib/harness.ts";
-import { journeysOf, playwrightCli, scrub, specsOf } from "../lib/suite.ts";
+import { journeysOf, playwrightCli, reachedTests, runPlaywright, scrub, type SpecResult, specsOf, type SuiteRecord } from "../lib/suite.ts";
+import { writeJson } from "../lib/util.ts";
 import { moveRefusal, newTask, type Task } from "../lib/tasks/model.ts";
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(userInfo().homedir, "Library", "Caches", "ms-playwright");
@@ -63,6 +64,102 @@ describe("the suite's report", () => {
     assert.deepEqual(journeysOf(specs[1] as never), ["12"], "@journey-12 is journey 12, not 1");
     assert.deepEqual(specsOf({ suites: [{ title: "a", file: "a", specs: [{ title: "t", tests: [{}] }] }] })[0]?.outcome, "listed");
     assert.equal(scrub("Error: STRIPE_SECRET_KEY=sk_test_123 was refused"), "Error: STRIPE_SECRET_KEY=… was refused");
+  });
+
+  test("a test's outcome is how it went against what it declared: told to fail or skip is never a pass", () => {
+    const one = (test: Record<string, unknown>) =>
+      specsOf({ suites: [{ title: "a.spec.ts", file: "a.spec.ts", specs: [{ title: "t", tests: [test] }] }] })[0]?.outcome;
+    const ran = (status: string, expectedStatus: string, ...results: string[]) =>
+      one({ status, expectedStatus, results: results.map((r) => ({ status: r })) });
+    assert.equal(ran("expected", "passed", "passed"), "passed");
+    assert.equal(ran("unexpected", "passed", "failed"), "failed");
+    assert.equal(ran("flaky", "passed", "failed", "passed"), "flaky");
+    // test.fail(), test.fail("…"), test.info().fail(): Playwright calls the failure expected.
+    assert.equal(ran("expected", "failed", "failed"), "excused");
+    assert.equal(ran("unexpected", "failed", "passed"), "failed", "told to fail, and it passed");
+    assert.equal(ran("skipped", "skipped", "skipped"), "skipped");
+    assert.equal(ran("skipped", "passed", "interrupted"), "skipped");
+    // A listing has no results: what a test is declared with is all there is.
+    assert.equal(one({ status: "skipped", expectedStatus: "passed", results: [] }), "listed");
+    assert.equal(one({ status: "skipped", expectedStatus: "skipped", results: [], annotations: [{ type: "fixme" }] }), "skipped");
+    assert.equal(one({ status: "skipped", expectedStatus: "passed", results: [], annotations: [{ type: "fail" }] }), "excused");
+    assert.ok(!reachedTests({ suites: [{ specs: [{ title: "t", tests: [{ status: "skipped", results: [] }] }] }] }));
+    assert.ok(!reachedTests({ errors: [{ message: "Error: global setup blew up" }] }));
+    assert.ok(reachedTests({ suites: [{ suites: [{ specs: [{ title: "t", tests: [{ results: [{ status: "passed" }] }] }] }] }] }));
+  });
+
+  test("one reading of a run: a journey is proven by the newest run holding its merges, where every tagged test passed", () => {
+    const home = makeRepo(baseTeam({ board: "tasks", roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} } }), {
+      ".a6g/harness.json": { e2e: { config: "playwright.config.ts" } },
+    });
+    const first = git(home, "rev-parse", "HEAD");
+    write(home, { "README.md": "later\n" });
+    git(home, "add", "README.md");
+    git(home, "commit", "-qm", "later");
+    const later = git(home, "rev-parse", "HEAD");
+    const spec = (title: string, outcome: SpecResult["outcome"], ...tags: string[]): SpecResult => ({
+      id: `e2e/a.spec.ts › ${title}`,
+      file: "e2e/a.spec.ts",
+      title,
+      project: "",
+      tags,
+      outcome,
+    });
+    const record = (commit: string, specs: SpecResult[], more: Partial<SuiteRecord> = {}): SuiteRecord => ({
+      commit,
+      at: "2026-01-01T00:00:00.000Z",
+      ran: true,
+      timedOut: false,
+      status: 0,
+      specs,
+      errors: [],
+      ...more,
+    });
+    const good = record(first, [spec("pays", "passed", "@journey-1"), spec("refunds", "flaky", "@journey-1"), spec("other", "failed", "@journey-2")]);
+    assert.equal(unprovenIn(good, "1"), null, "a test that passed on its retry passed");
+    assert.match(unprovenIn(good, "2") ?? "", /1 of journey 2's 1 tests didn't pass at .{9}: other$/);
+    assert.match(unprovenIn(good, "3") ?? "", /no test is tagged @journey-3/);
+    // Every test, not some: one skipped or told to fail keeps the journey open.
+    const partial = record(first, [
+      spec("pays", "passed", "@journey-1"),
+      spec("refunds", "skipped", "@journey-1"),
+      spec("cancels", "excused", "@journey-1"),
+    ]);
+    assert.match(unprovenIn(partial, "1") ?? "", /2 of journey 1's 3 tests didn't pass at .{9}: refunds \(skipped\); cancels \(expected to fail\)/);
+    const stopped = record(later, [], { ran: false, timedOut: true, status: null, errors: ["it ran past 20 minutes (e2e.timeoutMin) and was stopped"] });
+    assert.match(unprovenIn(stopped, "1") ?? "", /the suite didn't run at .{9} \(it ran past 20 minutes .*\), so journey 1 isn't proven yet/);
+
+    const team = loadTeam(home);
+    const journey = task({ id: "1", kind: "journey", status: "approved" });
+    const all = [journey, task({ id: "5", parent: "1", sha: first })];
+    const proof = journeyProofFor(home, team);
+    writeJson(historyFile(home), [good]);
+    assert.equal(proof(journey, all), null);
+    assert.deepEqual(
+      suiteGaps(home, [journey]).map((gap) => gap.replace(/[0-9a-f]{9}/g, "<sha>")),
+      ["the last run was at <sha>, not the head (<sha>): a6g e2e run", "1 tests failed: e2e/a.spec.ts › other"]
+    );
+    // A newer run that didn't finish holds the merges too: it speaks for the journey, and the older pass doesn't.
+    writeJson(historyFile(home), [stopped, good]);
+    assert.equal(runFor(home, journey, all)?.commit, later);
+    assert.match(proof(journey, all) ?? "", /the suite didn't run at .{9}/);
+    assert.deepEqual(
+      suiteGaps(home, [journey]),
+      ["the last run didn't run: it ran past 20 minutes (e2e.timeoutMin) and was stopped"],
+      "and it files no gaps"
+    );
+    // A run before one of the journey's merges says nothing of it.
+    writeJson(historyFile(home), [good]);
+    assert.match(
+      proof(journey, [journey, task({ id: "5", parent: "1", sha: later })]) ?? "",
+      /no recorded run of the suite holds all of journey 1's merges yet/
+    );
+    // At the finish line every journey is read the same way.
+    writeJson(historyFile(home), [record(later, partial.specs)]);
+    assert.deepEqual(
+      suiteGaps(home, [journey]).map((gap) => gap.replace(/[0-9a-f]{9}/g, "<sha>")),
+      ["journey 1 (task 1): 2 of journey 1's 3 tests didn't pass at <sha>: refunds (skipped); cancels (expected to fail)"]
+    );
   });
 
   test("a run's namespace is the member's branch", () => {
@@ -187,5 +284,122 @@ describe("journeys as specs, in a real browser", { skip: noBrowser ?? false }, (
     assert.match(proof(journeys[0] as Task, moved) ?? "", /no recorded run of the suite holds all of journey 1's merges/);
     assert.match(suiteGaps(home, journeys).join("\n"), /the last run was at .*, not the head/);
     assert.equal(suiteHistory(home).length, 1);
+  });
+
+  test("a recorded run sets its own retries and forbids .only, whatever the repository's configuration says", async () => {
+    const team = { ...baseTeam({ board: "tasks" }), roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} }, pages: { appUrl: url } } as RawTeam;
+    const home = makeRepo(team, {
+      ".a6g/harness.json": { e2e: { config: "playwright.config.mjs", timeoutMin: 3 } },
+      "playwright.config.mjs": "export default { testDir: 'e2e', retries: 3, workers: 1 };\n",
+      "e2e/a.spec.mjs": [
+        'import { test, expect } from "playwright/test";',
+        'test("passes", { tag: "@journey-1" }, async () => { expect(1).toBe(1); });',
+        'test("passes second time", { tag: "@journey-2" }, async ({}, info) => { expect(info.retry).toBe(1); });',
+        'test("told to fail", { tag: "@journey-3" }, async ({}, info) => { info.fail(); expect(1).toBe(2); });',
+        'test.skip("left out", { tag: "@journey-3" }, async () => {});',
+        "",
+      ].join("\n"),
+      ".gitignore": "node_modules\n",
+    });
+    mkdirSync(join(home, "node_modules"), { recursive: true });
+    for (const name of ["playwright", "playwright-core"]) symlinkSync(join(ROOT, "node_modules", name), join(home, "node_modules", name));
+    const loaded = loadTeam(home);
+    const record = await recordSuite(home, loaded);
+    assert.deepEqual(
+      record.specs.map((s) => [s.title, s.outcome]),
+      [
+        ["passes", "passed"],
+        ["passes second time", "failed"],
+        ["told to fail", "excused"],
+        ["left out", "skipped"],
+      ],
+      "the configuration's three retries didn't forgive the failure"
+    );
+    assert.ok(record.ran);
+    assert.equal(summary(record), "1 passed, 1 failed, 1 skipped, 1 expected to fail");
+    assert.equal(unprovenIn(record, "1"), null);
+    assert.match(unprovenIn(record, "3") ?? "", /2 of journey 3's 2 tests didn't pass/);
+    // The check after merges allows one retry of its own: the same test is flaky there, not failed.
+    assert.equal((await recordSuite(home, loaded, { retries: 1 })).specs[1]?.outcome, "flaky");
+
+    // A .only would run a part of the suite and report it whole: the run is refused, and it's no run at all.
+    commit(home, { "e2e/b.spec.mjs": 'import { test } from "playwright/test";\ntest.only("just this", async () => {});\n' });
+    const only = await recordSuite(home, loaded);
+    assert.ok(!only.ran);
+    assert.match(summary(only), /^the suite didn't run: Error: item focused with '\.only' is not allowed/);
+    const journey = task({ id: "1", kind: "journey", status: "approved" });
+    assert.match(journeyProofFor(home, loaded)(journey, [journey]) ?? "", /the suite didn't run at/, "the pass before it doesn't stand in");
+  });
+});
+
+describe("the suite's time limit", () => {
+  test("ends everything the suite started, and stops waiting for what won't end", async () => {
+    const home = makeRepo(baseTeam(), {
+      "playwright.config.mjs": "export default { testDir: 'e2e', workers: 1, globalSetup: './setup.mjs' };\n",
+      // Two processes the suite leaves behind: one a test starts that ignores being asked to stop, and one its setup
+      // starts for good, which has left the group and holds the suite's output open.
+      "setup.mjs": [
+        'import { spawn } from "node:child_process";',
+        'import { writeFileSync } from "node:fs";',
+        "export default () => {",
+        "  const away = spawn('sh', ['-c', 'sleep 300'], { stdio: 'inherit', detached: true });",
+        "  away.unref();",
+        "  writeFileSync(`${process.env.PIDS}.away`, String(away.pid));",
+        "};",
+        "",
+      ].join("\n"),
+      "e2e/hang.spec.mjs": [
+        'import { test } from "playwright/test";',
+        'import { spawn } from "node:child_process";',
+        'import { writeFileSync } from "node:fs";',
+        'test("hangs", async () => {',
+        "  test.skip(!!process.env.QUICK);",
+        "  const deaf = spawn('sh', ['-c', 'trap \"\" TERM; sleep 300'], { stdio: 'inherit' });",
+        "  writeFileSync(process.env.PIDS, String(deaf.pid));",
+        "  await new Promise(() => {});",
+        "});",
+        "",
+      ].join("\n"),
+      ".gitignore": "node_modules\n",
+    });
+    mkdirSync(join(home, "node_modules"), { recursive: true });
+    for (const name of ["playwright", "playwright-core"]) symlinkSync(join(ROOT, "node_modules", name), join(home, "node_modules", name));
+    const work = tmp("a6g-work-");
+    const pids = join(work, "pids");
+    const started = Date.now();
+    const ran = await runPlaywright(home, { config: "playwright.config.mjs", env: { PIDS: pids }, timeoutMin: 0.08, work, graceMs: 600 });
+    const took = Date.now() - started;
+    assert.deepEqual([ran.timedOut, ran.status], [true, null]);
+    assert.ok(took < 12_000, `it stopped waiting (${took} ms)`);
+    assert.ok(existsSync(pids), "the test got as far as starting them");
+    const [deaf, away] = [pids, `${pids}.away`].map((file) => Number(readFileSync(file, "utf8"))) as [number, number];
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const end = (...ids: number[]): void => {
+      for (const pid of ids)
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+    };
+    try {
+      // Ended, though not yet gone the instant the signal is sent.
+      for (let i = 0; i < 40 && alive(deaf); i++) await new Promise((wait) => setTimeout(wait, 50));
+      assert.ok(!alive(deaf), "the one that ignored the request was ended with its group");
+      assert.ok(alive(away), "what left the group is not the suite's to end");
+    } finally {
+      end(-away, away, deaf);
+    }
+    // A run that ends by itself isn't kept waiting by what still holds its output.
+    const again = Date.now();
+    const quick = await runPlaywright(home, { config: "playwright.config.mjs", env: { PIDS: pids, QUICK: "1" }, timeoutMin: 2, work });
+    end(-Number(readFileSync(`${pids}.away`, "utf8")));
+    assert.deepEqual([quick.timedOut, quick.status, specsOf(quick.report)[0]?.outcome], [false, 0, "skipped"]);
+    assert.ok(Date.now() - again < 30_000);
   });
 });
