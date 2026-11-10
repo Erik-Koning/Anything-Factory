@@ -71,7 +71,11 @@ export interface RegistryEntry {
   project: string;
   version: string;
   plannerInstance: string;
+  // The planner's model (on a worker machine, the builder's): what a version before roles had models of their own
+  // starts every thread on.
   model: string;
+  // Each role's model (lib/models.ts). Missing in entries registered before roles had their own: `model` for all.
+  models?: Record<string, string>;
   health: string[];
   needsDocker: boolean;
   worktreesDir: string;

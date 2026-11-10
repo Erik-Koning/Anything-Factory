@@ -34,6 +34,11 @@
       "type": "string",
       "pattern": "^[\\w-]+$"
     },
+    "model": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:[\\]-]{0,99}$",
+      "description": "fable, opus, sonnet or haiku (the newest of the family this version knows), or a model id such as claude-opus-5-5."
+    },
     "role": {
       "type": "object",
       "additionalProperties": false,
@@ -83,6 +88,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "Planner only: compact its context at this many tokens."
+        },
+        "model": {
+          "$ref": "#/$defs/model",
+          "description": "The model the role runs on. Left out: the team's model, else Fable for the planner, the innovator and the scaffolder, and Opus for the rest."
         }
       }
     },
@@ -374,7 +383,8 @@
       "$ref": "#/$defs/text"
     },
     "model": {
-      "$ref": "#/$defs/text"
+      "$ref": "#/$defs/model",
+      "description": "The model for every role that names none of its own (roles.<role>.model). Left out, each role runs on its default."
     },
     "roles": {
       "type": "object",

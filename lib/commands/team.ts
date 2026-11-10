@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { instanceId, loadTeam, type RawTeam, type Team } from "../config.ts";
+import { instanceId, loadTeam, modelsOf, type RawTeam, type Team } from "../config.ts";
+import { defaultModel } from "../models.ts";
 import {
   defaultRunDir,
   A6G_HOME,
@@ -209,6 +210,9 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
   t3.writeTeam({ team: team.name, instances, project, setup: team.worktreeSetup, branchPrefix: team.branchPrefix });
 
   mkdirSync(teamsDir, { recursive: true });
+  // The roles this machine runs, each with its model; `model` is the one its watchdog starts first.
+  const models = Object.fromEntries(Object.entries(modelsOf(team)).filter(([role]) => roles.includes(role)));
+  const first = worker ? "builder" : "planner";
   const entry: RegistryEntry = {
     name: team.name,
     title: team.title,
@@ -217,7 +221,8 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     project,
     version,
     plannerInstance: instanceId(team, "planner"),
-    model: team.model,
+    model: models[first] ?? defaultModel(first),
+    models,
     health: team.environment.health,
     needsDocker: team.environment.needsDocker,
     worktreesDir: t3.worktreesDir(home),
@@ -236,6 +241,7 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
   console.info(
     `  roles${worker ? " (a worker: builders only; testers test on the lead, where the environment runs)" : ""}: ${roles.map((role) => `${role} (${instanceId(team, role)})`).join(", ")}`
   );
+  console.info(`  models: ${describeModels(models)}`);
   // The subscriptions each role runs on, chosen now rather than at the watchdog's next run (else at that run).
   let steered: ReturnType<typeof steer> = null;
   try {
@@ -251,6 +257,13 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     console.info(`  a planner is running; it keeps the flags it started with until a6g rotate ${team.name} (members started from now get the new ones)`);
   else console.info(`  start it: a6g start ${team.name}`);
   return 0;
+}
+
+// Each model and the roles on it, in a line: "claude-fable-5-1 for the planner and scaffolder; claude-opus-5-5 for …".
+export function describeModels(models: Record<string, string>): string {
+  const on = new Map<string, string[]>();
+  for (const [role, model] of Object.entries(models)) on.set(model, [...(on.get(model) ?? []), role]);
+  return [...on].map(([model, roles]) => `${model} for the ${roles.join(", ")}`).join("; ");
 }
 
 // Each role's subscription on this machine, and those that wait, in a line (lib/steer.ts).

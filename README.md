@@ -197,6 +197,11 @@ claude --agent a6g:<role>                                 the role's prompt, fro
        --setting-sources project [--strict-mcp-config]    none of your personal skills, plugins or connectors
 ```
 
+Each role runs on its own model: Fable for the planner, the innovator and the scaffolder, who decide what gets built
+and on what, and Opus for the roles that build it and check it. `model` and `roles.<role>.model` in `team.json`
+change that ([docs/team.md](docs/team.md#models)); the planner passes each member's to T3 Code, and the guard refuses
+a member started on any other.
+
 The appended prompt is **compiled**, never written by hand. It combines:
 
 - the constitution's articles;

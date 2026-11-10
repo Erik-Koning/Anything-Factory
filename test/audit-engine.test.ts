@@ -44,9 +44,9 @@ describe("the engine audit's findings stay fixed", { concurrency: 8 }, () => {
   test("#1 the planner starts builders and testers in their own worktree, and the others shared", () => {
     const planner = compile(loadTeam(makeRepo()), "planner");
     assert.match(planner, /`isolation: "worktree"`/);
-    assert.match(planner, /\| builder \| `a6g-fixture-builder` \| `"worktree"` \|/);
-    assert.match(planner, /\| tester \| `a6g-fixture-tester` \| `"worktree"` \|/);
-    assert.match(planner, /\| reviewer \| `a6g-fixture-reviewer` \| `"shared"` \|/);
+    assert.match(planner, /\| builder \| `a6g-fixture-builder` \| `"claude-opus-5-5"` \| `"worktree"` \|/);
+    assert.match(planner, /\| tester \| `a6g-fixture-tester` \| `"claude-opus-5-5"` \| `"worktree"` \|/);
+    assert.match(planner, /\| reviewer \| `a6g-fixture-reviewer` \| `"claude-opus-5-5"` \| `"shared"` \|/);
     assert.match(readFileSync(join(ROOT, "plugin/agents/planner.md"), "utf8"), /`"worktree"` for builders, testers and the scaffolder/);
   });
 

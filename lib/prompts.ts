@@ -197,9 +197,10 @@ function teamTable(team: Team): string {
   const rows = Object.entries(team.roles)
     .filter(([role]) => role !== "planner")
     .map(
-      ([role, lane]) => `| ${role} | ${code(instanceId(team, role))} | ${code(`"${isolationOf(lane)}"`)} | ${lane.limit} | ${ROLES[role]?.summary ?? ""} |`
+      ([role, lane]) =>
+        `| ${role} | ${code(instanceId(team, role))} | ${code(`"${lane.model}"`)} | ${code(`"${isolationOf(lane)}"`)} | ${lane.limit} | ${ROLES[role]?.summary ?? ""} |`
     );
-  return ["| Role | providerInstanceId | isolation | At most | Does |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
+  return ["| Role | providerInstanceId | model | isolation | At most | Does |", "| --- | --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
 // What leaves the machine: the planner's pushes, if any, a team on several machines' branches, and a GitHub board's
@@ -266,7 +267,7 @@ export function compile(team: LoadedTeam, role: string): string {
       ].filter((line) => line !== null)
     ),
     role === "planner"
-      ? `## Your team members\n\nStart each with \`${"mcp__t3-code__delegate_task"}\`, \`mode: "async"\`, \`model: "${team.model}"\`, and \`target.providerInstanceId\` and the top-level \`isolation\` from this table. The instance gives the member its role, its rules and its hooks. \`isolation: "worktree"\` gives a builder or tester its own checkout, made from the integration branch's commit; without it (\`"shared"\`, the default) a member works in the team's checkout, which only the reviewer, the UX specialist and the innovator do, changing nothing there. The guard refuses a start over a limit, or a builder or tester without its worktree.\n\n${teamTable(team)}`
+      ? `## Your team members\n\nStart each with \`${"mcp__t3-code__delegate_task"}\`, \`mode: "async"\`, and from this table \`target.providerInstanceId\`, \`target.model\` and the top-level \`isolation\`. The instance gives the member its role, its rules and its hooks; the model is the one the team's rules give the role, and a member started without it would run on whichever model T3 Code lists first. \`isolation: "worktree"\` gives a builder or tester its own checkout, made from the integration branch's commit; without it (\`"shared"\`, the default) a member works in the team's checkout, which only the reviewer, the UX specialist and the innovator do, changing nothing there. The guard refuses a start over a limit, on another model than its role's, or a builder or tester without its worktree.\n\n${teamTable(team)}`
       : null,
     `## Your lane\n\n${laneText(team, role)}`,
     `## Commands\n\n${commandsFor(team, role)}`,

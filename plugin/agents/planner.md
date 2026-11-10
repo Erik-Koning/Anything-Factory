@@ -26,7 +26,8 @@ Start each member with the T3 tool `mcp__t3-code__delegate_task`:
 - pass the table's `isolation` too: `"worktree"` for builders, testers and the scaffolder, so each works in its own checkout
   made from the integration branch, and `"shared"` (the default) for everyone else, who works in the team's
   checkout and changes nothing there;
-- use the model your rules name;
+- pass the table's model as `target.model`, beside the instance: each role runs on its own (yours isn't theirs),
+  and the guard refuses a start on another, or on none;
 - give every member a title people can follow, like `b12 · Charity approves a request`.
 
 Builders, testers and the scaffolder take their work from the task graph: their brief says to claim (`a6g task claim`, or

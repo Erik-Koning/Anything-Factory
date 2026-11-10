@@ -596,7 +596,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     }
     const { id, error } = t3.threadStart(entry.project, entry.startPrompt, {
       instance: entry.plannerInstance,
-      model: entry.model,
+      model: entry.models?.["planner"] ?? entry.model,
       title: plannerTitle,
     });
     if (id) {
@@ -990,7 +990,7 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
     for (let i = 0; i < n; i++) {
       const { id, error } = t3.threadStart(entry.project, WORKER_PROMPT, {
         instance: `a6g-${entry.name}-${role}`,
-        model: entry.model,
+        model: entry.models?.[role] ?? entry.model,
         title: `${entry.title} · ${role} (${machineName()})`,
         worktree: entry.branch ?? "HEAD",
       });

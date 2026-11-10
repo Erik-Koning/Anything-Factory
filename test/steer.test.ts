@@ -390,7 +390,7 @@ describe("a6g subscriptions use and limit, the guard and the watchdog", () => {
         w.home,
         "planner",
         "mcp__t3-code__delegate_task",
-        { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" },
+        { target: { providerInstanceId: "a6g-fixture-builder", model: "claude-opus-5-5" }, isolation: "worktree" },
         { run: w.run, env }
       );
       assert.deepEqual([start.outcome, /the builders move from default to two once those at work have finished/.test(start.said)], ["refuse", true]);
@@ -471,7 +471,7 @@ describe("a6g subscriptions use and limit, the guard and the watchdog", () => {
         w.home,
         "planner",
         delegate,
-        { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" },
+        { target: { providerInstanceId: "a6g-fixture-builder", model: "claude-opus-5-5" }, isolation: "worktree" },
         { run: w.run, env }
       );
       assert.equal(started.outcome, "refuse");
@@ -498,7 +498,13 @@ describe("a6g subscriptions use and limit, the guard and the watchdog", () => {
       assert.deepEqual(steering().waiting, {});
       assert.match(readFileSync(join(w.run, "watchdog.log"), "utf8"), /the builders can start again, on default/);
       assert.equal(
-        guard(w.home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, { run: w.run, env }).outcome,
+        guard(
+          w.home,
+          "planner",
+          delegate,
+          { target: { providerInstanceId: "a6g-fixture-builder", model: "claude-opus-5-5" }, isolation: "worktree" },
+          { run: w.run, env }
+        ).outcome,
         "allow"
       );
     } finally {

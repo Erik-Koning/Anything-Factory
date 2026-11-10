@@ -1110,7 +1110,7 @@ export function check(input: HookInput): void {
     }
   }
 
-  // The planner's limits, enforced: one of this team's instances, in a worktree for the roles that build, no more
+  // The planner's limits, enforced: one of this team's instances, on its role's model, in a worktree for the roles that build, no more
   // members of a role than team.json allows, none of a draining role while the environment resets, and nothing at
   // all while the operator has the team paused.
   function checkDelegate(): void {
@@ -1133,6 +1133,13 @@ export function check(input: HookInput): void {
     const waits = waitRefusal(run, childRole);
     if (waits) refuse(waits);
     const child = team.roles[childRole];
+    // Each role runs on the model the team's rules give it. T3 Code reads it from the target; without one there, the
+    // member would run on whichever model the instance lists first.
+    const model = named(typeof target === "object" && target !== null ? (target as Record<string, unknown>).model : undefined);
+    if (child && model !== child.model)
+      refuse(
+        `start a ${childRole} with target.model: "${child.model}" (beside target.providerInstanceId), the model the team's rules give the role; ${model ? `${model} isn't it` : "without it, it would run on whichever model T3 Code lists first"}.`
+      );
     if (child?.worktree && args.isolation !== "worktree")
       refuse(
         `start a ${childRole} with isolation: "worktree" (a top-level argument of delegate_task), so it works in a worktree of its own; without it, it would work in the team's checkout.`

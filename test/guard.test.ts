@@ -554,6 +554,7 @@ describe("guard", () => {
   test("outside tools: email, other connectors, starting members", async () => {
     const send = "mcp__claude_ai_Gmail__send_message";
     const delegate = "mcp__t3-code__delegate_task";
+    const opus = "claude-opus-5-5";
     await holds([
       tool(home, "planner", send, { to: ["op@example.com"], subject: "[A6G-Planner] [Fixture team] x" }, "allow"),
       tool(home, "planner", send, { to: ["op@example.com"], subject: "[Fixture team] x" }, "refuse"),
@@ -564,15 +565,15 @@ describe("guard", () => {
       tool(home, "planner", "mcp__claude_ai_Claude_Docs__create", {}, "refuse"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "claudeBuilder" } }, "refuse"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-planner" } }, "refuse"),
-      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, "allow"),
-      tool(home, "builder", delegate, { target: { providerInstanceId: "a6g-fixture-builder" } }, "refuse"),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" }, "allow"),
+      tool(home, "builder", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus } }, "refuse"),
     ]);
     const draining = makeRepo();
     mkdirSync(join(draining, ".a6g/run/state"), { recursive: true });
     writeFileSync(join(draining, ".a6g/run/state/drain"), "builder tester\n");
     await holds([
-      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, "refuse"),
-      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer" } }, "allow"),
+      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" }, "refuse"),
+      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: opus } }, "allow"),
     ]);
   });
 

@@ -108,7 +108,7 @@ describe("team.json that 0.2.0 loaded loads again", { concurrency: true }, () =>
     const cases: [Record<string, unknown>, string][] = [
       [{ watchdog: { tickevery: "10m" } }, "watchdog.tickevery"],
       [{ gate: { full: "true", $comment: "what CI runs" } }, "gate.$comment"],
-      [{ roles: { planner: {}, builder: { limit: 2, model: "claude-sonnet" } } }, "roles.builder.model"],
+      [{ roles: { planner: {}, builder: { limit: 2, effort: "high" } } }, "roles.builder.effort"],
       [{ board: { github: { label: "a6g", repo: "o/r" } } }, "board.github.repo"],
       [{ board: { github: {}, note: "x" } }, "board.note"],
       [{ push: { every: "6h", force: true } }, "push.force"],
@@ -132,7 +132,7 @@ describe("team.json that 0.2.0 loaded loads again", { concurrency: true }, () =>
     }
     // Ignored: a role's lane is what it would be without them.
     const plain = norm({ roles: { planner: {}, builder: { limit: 2 }, reviewer: {} } }).team.roles;
-    const extra = norm({ roles: { planner: { model: "x" }, builder: { limit: 2, worktree: false, readonly: true }, reviewer: { worktree: true } } });
+    const extra = norm({ roles: { planner: { effort: "x" }, builder: { limit: 2, worktree: false, readonly: true }, reviewer: { worktree: true } } });
     assert.deepEqual(extra.team.roles, plain);
   });
 

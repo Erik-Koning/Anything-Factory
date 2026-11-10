@@ -53,7 +53,7 @@ team may leave out (`finish`, `afterMerge`, `gate.full`, `environment.script`, �
 | Key                     | Default                                    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `board`                 | `"tasks"`                                  | `"tasks"` (or `"files"`, the same): the factory's task graph (`a6g task`), kept by the team's `tasks` store. `{"github": {"label": "a6g"}}`: GitHub issues with that label and `<label>:triage\|ready\|building\|review\|blocked\|question\|proposal`; the issues the planner opens also carry `A6G-Planner`, as its email subjects do (`[A6G-Planner] [<title>] …`), so you can filter what the team sends                           |
-| `model`                 | `"claude-opus-5-5"`                        | The model the planner starts members with                                                                                                                                                                                                                                                                                                                                                                                             |
+| `model`                 | each role's own default                    | The model for every role that names none of its own (`roles.<role>.model`): see [Models](#models)                                                                                                                                                                                                                                                                                                                                     |
 | `roles`                 | planner, builder, reviewer                 | Which roles the team has, and each one's settings. See below                                                                                                                                                                                                                                                                                                                                                                          |
 | `review.required`       | `["builder"]`, and `"scaffolder"` with one | Roles whose branches need a reviewer's approval of the exact commit                                                                                                                                                                                                                                                                                                                                                                   |
 | `review.removedPattern` | assertions, with a tester or scaffolder    | A regex; a branch that removes a line matching it needs a review whatever its role. A team with a tester gets one that finds assertions: `expect(…)`, `assert(…)` and `assert.equal(…)`, Python's `assert`, Rust's `assert!(…)`, xUnit's `assertEqual(…)` and `assertThat(…)`, `x.should.…`, and matchers such as `.toBe(…)` and `.toHaveURL(…)`; not `.toString(…)`, nor a helper such as `assertMainBranch(…)`. `null` turns it off |
@@ -126,6 +126,7 @@ Each entry in `roles` takes:
 | `mcp`       | Outside tools the role may call. The planner has the Gmail tools by default; the guard lets email go only to `owner`                                                                                                                                             |
 | `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, security-reviewer, ux-specialist and innovator                                                                                                                                |
 | `compactAt` | (planner) T3 Code compacts the planner's context at this many tokens (default 160000)                                                                                                                                                                            |
+| `model`     | The model the role runs on: `fable`, `opus`, `sonnet` or `haiku`, or a model id. See [Models](#models)                                                                                                                                                           |
 
 The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer, ux-specialist, innovator and approver
 (the reviewer, the security reviewer, the UX specialist, the innovator and the approver are read-only). The security
@@ -136,6 +137,44 @@ skeleton, and claims `scaffold` and `test-infra` tasks (and `test` ones where th
 `a6g/s<id>-…`, and a team with one has `review.required` default to `["builder", "scaffolder"]`. Their prompts are in the factory
 (`plugin/agents/<role>.md`). What one team adds for a role goes in `.a6g/roles/<role>.md`, which is compiled into
 that role's prompt.
+
+### Models
+
+Each role runs on one model. Left out, the roles that decide what gets built and on what run on Fable, and the roles
+that build it and check it on Opus:
+
+| Role                                                                  | Default            |
+| --------------------------------------------------------------------- | ------------------ |
+| planner, innovator, scaffolder                                        | `claude-fable-5-1` |
+| builder, tester, reviewer, security-reviewer, ux-specialist, approver | `claude-opus-5-5`  |
+
+A wrong plan or a wrong foundation costs every task built on it, so the dearer model goes where a mistake travels
+furthest; most of a team's tokens go to building and checking, which stay on Opus. To change it:
+
+```json
+{
+  "model": "opus",
+  "roles": {
+    "planner": { "model": "fable" },
+    "builder": { "limit": 2, "model": "claude-sonnet-5-5" }
+  }
+}
+```
+
+- `roles.<role>.model` is that role's model.
+- `model` is the model of every role that names none of its own. A team that sets it, and nothing per role, runs
+  every role on it.
+- `fable`, `opus`, `sonnet` and `haiku` mean the newest model of the family this version of the factory knows
+  (`lib/models.ts`), so they move when you upgrade; a model id is used as written.
+
+`a6g register` records each role's model and prints them, and `a6g check` shows them in its summary. The planner's
+rules carry a table with each member's model, which it passes to T3 Code as `target.model`; the guard refuses a
+member started on any other, or on none. A change takes effect at the next `a6g register`: members started after
+it run on the new model, and the planner at its next `a6g rotate`.
+
+What a model costs is in `lib/prices.ts`: Fable is 2.5 times Opus per token, and a Claude subscription counts it
+against a weekly limit of its own (`a6g subscriptions` shows it). A model the price table doesn't know still runs,
+with a warning, and its tokens count for nothing in `a6g usage` or a budget.
 
 ## `pages`
 

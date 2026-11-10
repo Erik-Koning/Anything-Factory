@@ -477,7 +477,7 @@ describe("what a team is told of its security reviewer", () => {
     assert.match(compile(team, "reviewer"), /Add `--security` to an approval to send the branch on/);
     assert.match(
       compile(team, "planner"),
-      /\| security-reviewer \| `a6g-fixture-security-reviewer` \| `"shared"` \| 1 \|/,
+      /\| security-reviewer \| `a6g-fixture-security-reviewer` \| `"claude-opus-5-5"` \| `"shared"` \| 1 \|/,
       "the planner's table of members"
     );
 

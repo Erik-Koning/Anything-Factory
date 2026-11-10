@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased: a model for each role
+
+- **Each role runs on its own model.** `roles.<role>.model` in `team.json` sets one role's, and `model` every role's
+  that names none. Left out, the planner, the innovator and the scaffolder run on Fable (`claude-fable-5-1`), since a
+  wrong plan or a wrong foundation costs every task built on it, and the builder, tester, reviewer, security reviewer,
+  UX specialist and approver on Opus (`claude-opus-5-5`). `fable`, `opus`, `sonnet` and `haiku` name the newest model
+  of the family this version knows; a model id is used as written. `a6g register` records and prints each role's
+  model, `a6g check` shows them, and a model the price table doesn't know is a warning (a budget can't count it).
+- **The planner passes each member's model where T3 Code reads it, and the guard holds it there.** The planner's
+  table has a model column, passed as `target.model`. Until now the rules named one model beside `mode`, at the top
+  level of `delegate_task`, where T3 Code 0.1.7 reads none: a member started that way ran on whichever model its
+  instance lists first. The guard now refuses a member started on another model than its role's, or on none, and says
+  which to pass.
+- **Upgrading.** A team whose `team.json` names no model moves its planner, innovator and scaffolder to Fable at its
+  next `a6g register` (the planner at its next `a6g rotate`). Fable costs 2.5 times Opus per token, and a Claude
+  subscription counts it against a weekly limit of its own. `"model": "opus"` keeps every role on Opus. A team that
+  already set `model` keeps every role on it. A planner started before the upgrade is told the model to pass by the
+  guard's refusal the first time it starts a member.
+
 ## Unreleased: security, and how the merged work went
 
 - **Secrets are stored through a secret manager, their values never in a command.** A new policy, `secrets`, allowed

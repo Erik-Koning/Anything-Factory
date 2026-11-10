@@ -138,14 +138,17 @@ export function guardCases(team: Team): GuardCase[] {
   );
   add("planner", "mcp__t3-code__delegate_task", { target: { providerInstanceId: instanceId(team, "planner") } }, "refuse", "starting a second planner");
   const building = roles.find((r) => team.roles[r]?.worktree);
-  if (building)
+  if (building) {
+    const target = { providerInstanceId: instanceId(team, building), model: team.roles[building]?.model };
+    add("planner", "mcp__t3-code__delegate_task", { target }, "refuse", `starting a ${building} without a worktree of its own (isolation: "worktree")`);
     add(
       "planner",
       "mcp__t3-code__delegate_task",
-      { target: { providerInstanceId: instanceId(team, building) } },
+      { target: { ...target, model: "another-model" }, isolation: "worktree" },
       "refuse",
-      `starting a ${building} without a worktree of its own (isolation: "worktree")`
+      `starting a ${building} on another model than its role's (${target.model})`
     );
+  }
   bash("planner", `git branch -m ${team.branch} a6g-check`, "refuse", "renaming the integration branch");
   bash("planner", 'gh issue create --title "a6g check" --body x', "refuse", "an issue the planner opens without its label");
   add(builder, "Monitor", { command: "cat .env", description: "a6g check" }, "refuse", "a command run through Monitor");
@@ -481,7 +484,7 @@ function summary(team: Team, failures: number): number {
   for (const [role, lane] of Object.entries(team.roles)) {
     const writes = lane.write.length ? lane.write.map((rule) => (rule === "*" ? "anything" : rule)).join(", ") : "nothing (read-only)";
     console.info(
-      `  - ${role}${role === "planner" ? "" : ` (up to ${lane.limit} at once)`}: ${ROLES[role]?.summary ?? ""}; writes ${writes}${lane.deny.length ? `, never ${lane.deny.join(", ")}` : ""}`
+      `  - ${role} (${role === "planner" ? "" : `up to ${lane.limit} at once, `}on ${lane.model}): ${ROLES[role]?.summary ?? ""}; writes ${writes}${lane.deny.length ? `, never ${lane.deny.join(", ")}` : ""}`
     );
   }
   console.info(

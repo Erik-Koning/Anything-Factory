@@ -6,6 +6,8 @@ import { type Contact, DEFAULT_CONTACT } from "./contact.ts";
 import { teamFile, VERSION_NAME } from "./paths.ts";
 import { POLICIES, type PolicyState } from "./policies.ts";
 import { MACHINE_NAME } from "./machine.ts";
+import { defaultModel, MODEL_ALIASES, MODEL_ID, modelId } from "./models.ts";
+import { priced } from "./prices.ts";
 import { type ApprovalRules, DEFAULT_WEIGHTS, DIMENSIONS, type Dimension, SIZES, type Size } from "./tasks/model.ts";
 import { minutes } from "./util.ts";
 
@@ -18,6 +20,8 @@ export interface RoleSettings {
   mcp?: string[];
   readOnly?: boolean;
   compactAt?: number;
+  // The model the role runs on: an id, or fable, opus, sonnet or haiku (lib/models.ts).
+  model?: string;
 }
 
 export interface PageSpec {
@@ -133,6 +137,8 @@ export interface Lane extends RoleDefaults {
   mcp: string[];
   branch?: string;
   compactAt?: number;
+  // The model its members start on: the role's own in team.json, else the team's, else the role's default.
+  model: string;
 }
 
 export interface Team {
@@ -161,7 +167,6 @@ export interface Team {
   // Hosts beyond this machine the team may reach (policies.ts network): api.example.com, or *.example.com.
   hosts: string[];
   branchPrefix: string;
-  model: string;
   roles: Record<string, Lane>;
   review: { required: string[]; removedPattern: string | null; maxRounds: number };
   gate: { full: string | null; quick: string | null; concurrency: number };
@@ -440,6 +445,16 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(`branch: ${branch} is protected (protectedBranches), so the team could never merge into it; give it its own branch, such as a6g/next`);
 
   const prefix = text(input.branchPrefix, "branchPrefix") ?? "a6g";
+  // A model, by its id or a family's short name. One that doesn't fit reads as left out, so the role keeps a model the
+  // factory can start it on.
+  const model = (value: unknown, where: string): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !MODEL_ID.test(value))
+      return bad(where, `a model: ${Object.keys(MODEL_ALIASES).join(", ")}, or a model id such as ${defaultModel("builder")}`);
+    return modelId(value);
+  };
+  // The team's model, for every role that names none of its own.
+  const teamModel = model(input.model, "model");
   const roles: Record<string, Lane> = {};
   const given = input.roles === undefined ? { planner: {}, builder: {}, reviewer: {} } : (object(input.roles, "roles", null) ?? {});
   for (const [id, value] of Object.entries(given)) {
@@ -451,7 +466,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const where = `roles.${id}`;
     // The lane is the factory's defaults plus only these settings, so any other key (such as "worktree") is ignored and
     // can't change what the factory gives the role.
-    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt"]) ?? {};
+    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt", "model"]) ?? {};
     const written = list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at)));
     const lane: Lane = {
       ...base,
@@ -459,6 +474,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       write: written ? (id === "scaffolder" ? [...new Set([...written, HARNESS_RULE])] : written) : base.write,
       deny: list(settings.deny, `${where}.deny`, regex) ?? [],
       mcp: list(settings.mcp, `${where}.mcp`, text) ?? base.mcp ?? [],
+      model: model(settings.model, `${where}.model`) ?? teamModel ?? defaultModel(id),
     };
     const limit = whole(settings.limit, `${where}.limit`, 0);
     if (limit !== undefined) lane.limit = limit;
@@ -473,6 +489,13 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     roles[id] = lane;
   }
   if (!roles["planner"]) problems.push("roles.planner: every team has a planner");
+  // A model this version has no price for still runs, but its tokens count for nothing in a6g usage or a budget.
+  const unpriced = new Map<string, string[]>();
+  for (const [id, lane] of Object.entries(roles)) if (!priced(lane.model)) unpriced.set(lane.model, [...(unpriced.get(lane.model) ?? []), id]);
+  for (const [unknown, on] of unpriced)
+    warnings.push(
+      `model: this version has no price for ${unknown} (the ${on.join(", ")}), so a6g usage and a budget can't count what it spends; check the id, or upgrade the factory`
+    );
   // Task branches are named for their task (a6g/b12-…, a6g/t-12-…), so the merge closes the task; a team's own pattern
   // has to accept those names when it keeps a task graph.
   const tasksBoard = input.board === undefined || input.board === "files" || input.board === "tasks";
@@ -777,7 +800,6 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
           : bad(where, "a host, such as api.example.com or *.example.com")
       ) ?? [],
     branchPrefix: prefix,
-    model: text(input.model, "model") ?? "claude-opus-5-5",
     roles,
     review: {
       // A scaffolder's harness decides what the team's checks can see, so its branches are reviewed like a builder's.
@@ -843,6 +865,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   if (!team.owner) warnings.push("owner: nobody to email when the team is done or needs a decision");
   return { team, problems, warnings };
 }
+
+// Each of the team's roles and the model it starts on.
+export const modelsOf = (team: Pick<Team, "roles">): Record<string, string> =>
+  Object.fromEntries(Object.entries(team.roles).map(([role, lane]) => [role, lane.model]));
 
 // One T3 provider instance per role; its id carries the team and the role.
 export const instanceId = (team: Pick<Team, "name">, role: string): string => `a6g-${team.name}-${role}`;
