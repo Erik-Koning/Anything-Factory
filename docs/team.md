@@ -152,6 +152,9 @@ scaffolder, and the planner asks again. Only your answer settles it: the approve
 can't close one you haven't answered. `a6g task status <id> done` (or `rejected`, for none) from you ends it at any
 time.
 
+Waiting costs little: once the foundation is merged and the question is with you, the watchdog ticks the planner
+hourly rather than every `watchdog.tickEvery`, and your answer reaches it within a minute whenever it comes.
+
 `a6g init` drafts the check-in where nothing is built yet (only documents, pictures and dot-files). It's never held
 with an operator who isn't technical: that team makes the same record, and goes on.
 

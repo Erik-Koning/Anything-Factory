@@ -30,7 +30,7 @@ import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
-import { claimRefusal, journeyDue, type Task } from "../tasks/model.ts";
+import { claimRefusal, FOUNDATION, journeyDue, type Task } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { readSteering, steer, steeringNote } from "../steer.ts";
 import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
@@ -696,6 +696,13 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     `planner ${status} (quiet ${quiet} min); members ${members.map((r) => `${r.instance}:${r.n}`).join(" ") || "none"}${quietMembers.length ? `; quiet members: ${quietMembers.join("; ")}` : ""}`
   );
 
+  // A foundation that waits for the operator's word on its design leaves the team nothing to build, and their answer
+  // reaches the planner within a minute by itself (lib/answers.ts): the tick slows to an hour, so waiting costs little.
+  const awaitsDesign =
+    graph !== null &&
+    members.every((r) => r.n === 0) &&
+    graph.some((t) => t.kind === "design" && t.status === "question") &&
+    !graph.some((t) => FOUNDATION.includes(t.kind) && ["approved", "building", "review"].includes(t.status));
   const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}${steeringNote(run)}`;
   if (BUSY.includes(status)) {
     if (quiet >= (w.stuckAfterMin ?? 45) && oncePer("stuck", 60)) {
@@ -723,6 +730,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
       t3.threadSend(planner, tickText(", nightly: the work is complete; re-check the finish line and report only if something broke"))
     )
       log("nightly tick");
+  } else if (awaitsDesign) {
+    if (
+      ((envNote && oncePer("env-down", 30)) || oncePer("tick", Math.max(60, w.tickEveryMin ?? 10))) &&
+      t3.threadSend(planner, tickText(", hourly: the team waits for the operator's word on the design"))
+    )
+      log("hourly tick (the design check-in waits for the operator)");
   } else if ((envNote && oncePer("env-down", 30)) || oncePer("tick", w.tickEveryMin ?? 10)) {
     log(t3.threadSend(planner, tickText()) ? `tick (planner was ${status})` : "couldn't send a tick");
   }

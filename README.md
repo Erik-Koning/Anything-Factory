@@ -30,9 +30,9 @@ a6g init ~/code/my-app                           # detect, make the team's check
 3. Writes a draft `.a6g/`, pinned to the factory version that wrote it.
 4. Opens the **setup agent**. It asks you only what it couldn't detect: the goal, how done is proven, the team,
    a budget, branches, the board, data, contact, taste, and which policies to unlock. The budget goes into the
-   brief as guidance for the planner; nothing enforces it, so watch `a6g metrics` and pause the team when it's
-   spent. It finishes `.a6g/`, commits it on the integration branch (members' worktrees are made from it), and
-   proves it with `a6g check --run`. If you say so, it registers and starts the team.
+   brief as guidance for the planner, and `a6g budget` holds the team to it (the command is yours to run: the
+   setup agent tells you the line). It finishes `.a6g/`, commits it on the integration branch (members' worktrees
+   are made from it), and proves it with `a6g check --run`. If you say so, it registers and starts the team.
 
 `a6g init --no-interview` writes the draft only, and prints the same steps for you to do by hand.
 

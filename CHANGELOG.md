@@ -6,14 +6,18 @@ Tried on a new project (a gateway for sensor boards and its dashboard, from an e
 sound skeleton and a poor record of why. The setup agent had fixed the whole stack in the brief before anyone
 weighed it, the planner's first task listed libraries, versions and files from memory, the scaffolder carried the
 list out, and nobody wrote down an alternative, a running cost or what the operator had and hadn't chosen. Builders
-would have started on it the moment it merged.
+would have started on it the moment it merged. Tried again with the changes below, the same goal gave a skeleton
+with a slice through every layer, a design record, a CI workflow and a staged image, the harness, and then one
+question to the operator, with no feature claimed before the answer.
 
 - **The design check-in.** `operator.designCheckIn` in `team.json` (drafted by `a6g init` where nothing is built yet)
   makes `a6g register` file one `design` task. While it's open, only `scaffold` and `test-infra` tasks are claimed.
   Once the skeleton and the harness have merged, the planner raises it as a question with the design in a few lines;
   you agree it, or say what to change, and the scaffolder changes it before the planner asks again. Only the
   operator's answer settles it: the approver and the merge queue can't, the planner can't close one that has no
-  answer since it was asked, and a member can't file one or turn another task into one.
+  answer since it was asked, and a member can't file one or turn another task into one. While the question waits
+  for you and nothing of the foundation is left to build, the watchdog ticks the planner hourly, not every ten
+  minutes (your answer still reaches it within a minute), and `a6g task show` prints what was asked once.
 - **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
   agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
   role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time

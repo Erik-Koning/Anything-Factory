@@ -3,7 +3,7 @@
 import { a6g, baseTeam, git, gitRepo, machine, makeRepo, tmp, write } from "./helpers.ts";
 import { fakeWorld } from "./fake-t3.ts";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { loadTeam, normalize, type RawTeam } from "../lib/config.ts";
@@ -220,6 +220,11 @@ describe("a6g task and the design check-in", () => {
       as("planner")
     );
     assert.equal(raised.code, 0, raised.out);
+    // The operator reads what was asked once: the note and the history entry that repeat it point to it.
+    const shown = (await a6g(["task", "show", "1"], as(null))).out;
+    assert.equal(shown.split("The skeleton runs end to end").length - 1, 1, shown);
+    assert.match(shown, /raised to the operator by the planner: The skeleton runs end to end/);
+    assert.match(shown, /planner: triage → question: \(as raised, above\)/);
     assert.match((await a6g(["task", "status", "1", "done"], as("planner"))).out, /is done on the operator's word/);
 
     // Changes asked for: back to the planner, made as scaffold work, and asked again.
@@ -244,6 +249,63 @@ describe("a6g task and the design check-in", () => {
     const direct = setup();
     await addTask(direct.store, "fixture", { title: "Design check-in", kind: "design" }, OPERATOR);
     assert.equal((await a6g(["task", "status", "1", "done", "--reason", "read the record; go"], direct.as(null))).code, 0);
+  });
+});
+
+describe("the watchdog while the design waits for the operator", () => {
+  const ticks = (w: { calls: () => string[] }) => w.calls().filter((c) => /thread send mcp:planner tick/.test(c));
+  async function world(tasks: Task[]) {
+    const w = await fakeWorld(baseTeam({ roles: ROLES, operator: { designCheckIn: true } }));
+    const file = join(w.a6gHome, "teams", "fixture.json");
+    write(join(w.a6gHome, "teams"), {
+      "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), tasks: { store: "files", database: "a6g", lead: null } },
+    });
+    write(w.run, { "planner-thread": "mcp:planner\n" });
+    const store = fileStore(w.run, "fixture");
+    for (const { id, version: _v, ...fields } of tasks) await store.tasks.createAs(id, fields);
+    // The last tick was `min` minutes ago.
+    const ticked = (min: number) => {
+      const stamp = join(w.run, ".stamp-tick");
+      writeFileSync(stamp, "");
+      utimesSync(stamp, new Date(Date.now() - min * 60_000), new Date(Date.now() - min * 60_000));
+    };
+    return { w, store, ticked };
+  }
+  const QUESTION = task({ id: "1", kind: "design", status: "question", title: "Design check-in" });
+  const FEATURE = task({ id: "3", title: "Sign-in" });
+
+  test("the tick slows to an hour: nothing can be built, and the answer wakes the planner by itself", async () => {
+    const { w, ticked } = await world([QUESTION, task({ id: "2", kind: "scaffold", status: "done" }), FEATURE]);
+    try {
+      ticked(15);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.deepEqual(ticks(w), [], "a quarter of an hour after the last tick, none is sent");
+      ticked(61);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.equal(ticks(w).length, 1);
+      assert.match(ticks(w)[0] ?? "", /hourly: the team waits for the operator's word on the design/);
+      assert.match(readFileSync(join(w.run, "watchdog.log"), "utf8"), /hourly tick \(the design check-in waits for the operator\)/);
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("it keeps its pace while the foundation is still being built, and once the check-in is settled", async () => {
+    for (const tasks of [
+      [QUESTION, task({ id: "2", kind: "test-infra", status: "approved" }), FEATURE],
+      [{ ...QUESTION, status: "triage" as const }, task({ id: "2", kind: "scaffold", status: "done" }), FEATURE],
+      [{ ...QUESTION, status: "done" as const }, FEATURE],
+    ]) {
+      const { w, ticked } = await world(tasks);
+      try {
+        ticked(15);
+        assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+        assert.equal(ticks(w).length, 1, tasks.map((t) => `${t.kind} ${t.status}`).join(", "));
+        assert.doesNotMatch(ticks(w)[0] ?? "", /hourly/);
+      } finally {
+        await w.close();
+      }
+    }
   });
 });
 

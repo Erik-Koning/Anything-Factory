@@ -189,8 +189,11 @@ export function detail(t: Task): string {
     );
   if (theirs) out.push("", ...asData(t.from ? `stakeholder ${t.from}'s` : "a stakeholder's", t.title, t.body));
   else if (t.body) out.push("", t.body);
-  if (t.notes.length) out.push("", "Notes:", ...t.notes.map((n) => `- ${n.at.slice(0, 16)} ${n.by}: ${n.text}`));
-  out.push("", "History:", ...t.history.slice(-8).map((e) => `- ${e.at.slice(0, 16)} ${e.by}: ${e.what}`));
+  // What was asked of the operator is said once, at the top: the note and the history entry that carry it again point there.
+  const reason = t.ask?.reason ?? "";
+  const once = (text: string): string => (reason && text.endsWith(`: ${reason}`) ? `${text.slice(0, -reason.length)}(as raised, above)` : text);
+  if (t.notes.length) out.push("", "Notes:", ...t.notes.map((n) => `- ${n.at.slice(0, 16)} ${n.by}: ${once(n.text)}`));
+  out.push("", "History:", ...t.history.slice(-8).map((e) => `- ${e.at.slice(0, 16)} ${e.by}: ${once(e.what)}`));
   return out.join("\n");
 }
 
