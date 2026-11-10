@@ -1,13 +1,27 @@
 "use client";
-// Turning on an authenticator: a QR code to scan (or a key to type), a code from the app to prove it, then the backup
-// codes, shown once. It stays mounted once the authenticator is on (the page re-renders in the same round trip), so the
-// codes stay on screen until they're put away; then it shows what the page gives it for an authenticator that's on.
+// Turning on an authenticator: the password first for an account that has one, a QR code to scan (or a key to type), a
+// code from the app to prove it, then the backup codes, shown once. It stays mounted once the authenticator is on (the
+// page re-renders in the same round trip), so the codes stay on screen until they're put away; then it shows what the
+// page gives it for an authenticator that's on. On the account page, and at /welcome for someone who asked for one as
+// they signed up: there the codes are put away by going on to `next`.
 import { type ReactNode, useActionState, useEffect, useRef, useState } from "react";
 import { type AuthenticatorState, authenticatorAction } from "./actions.ts";
 
 const IDLE: AuthenticatorState = { stage: "idle", error: null, qr: null, key: null, backupCodes: [] };
 
-export function AuthenticatorSetup({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+export function AuthenticatorSetup({
+  enabled,
+  password,
+  next,
+  children,
+}: {
+  enabled: boolean;
+  // The account has a password, asked for before the key is made.
+  password: boolean;
+  // Where "Continue" leads once the codes are kept; without it they're put away in place.
+  next?: string;
+  children: ReactNode;
+}) {
   const [state, action, pending] = useActionState(authenticatorAction, IDLE);
   const [kept, setKept] = useState(false);
   const alert = useRef<HTMLParagraphElement>(null);
@@ -34,9 +48,15 @@ export function AuthenticatorSetup({ enabled, children }: { enabled: boolean; ch
           </>
         ) : null}
         <p>
-          <button type="button" onClick={() => setKept(true)}>
-            I&apos;ve kept them
-          </button>
+          {next ? (
+            <a className="button primary" href={next}>
+              Continue
+            </a>
+          ) : (
+            <button type="button" onClick={() => setKept(true)}>
+              I&apos;ve kept them
+            </button>
+          )}
         </p>
       </div>
     );
@@ -66,10 +86,17 @@ export function AuthenticatorSetup({ enabled, children }: { enabled: boolean; ch
   return (
     <form action={action} className="stack">
       {problem}
-      <p className="hint">A second factor: every sign-in, by passkey or email link, then also asks for a code from an app on your phone.</p>
+      <p className="hint">A second factor: every sign-in then also asks for a code from an app on your phone.</p>
       <input type="hidden" name="step" value="start" />
+      {password ? (
+        <label>
+          Your password
+          <input name="password" type="password" required autoComplete="current-password" />
+        </label>
+      ) : null}
       <div>
-        <button type="submit" disabled={pending}>
+        {/* On the way in (/welcome) this is the page's one step; on the account page, one thing among several. */}
+        <button type="submit" className={next ? "primary" : undefined} disabled={pending}>
           {pending ? "Setting up…" : "Set up an authenticator"}
         </button>
       </div>

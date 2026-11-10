@@ -10,6 +10,7 @@ import { after, before, mock, test } from "node:test";
 import type { BetterAuthOptions } from "better-auth";
 import { getSessionCookie } from "better-auth/cookies";
 import { MongoMemoryReplSet } from "mongodb-memory-server-core";
+import { hasPassword, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
 import { auth, isAdminRole } from "../../server/auth.ts";
 import { createAdmin, type NewAdmin } from "../../server/bootstrap.ts";
 import { authDb, closeMongo } from "../../server/db.ts";
@@ -221,16 +222,412 @@ test("what the app runs is what its judgement of Better Auth's advisories rests 
   assert.equal(options.trustedOrigins, undefined);
 });
 
-test("nobody signs up: not by password, and a link for a stranger makes no account and no email", async () => {
+// --- Signing up ----------------------------------------------------------------------------------------------------
+
+const PASSWORD = "a-long-enough-password";
+const CONFIRM = "Confirm your email for Anything Factory";
+const KNOWN = "You already have an Anything Factory account";
+const NEW_ADDRESS = "Confirm it's you signing in to Anything Factory";
+// At least this long, whatever a sign-up found (SEND_TIME_MS in server/auth.ts, less a timer's slack).
+const FLOOR_MS = 1450;
+
+// A sign-up over HTTP, as the sign-up page sends it. Each Browser has an address of its own, so its tries count alone.
+const signUp = (browser: Browser, email: string, more: Record<string, unknown> = {}): Promise<Response> =>
+  browser.fetch("/sign-up/email", { body: { name: "Sam Signup", email, password: PASSWORD, ...more } });
+const mailFor = (email: string, subject: string, seen = 0) => mails.slice(seen).findLast((m) => m.to === email && m.subject === subject);
+const accountOf = (email: string) => authDb().collection("user").findOne({ email });
+// However the adapter keeps a person's id on what's theirs.
+const idsOf = async (email: string) => [(await accountOf(email))?._id].flatMap((id) => (id ? [id, String(id)] : []));
+const credentialOf = async (email: string) =>
+  authDb()
+    .collection("account")
+    .findOne({ userId: { $in: await idsOf(email) }, providerId: "credential" });
+const sessionsOf = async (email: string): Promise<number> =>
+  authDb()
+    .collection("session")
+    .countDocuments({ userId: { $in: await idsOf(email) } });
+const audited = (action: string, email: string) => authDb().collection("audit").find({ action, email }).sort({ at: 1 }).toArray();
+// Lets the next email of each kind go at once: they're held to one a minute per address.
+const forgetSends = () => authDb().collection("magic_link_sends").deleteMany({});
+
+// Someone who signed up and opened the link in their email: signed in, at the address they opened it from.
+async function aSignedUpPerson(more: Record<string, unknown> = {}): Promise<{ browser: Browser; email: string; me: SessionView }> {
+  const browser = new Browser();
+  const email = anAddress("signup");
+  assert.equal((await signUp(browser, email, more)).status, 200);
+  const link = mailFor(email, CONFIRM)?.link;
+  assert.ok(link, `a confirmation for ${email}`);
+  assert.equal((await browser.fetch(link)).status, 302);
+  const me = await browser.session();
+  assert.ok(me, "signed in by the confirmation");
+  return { browser, email, me };
+}
+
+test("anyone signs up with an email address and a password; nothing opens until the emailed link confirms it, and that signs them in once", async () => {
+  const browser = new Browser();
+  const email = anAddress("signup");
+  const answer = await signUp(browser, email);
+  assert.equal(answer.status, 200);
+  assert.deepEqual(await answer.json(), { status: true });
+  assert.equal(browser.cookies.size, 0, "no session, no cookie, before the address is confirmed");
+  assert.equal(await browser.session(), null);
+
+  const made = await accountOf(email);
+  assert.equal(made?.["emailVerified"], false);
+  assert.equal(made?.["role"], "user");
+  assert.equal(made?.["name"], "Sam Signup");
+  // The page's two boxes, ticked unless unticked.
+  assert.equal(made?.["authenticatorDue"], true);
+  assert.equal(made?.["ipCheck"], true);
+  assert.equal(await sessionsOf(email), 0);
+
+  const mail = mailFor(email, CONFIRM);
+  assert.ok(mail, "the confirmation is emailed");
+  const link = new URL(mail.link);
+  assert.equal(`${link.origin}${link.pathname}`, `${BASE}/api/auth/verify-email`);
+  assert.equal(link.searchParams.get("callbackURL"), "/sign-up/confirmed", "it lands on the app's own page, whatever the request asked");
+
+  const opened = await browser.fetch(mail.link);
+  assert.equal(opened.status, 302);
+  assert.equal(opened.headers.get("location"), "/sign-up/confirmed");
+  const me = await browser.session();
+  assert.equal(me?.user.email, email);
+  assert.equal(me?.session.secondFactor, false);
+  assert.equal(await sessionsOf(email), 1);
+  assert.equal((await accountOf(email))?.["emailVerified"], true);
+  // The address it was opened from is theirs, as with a sign-in link: nothing more to confirm from it.
+  assert.equal((await authDb().collection("known_ips").findOne({ userId: me?.user.id, ip: browser.address }))?.["via"], "email link");
+  assert.equal(await statusOf(browser.fetch("/list-sessions")), 200);
+
+  // Both are in the audit log: the sign-up with the account it made, the confirmation as a sign-in.
+  const [signedUp] = await audited("sign-up", email);
+  assert.deepEqual([signedUp?.["outcome"], signedUp?.["userId"], signedUp?.["ip"]], ["ok", me?.user.id, browser.address]);
+  const [signedIn] = await audited("sign-in", email);
+  assert.deepEqual([signedIn?.["outcome"], signedIn?.["detail"], signedIn?.["sessionId"]], ["ok", "email confirmed", me?.session.id]);
+
+  // The link confirms once: opened again it signs nobody in.
+  const again = new Browser();
+  assert.equal((await again.fetch(mail.link)).status, 302);
+  assert.equal(await again.session(), null);
+  // And the password now signs them in.
+  assert.equal(await statusOf(browser.fetch("/sign-out", { body: {} })), 200);
+  assert.equal(await statusOf(browser.fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 200);
+  assert.equal((await browser.session())?.user.email, email);
+});
+
+test("a sign-up says what's wrong with what was typed, and makes nothing", async () => {
+  const browser = new Browser();
+  const email = anAddress("typo");
+  for (const [body, message] of [
+    [{ name: "Sam", email, password: "too-short" }, /password/i],
+    [{ name: "  ", email, password: PASSWORD }, /name/i],
+    [{ name: "Sam", email: "not-an-address", password: PASSWORD }, /email/i],
+  ] as const) {
+    const answer = await browser.fetch("/sign-up/email", { body });
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.match(((await answer.json()) as { message: string }).message, message);
+  }
+  assert.equal(await accountsNamed(email), 0);
+  assert.equal(mailFor(email, CONFIRM), undefined);
+  assert.ok((await audited("sign-up", email)).every((entry) => entry["outcome"] === "failed"));
+});
+
+test("a sign-up answers the same, as slowly, whether or not the address has an account, and changes nothing for one that has", async () => {
+  const fresh = anAddress("fresh");
+  const invited = await aPerson("invited");
+  const { email: confirmed } = await aSignedUpPerson();
+  const waiting = anAddress("waiting");
+  assert.equal((await signUp(new Browser(), waiting, { checkNewIps: false })).status, 200);
+  const before = { waiting: await credentialOf(waiting), confirmed: await credentialOf(confirmed) };
+  assert.ok(before.waiting?.["password"] && before.confirmed?.["password"]);
+  await forgetSends();
+
+  const seen = mails.length;
+  const answers = await Promise.all(
+    [fresh, invited, confirmed, waiting].map(async (email) => {
+      const browser = new Browser();
+      const started = Date.now();
+      const answer = await signUp(browser, email, { password: "someone-else's-password", name: "Someone Else", setUpAuthenticator: false });
+      return { email, status: answer.status, body: await answer.text(), took: Date.now() - started, cookies: browser.cookies.size };
+    })
+  );
+  for (const answer of answers) {
+    assert.deepEqual([answer.status, answer.body, answer.cookies], [200, '{"status":true}', 0], answer.email);
+    assert.ok(answer.took >= FLOOR_MS, `${answer.email} answered in ${answer.took} ms`);
+  }
+  // Only the new address gets a confirmation. An address with an account is told someone tried, and nothing of it changed.
+  const sent = mails.slice(seen);
+  assert.deepEqual(
+    [fresh, invited, confirmed, waiting].map((email) => sent.filter((m) => m.to === email).map((m) => m.subject)),
+    [[CONFIRM], [KNOWN], [KNOWN], [KNOWN]]
+  );
+  for (const email of [fresh, invited, confirmed, waiting]) assert.equal(await accountsNamed(email), 1, email);
+  assert.equal((await credentialOf(waiting))?.["password"], before.waiting["password"], "the password it was first signed up with stands");
+  assert.equal((await credentialOf(confirmed))?.["password"], before.confirmed["password"]);
+  assert.equal(await credentialOf(invited), null, "an invited account gets no password this way");
+  const still = await accountOf(waiting);
+  assert.deepEqual([still?.["name"], still?.["authenticatorDue"], still?.["ipCheck"], still?.["emailVerified"]], ["Sam Signup", true, false, false]);
+  // The log says which it was; the answer never does.
+  for (const email of [invited, confirmed, waiting]) {
+    const entry = (await audited("sign-up", email)).at(-1);
+    assert.deepEqual([entry?.["outcome"], entry?.["detail"]], ["refused", "the address already has an account"], email);
+    assert.equal(entry?.["userId"], String((await accountOf(email))?._id));
+  }
+  assert.equal((await audited("sign-up", fresh)).at(-1)?.["outcome"], "ok");
+});
+
+test("a sign-up sets a name, an address, a password and the two choices: never a role, a ban, a second factor or a confirmed address", async () => {
+  const tries = [
+    { role: "admin" },
+    { emailVerified: true },
+    { twoFactorEnabled: true },
+    { banned: true },
+    // The account's own fields for the two choices aren't the sign-up's to send: only its two boxes are.
+    { authenticatorDue: false, ipCheck: false },
+    { data: { role: "admin", emailVerified: true } },
+  ];
+  const outcomes = await Promise.all(
+    tries.map(async (more) => {
+      const email = anAddress("raised");
+      const answer = await signUp(new Browser(), email, more);
+      return { more, email, status: answer.status };
+    })
+  );
+  for (const { more, email, status } of outcomes) {
+    const said = JSON.stringify(more);
+    assert.ok(status === 200 || status === 400, `${said} answered ${status}`);
+    const made = await accountOf(email);
+    // Refused outright, or made as any other sign-up is: an unconfirmed user with both choices on.
+    if (status === 400) assert.equal(made, null, said);
+    else
+      assert.deepEqual(
+        [
+          made?.["role"],
+          made?.["emailVerified"],
+          made?.["twoFactorEnabled"] === true,
+          made?.["banned"] === true,
+          made?.["authenticatorDue"],
+          made?.["ipCheck"],
+        ],
+        ["user", false, false, false, true, true],
+        said
+      );
+  }
+  // What Better Auth 1.7.20 does with each, so a change in it shows here: a role is refused, the rest are dropped.
+  assert.deepEqual(
+    outcomes.map((o) => o.status),
+    [400, 200, 200, 200, 200, 200]
+  );
+
+  // The two boxes, unticked: stored as that. Anything but a plain false leaves a choice on.
+  const [unticked, odd] = [anAddress("unticked"), anAddress("odd")];
+  await Promise.all([
+    signUp(new Browser(), unticked, { setUpAuthenticator: false, checkNewIps: false }),
+    signUp(new Browser(), odd, { setUpAuthenticator: "false", checkNewIps: 0 }),
+  ]);
+  assert.deepEqual([(await accountOf(unticked))?.["authenticatorDue"], (await accountOf(unticked))?.["ipCheck"]], [false, false]);
+  assert.deepEqual([(await accountOf(odd))?.["authenticatorDue"], (await accountOf(odd))?.["ipCheck"]], [true, true]);
+  // An account the app's invite makes has neither box: nothing due, new addresses checked.
+  const invited = await accountOf(await aPerson());
+  assert.deepEqual([invited?.["authenticatorDue"] === true, invited?.["ipCheck"] !== false], [false, true]);
+});
+
+test("the two choices are the account's own: no request changes them or raises the account, only the app's server code does", async () => {
+  const { browser, email, me } = await aSignedUpPerson();
+  const fields = async () => {
+    const user = await accountOf(email);
+    return [user?.["authenticatorDue"], user?.["ipCheck"], user?.["role"], user?.["banned"] === true, user?.["twoFactorEnabled"] === true];
+  };
+  const asMade = [true, true, "user", false, false];
+  assert.deepEqual(await fields(), asMade);
+  for (const body of [
+    { ipCheck: false },
+    { authenticatorDue: false },
+    { name: "Still Sam", ipCheck: false, authenticatorDue: false },
+    { ipCheck: "false" },
+    { role: "admin" },
+    { banned: true },
+    { twoFactorEnabled: true },
+    { setUpAuthenticator: false, checkNewIps: false },
+  ]) {
+    const status = await statusOf(browser.fetch("/update-user", { body }));
+    assert.ok(status === 200 || status === 400, `${JSON.stringify(body)} answered ${status}`);
+    assert.deepEqual(await fields(), asMade, JSON.stringify(body));
+  }
+  assert.equal(await statusOf(browser.fetch("/update-session", { body: { ipCheck: false } })), 400);
+  assert.deepEqual(await fields(), asMade);
+
+  // The account page's and the welcome page's server actions change them, after their own checks (account-choices.ts).
+  await setIpCheck(me.user.id, false);
+  await setAuthenticatorDue(me.user.id, false);
+  assert.deepEqual(await fields(), [false, false, "user", false, false]);
+  assert.equal((await auth().api.getSession({ headers: browser.headers() }))?.user.ipCheck, false, "and the session's person reads as changed");
+});
+
+test("someone who turned the IP check off isn't asked about a new address; someone who left it on is, and an admin always", async () => {
+  const [off, on] = await Promise.all([aSignedUpPerson({ checkNewIps: false }), aSignedUpPerson()]);
+  for (const { email, expected } of [
+    { email: off.email, expected: false },
+    { email: on.email, expected: true },
+  ]) {
+    const elsewhere = new Browser();
+    const seen = mails.length;
+    assert.equal(await statusOf(elsewhere.fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 200);
+    assert.equal((await elsewhere.session())?.user.email, email);
+    assert.equal(Boolean(mailFor(email, NEW_ADDRESS, seen)), expected, `${email} asked by email`);
+    // Until they answer, a session at a new address can do nothing but look at itself.
+    assert.equal(await statusOf(elsewhere.fetch("/list-sessions")), expected ? 403 : 200, email);
+  }
+
+  // Turned off by the account page's action for someone already signed in: the next new address isn't asked about.
+  await setIpCheck(on.me.user.id, false);
+  const later = new Browser();
+  const seen = mails.length;
+  assert.equal(await statusOf(later.fetch("/sign-in/email", { body: { email: on.email, password: PASSWORD } })), 200);
+  assert.equal(mailFor(on.email, NEW_ADDRESS, seen), undefined);
+  assert.equal(await statusOf(later.fetch("/list-sessions")), 200);
+
+  // An admin's addresses are checked whatever their account says.
+  const admin = await createAdmin({ email: anAddress("admin"), name: "Ada Admin" });
+  const context = await auth().$context;
+  await setIpCheck((await context.internalAdapter.findUserByEmail(admin.email))?.user.id ?? "", false);
+  const adminBrowser = new Browser();
+  const before = mails.length;
+  await adminBrowser.fetch("/sign-in/email", { body: { email: admin.email, password: admin.password } });
+  assert.equal(await statusOf(adminBrowser.fetch("/two-factor/verify-totp", { body: { code: totpCode(admin.totpURI) } })), 200);
+  assert.ok(mailFor(admin.email, NEW_ADDRESS, before), "the admin is asked");
+  assert.equal(await statusOf(adminBrowser.fetch("/list-sessions")), 403);
+});
+
+test("a password is refused until the address is confirmed, and sends the confirmation again: one a minute, and none to a stranger", async () => {
+  const browser = new Browser();
+  const email = anAddress("unconfirmed");
+  assert.equal((await signUp(browser, email)).status, 200);
+  const first = mailFor(email, CONFIRM);
+  assert.ok(first);
+
+  // Within the minute: refused, and no second email.
+  let seen = mails.length;
+  const refused = await browser.fetch("/sign-in/email", { body: { email, password: PASSWORD } });
+  assert.equal(refused.status, 403);
+  assert.equal(((await refused.json()) as { code: string }).code, "EMAIL_NOT_VERIFIED");
+  assert.equal(await browser.session(), null);
+  assert.equal(mails.length, seen);
+  // A wrong password says nothing of the kind.
+  assert.equal(await statusOf(browser.fetch("/sign-in/email", { body: { email, password: "not-the-password" } })), 401);
+
+  // After it: refused still, with a new link.
+  await forgetSends();
+  assert.equal(await statusOf(browser.fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 403);
+  assert.equal(mails.slice(seen).filter((m) => m.to === email && m.subject === CONFIRM).length, 1);
+  assert.equal(await browser.session(), null);
+
+  // Asked for outright, it answers the same for an address with a sign-up waiting, a confirmed one and nobody's.
+  const { email: confirmed } = await aSignedUpPerson();
+  await forgetSends();
+  seen = mails.length;
+  const asked = await Promise.all(
+    [email, confirmed, anAddress("nobody")].map(async (address) => {
+      const started = Date.now();
+      const answer = await new Browser().fetch("/send-verification-email", { body: { email: address, callbackURL: "/teams/anything" } });
+      return { status: answer.status, body: await answer.text(), took: Date.now() - started };
+    })
+  );
+  for (const answer of asked) {
+    assert.deepEqual([answer.status, answer.body], [200, '{"status":true}']);
+    assert.ok(answer.took >= FLOOR_MS, `answered in ${answer.took} ms`);
+  }
+  // One email, to the address still waiting, and its link lands on the app's own page whatever the request named.
+  assert.deepEqual(
+    mails.slice(seen).map((m) => [m.to, m.subject, new URL(m.link).searchParams.get("callbackURL")]),
+    [[email, CONFIRM, "/sign-up/confirmed"]]
+  );
+  // A link that would land on another site isn't asked for at all.
+  await forgetSends();
+  seen = mails.length;
+  for (const path of ["/send-verification-email", "/sign-up/email"]) {
+    const body = { name: "Sam", email, password: PASSWORD, callbackURL: "https://elsewhere.example/" };
+    assert.equal(await statusOf(new Browser().fetch(path, { body })), 403, path);
+  }
+  assert.equal(mails.length, seen);
+});
+
+test("no sign-up by a sign-in link; one opened before the confirmation proves the address, drops the unproven password and checks new addresses", async () => {
   const stranger = anAddress("stranger");
   const browser = new Browser();
-  const signUp = await browser.fetch("/sign-up/email", { body: { email: stranger, password: "a-long-enough-password", name: "Stranger" } });
-  assert.ok(signUp.status >= 400 && signUp.status < 500, `sign-up answered ${signUp.status}`);
-  const seen = mails.length;
+  let seen = mails.length;
   assert.equal(await statusOf(browser.fetch("/sign-in/magic-link", { body: { email: stranger, callbackURL: "/" } })), 200);
-  assert.equal(mails.length, seen);
+  assert.equal(mails.length, seen, "no link for an address without an account");
   assert.equal(await accountsNamed(stranger), 0);
   assert.equal(await browser.session(), null);
+
+  // Whoever signed up with this address chose its password and unticked the IP check, and hasn't shown the inbox is theirs.
+  const email = anAddress("claimed");
+  assert.equal((await signUp(new Browser(), email, { checkNewIps: false })).status, 200);
+  const confirmation = mailFor(email, CONFIRM)?.link ?? "";
+  assert.ok(await credentialOf(email));
+  // The inbox's owner signs in by a link instead.
+  seen = mails.length;
+  await signInByLink(browser, email);
+  assert.equal((await browser.session())?.user.email, email);
+  const owner = await accountOf(email);
+  assert.deepEqual([owner?.["emailVerified"], owner?.["ipCheck"]], [true, true]);
+  assert.equal(await credentialOf(email), null, "the password nobody proved is gone");
+  assert.equal(await statusOf(new Browser().fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 401);
+  // And the confirmation that was waiting signs nobody in.
+  const late = new Browser();
+  await late.fetch(confirmation);
+  assert.equal(await late.session(), null);
+});
+
+test("a confirmation link never signs an admin in, and none is emailed to one", async () => {
+  const email = anAddress("promoted");
+  assert.equal((await signUp(new Browser(), email)).status, 200);
+  const link = mailFor(email, CONFIRM)?.link ?? "";
+  assert.ok(link);
+  const context = await auth().$context;
+  const found = await context.internalAdapter.findUserByEmail(email);
+  await context.internalAdapter.updateUser(found?.user.id ?? "", { role: "admin" });
+
+  await forgetSends();
+  const seen = mails.length;
+  assert.equal(await statusOf(new Browser().fetch("/send-verification-email", { body: { email } })), 200);
+  assert.equal(mails.length, seen, "nothing sent to an admin");
+
+  const browser = new Browser();
+  const opened = await browser.fetch(link);
+  assert.notEqual(opened.status, 200);
+  assert.equal(await browser.session(), null);
+  assert.equal(await sessionsOf(email), 0);
+  // Logged as a sign-in that failed, from where it was tried.
+  const entry = await authDb().collection("audit").findOne({ action: "sign-in", ip: browser.address });
+  assert.equal(entry?.["outcome"], "failed");
+  assert.match(String(entry?.["detail"]), /^email confirmed: /);
+});
+
+test("sign-ups and confirmations asked for again are held to three a minute from one address", async () => {
+  const browser = new Browser();
+  // Counted whatever comes of them: these are refused for a short password before anything is made.
+  for (let n = 0; n < 3; n += 1) assert.equal(await statusOf(signUp(browser, anAddress("flood"), { password: "short" })), 400);
+  assert.equal(await statusOf(signUp(browser, anAddress("flood"))), 429);
+  for (let n = 0; n < 3; n += 1) assert.equal(await statusOf(browser.fetch("/send-verification-email", { body: {} })), 400);
+  assert.equal(await statusOf(browser.fetch("/send-verification-email", { body: { email: anAddress("flood") } })), 429);
+  // Another address's tries are its own.
+  assert.equal(await statusOf(signUp(new Browser(), anAddress("flood"), { password: "short" })), 400);
+});
+
+test("an account with a password gives it to turn on an authenticator; an invited one has none to give", async () => {
+  const { browser, me } = await aSignedUpPerson();
+  assert.equal(await hasPassword(me.user.id), true);
+  await assert.rejects(auth().api.enableTwoFactor({ body: {}, headers: browser.headers() }));
+  await assert.rejects(auth().api.enableTwoFactor({ body: { password: "not-the-password" }, headers: browser.headers() }));
+  const made = await auth().api.enableTwoFactor({ body: { password: PASSWORD }, headers: browser.headers() });
+  assert.match("totpURI" in made ? made.totpURI : "", /^otpauth:\/\/totp\//);
+
+  const invited = await aSignedInPerson();
+  assert.equal(await hasPassword(invited.me.user.id), false);
+  const passwordless = await auth().api.enableTwoFactor({ body: {}, headers: invited.browser.headers() });
+  assert.match("totpURI" in passwordless ? passwordless.totpURI : "", /^otpauth:\/\/totp\//);
 });
 
 test("a person signs in by a link, reads their session and signs out", async () => {

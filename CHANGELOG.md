@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased: sign up on the web app
+
+The web app was invite only: an admin made every account, and each signed in by a link or a passkey. Now anyone can
+create one, with an email address and a password, and choose as they do how it's guarded. Invitations work as before.
+
+- **Sign up.** `/sign-up` takes a name, an email address and a password of 12 characters or more. Nothing opens until
+  the address is confirmed: a link is emailed, good for an hour, and opening it confirms the address and signs the
+  person in, once. Until then the password is refused and the link is sent again, at most one a minute. A sign-up for
+  an address that already has an account answers exactly as a new one does, as slowly, changes nothing on that
+  account, and emails its owner that they have one. A sign-up sets a name, an address, a password and the two choices
+  below, never a role, a ban, a second factor or a confirmed address. Three sign-ups a minute from one IP address.
+- **Two choices on the sign-up page, both ticked.** _Two-factor authentication_: once the address is confirmed the
+  person sets up an authenticator app at `/welcome` before anything else opens (their password, the QR code, a code to
+  prove it, ten backup codes shown once), or chooses **Set it up later**. _Check new IP addresses_: a sign-in from an
+  address they haven't used asks them by email first, as it always has for everyone; unticked, no address is asked
+  about. Both are kept on the account, and no request changes them, only the app's own server code after its checks.
+- **The IP check, from the account page.** Anyone but an admin can turn it off for their own account: it takes a
+  sign-in from the last ten minutes and a code from the authenticator when one is on, goes in the audit log, and
+  emails the person that it was turned off. Turning it on again confirms the address it's turned on from. An admin's
+  addresses are always checked, and accounts from before the choice read as checked.
+- **Signing in with a password** is for anyone who has one now, not admins only. Admins are as they were: made by
+  `create-admin`, signed in with two factors, never by an emailed link, and a confirmation link doesn't sign one in.
+  An account with a password gives it to turn its authenticator on or off and to make new backup codes; an invited
+  account, which has none, doesn't.
+- **On no team yet.** Someone who signed up sees an empty Teams page that says an admin adds them to a team. People
+  lists them as on no team, and inviting their address puts the account they made on the team: no second account, no
+  link sent.
+- **Better Auth 1.7.20**, pinned exactly as before. The audit log gains the sign-up, the confirmed email as a sign-in,
+  the check of new addresses turned off and on, and an authenticator put off at sign-up.
+- **Not yet:** a password reset. An account whose address is first proven by a sign-in link, before its confirmation
+  link, loses the password it was signed up with (whoever chose it hadn't proven the inbox) and signs in by link or
+  passkey from then on.
+
 ## Unreleased: how a project starts
 
 Tried on a new project (a gateway for sensor boards and its dashboard, from an empty repository), the factory made a

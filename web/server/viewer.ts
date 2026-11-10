@@ -1,6 +1,7 @@
-// Who's asking: the session's person, their roles per team, whether the session has its second factor, and whether
-// the request comes from an IP address they've confirmed. Every page and server action starts here; access.ts says
-// what they may do.
+// Who's asking: the session's person, their roles per team, whether the session has its second factor, whether the
+// request comes from an IP address they've confirmed (and whether they have that checked), and whether they still owe
+// the authenticator they asked for as they signed up. Every page and server action starts here; access.ts says what
+// they may do.
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -50,6 +51,9 @@ export const getViewer = cache(async (): Promise<Person | null> => {
     secondFactor: current.session.secondFactor === true,
     twoFactor: current.user.twoFactorEnabled === true,
     ipConfirmed,
+    // Accounts from before these two were kept read as: checked, nothing due.
+    ipCheck: current.user.ipCheck !== false,
+    authenticatorDue: current.user.authenticatorDue === true,
     sessionId: current.session.id,
     ip,
     teams,
@@ -57,7 +61,7 @@ export const getViewer = cache(async (): Promise<Person | null> => {
 });
 
 // Where a session that still owes a step is sent.
-export const STEP_PAGE = { "second-factor": "/second-factor", "confirm-ip": "/confirm-sign-in" } as const;
+export const STEP_PAGE = { "second-factor": "/second-factor", "confirm-ip": "/confirm-sign-in", "set-up-authenticator": "/welcome" } as const;
 
 // For pages: the signed-in person, or off to sign in, or to the step their session still owes.
 export async function requireViewer(): Promise<Person> {
@@ -74,6 +78,7 @@ export class NotAllowed extends Error {}
 const STEP_REFUSAL = {
   "second-factor": "Enter your authenticator's code first.",
   "confirm-ip": "Confirm this sign-in from the email we sent first.",
+  "set-up-authenticator": "Set up your authenticator first, or choose to do it later.",
 } as const;
 
 // For server actions: the person, when they may do `ability` (on `team`); otherwise NotAllowed, before anything is read

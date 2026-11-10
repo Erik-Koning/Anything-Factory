@@ -128,41 +128,43 @@ export function SignInForm({ next }: { next: string }) {
           </div>
         </form>
       </section>
-      <section className="panel">
-        <details>
-          <summary>Admins: password and authenticator</summary>
-          <form
-            className="stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const data = new FormData(event.currentTarget);
-              void attempt(async () => {
-                const { data: result, error } = await authClient.signIn.email({
-                  email: String(data.get("email") ?? "").trim(),
-                  password: String(data.get("password") ?? ""),
-                });
-                if (error) throw new Error(problemOf(error, "That email and password don't match."));
-                if (result && "twoFactorRedirect" in result && result.twoFactorRedirect) return setStep("code");
-                done();
+      <section className="panel" aria-labelledby="with-password">
+        <h2 id="with-password">With your password</h2>
+        <p className="small muted">If you signed up with one. Your authenticator&apos;s code comes next when you have one.</p>
+        <form
+          className="stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            void attempt(async () => {
+              const { data: result, error } = await authClient.signIn.email({
+                email: String(data.get("email") ?? "").trim(),
+                password: String(data.get("password") ?? ""),
               });
-            }}
-          >
-            <label>
-              Email
-              <input name="email" type="email" required autoComplete="username" />
-            </label>
-            <label>
-              Password
-              <input name="password" type="password" required autoComplete="current-password" />
-            </label>
-            <div>
-              <button type="submit" disabled={busy}>
-                Continue
-              </button>
-            </div>
-            <p className="hint">Admins never get a link by email: they sign in with a passkey, or a password and their authenticator&apos;s code.</p>
-          </form>
-        </details>
+              // The password was right, the address not confirmed yet: the link has been sent again, unless one went in
+              // the last minute (server/auth.ts).
+              if (error?.code === "EMAIL_NOT_VERIFIED") throw new Error("Confirm your email first: we've sent you a link. It works once, for an hour.");
+              if (error) throw new Error(problemOf(error, "That email and password don't match."));
+              if (result && "twoFactorRedirect" in result && result.twoFactorRedirect) return setStep("code");
+              done();
+            });
+          }}
+        >
+          <label>
+            Email
+            <input name="email" type="email" required autoComplete="username" />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" required autoComplete="current-password" />
+          </label>
+          <div>
+            <button type="submit" disabled={busy}>
+              Continue
+            </button>
+          </div>
+          <p className="hint">Admins never get a link by email: they sign in with a passkey, or a password and their authenticator&apos;s code.</p>
+        </form>
       </section>
     </>
   );

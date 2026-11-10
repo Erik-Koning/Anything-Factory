@@ -28,6 +28,10 @@ and may unlink them; an admin sees and may unlink every machine, and sees whose 
 machines of its members and admins that run it: a member of another team may link a machine whose report names any
 team, but it says nothing about where this one runs.
 
+Anyone may create an account (below), and a new account is on no team: its Teams page is empty and says an admin adds
+them to one. People lists everyone, on a team or not; inviting an address that has an account puts that account on the
+team.
+
 Roles are per team (a member of one team can be a contributor to another). The rules are in `server/access.ts`; every
 page and server action asks there, and `tests/unit/access.test.ts` proves them. The team's agents still see a request's
 stakeholder id and role only: names and emails live in the accounts and the stakeholder records, never in a task or a
@@ -102,7 +106,8 @@ request (Article 8).
   it became and theirs, notes and the reason when it's turned down. Contributors see their own.
 - `/t/<team>/proposals` (admins): proposals with who they came from, their gate and score; approve with a note, reject
   with a reason, send back for research, escalate. Tasks in triage come last, for when one can't wait for the planner.
-- `/admin/people` (admins): invite by email with a role on a team, change a role, remove from a team, ban and unban.
+- `/admin/people` (admins): invite by email with a role on a team (an address that signed up joins the team with the
+  account it has), change a role, remove from a team, ban and unban; everyone with an account, on a team or on none.
 - `/admin/audit` (admins): the audit log, newest first, filtered by what, how it went, who and IP address.
 - `/account/notifications`: what the person is emailed about, for each kind of event they could see in the app
   (questions for them, blocked work, journeys done, a team pausing or finishing, work merged, their requests): at
@@ -111,7 +116,13 @@ request (Article 8).
   their role's defaults apply (an admin hears of questions and blocked work at once). It shows the last email sent and
   what's waiting to go, and sends a test email (three an hour).
 - `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
-  you're signed in, with each session's address; the IP addresses you've confirmed; your recent activity; sign out.
+  you're signed in, with each session's address; the IP addresses you've confirmed, and whether new ones are checked
+  (always, for an admin); your recent activity; sign out.
+- `/sign-up`: a name, an email address, a password, and the two choices, both ticked: two-factor authentication and
+  the check of new IP addresses. `/sign-up/confirmed` is where the emailed link lands when it couldn't sign anyone in
+  (used already, expired).
+- `/welcome`: where someone who chose two-factor authentication as they signed up sets up their authenticator, or
+  puts it off, before anything else opens.
 - `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
   address to be confirmed by email; `/sign-in/confirm` is the email's page (“Was this you?”), no session needed.
 
@@ -154,12 +165,37 @@ the CDN like every other request, and their answers are never cached. Links and 
 (a link a token's use ended too: copied, quiet too long, its person no longer allowed), a look past the limit, and a
 made-up token (once per address in 15 minutes) go in the audit log.
 
-## Signing in: two factors, new IP addresses, and the audit log
+## Signing up and signing in: two factors, new IP addresses, and the audit log
 
-Invite only: nobody signs up. An admin invites someone by email from People; the app makes the account (Better Auth's
-admin plugin), gives it its role on the team and a stakeholder record there, and emails a sign-in link.
+Two ways to an account. **Anyone signs up** at `/sign-up`; and an admin **invites** someone by email from People: the
+app makes the account (Better Auth's admin plugin), gives it its role on the team and a stakeholder record there, and
+emails a sign-in link. An invited account has no password; one that signed up is on no team until an admin adds it.
 
-- **Everyone** signs in with a **passkey** or a **magic link** by email (15 minutes, once).
+- **Signing up** takes a name, an email address and a password of 12 characters or more. Nothing opens until the
+  address is confirmed: the sign-up emails a link, good for an hour, and opening it confirms the address and signs the
+  person in, once (opened again it signs nobody in). Until then the password is refused, and the link is sent again
+  (at most one a minute). A sign-up for an address that already has an account answers exactly as a new one does, as
+  slowly, changes nothing on that account, and emails its owner that they have one. A sign-up sets a name, an
+  address, a password and the two choices below and nothing else: a role in the request is refused, and a ban, a
+  second factor or “confirmed” is dropped. Nobody becomes an admin by signing up, and a confirmation link never signs
+  an admin in. From one IP address: three sign-ups and three requests for the link again a minute.
+- **The two choices on the sign-up page**, both ticked unless the person unticks them, are kept on the account
+  (`authenticatorDue`, `ipCheck`). They're read as the account is made and changed afterwards only by the app's own
+  server actions; no endpoint takes either.
+  - **Two-factor authentication**: once the address is confirmed the person lands on `/welcome` and sets up an
+    authenticator app before anything else opens: their password, the QR code (or its key), a code to prove it, ten
+    backup codes shown once, then on to Teams. **Set it up later** there puts it off (audited); the account page
+    offers it from then on.
+  - **Check new IP addresses**: a sign-in from an address they haven't used asks them by email first (below). Without
+    it no address is asked about. It can be changed on the account page: turning it off takes a sign-in from the last
+    ten minutes and a code from the authenticator when one is on, is audited, and emails the person that it was
+    turned off; turning it on confirms the address it's turned on from. An admin's addresses are always checked.
+  - Accounts from before these were kept read as: new addresses checked, nothing due.
+- An account whose address is first proven by a sign-in link, not by its confirmation link, loses the password it was
+  signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on. There is no
+  password reset yet: such a person signs in by link or passkey.
+- **Everyone** signs in with a **passkey**, a **magic link** by email (15 minutes, once), or **their password** when
+  they have one (they signed up). A link is sent only to an address with an account: no sign-up by link.
 - **Admins sign in with two factors, by design.** Better Auth enforces two-factor only on email-and-password sign-in,
   so the app makes that the admins' way in and closes the others:
   - An admin is made by `npm run create-admin` on the operator's machine, which creates the account with a password
@@ -168,9 +204,11 @@ admin plugin), gives it its role on the team and a stakeholder record there, and
   - An admin signs in with **password + authenticator code** (or a backup code), or with a **passkey whose
     authenticator verified them** (PIN or biometrics: the UV flag of the signed assertion, checked on the server).
   - **No magic link for admins**: none is sent to an admin's address, and a session from one is refused for an admin.
-- **Anyone else may turn on an authenticator** from their account page (a QR code, a code to prove it, ten backup
-  codes shown once; Better Auth's two-factor plugin, passwordless). From then on every sign-in, by passkey or link,
-  also asks for its code. Turning it off takes a current code.
+- **Anyone else may turn on an authenticator**, as they sign up or from their account page (a QR code, a code to
+  prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on every sign-in, by passkey,
+  link or password, also asks for its code. Turning it off takes a current code. An account with a password gives it
+  too, to turn the authenticator on or off and to make new backup codes (Better Auth asks it of any account that has
+  one); an invited account has none to give.
 - Each session records **whether it has its second factor** (`session.secondFactor`): set by the server from how the
   session was made, or once a code is entered for it at `/second-factor` (an admin whose passkey didn't verify them,
   anyone with an authenticator after a link). Five wrong codes end the session. The client can't set it.
@@ -180,15 +218,18 @@ admin plugin), gives it its role on the team and a stakeholder record there, and
   emailed a link to a page that shows the address, device and time, with **Yes, it was me** (the address joins their
   list) and **It wasn't me** (every session on the account ends). A button answers, not the link, so a mail scanner
   that opens links answers nothing; the link works once, for 30 minutes, and a new one goes out at most every 10
-  minutes. Signing in by an email link confirms the address it's opened from, since opening it already proves the
-  inbox. The account page lists your addresses (with Forget) and each session's address.
-- **The audit log** keeps every sign-in (by method, or why it failed), sign-out and ended session, second factor, new
-  address (asked, confirmed, denied, forgotten), passkey and authenticator change, invitation, role change, removal,
+  minutes. Signing in by an email link, or confirming a sign-up's address, confirms the address it's opened from, since
+  opening it already proves the inbox. The account page lists your addresses (with Forget) and each session's
+  address. Someone who isn't an admin may turn the check off for their own account (above).
+- **The audit log** keeps every sign-up, sign-in (by method, or why it failed), sign-out and ended session, second
+  factor, new address (asked, confirmed, denied, forgotten), the check of new addresses turned off or on, passkey and
+  authenticator change (and one put off at sign-up), invitation, role change, removal,
   ban, request, task and decision: who, when, from which address and device, and how it went. It's in the accounts
   database (`audit`), written once and never changed, kept `AUDIT_RETENTION_DAYS` (400). Admins read and filter it at
   `/admin/audit`; each person sees their own recent activity on their account page. The team's agents never see it.
 - Pages and server actions check all of this on the server (`server/viewer.ts`, `server/access.ts`): a session that
-  owes its second factor or an address confirmation is sent to finish that and can do nothing else. Over HTTP it may
+  owes its second factor, an address confirmation or the authenticator it chose at sign-up is sent to finish that and
+  can do nothing else. Over HTTP a session without its second factor or its address confirmed may
   only look at itself, sign out or sign in again, so it can't enrol a passkey or new backup codes to raise itself.
   Better Auth's own admin endpoints (`/api/auth/admin/*`) and turning the authenticator on or off are never served over
   HTTP; the app calls them from its server actions after its own checks. (`server/auth.ts` has the sign-in rules in
@@ -198,8 +239,9 @@ admin plugin), gives it its role on the team and a stakeholder record there, and
   (`ORIGIN_SECRET`, sent as `x-a6g-origin`; `proxy.ts`), so nobody reaches it around CloudFront or makes the header up.
   Sessions, rate limits, the new-address check and the audit log all read the same address.
 - Sessions are revocable from the account page; a ban ends all of a person's sessions and keeps them out.
-- Rate limits: Better Auth's, kept in the database (from one IP address, 5 password sign-ins, 5 link requests and 5
-  two-factor tries a minute; 100 auth requests a minute in all), plus Better Auth's own lockout after repeated wrong
+- Rate limits: Better Auth's, kept in the database (from one IP address, 3 sign-ups, 3 requests for a confirmation
+  link, 5 password sign-ins, 5 link requests and 5 two-factor tries a minute; 100 auth requests a minute in all),
+  plus Better Auth's own lockout after repeated wrong
   codes; and at most 20 requests and task suggestions a day per person.
 
 ## Running it locally
@@ -216,7 +258,7 @@ npm run create-admin -- --email you@example.com --name "Your Name"
 npm run dev            # http://localhost:3000
 ```
 
-Without a mail service, sign-in links and invitations are printed to the dev server's console (`[mail] to=… link=…`):
+Without a mail service, sign-in links, confirmation links and invitations are printed to the dev server's console (`[mail] to=… link=…`):
 only while the app's address is this machine (`http://localhost`), never where a log could hand someone a link.
 A team shows up once its settings are in the `teams` collection: `a6g register` publishes them for a team whose tasks
 are in Mongo (team.json `tasks.store: "mongo"`), and the lead's watchdog keeps its status current.
@@ -256,7 +298,9 @@ npm run check:infra    # sst install, then tsc against SST's platform: the deplo
 ```
 
 The integration tests (`tests/integration/auth.test.ts`) call `auth().handler` directly, with no server or browser, over
-a throwaway replica set from the same cached mongod binary as below: closed sign-up, magic links, an admin's password and
+a throwaway replica set from the same cached mongod binary as below: signing up (nothing before the address is
+confirmed, the same answer for an address that has an account, what a sign-up can't set, the two choices and that no
+request changes them, the limit), magic links, an admin's password and
 authenticator code, confirming a new IP address by email, backup codes, the HTTP guard, passkeys signed by a software
 authenticator (with and without user verification, and from another origin), sessions, bans and `create-admin` run again.
 
@@ -271,7 +315,9 @@ without user verification; the daily limit; phone width; and the sign-in rate li
 address and the origin secret as CloudFront does (`playwright.config.ts`), and `security.spec.ts` covers the rest of
 signing in: a request without the secret refused, an admin's new address confirmed by email (the link once), a session
 taken elsewhere and “it wasn't me”, a member's authenticator and every sign-in after it asking for a code, and the
-audit log. Playwright's Chromium must be installed (`npx playwright install chromium`).
+audit log. `sign-up.spec.ts` signs three people up: one through the confirmation email and the authenticator at
+`/welcome` to an empty Teams page, one who puts the authenticator off and turns the IP check off and on from the
+account page, one with both boxes unticked, whom an admin then adds to a team. Playwright's Chromium must be installed (`npx playwright install chromium`).
 
 `npm run test:e2e:atlas` runs the same suite against a real cluster: it reads `DB_USER`, `DB_PASSWORD` and `DB_HOST`
 from the repository's `.env` (gitignored; or `E2E_MONGODB_URI`), and uses databases of its own, `a6g_e2e` and
@@ -435,12 +481,13 @@ changing the domain means adding passkeys again.
 - `server/audit.ts`: the audit log; `server/known-ips.ts`: confirmed addresses and the emails that confirm new ones;
   `server/origin-check.ts`: the CDN's secret; `server/device.ts`: a browser's name from its user agent.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
+- `server/account-choices.ts`: the two choices made at sign-up, and whether an account has a password.
 - `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and
   no-journey kinds registered and the level kept in the address.
 - `server/machines.ts`: linked machines, their codes and reports; `server/machine-api.ts`: what the machines'
   endpoints (`app/api/machines/`) share: no caching, OAuth's errors, bodies read up to a size, the bearer's machine.
 - `app/`: the pages; `app/t/[team]/actions.ts`, `app/admin/people/actions.ts`, `app/account/actions.ts`,
-  `app/machines/actions.ts`: every write a person makes.
+  `app/welcome/actions.ts`, `app/machines/actions.ts`: every write a person makes.
 - `proxy.ts`: requests without the CDN's secret refused, a nonce-based Content Security Policy, and anyone without a
   session cookie off to sign in.
 - `sst.config.ts`, `Dockerfile`: the deployment (Lightsail behind CloudFront); `tsconfig.infra.json` checks it.

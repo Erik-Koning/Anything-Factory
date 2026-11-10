@@ -101,8 +101,7 @@ let lastCode = "";
 export async function signInAsAdmin(page: Page, { backupCode, confirm = false }: { backupCode?: string; confirm?: boolean } = {}): Promise<void> {
   const { admin } = state();
   await page.goto("/sign-in");
-  await page.getByText("Admins: password and authenticator").click();
-  const form = page.locator("details form");
+  const form = page.getByRole("region", { name: "With your password" });
   await form.getByLabel("Email").fill(admin.email);
   await form.getByLabel("Password").fill(admin.password);
   await form.getByRole("button", { name: "Continue" }).click();
