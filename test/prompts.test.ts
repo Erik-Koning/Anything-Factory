@@ -72,6 +72,19 @@ describe("prompts", () => {
     }
   });
 
+  test("every role is told how a secret is stored, and who stores it", () => {
+    for (const role of Object.keys(team.roles)) assert.match(compile(team, role), /## Secrets\n\n- A secret's value never appears in a command/, role);
+    assert.match(compile(team, "builder"), /openssl rand -hex 32 \| npx sst secret set AuthSecret/);
+    assert.match(compile(team, "builder"), /\(the planner asks the operator\)/);
+    assert.doesNotMatch(compile(team, "planner"), /\(the planner asks the operator\)/);
+    assert.match(compile(team, "reviewer"), /You store none: say which one is needed in your report\./);
+    assert.doesNotMatch(compile(team, "reviewer"), /npx sst secret set/);
+    const none = loadTeam(makeRepo(baseTeam({ policies: { secrets: "deny" } })));
+    assert.match(compile(none, "builder"), /This team stores none: the operator sets them\./);
+    assert.doesNotMatch(compile(none, "builder"), /npx sst secret set/);
+    assert.match(compile(none, "builder"), /## What this team never does[\s\S]*storing secrets through a secret manager/);
+  });
+
   test("a starter direction no one has filled in stays out of the prompts", () => {
     const starter = readFileSync(new URL("../templates/team/direction.md", import.meta.url), "utf8");
     const bare = makeRepo(baseTeam(), { ".a6g/direction.md": starter });

@@ -333,7 +333,9 @@ describe("pages and metrics", { concurrency: true }, () => {
 
   test("a pages finish line needs pages to check (#5)", async () => {
     assert.match(problemsOf({ finish: "a6g pages done" }), /pages: the finish line is a6g pages done/);
-    assert.match(problemsOf({ finish: "a6g pages done", pages: {} }), /pages\.list: the pages to check/);
+    // The pages can come from the team's harness manifest instead, so an empty "pages" loads; a6g pages refuses to
+    // call nothing done (the pages command, #10).
+    assert.doesNotMatch(problemsOf({ finish: "a6g pages done", pages: {} }), /pages/);
     assert.match(problemsOf({ finish: "a6g pages done", pages: { list: [] } }), /pages\.list: the pages to check/);
     assert.match(problemsOf({ pages: { list: [{ id: "a b", path: "/" }] } }), /pages\.list\[0\]\.id/);
     assert.match(problemsOf({ pages: { list: [{ id: "a", path: "a" }] } }), /pages\.list\[0\]\.path/);
@@ -354,12 +356,16 @@ describe("pages and metrics", { concurrency: true }, () => {
     assert.deepEqual(norm({ finish: "a6g pages done", pages: { list: [{ id: "landing", path: "/", title: "Landing" }] } }).problems, []);
     // These teams don't load, so pages done never runs; the pages command's own refusal, for a team that loads, is in
     // review-setup.test.ts (#10 of that review).
-    for (const pages of [undefined, {}, { list: [] }]) {
+    for (const pages of [undefined, { list: [] }]) {
       const home = makeRepo(baseTeam({ finish: "a6g pages done", ...(pages ? { pages } : {}) }));
       const done = await a6g(["pages", "done"], planner(home));
       assert.notEqual(done.code, 0, `pages ${JSON.stringify(pages)}: ${done.out}`);
       assert.match(done.out, /team\.json:\n {2}- pages(\.list)?: /, `pages ${JSON.stringify(pages)}: refused as rules that don't load`);
     }
+    // An empty "pages" loads (the harness manifest may name the pages), and with no manifest pages done isn't done.
+    const none = await a6g(["pages", "done"], planner(makeRepo(baseTeam({ finish: "a6g pages done", pages: {} }))));
+    assert.equal(none.code, 2, none.out);
+    assert.match(none.out, /nothing to check/);
   });
 
   test("allowedChanges is checked against the team's base when pages.base is left out (#5)", async () => {
@@ -506,9 +512,13 @@ describe("team.json: what normalize checks", { concurrency: true }, () => {
       { ...base, finish: "" },
       { ...base, vars: { A: 1 } },
       { ...base, vars: { CLAUDE_X: "y" } },
+      { ...base, security: {} },
+      { ...base, security: { audit: false } },
     ];
     const rejected: Record<string, unknown>[] = [
       { name: "t" },
+      { ...base, security: { audit: "weekly" } },
+      { ...base, security: false },
       { ...base, name: "" },
       { ...base, name: "2048" },
       { ...base, name: "Bad" },
@@ -559,7 +569,6 @@ describe("team.json: what normalize checks", { concurrency: true }, () => {
       { ...base, board: { gitlab: {} } },
       { ...base, review: { required: ["wizard"] } },
       { ...base, review: { removedPattern: "(" } },
-      { ...base, pages: {} },
       { ...base, pages: { list: [] } },
       { ...base, finish: "a6g pages done" },
       { ...base, pages: { list: [{ id: "a b", path: "/" }] } },
@@ -633,10 +642,10 @@ describe("the public repository (#19)", () => {
   );
   test("no traces of the projects the factory was first used on, tests included", () => {
     assert.match("app-" + "ride" + "net", traces, "the pattern still finds them");
-    const files = git(ROOT, "ls-files", "examples", "docs", "templates", "README.md", "CONSTITUTION.md", "schema", "plugin/agents", "test")
-      .split("\n")
-      .filter(Boolean);
-    assert.ok(files.includes("test/audit-setup.test.ts"));
+    // Every file in the repository: a fixture in the web app's tests once carried one where a list of folders didn't look.
+    const files = git(ROOT, "ls-files").split("\n").filter(Boolean);
+    for (const file of ["test/audit-setup.test.ts", "web/tests/unit/notifications.test.ts", "CHANGELOG.md", "lib/detect.ts"])
+      assert.ok(files.includes(file), file);
     for (const file of files) {
       const text = readFileSync(join(ROOT, file), "utf8");
       assert.doesNotMatch(text, traces, file);

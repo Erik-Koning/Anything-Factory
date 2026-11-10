@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stop hook for builders and testers: a member that changed code can't end its turn with uncommitted work (untracked
+// Stop hook for builders, testers and the scaffolder: a member that changed code can't end its turn with uncommitted work (untracked
 // files included), a branch named outside its pattern, or a branch that fails the quick gate (the merge queue runs
 // the full gate once, on the merged result). Gates run under the team's gate semaphore, so parallel builds don't
 // starve each other into flaky failures. After three refusals in a row the member may stop, and says so, so a stuck
@@ -12,6 +12,7 @@ import { TIMED_OUT } from "../../lib/lock.ts";
 import { FACTORY_ROOT, stateDir } from "../../lib/paths.ts";
 import { type HookInput, inTeam, teamSession } from "../../lib/session.ts";
 import { isLead, multiMachine, remoteOf } from "../../lib/tasks/machines.ts";
+import { CLAIMANTS } from "../../lib/tasks/model.ts";
 import { git, gitOk } from "../../lib/util.ts";
 
 // hooks.json gives this hook 1800 s. The wait for a gate slot and the gate itself share less than that, so the hook
@@ -22,7 +23,7 @@ const GATE_MS = 27 * 60_000;
 if (!inTeam()) process.exit(0);
 const input = JSON.parse(readFileSync(0, "utf8")) as HookInput;
 const { home, team, role } = teamSession({ cwd: input.cwd, agentType: input.agent_type });
-if (!["builder", "tester"].includes(role)) process.exit(0);
+if (!CLAIMANTS.includes(role)) process.exit(0);
 
 // The worktree the member works in; the hook's own cwd can be elsewhere.
 const cwd = process.env.CLAUDE_PROJECT_DIR ?? input.cwd ?? process.cwd();

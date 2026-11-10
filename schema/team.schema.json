@@ -28,11 +28,16 @@
       "description": "45m, 6h, 2d, or minutes."
     },
     "roleName": {
-      "enum": ["planner", "builder", "tester", "reviewer", "ux-specialist", "innovator", "approver"]
+      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "security-reviewer", "ux-specialist", "innovator", "approver"]
     },
     "id": {
       "type": "string",
       "pattern": "^[\\w-]+$"
+    },
+    "model": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:[\\]-]{0,99}$",
+      "description": "fable, opus, sonnet or haiku (the newest of the family this version knows), or a model id such as claude-opus-5-5."
     },
     "role": {
       "type": "object",
@@ -83,6 +88,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "Planner only: compact its context at this many tokens."
+        },
+        "model": {
+          "$ref": "#/$defs/model",
+          "description": "The model the role runs on. Left out: the team's model, else Fable for the planner, the innovator and the scaffolder, and Opus for the rest."
         }
       }
     },
@@ -109,6 +118,32 @@
             "$ref": "#/$defs/regex"
           },
           "description": "Source paths that belong only to other pages."
+        },
+        "as": {
+          "$ref": "#/$defs/text",
+          "description": "The sign-in state the page is seen with (the harness manifest's auth.states)."
+        },
+        "mask": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "description": "CSS selectors masked in its screenshots."
+        },
+        "ignore": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "description": "CSS selectors every in-page check leaves out (sideways scrolling, axe, touch targets, clipped text, focus): the operator's exemptions."
+        },
+        "schemes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["light", "dark", "no-preference"]
+          },
+          "description": "The colour schemes this page is checked in, in place of pages.schemes (a page with no dark variant: [\"light\"])."
         }
       }
     },
@@ -329,6 +364,21 @@
         }
       }
     },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who the team works for, which decides what it asks them.",
+      "properties": {
+        "technical": {
+          "type": "boolean",
+          "description": "Whether you weigh in on the platform, the stack and the architecture (the default). false: the team never asks about them, picks what's safest for someone who won't maintain it by hand (managed, mainstream, little to operate, costs capped), records the choices, and asks you only about the product, in plain words."
+        },
+        "designCheckIn": {
+          "type": "boolean",
+          "description": "For a team that starts a repository: once the skeleton is built and its design record written, the planner puts the foundation's choices to you, and only scaffold and test-infra work is claimed until you've agreed (a6g init drafts true for an empty repository). Only with operator.technical."
+        }
+      }
+    },
     "hosts": {
       "type": "array",
       "items": {
@@ -348,7 +398,8 @@
       "$ref": "#/$defs/text"
     },
     "model": {
-      "$ref": "#/$defs/text"
+      "$ref": "#/$defs/model",
+      "description": "The model for every role that names none of its own (roles.<role>.model). Left out, each role runs on its default."
     },
     "roles": {
       "type": "object",
@@ -377,8 +428,15 @@
           ],
           "description": "Testers need write: where the tests live."
         },
+        "scaffolder": {
+          "$ref": "#/$defs/role"
+        },
         "reviewer": {
           "$ref": "#/$defs/role"
+        },
+        "security-reviewer": {
+          "$ref": "#/$defs/role",
+          "description": "Reviews a branch that changes a security path (security), or that a reviewer sent on, before it merges: a team with one merges such a branch only once it has passed the tip (a6g verdict security)."
         },
         "ux-specialist": {
           "$ref": "#/$defs/role"
@@ -477,7 +535,6 @@
     "pages": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["list"],
       "properties": {
         "appUrl": {
           "type": "string",
@@ -504,7 +561,8 @@
           "minItems": 1,
           "items": {
             "$ref": "#/$defs/page"
-          }
+          },
+          "description": "The operator's pages; the team's harness manifest (.a6g/harness.json) adds its own."
         },
         "viewports": {
           "type": "array",
@@ -529,6 +587,50 @@
         "settleMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "minTarget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The smallest touch target on a phone, in CSS pixels (default 24, WCAG 2.2 AA)."
+        }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "journeys": {
+          "enum": ["required", "optional"],
+          "description": "Whether a journey is done only while its specs pass, and the finish line needs every journey's (a6g e2e done). Left out, that's exactly when the team's harness manifest has a suite."
+        },
+        "lane": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regex"
+          },
+          "description": "Paths that count as test and harness files for a scaffolder's test and test-infra work, beyond the factory's own list (tests and their folders, runner configuration, lockfiles, a package.json's devDependencies and test scripts)."
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "type": "boolean",
+          "description": "Whether the check after merges runs the package manager's audit of what ships (npm audit --omit=dev, pnpm audit --prod) when a lockfile changed, and weekly, and files each package with an advisory at high or critical. It sends the registry the names and versions of the packages. Default true."
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "regex"
+          },
+          "description": "Regexes over paths: a branch that changes a file one matches merges only once the security reviewer has passed it (on a team with that role). They add to the factory's own list, and match a path as written, tests and documents included."
+        },
+        "builtIn": {
+          "type": "boolean",
+          "description": "Whether the factory's own list of security paths applies: files whose names say sign-in, sessions, permissions, payments, webhooks, migrations or policies (never tests or documents), and .sql and rules files. Default true; false leaves only paths."
         }
       }
     },

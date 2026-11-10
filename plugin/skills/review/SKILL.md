@@ -54,6 +54,13 @@ connection, or changes a contract without updating every caller, is "changes", e
   reason. Then put the branch back (`git -C /tmp/review-<n> reset -q --hard <sha> && git -C /tmp/review-<n> clean -fdq`).
   A test that passes on the old code proves nothing.
 - Nothing is weakened: no skipped, loosened or deleted assertions, no longer timeouts to hide flakiness.
+- **A scaffolder's branch changes what every check can see,** so hold it to more. The manifest
+  (`.a6g/harness.json`) only adds pages, sign-ins and scheme set-up (the merge queue refuses one that checks less,
+  unless the operator allowed it); the Playwright configuration sets no retries, filters or ignored tests; fixtures
+  make their records under `A6G_NAMESPACE` and remove them, and never touch another run's; sign-ins and stand-ins
+  use made-up data and no real key; screenshots turn animations off and mask what changes on its own or is personal;
+  and a `test` or `test-infra` branch changes test and harness files only. Run the suite once from the detached copy
+  (`a6g e2e try`) and see it pass.
 
 ## 6. It looks right (anything a person sees)
 
@@ -103,10 +110,17 @@ A high-risk change carries its own tests in the same branch: unit tests for its 
 spec for the flow, failing without the change (section 5). Without them it's "changes", and the merge queue refuses
 it anyway.
 
+**Where the team has a security reviewer** (your commands list `--security`), `a6g blast` also lists the security
+paths the change touches, and a branch with any merges only once they've passed it; you needn't send it. Send on one
+it lists none for, with `--security` on your approval, when the change decides who can do what, what someone can
+see, or what moves money: a permission check in a helper, a query that stops narrowing by the signed-in user, a
+price worked out from what the browser sent. Their review is beside yours, never instead of it: a hole you can see
+is a change you ask for.
+
 ## The verdict
 
-- Every section holds: `a6g verdict review <branch> approve --sha <sha> --risk low|medium|high [--shots <dir>] --note
-"<one line, with why that risk>"`.
+- Every section holds: `a6g verdict review <branch> approve --sha <sha> --risk low|medium|high [--shots <dir>]
+[--security] --note "<one line, with why that risk>"`.
 - Otherwise: `a6g verdict review <branch> changes --sha <sha> --note "<the gist>"`, and answer with `VERDICT: changes`
   and a numbered list: each item with the file and line, what's wrong, why it matters, and what would fix it in the
   codebase's own terms. Order it by severity. Optional suggestions go after it, marked as such; don't ask for changes

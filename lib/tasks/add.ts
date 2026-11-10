@@ -4,8 +4,10 @@
 // same code.
 import {
   type Actor,
+  designOpen,
   type FeatureRequest,
   type Kind,
+  MERGE,
   newTask,
   nowIso,
   OPERATOR,
@@ -50,6 +52,12 @@ export async function addTask(store: Store, team: string, input: TaskInput, who:
   if (!proposes(who) && ["bug", "ux"].includes(input.kind) && !severity) throw new Refused("a finding says how bad it is: --sev blocker|major|minor");
   if (!proposes(who) && body.length < 20) throw new Refused("say what happened and what should happen, with steps: --body or --body-file");
   const all = await store.tasks.all();
+  // The design check-in holds feature work while it's open: one at a time, and never a member's to add.
+  if (input.kind === "design") {
+    if (!proposes(who) && who !== MERGE) throw new Refused(`the design check-in is the planner's to add (or the operator's); you're the ${who}`);
+    const open = designOpen(all);
+    if (open) throw new Refused(`#${open.id} is the design check-in already (${open.status}): add to it with a note, or raise it`);
+  }
   const byId = new Map(all.map((t) => [t.id, t]));
   const parent = input.parent?.replace(/^#/, "") || null;
   if (parent && byId.get(parent)?.kind !== "journey")

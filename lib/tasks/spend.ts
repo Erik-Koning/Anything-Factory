@@ -3,11 +3,14 @@
 import type { Limits } from "./controls.ts";
 import type { Task } from "./model.ts";
 
-// A day's use by one role, model and task.
+// A day's use by one role, model, task and subscription.
 export interface UsageRow {
   role: string;
   model: string;
   task: string | null;
+  // The subscription it ran on (lib/subscriptions.ts), by its name on the machine that counted it; missing in rows
+  // counted before 0.7.0, which all ran on that machine's own login.
+  account?: string;
   requests: number;
   input: number;
   output: number;
@@ -54,13 +57,32 @@ export interface Spend {
   subscriptionWeek?: number | null;
   // What each subscription's own usage report said, for the record.
   subscriptions?: { account: string; percent: number; resetsAt: string }[];
+  // The same figures for each subscription the team ran on, with that subscription's week in dollars as last measured.
+  accounts?: Record<string, AccountSpend>;
 }
+export interface AccountSpend {
+  today: number;
+  week: number;
+  total: number;
+  subscriptionWeek?: number | null;
+}
+
+// Rows from before subscriptions were told apart ran on the counting machine's own login, "default" by its name.
+export const OWN_LOGIN = "default";
+
 export function spendOf(days: UsageDay[], now: Date, since: string | null = null): Spend {
   const today = dayOf(now);
   const week = weekOf(now);
   const from = since ? dayOf(new Date(since)) : null;
   const spend: Spend = { day: today, today: 0, week: 0, total: 0, since: from, unpriced: 0, at: now.toISOString() };
+  const accounts: Record<string, AccountSpend> = {};
   for (const day of days) {
+    for (const row of day.rows) {
+      const account = (accounts[row.account ?? OWN_LOGIN] ??= { today: 0, week: 0, total: 0 });
+      if (day.day === today) account.today += row.cost;
+      if (day.day >= week) account.week += row.cost;
+      if (!from || day.day >= from) account.total += row.cost;
+    }
     const cost = day.rows.reduce((sum, r) => sum + r.cost, 0);
     if (day.day === today) spend.today += cost;
     if (day.day >= week) spend.week += cost;
@@ -69,7 +91,25 @@ export function spendOf(days: UsageDay[], now: Date, since: string | null = null
       spend.unpriced += day.rows.reduce((sum, r) => sum + r.unpriced, 0);
     }
   }
-  return { ...spend, today: round(spend.today), week: round(spend.week), total: round(spend.total) };
+  for (const account of Object.values(accounts))
+    Object.assign(account, { today: round(account.today), week: round(account.week), total: round(account.total) });
+  return { ...spend, today: round(spend.today), week: round(spend.week), total: round(spend.total), accounts };
+}
+
+// The week in dollars a share of "a subscription's week" means for a team that ran on several: what it spent this week
+// over the shares of each one's week that was (so its percentage is the sum of each subscription's). Null when a
+// subscription it spent on hasn't been measured, or it spent nothing this week.
+export function blendedWeek(accounts: Record<string, AccountSpend>, weeks: Record<string, number | null>): number | null {
+  let spent = 0;
+  let share = 0;
+  for (const [name, account] of Object.entries(accounts)) {
+    if (!account.week) continue;
+    const week = weeks[name];
+    if (!week) return null;
+    spent += account.week;
+    share += account.week / week;
+  }
+  return share ? round(spent / share) : null;
 }
 
 // Spend by journey and by task, every machine's and day's in `days` added up: a task's cost goes to its journey too
@@ -95,7 +135,8 @@ export function dollars(n: number): string {
   return n < 10 ? `$${n.toFixed(2)}` : `$${Math.round(n)}`;
 }
 
-// What a team spent, against its budget when it has one, in a line.
+// What a team spent, against its budget when it has one, in a line; this week by subscription when it ran on more than
+// one, or on one with a limit of its own.
 export function describeSpend(spend: Spend, limits: Limits | null): string {
   const week = spend.subscriptionWeek ?? null;
   const sub = limits?.unit === "subscription";
@@ -113,7 +154,18 @@ export function describeSpend(spend: Spend, limits: Limits | null): string {
     : week
       ? ` (this week is ${percentOf(spend.week, week)}% of a subscription's week)`
       : "";
-  return `Spent${sub && week ? "" : " (API-equivalent)"}: ${parts.join(", ")}${unit}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}.`;
+  const by = Object.entries(spend.accounts ?? {});
+  const each =
+    by.length > 1 || Object.keys(limits?.accounts ?? {}).length
+      ? `; this week by subscription: ${by
+          .map(([name, a]) => {
+            const own = limits?.accounts?.[name]?.weekly;
+            const share = a.subscriptionWeek ? ` (${percentOf(a.week, a.subscriptionWeek)}% of its week)` : "";
+            return `${name} ${dollars(a.week)}${share}${own ? ` of ${sub ? `${own}%` : dollars(own)}` : ""}`;
+          })
+          .join(", ")}`
+      : "";
+  return `Spent${sub && week ? "" : " (API-equivalent)"}: ${parts.join(", ")}${unit}${each}${spend.unpriced ? `; ${spend.unpriced} requests of models with no price` : ""}.`;
 }
 
 // `dollars` as a percentage of one subscription's week (`week` dollars), to one decimal below 10%.

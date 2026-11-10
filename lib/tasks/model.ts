@@ -3,7 +3,8 @@
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
 import { type Hold, holdRefusal } from "./controls.ts";
 
-export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "chore", "research", "journey"] as const;
+// "design" is the design check-in: a new project's foundation, put to the operator before features are built on it.
+export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "scaffold", "chore", "research", "journey", "design"] as const;
 export type Kind = (typeof KINDS)[number];
 export const STATUSES = ["triage", "proposed", "researching", "approved", "building", "review", "done", "blocked", "question", "rejected"] as const;
 export type Status = (typeof STATUSES)[number];
@@ -129,6 +130,10 @@ export interface Task extends Doc {
   critical: string[];
   // How much could break, as the reviewer judged it when it approved (a high-risk change merges with its tests).
   risk: Risk | null;
+  // On a team with a security reviewer, what makes the branch that reviewer's too: the security paths it changes (read
+  // at submit), whether the reviewer sent it on, and the commit that passed. The merge queue measures the branch
+  // itself; this is how the planner knows before it merges.
+  security?: SecurityDue | null;
   // Raised to the operator, and waiting on other tasks (above); cleared when it moves on.
   ask?: Ask | null;
   wait?: Wait | null;
@@ -223,11 +228,38 @@ export function priorityOf(score: Score, weights: Record<Dimension, number> = DE
 // What refuses a change; the commands print it as it is.
 export class Refused extends Error {}
 
+// Why a task's branch is the security reviewer's to pass before it merges (the merge queue's rule, a6g merge): the
+// security paths its last round changed, a reviewer who sent it on, or a verdict the security reviewer has recorded on
+// it already. The last two hold for every later round. `passed` is the commit they last passed.
+export interface SecurityDue {
+  files: string[];
+  sent?: boolean;
+  seen?: boolean;
+  passed?: string;
+}
+// Whether a task's branch still waits for the security reviewer: it's theirs, and they haven't passed this commit.
+export const needsSecurity = (t: Pick<Task, "security" | "sha">): boolean => Boolean(t.security) && (!t.security?.passed || t.security.passed !== t.sha);
+// In a few words, for the task's own page.
+export function securityLine(t: Pick<Task, "security" | "sha">): string | null {
+  const due = t.security;
+  if (!due) return null;
+  if (!needsSecurity(t)) return `security reviewer: passed ${due.passed?.slice(0, 9)}`;
+  const why = due.files.length
+    ? `it changes ${due.files.slice(0, 3).join(", ")}${due.files.length > 3 ? ` and ${due.files.length - 3} more` : ""}`
+    : due.sent
+      ? "the reviewer sent it on"
+      : "it has been in its hands";
+  const earlier = due.passed ? ` (it passed ${due.passed.slice(0, 9)}; a plain rebase of that merges with --rebased-from)` : "";
+  return `needs the security reviewer: ${why}${due.files.length && due.sent ? ", and the reviewer sent it on" : ""}${earlier}`;
+}
+
 // Who's acting on a task: a team role, the operator (a person, outside any team), or the factory itself.
 export type Actor = string;
 export const OPERATOR = "operator";
 export const MERGE = "merge-queue";
 export const WATCHDOG = "watchdog";
+// The roles that claim tasks from the graph and hand them in (CLAIMS says which kinds).
+export const CLAIMANTS = ["builder", "tester", "scaffolder"];
 
 // The kinds a member files as findings, which the planner may approve (team.json approval.findings).
 export const FINDINGS: Kind[] = ["bug", "ux", "test", "test-infra"];
@@ -250,6 +282,8 @@ export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !(plan
 
 export type Via =
   "status" | "approve" | "reject" | "research" | "escalate" | "claim" | "release" | "submit" | "changes" | "merge" | "conflict" | "expire" | "settle";
+// The decisions on a proposal (lib/tasks/decide.ts).
+const VERDICTS_VIA: readonly Via[] = ["approve", "reject", "research", "escalate"];
 export interface ApprovalRules {
   mode: "operator" | "thresholds" | "full";
   maxSize: Size;
@@ -270,6 +304,9 @@ export interface MoveContext {
   tip?: string;
   // A merge of a rebase: the commit the review approved, which the task may still name.
   rebasedFrom?: string;
+  // Why a journey isn't proven done yet (its specs, lib/commands/e2e.ts journeyProofFor), or null when it is. Asked of
+  // every move of a journey to done but the operator's; a mover that can't ask (the watchdog) doesn't settle journeys.
+  journeyProof?: (journey: Task, all: Task[]) => string | null;
   now?: number;
 }
 type Check = (task: Task, to: Status, actor: Actor, ctx: MoveContext) => string | null;
@@ -335,11 +372,60 @@ const stakeholdersOperator: Check = (t, _to, _actor, { approval }) => {
     return `work from a stakeholder is the operator's to approve (team.json approval.stakeholders): a6g task escalate ${t.id} --reason "…"`;
   return null;
 };
+// Whether a task's work is finished: done now, or merged once (and reopened since).
+export const finished = (t: Task): boolean => t.status === "done" || t.history.some((e) => e.to === "done" && Boolean(e.sha));
+// The finished tasks under a journey: what was built for it is merged, so its proof is still owed.
+export const finishedUnder = (journey: Task, all: Task[]): Task[] =>
+  journey.kind === "journey" ? all.filter((t) => t.parent === journey.id && finished(t)) : [];
+// So a journey with finished work under it is rejected only by the operator: rejected, its tests stop being asked for.
+const journeyKept: Check = (t, to, _actor, { all }) => {
+  const finished = to === "rejected" ? finishedUnder(t, all) : [];
+  return finished.length
+    ? `journey ${t.id} has finished work under it (${finished
+        .slice(0, 5)
+        .map((c) => `#${c.id}`)
+        .join(
+          ", "
+        )}), so its tests are still owed, and rejecting it is the operator's call: raise it (a6g task status ${t.id} question --reason "…" --recommend "…")`
+    : null;
+};
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;
+// When `t` last came into the status it's in, or its creation.
+export const waitingSince = (t: Task): string => t.history.findLast((e) => e.to === t.status)?.at ?? t.createdAt;
+// The operator's answers on `t` since it last came to wait on them, oldest first.
+export const answersOn = (t: Task): Note[] => {
+  const since = waitingSince(t);
+  return t.notes.filter((n) => n.kind === "answer" && n.at >= since);
+};
+// The design check-in still open, if any: while there is one, the foundation is all that's built (claimRefusal).
+export const designOpen = (all: Task[]): Task | null => all.find((t) => t.kind === "design" && t.status !== "done" && t.status !== "rejected") ?? null;
+// The design check-in goes between the planner and the operator only: raised as a question once the foundation is
+// built, back to the planner (triage) while what the operator asked for is changed, and never proposed, approved or
+// rejected by the team.
+const designAsked: Check = (t, to) =>
+  t.kind === "design" && to !== "question"
+    ? `#${t.id} is the design check-in, which only the operator settles: raise it once the foundation is built and its record written (a6g task status ${t.id} question --reason "…" --recommend "…")`
+    : null;
+// What counts as the operator's answer on the check-in, for the planner that was refused: a note it writes itself
+// from a message it read doesn't.
+const ANSWERED_HOW =
+  "An answer is one they gave in the web app or with a6g task answer, or their reply to its message that the watchdog passed on as recorded; one you noted yourself isn't, so ask them to answer one of those ways";
+const designBack: Check = (t) =>
+  t.kind !== "design"
+    ? `task ${t.id} isn't the design check-in; a question goes on to proposed, approved, rejected or blocked`
+    : answersOn(t).length
+      ? null
+      : `the operator hasn't answered #${t.id} on the task yet: it waits with them until they do. ${ANSWERED_HOW}`;
 // Code isn't done by anyone's say-so. Research is, when the planner says so; a journey, once its tasks are and the planner
-// has verified it.
+// has verified it; the design check-in, once the operator has answered it (agreed: the planner reads the answer).
 const plannerDone: Check = (t, _to, _actor, { all }) => {
   if (t.kind === "research") return null;
+  if (t.kind === "design")
+    return t.status === "question" && answersOn(t).length
+      ? null
+      : t.status === "question"
+        ? `the design check-in is done on the operator's word, and they haven't answered #${t.id} on the task yet. ${ANSWERED_HOW}`
+        : `the design check-in is done on the operator's word: raise it (a6g task status ${t.id} question …), and close it when their answer agrees`;
   if (t.kind !== "journey") return codeDone(t);
   return journeyDue(t, all) ? null : `journey ${t.id} is done once it's verified: its tasks done, then its audit, end-to-end spec and polish`;
 };
@@ -361,9 +447,11 @@ const sameBranch: Check = (t, _to, _actor, { branch }) =>
 const merged: Check = (t, _to, _actor, { branch, tip, rebasedFrom }) =>
   t.kind === "journey"
     ? `#${t.id} is a journey, done once the planner has verified it`
-    : tip && t.branch === branch && t.sha && t.sha !== tip && t.sha !== rebasedFrom
-      ? `#${t.id} was submitted at ${t.sha.slice(0, 9)}, and ${tip.slice(0, 9)} merged`
-      : null;
+    : t.kind === "design"
+      ? `#${t.id} is the design check-in, done on the operator's word`
+      : tip && t.branch === branch && t.sha && t.sha !== tip && t.sha !== rebasedFrom
+        ? `#${t.id} was submitted at ${t.sha.slice(0, 9)}, and ${tip.slice(0, 9)} merged`
+        : null;
 const leaseOut: Check = (t, _to, _actor, { now = Date.now() }) =>
   t.claim && Date.parse(t.claim.until) <= now ? null : `task ${t.id}'s claim hasn't run out`;
 
@@ -388,7 +476,8 @@ const EVERY: readonly Status[] = STATUSES;
 const OPERATOR_FROM: Status[] = ["proposed", "researching", "question", "triage"];
 
 const RULES: Rule[] = [
-  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(wasApproved, screened) })),
+  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(designAsked, wasApproved, screened, journeyKept) })),
+  { via: "status", by: ["planner"], from: ["question"], to: ["triage"], check: designBack },
   { via: "status", by: ["planner"], from: ["triage", "approved", "researching", "proposed", "question", "blocked"], to: ["done"], check: plannerDone },
   // The operator makes any move but one: a task is building only when a member claims it, so it has a claim to expire.
   { via: "status", by: [OPERATOR], from: EVERY, to: EVERY.filter((s) => s !== "building") },
@@ -409,16 +498,16 @@ const RULES: Rule[] = [
   { via: "escalate", by: ["approver"], from: ["proposed"], to: ["question"], check: first(notJourney, approverActs) },
   { via: "escalate", by: [OPERATOR], from: OPERATOR_FROM, to: ["question"] },
 
-  { via: "claim", by: ["builder", "tester"], from: ["approved"], to: ["building"], check: (t, _to, actor, { all }) => claimRefusal(t, actor, all) },
+  { via: "claim", by: CLAIMANTS, from: ["approved"], to: ["building"], check: (t, _to, actor, { all }) => claimRefusal(t, actor, all) },
   {
     via: "release",
-    by: ["builder", "tester", "planner", OPERATOR],
+    by: [...CLAIMANTS, "planner", OPERATOR],
     from: ["building"],
     to: ["approved", "blocked"],
     check: holderOrPlanner,
   },
-  { via: "submit", by: ["builder", "tester"], from: ["building"], to: ["review"], check: holder },
-  { via: "changes", by: ["reviewer", OPERATOR], from: ["review"], to: ["approved", "blocked"], check: sameBranch },
+  { via: "submit", by: CLAIMANTS, from: ["building"], to: ["review"], check: holder },
+  { via: "changes", by: ["reviewer", "security-reviewer", OPERATOR], from: ["review"], to: ["approved", "blocked"], check: sameBranch },
   { via: "merge", by: [MERGE], from: ["approved", "blocked", "question", "review"], to: ["done"], check: merged },
   // A branch that conflicts goes back to be claimed again and rebased.
   { via: "conflict", by: [MERGE], from: ["review"], to: ["approved"], check: sameBranch },
@@ -433,9 +522,9 @@ const DOES: Record<Via, string> = {
   reject: "reject proposals",
   research: "send proposals back for research",
   escalate: "escalate proposals",
-  claim: "claim tasks; builders and testers do",
+  claim: "claim tasks; builders, testers and the scaffolder do",
   release: "release tasks",
-  submit: "submit tasks; builders and testers submit what they built",
+  submit: "submit tasks; builders, testers and the scaffolder submit what they built",
   changes: "ask for changes",
   merge: "merge",
   conflict: "send a conflicting branch back",
@@ -471,7 +560,18 @@ function notFrom(t: Task, to: Status, via: Via): string {
 // Why `actor` can't move `task` to `to` through `via`, or null when it can.
 export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx: MoveContext): string | null {
   if (task.status === to) return `task ${task.id} is already ${to}`;
-  if (to === "building" && via !== "claim") return "a task is building only when a builder or tester claims it (a6g task claim)";
+  if (to === "building" && via !== "claim") return "a task is building only when a member claims it (a6g task claim)";
+  // The design check-in takes no verdict from anyone. The operator answers it in words: a Reject beside it would read
+  // as "not this design", and a rejected check-in is one the operator wants none of, so features would start.
+  if (task.kind === "design" && VERDICTS_VIA.includes(via)) {
+    if (actor !== OPERATOR) return `#${task.id} is the design check-in: the operator settles it, once the planner has raised it`;
+    if (task.status === "done" || task.status === "rejected") return `#${task.id} is the design check-in, and it's ${task.status} already`;
+    const how =
+      task.status === "question"
+        ? `a6g task answer ${task.id} "…" (agreed, or what to change)`
+        : `the planner raises it once the foundation is built (it's ${task.status} now)`;
+    return `#${task.id} is the design check-in, which you answer rather than approve or reject: ${how}. To end it yourself: a6g task status ${task.id} done (or rejected, to hold none)`;
+  }
   const theirs = RULES.filter((rule) => rule.via === via && rule.by.includes(actor));
   if (!theirs.length)
     return via === "status"
@@ -482,7 +582,7 @@ export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx:
   let why: string | null = null;
   for (const rule of fits) {
     const refusal = rule.check?.(task, to, actor, ctx) ?? null;
-    if (refusal === null) return null;
+    if (refusal === null) return to === "done" && task.kind === "journey" && actor !== OPERATOR ? (ctx.journeyProof?.(task, ctx.all) ?? null) : null;
     why ??= refusal;
   }
   return why;
@@ -547,11 +647,19 @@ export function waitOutcome(t: Task, all: Task[]): { to: Status; why: string } |
   return t.approval ? { to: "approved", why: `${ids} done: back to work` } : { to: "proposed", why: `${ids} done: back to the planner, never approved` };
 }
 
-// Which kinds each role builds.
+// Which kinds each role builds, its own first: a plain claim takes the first of those before the rest. The scaffolder
+// owns the harness (test-infra) and the repository's structure (scaffold), and writes specs where the team has no
+// tester; a tester keeps test-infra where the team has no scaffolder. Builders claim neither, so nobody writes the
+// only spec of a journey they built.
 export const CLAIMS: Record<string, Kind[]> = {
   builder: ["feature", "bug", "ux", "chore"],
   tester: ["test", "test-infra"],
+  scaffolder: ["scaffold", "test-infra", "test"],
 };
+const OWN: Record<string, Kind[]> = { tester: ["test"], scaffolder: ["scaffold", "test-infra"] };
+// What's built while the design check-in is open: the foundation itself (the skeleton, the harness, and what the
+// operator asks to have changed in them).
+export const FOUNDATION: Kind[] = ["scaffold", "test-infra"];
 
 const SEVERITY_ORDER: Record<string, number> = { blocker: 0, major: 1, minor: 3 };
 // Claim order: blockers, then majors, then the rest by priority (unscored work after scored) with minor findings last
@@ -581,12 +689,15 @@ export function conflictOf(task: Task, building: Task[]): Task | null {
 // (controls.ts), which lets only the work it finishes be claimed.
 export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold | null = null): string | null {
   const kinds = CLAIMS[role];
-  if (!kinds) return `the ${role} doesn't claim tasks; builders and testers do`;
+  if (!kinds) return `the ${role} doesn't claim tasks; builders, testers and the scaffolder do`;
   if (task.status !== "approved") return `task ${task.id} is ${task.status}, not approved`;
   if (!kinds.includes(task.kind)) return `task ${task.id} is ${task.kind} work, which the ${role} doesn't take (it takes ${kinds.join(", ")})`;
   const byId = new Map(all.map((t) => [t.id, t]));
   const waiting = task.after.filter((id) => byId.get(id)?.status !== "done");
   if (waiting.length) return `task ${task.id} waits for ${waiting.map((id) => `${id} (${byId.get(id)?.status ?? "missing"})`).join(", ")}`;
+  const design = FOUNDATION.includes(task.kind) ? null : designOpen(all);
+  if (design)
+    return `task ${task.id} waits for the operator to agree the design (#${design.id}, ${design.status}): until then only ${FOUNDATION.join(" and ")} work is claimed`;
   const conflict = conflictOf(
     task,
     all.filter((t) => t.status === "building")
@@ -597,10 +708,16 @@ export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold |
 
 // The task `role` should claim next, of those it may: the first in claim order.
 export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
-  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null).sort(claimOrder)[0] ?? null;
+  const own = OWN[role] ?? CLAIMS[role] ?? [];
+  const first = (t: Task): number => (own.includes(t.kind) ? 0 : 1);
+  return (
+    all
+      .filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null)
+      .sort((a, b) => first(a) - first(b) || claimOrder(a, b))[0] ?? null
+  );
 }
 
-// The branch name a claimant uses, matching its role's pattern (a6g/b142-resume-a-recording, a6g/t-142-…).
+// The branch name a claimant uses, matching its role's pattern (a6g/b142-resume-a-recording, a6g/t-142-…, a6g/s142-…).
 export function branchFor(task: Task, role: string, prefix: string): string {
   const slug =
     task.title
@@ -609,7 +726,7 @@ export function branchFor(task: Task, role: string, prefix: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40)
       .replace(/-+$/, "") || "task";
-  return role === "tester" ? `${prefix}/t-${task.id}-${slug}` : `${prefix}/b${task.id}-${slug}`;
+  return role === "tester" ? `${prefix}/t-${task.id}-${slug}` : `${prefix}/${role === "scaffolder" ? "s" : "b"}${task.id}-${slug}`;
 }
 
 // The ticket a branch's name gives: the number in the first part after the prefix (a6g/b12-x/v2-y closes 12, and a

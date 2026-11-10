@@ -21,19 +21,37 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { join, posix } from "node:path";
 import { FACTORY_PATH, factoryWrite, laneAllows, roleForBranch, type Team } from "../config.ts";
+import { HARNESS_FILE, readHarness } from "../harness.ts";
 import { acquire, TIMED_OUT, withLock } from "../lock.ts";
 import { entryOf, FACTORY_ROOT, readRegistry, stateDir, workDir } from "../paths.ts";
+import { leakRefusal, leaksInRange } from "../secrets.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { machineName } from "../machine.ts";
-import { isTest } from "../blast.ts";
+import { isTest, securityFiles } from "../blast.ts";
 import { branchRef, integrationDiverged, isLead, pushIntegration } from "../tasks/machines.ts";
-import { ticketOf } from "../tasks/model.ts";
+import { ticketOf, type Task } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
+import { clearQueued, markQueued, pendingDir, verifyAfterMerge } from "../verify.ts";
+import { journeyProofFor } from "./e2e.ts";
+import {
+  allowed,
+  CODE,
+  fewerTests,
+  holdsJourneyTest,
+  importsRunner,
+  listSuite,
+  type Listing,
+  manifestNarrowing,
+  narrowingAdded,
+  SUITE_MENTIONS,
+  testLaneProblems,
+} from "./harness.ts";
 import { pruneWorktrees } from "./watchdog.ts";
 
-// What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/.
+// What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/ (the security
+// reviewer's, in state/security/).
 export interface MergeRecord {
   branch: string;
   result: string;
@@ -48,6 +66,8 @@ export interface Verdict {
   sha: string;
   // How much the reviewer judged the change could break (review approvals since 0.4.0).
   risk?: string;
+  // The reviewer sent the branch on to the security reviewer (a6g verdict review … approve --security).
+  security?: boolean;
   note: string;
   by: string;
   at: string;
@@ -63,6 +83,33 @@ const waitMin = (minutes: number): number => Number(process.env.A6G_MERGE_WAIT_M
 // Diffs and listings can be large; past this, git's output is cut off, and the merge is refused rather than checked
 // on part of it.
 const MAX_BUFFER = 256 * 1024 * 1024;
+
+// The task a scaffolder's branch is named for, or why the branch can't merge (teams with a task graph). What the branch
+// may change comes from its task's kind, so it has to name a task of its own that's approved and still open: named
+// for none, or for one that's finished, it would take the widest lane there is.
+const OPEN: readonly string[] = ["approved", "building", "review", "blocked", "question"];
+async function ownTask(team: Team, run: string, home: string, branch: string): Promise<Task | string> {
+  const id = ticketOf(branch, team.branchPrefix);
+  if (!id)
+    return `${branch} isn't named for a task (a6g task claim names a scaffolder's branch, ${team.branchPrefix}/s<task>-…), and what a scaffolder's branch may change comes from its task's kind`;
+  let task: Task | null;
+  try {
+    const store = await openTeamStore(team, run, home);
+    try {
+      task = await store.tasks.get(id);
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    return `the team's tasks couldn't be read (${(error as Error).message.split("\n")[0] ?? ""}), so what ${branch} may change isn't known; nothing was merged, queue it again`;
+  }
+  if (!task) return `${branch} is named for task ${id}, and there's no such task: what a scaffolder's branch may change comes from its task's kind`;
+  if (!OPEN.includes(task.status))
+    return `${branch} is named for task ${id}, which is ${task.status}: a scaffolder's branch merges for its own approved, open task`;
+  if (task.branch && task.branch !== branch)
+    return `${branch} is named for task ${id}, which was submitted as ${task.branch}: a scaffolder's branch merges for its own task`;
+  return task;
+}
 
 // The paths in a diff that a role may not change: outside its lane, the factory's own files, or the paths only the
 // team's scripts write (team.json protect).
@@ -135,7 +182,7 @@ async function pushWaiting(): Promise<number> {
   if (waiting.length && team.board.type === "tasks") {
     const store = await openTeamStore(team, run, home);
     try {
-      for (const merge of waiting) closed.push(...(await closeMerged(store, merge.ids, merge)).closed);
+      for (const merge of waiting) closed.push(...(await closeMerged(store, merge.ids, { ...merge, journeyProof: journeyProofFor(home, team) })).closed);
     } finally {
       await store.close();
     }
@@ -145,7 +192,18 @@ async function pushWaiting(): Promise<number> {
   return 0;
 }
 
+// A queued run clears its own queue mark however it ends (refused, timed out, thrown), so the check after merges never
+// waits for a merge that's over (lib/verify.ts).
 export async function run(argv: string[]): Promise<number> {
+  const mark = process.env.A6G_MERGE_QUEUED ? process.env.A6G_MERGE_MARK : undefined;
+  try {
+    return await merge(argv);
+  } finally {
+    if (mark) clearQueued(mark);
+  }
+}
+
+async function merge(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["queue", "light", "no-journeys", "no-after", "skip-after", "push"], repeat: ["closes"] });
   const branch = positional[0];
   if (!branch && options["push"] === true) return pushWaiting();
@@ -200,16 +258,32 @@ export async function run(argv: string[]): Promise<number> {
   if (queue !== undefined && !["false", "0", "no"].includes(String(queue)) && !process.env.A6G_MERGE_QUEUED) {
     const rest = argv.filter((arg) => !/^--queue(=.*)?$/.test(arg));
     const log = openSync(join(state, "merges", `${safe}.log`), "w");
-    spawn(process.execPath, [entryOf(FACTORY_ROOT), "merge", ...rest], {
+    const mark = join(pendingDir(state), `${safe}.json`);
+    const child = spawn(process.execPath, [entryOf(FACTORY_ROOT), "merge", ...rest], {
       cwd: home,
       detached: true,
       stdio: ["ignore", log, log],
-      env: { ...process.env, A6G_MERGE_QUEUED: "1" },
-    }).unref();
+      env: { ...process.env, A6G_MERGE_QUEUED: "1", A6G_MERGE_MARK: mark },
+    });
+    // Marked as queued until it finishes, so the check after merges waits for the last of a burst (lib/verify.ts).
+    if (child.pid) markQueued(mark, child.pid);
+    child.unref();
     closeSync(log);
     console.info(`merge: ${branch} queued. The result comes as a message and in your next wake's context; the log is .a6g/run/state/merges/${safe}.log.`);
     return 0;
   }
+
+  // The check after merges (lib/verify.ts): a queued merge, however it ends, runs one that's due, since a merge before
+  // it may have left its check to this one; and a merge that landed marks one due.
+  const check = async (merged: boolean): Promise<void> => {
+    if (!process.env.A6G_MERGE_QUEUED || !runDir) return;
+    try {
+      const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
+      await verifyAfterMerge(home, team, runDir, branch, { merged, wake: (text) => planner && threadSend(planner, text) });
+    } catch (error) {
+      console.error(`merge: the check after merges failed: ${(error as Error).message}`);
+    }
+  };
 
   const release = await acquire(home, "merge", {
     slots: 1,
@@ -221,6 +295,7 @@ export async function run(argv: string[]): Promise<number> {
     record("timed-out", `another merge held the merge lock for ${waitMin(120)} min; nothing was merged, queue it again`);
     console.error(`merge: another merge held the merge lock for ${waitMin(120)} min; nothing was merged`);
     wake();
+    await check(false);
     return TIMED_OUT;
   }
   let code: number;
@@ -255,7 +330,8 @@ export async function run(argv: string[]): Promise<number> {
       slots: 1,
       waitMin: waitMin(120),
       cwd: home,
-      env: { BEFORE: before ?? "", AFTER: after, A6G_LIGHT: light ? "1" : "0", JOURNEYS: light ? "0" : "1" },
+      // A6G_APP_LOCK: the command holds the app lock, so the checks it runs (a6g pages, a6g e2e) don't wait on it.
+      env: { BEFORE: before ?? "", AFTER: after, A6G_LIGHT: light ? "1" : "0", JOURNEYS: light ? "0" : "1", A6G_APP_LOCK: "held" },
       stdio: ["ignore", "pipe", "pipe"],
       onOutput: (chunk) => {
         process.stdout.write(chunk);
@@ -285,6 +361,10 @@ export async function run(argv: string[]): Promise<number> {
     } catch (error) {
       console.error(`merge: pruning finished worktrees failed: ${(error as Error).message}`);
     }
+    // The pages and the suite on the merged result. A light merge, or one that didn't land, marks no check due, and
+    // still runs one an earlier merge left. Whether the app came back up after an after-merge command that failed is
+    // the check's to find: it asks the app first.
+    await check(code === 0 && !light);
   }
   return code;
 }
@@ -330,6 +410,23 @@ async function mergeLocked({
     return { code };
   };
   const integration = team.branch;
+  // The branch's task goes back to be claimed and rebuilt (a conflict, a secret), on whichever machine claims it: the
+  // branch is on the remote. What's said of it, to end the refusal.
+  const sentBack = async (rebuild?: string): Promise<string> => {
+    const id = ticketOf(branch, team.branchPrefix);
+    if (team.board.type !== "tasks" || !id) return "";
+    try {
+      const store = await openTeamStore(team, run, home);
+      try {
+        const why = await sendBackToRebase(store, id, { branch, integration, ...(rebuild ? { rebuild } : {}) });
+        return why ? ` (task ${id} wasn't sent back: ${why})` : `; task ${id} went back to be claimed and ${rebuild ? "rebuilt" : "rebased"}`;
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      return ` (task ${id} couldn't be sent back: ${(error as Error).message})`;
+    }
+  };
   const scratch = join(workDir(home), "merge");
   const cleanup = () => {
     if (g("worktree", "remove", "--force", scratch).status !== 0) rmSync(scratch, { recursive: true, force: true });
@@ -359,6 +456,12 @@ async function mergeLocked({
         .map(([r, l]) => `${r}: ${l.branch}`)
         .join(", ")})`
     );
+  // Secrets don't merge (lib/secrets.ts): read in every commit the branch would bring, before anything else is.
+  const leaks = leaksInRange(raw, `${integration}..${tip}`);
+  if (leaks.length) {
+    const why = leakRefusal(branch, leaks);
+    return fail(2, "refused", `${why}${await sentBack(why)}`);
+  }
   // --no-renames lists both sides of a rename, so a move can't hide a deletion outside the lane. -z gives each path
   // as it is: git quotes unusual ones otherwise, and a quoted path matches no lane rule.
   const paths = (...args: string[]): string[] =>
@@ -378,48 +481,144 @@ async function mergeLocked({
     if (problem) return fail(2, "refused", `${branch} (${role}): ${problem}`);
   }
 
-  let required = team.review.required.includes(role);
+  // The harness (lib/harness.ts, ./harness.ts). A branch's manifest must load.
+  const touchesHarness = changed.includes(HARNESS_FILE);
+  if (touchesHarness) {
+    const problems = readHarness(home, tip).problems;
+    if (problems.length) return fail(2, "refused", `${branch}'s ${HARNESS_FILE} doesn't load: ${problems.slice(0, 3).join("; ")}`);
+  }
+  const diff = raw("diff", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", `${integration}...${tip}`);
+  // Where the branch started: what it changed is judged against that, not against what merged since.
+  const base = out("merge-base", integration, tip);
+  const show = (ref: string, path: string): string | null => {
+    const blob = g("cat-file", "blob", `${ref}:${path}`);
+    return blob.error || blob.status !== 0 ? null : blob.stdout;
+  };
+
+  // A scaffolder's test and test-infra work stays in test and harness files. Which kind of work a branch is comes from
+  // its own task, so on a team with a task graph it has to name one.
+  if (role === "scaffolder" && team.board.type === "tasks") {
+    const task = await ownTask(team, run, home, branch);
+    if (typeof task === "string") return fail(2, "refused", task);
+    const outside =
+      task.kind === "scaffold"
+        ? []
+        : testLaneProblems(
+            changed,
+            team.harness.lane.map((rule) => new RegExp(rule)),
+            (path) => ({ before: show(base, path), after: show(tip, path) })
+          );
+    if (outside.length)
+      return fail(
+        2,
+        "refused",
+        `${branch} is ${task.kind} work, which changes test and harness files only, and it changes ${outside.slice(0, 5).join(" ")}: a product change is a builder's task`
+      );
+  }
+
+  // The changed files that could be the suite's, by what they mention where the branch started, on the integration
+  // branch or on the branch: git finds them, and only those are read.
+  const mentions = (ref: string): string[] => {
+    const found = g("grep", "-l", "-z", "-I", "-F", ...SUITE_MENTIONS.flatMap((text) => ["-e", text]), ref, "--");
+    // Exit 1: no file mentions them.
+    if (found.error || (found.status !== 0 && found.status !== 1))
+      throw new GitFailed(`git grep in ${ref} failed: ${(found.error?.message ?? found.stderr ?? "").trim().split("\n")[0] ?? ""}`.trim());
+    return found.stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((entry) => entry.slice(ref.length + 1));
+  };
+  const mentioned = new Set([base, integration, tip].flatMap(mentions));
+  const suiteFiles = changed
+    .filter((path) => CODE.test(path) && mentioned.has(path))
+    .map((path) => ({ path, base: show(base, path), mid: show(integration, path), tip: show(tip, path) }));
+
+  // A builder's branch changes no file that holds a journey's test: nobody makes their own proof. On a team with
+  // someone else to write them, that is.
+  const proofIsOthers = role === "builder" && Boolean(team.roles["tester"] || team.roles["scaffolder"]);
+  const ownProof = (held: string[]): string =>
+    `${branch} (a builder's) changes ${held.slice(0, 5).join(" ")}, where a journey's tests are: a journey's proof comes from a tester or the scaffolder, not from who built it. Take those changes out of the branch, and ask the planner for a test task for them`;
+  if (proofIsOthers) {
+    const held = suiteFiles.filter((file) => [file.base, file.mid, file.tip].some((text) => holdsJourneyTest(file.path, text)));
+    if (held.length) return fail(2, "refused", ownProof(held.map((file) => file.path)));
+  }
+
+  // Checking less is the operator's call (Article 5): only once the team has a suite to narrow. Here, what the text of
+  // the suite's files says (those that import Playwright's test runner, and its configuration); below, in the scratch
+  // worktree, what the suite's own listing says.
+  const suiteBefore = readHarness(home, integration).harness?.e2e;
+  const allowance = allowed(state, branch, tip);
+  const checksLess = (found: string[]): string =>
+    `${branch} checks less than ${integration}: ${found.slice(0, 5).join("; ")}. That's the operator's call: ask them, and they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`;
+  const configs = [suiteBefore?.config, readHarness(home, tip).harness?.e2e?.config];
+  const suiteTexts = !suiteBefore
+    ? []
+    : [
+        ...suiteFiles
+          .filter((file) => importsRunner(file.base) || importsRunner(file.tip))
+          .map((file) => ({ path: file.path, before: file.base, after: file.tip })),
+        ...changed
+          .filter(
+            (path) => configs.includes(path) && !suiteFiles.some((file) => file.path === path && (importsRunner(file.base) || importsRunner(file.tip)))
+          )
+          .map((path) => ({ path, before: show(base, path), after: show(tip, path) })),
+      ];
+  const narrows = [...(touchesHarness ? manifestNarrowing(home, base, tip) : []), ...narrowingAdded(suiteTexts)];
+  if (narrows.length && !allowance) return fail(2, "refused", checksLess(narrows));
+  // What the suite's listings say of a branch: the tests that run before it (`was`) and with it merged (`now`).
+  const measured = (was: Listing, now: Listing | string): string | null => {
+    if (typeof now === "string")
+      return allowance
+        ? null
+        : `${branch} breaks the suite's listing (${now.slice(0, 300)}), so its tests can't be counted: fix that. If the suite is meant to go, that's the operator's call: they allow this commit with a6g harness allow ${branch} --sha ${tip.slice(0, 9)} --why "…"`;
+    // A tag can come from a helper or a variable; the listing names the files whichever way.
+    const held = proofIsOthers ? changed.filter((path) => was.journeyFiles.includes(path) || now.journeyFiles.includes(path)) : [];
+    if (held.length) return ownProof(held);
+    if (allowance) return null;
+    const fewer = fewerTests(was, now);
+    if (fewer.length) return checksLess(fewer);
+    // The suite's files that the text above didn't find (a spec that takes `test` from the suite's own fixtures).
+    const more = changed.filter((path) => (was.files.includes(path) || now.files.includes(path)) && !suiteTexts.some((file) => file.path === path));
+    const added = more.length ? narrowingAdded([...suiteTexts, ...more.map((path) => ({ path, before: show(base, path), after: show(tip, path) }))]) : [];
+    return added.length ? checksLess(added) : null;
+  };
+
+  // Every scaffolder branch, and any that changes the manifest, is reviewed, whatever review.required says.
+  let required = team.review.required.includes(role) || role === "scaffolder" || touchesHarness;
   const removedPattern = team.review.removedPattern;
   if (!required && removedPattern) {
     const pattern = new RegExp(removedPattern);
-    required = removedLines(raw("diff", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", `${integration}...${tip}`)).some((line) =>
-      pattern.test(line)
-    );
+    required = removedLines(diff).some((line) => pattern.test(line));
   }
+  // A verdict on an earlier commit holds for the tip when the tip is only a rebase of it (--rebased-from <that commit>).
+  // What refuses that, in the verdict's own words, or null.
+  const notRebaseOf = (judged: string, say: { gone: string; moved: string; merges: string; changed: string }): string | null => {
+    if (rebasedFrom && g("cat-file", "-e", `${judged}^{commit}`).status !== 0) return say.gone;
+    if (!rebasedFrom || commit(rebasedFrom) !== judged) return say.moved;
+    // range-diff skips merge commits, so a "rebase" that merged the integration branch in could carry new code in
+    // the merge itself. A rebase has none.
+    const oldRange = `${out("merge-base", judged, integration)}..${judged}`;
+    const newRange = `${out("merge-base", tip, integration)}..${tip}`;
+    if (out("rev-list", "--merges", oldRange) || out("rev-list", "--merges", newRange)) return say.merges;
+    // Every commit in both ranges paired with one unchanged ("=") on the other side, and nothing else.
+    const commits = Number(out("rev-list", "--count", oldRange));
+    const lines = out("range-diff", "--no-color", oldRange, newRange).split("\n").filter(Boolean);
+    const same = lines.filter((line) => /^\s*\d+:\s+[0-9a-f]+\s+=\s+\d+:\s+[0-9a-f]+(\s|$)/.test(line)).length;
+    return !commits || Number(out("rev-list", "--count", newRange)) !== commits || lines.length !== commits || same !== commits ? say.changed : null;
+  };
   if (required) {
     const review = readJson<Verdict>(join(state, "reviews", `${safe}.json`));
     if (!review) return fail(2, "refused", `${branch} has no review; start a reviewer (it records one with a6g verdict review)`);
     if (review.verdict !== "approve") return fail(2, "refused", `the review of ${branch} asks for changes: ${review.note}`);
     if (review.sha !== tip) {
       const approved = review.sha.slice(0, 9);
-      if (rebasedFrom && g("cat-file", "-e", `${review.sha}^{commit}`).status !== 0)
-        return fail(
-          2,
-          "refused",
-          `the approved commit ${approved} is gone from the repository, so the rebase can't be compared; have ${branch} reviewed again`
-        );
-      if (!rebasedFrom || commit(rebasedFrom) !== review.sha)
-        return fail(
-          2,
-          "refused",
-          `the approval is for ${approved} but ${branch} is at ${tip.slice(0, 9)}: have it reviewed again, or pass --rebased-from ${approved} if it's only a rebase`
-        );
-      // range-diff skips merge commits, so a "rebase" that merged the integration branch in could carry new code in
-      // the merge itself. A rebase has none.
-      const oldRange = `${out("merge-base", review.sha, integration)}..${review.sha}`;
-      const newRange = `${out("merge-base", tip, integration)}..${tip}`;
-      if (out("rev-list", "--merges", oldRange) || out("rev-list", "--merges", newRange))
-        return fail(
-          2,
-          "refused",
-          `${branch} has merge commits, so it isn't a plain rebase of ${approved}; rebase it without merges, or have it reviewed again`
-        );
-      // Every commit in both ranges paired with one unchanged ("=") on the other side, and nothing else.
-      const commits = Number(out("rev-list", "--count", oldRange));
-      const lines = out("range-diff", "--no-color", oldRange, newRange).split("\n").filter(Boolean);
-      const same = lines.filter((line) => /^\s*\d+:\s+[0-9a-f]+\s+=\s+\d+:\s+[0-9a-f]+(\s|$)/.test(line)).length;
-      if (!commits || Number(out("rev-list", "--count", newRange)) !== commits || lines.length !== commits || same !== commits)
-        return fail(2, "refused", `${branch} isn't only a rebase of the approved ${approved} (git range-diff shows changes); have it reviewed again`);
+      const problem = notRebaseOf(review.sha, {
+        gone: `the approved commit ${approved} is gone from the repository, so the rebase can't be compared; have ${branch} reviewed again`,
+        moved: `the approval is for ${approved} but ${branch} is at ${tip.slice(0, 9)}: have it reviewed again, or pass --rebased-from ${approved} if it's only a rebase`,
+        merges: `${branch} has merge commits, so it isn't a plain rebase of ${approved}; rebase it without merges, or have it reviewed again`,
+        changed: `${branch} isn't only a rebase of the approved ${approved} (git range-diff shows changes); have it reviewed again`,
+      });
+      if (problem) return fail(2, "refused", problem);
     }
     // A change the reviewer judged high-risk merges with its tests: they come in the same branch, not after it.
     // Tests added or changed, that is: deleting one isn't testing the change.
@@ -431,10 +630,42 @@ async function mergeLocked({
       );
   }
 
+  // On a team with a security reviewer, three kinds of branch merge only once they've passed its tip: one that changes
+  // a security path (team.json security), one a reviewer sent on (a6g verdict review … approve --security), and one
+  // they've judged before, so a branch sent back with issues can't merge on a later round that nobody sends on.
+  if (team.roles["security-reviewer"]) {
+    const security = readJson<Verdict>(join(state, "security", `${safe}.json`));
+    const onPaths = securityFiles(team.security, changed);
+    const sentOn = readJson<Verdict>(join(state, "reviews", `${safe}.json`))?.security === true;
+    if (!security && (onPaths.length || sentOn)) {
+      const why = onPaths.length
+        ? `it changes ${onPaths.slice(0, 3).join(", ")}${onPaths.length > 3 ? ` and ${onPaths.length - 3} more` : ""}`
+        : "its reviewer sent it on";
+      return fail(2, "refused", `${branch} has no security review, and ${why}; start a security reviewer (it records one with a6g verdict security)`);
+    }
+    if (security && security.verdict !== "pass")
+      return fail(2, "refused", `the security review of ${branch} found issues: ${security.note}; it merges once the security reviewer passes it`);
+    if (security && security.sha !== tip) {
+      const passed = security.sha.slice(0, 9);
+      const again = "have the security reviewer pass it again";
+      const problem = notRebaseOf(security.sha, {
+        gone: `the commit the security reviewer passed, ${passed}, is gone from the repository, so the rebase can't be compared; ${again}`,
+        moved: `the security review passed ${passed} but ${branch} is at ${tip.slice(0, 9)}: ${again}, or pass --rebased-from ${passed} if it's only a rebase`,
+        merges: `${branch} has merge commits, so it isn't a plain rebase of ${passed}; rebase it without merges, or ${again}`,
+        changed: `${branch} isn't only a rebase of ${passed}, which the security reviewer passed (git range-diff shows changes); ${again}`,
+      });
+      if (problem) return fail(2, "refused", problem);
+    }
+  }
+
   const before = out("rev-parse", integration);
   cleanup();
   if (g("worktree", "add", "--detach", "--quiet", scratch, integration).status !== 0) return fail(2, "refused", "couldn't make the scratch worktree");
   try {
+    // The suite's own count of its tests, in the same worktree before the merge and with it.
+    const listWork = join(workDir(home), "merge-list");
+    const listMerged = (config: string): Promise<Listing | string> => listSuite(scratch, readHarness(scratch).harness?.e2e?.config ?? config, listWork);
+    let was = suiteBefore ? await listSuite(scratch, suiteBefore.config, listWork) : null;
     // The commit that was checked and approved, not whatever the branch points at by now.
     const merged = spawnSync("git", ["merge", "--no-ff", "--no-edit", "-m", `Merge ${branch} into ${integration}`, tip], {
       cwd: scratch,
@@ -442,22 +673,22 @@ async function mergeLocked({
     });
     if (merged.status !== 0) {
       spawnSync("git", ["merge", "--abort"], { cwd: scratch });
-      // Its task goes back to be claimed and rebased, on whichever machine claims it (the branch is on the remote).
-      let back = "";
-      const id = ticketOf(branch, team.branchPrefix);
-      if (team.board.type === "tasks" && id)
-        try {
-          const store = await openTeamStore(team, run, home);
-          try {
-            const why = await sendBackToRebase(store, id, { branch, integration });
-            back = why ? ` (task ${id} wasn't sent back: ${why})` : `; task ${id} went back to be claimed and rebased`;
-          } finally {
-            await store.close();
-          }
-        } catch (error) {
-          back = ` (task ${id} couldn't be sent back: ${(error as Error).message})`;
-        }
-      return fail(3, "conflict", `${branch} conflicts with ${integration}; rebase it onto ${integration}${back}`);
+      return fail(3, "conflict", `${branch} conflicts with ${integration}; rebase it onto ${integration}${await sentBack()}`);
+    }
+    // Two changes to the manifest can merge into one that doesn't load, and with no manifest nothing here checks.
+    const mergedProblems = touchesHarness ? readHarness(scratch).problems : [];
+    if (mergedProblems.length)
+      return fail(
+        3,
+        "conflict",
+        `${HARNESS_FILE} doesn't load once ${branch} is merged into ${integration} (${mergedProblems.slice(0, 3).join("; ")}); rebase it onto ${integration}`
+      );
+    // Where the suite lists as git has it, the branch is measured before the gate's time is spent.
+    let now = suiteBefore && was && typeof was !== "string" ? await listMerged(suiteBefore.config) : null;
+    const counted = Boolean(was && now && typeof was !== "string" && typeof now !== "string");
+    if (was && now && typeof was !== "string" && typeof now !== "string") {
+      const refusal = measured(was, now);
+      if (refusal) return fail(2, "refused", refusal);
     }
     if (team.gate.full) {
       const gateLog = join(state, "merges", `${safe}.gate.log`);
@@ -494,6 +725,23 @@ async function mergeLocked({
       }
     }
     const result = out("-C", scratch, "rev-parse", "HEAD");
+    // Where it didn't, the gate may have set up what the suite needs (packages installed per folder, generated files):
+    // the same two listings in the worktree as the gate left it, the integration branch's files last.
+    if (suiteBefore && !counted) {
+      if (team.gate.full) {
+        now = await listMerged(suiteBefore.config);
+        const back = spawnSync("git", ["checkout", "--force", "--detach", "--quiet", before], { cwd: scratch });
+        was = back.status === 0 ? await listSuite(scratch, suiteBefore.config, listWork) : "the scratch worktree couldn't go back to it";
+      }
+      if (!was || typeof was === "string")
+        console.error(
+          `merge: the suite couldn't be listed at ${integration} (${(was ?? "").slice(0, 200)}), so ${branch}'s tests weren't counted against it`
+        );
+      else {
+        const refusal = measured(was, now ?? "it wasn't listed");
+        if (refusal) return fail(2, "refused", refusal);
+      }
+    }
 
     // The gate took a while: the team's checkout must still be on the integration branch and clean.
     if (out("rev-parse", "--abbrev-ref", "HEAD") !== integration || out("status", "--porcelain", "--untracked-files=no") !== "")
@@ -564,6 +812,7 @@ async function mergeLocked({
             sha: earlier.sha,
             tip: earlier.tip,
             rebasedFrom: earlier.rebasedFrom,
+            journeyProof: journeyProofFor(home, team),
           });
           closed.push(...result.closed);
           skipped.push(...result.skipped);

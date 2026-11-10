@@ -25,7 +25,7 @@ export default async function ProposalsPage({ params, searchParams }: { params: 
   if (!can(viewer, "proposals:decide", team.name)) notFound();
   const [tasks, origins] = await Promise.all([storeFor(team.name).tasks.all(), originsFor(team.name, viewer)]);
   // Triage is the planner's to sort; an admin may decide one too (it's down, or it's spam), by the same rules.
-  const waiting = [...proposals(tasks), ...tasks.filter((t) => t.status === "triage" && t.kind !== "journey")];
+  const waiting = [...proposals(tasks), ...tasks.filter((t) => t.status === "triage" && t.kind !== "journey" && t.kind !== "design")];
   const groups = Object.keys(HEADINGS)
     .map((status) => ({ status, tasks: waiting.filter((t) => t.status === status) }))
     .filter((g) => g.tasks.length);

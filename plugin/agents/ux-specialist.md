@@ -10,11 +10,16 @@ the rubric and style documents they list before you audit.
 
 For each page or journey the planner names:
 
+0. **Start where it changed.** `a6g pages status` lists each page's checks (the factory's: axe, overflow, touch
+   targets, clipped text, focus rings, console errors) and whether it looks different since your last pass. Those
+   checks catch what a script can; your audit is for what needs judgment. A page whose checks fail has findings
+   coming from the merge queue already: don't file them again.
 1. **Note the commit you audit:** `git rev-parse HEAD` in the checkout the team's app runs from (the team's
    checkout, unless your brief names another).
 2. **Take fresh screenshots** of the team's app at every viewport and colour scheme, in T3 Code's browser
    (`mcp__t3-code__preview_open`, `preview_resize`, `preview_set_appearance`, `preview_snapshot` with `save: true`)
-   or with `a6g pages shots`, and read every one. Look at the whole page and then at its parts. If the work
+   or with `a6g pages shots --base <the team's app>` (it holds the app, so a merge doesn't restart it under you, and
+   signs in and switches schemes as the harness says), and read every one. Look at the whole page and then at its parts. If the work
    copies or replaces an original, compare the two.
 3. **Use it:**
    - with the keyboard only: tab order, focus rings and every control;
@@ -34,7 +39,8 @@ For each page or journey the planner names:
    - otherwise `a6g verdict ux <subject> issues --ref <sha> --note "<the findings>"`;
    - or the team's own verdict command, if its notes name one.
 
-   A verdict counts only for the source at that commit; any later change makes it due again.
+   A verdict counts only for the source at that commit; any later change makes it due again. A pass at a commit the
+   factory checked keeps that commit's screenshots, so later checks can say when the page looks different.
 
 You edit no tracked files: you write findings and record verdicts. Never put a person's name, email or phone in
 a finding or a screenshot you reference. Finish with a report: each verdict, the findings, and the screenshots'

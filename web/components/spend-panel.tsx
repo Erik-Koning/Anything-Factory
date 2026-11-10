@@ -165,6 +165,19 @@ export function SpendPanel({
               {week ? ` · one subscription's week is about ${dollars(week)} API-equivalent` : ""}
             </p>
           ) : null}
+          {Object.keys(spend?.accounts ?? {}).length > 1 || Object.keys(limits?.accounts ?? {}).length ? (
+            <p className="small muted">
+              This week by subscription:{" "}
+              {Object.entries(spend?.accounts ?? {})
+                .map(([name, spent]) => {
+                  const own = limits?.accounts?.[name]?.weekly;
+                  const share = spent.subscriptionWeek ? ` (${percentOf(spent.week, spent.subscriptionWeek)}% of its week)` : "";
+                  return `${name === "default" ? "your subscription" : name} ${dollars(spent.week)}${share}${own ? ` of its ${unit === "subscription" ? `${own}%` : dollars(own)} limit` : ""}`;
+                })
+                .join(" · ")}
+              . At a limit on one, the team moves to its next subscription.
+            </p>
+          ) : null}
           {days.length ? <DailyChart days={days} daily={limits?.daily ? limitDollars(limits.daily, limits, week) : null} /> : null}
           {days.length ? (
             <details>

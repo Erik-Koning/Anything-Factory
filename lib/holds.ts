@@ -59,6 +59,12 @@ export function readLimits(run: string): Limits | null {
   }
 }
 
+// The limits in force, kept in the run folder (none: removed).
+export function writeLimits(run: string, limits: Limits | null): void {
+  if (limits) writeJson(budgetFile(run), limits);
+  else rmSync(budgetFile(run), { force: true });
+}
+
 const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
 const money = (n: number | null): string => (n === null ? "none" : dollars(n));
 
@@ -112,8 +118,7 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
         wake: true,
       });
     } else if (control.kind === "budget") {
-      if (control.limits) writeJson(budgetFile(run), control.limits);
-      else rmSync(budgetFile(run), { force: true });
+      writeLimits(run, control.limits);
       const l = control.limits;
       log.push(l ? `the budget is now ${money(l.daily)} a day, ${money(l.weekly)} a week, ${money(l.total)} in all` : "the budget was cleared");
     }

@@ -1,16 +1,23 @@
-// a6g metrics [--since <ISO time>] [--until …] [--team <name>] [--json]
+// a6g metrics [--quality] [--since <ISO time>] [--until …] [--team <name>] [--json]
 //
 // What a team has cost, per role: agents (T3 threads), runs (T3 turns: one wake of the planner, one task of a
 // member), model requests and tool calls (from the Claude transcripts), tokens and wall time. Two sources that
-// should agree: T3 Code's database (per-turn token usage) and the transcripts under ~/.claude/projects.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+// should agree: T3 Code's database (per-turn token usage) and the transcripts under each subscription's login (~/.claude/projects).
+//
+// --quality: how the merged work went instead (lib/quality.ts), from the team's tasks, the suite's recorded runs and
+// its usage by day. It reads no T3 database, so it works before the team is registered and on any of its machines.
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { roleForInstance, roleOfAgent } from "../config.ts";
 import { readRegistry } from "../paths.ts";
+import { describeQuality, quality } from "../quality.ts";
 import { teamSession } from "../session.ts";
-import { encodePath } from "../usage.ts";
+import { loginDirs } from "../subscriptions.ts";
+import { isLead } from "../tasks/machines.ts";
+import { openTeamStore } from "../tasks/ops.ts";
+import { transcriptDirsByAccount } from "../usage.ts";
 import { turns as t3Turns, worktreesDir } from "../t3.ts";
+import { suiteHistory } from "./e2e.ts";
 
 interface RoleRow {
   role: string;
@@ -42,11 +49,56 @@ interface TranscriptLine {
   };
 }
 
-export function run(args: string[]): number {
+// The quality numbers for a period: both ends are times (a date alone is its first moment, UTC), and open when not given.
+async function qualityOf(option: (flag: string) => string | undefined, given: (flag: string) => boolean, json: boolean): Promise<number> {
+  const bounds: { since: number | null; until: number | null } = { since: null, until: null };
+  for (const flag of ["since", "until"] as const) {
+    if (!given(`--${flag}`)) continue;
+    const ms = Date.parse(option(`--${flag}`) ?? "");
+    if (Number.isNaN(ms)) {
+      console.error(`metrics: --${flag} takes a time like 2026-03-01 or 2026-03-01T09:00:00Z, not "${option(`--${flag}`) ?? ""}"`);
+      return 2;
+    }
+    bounds[flag] = ms;
+  }
+  const { home, team, run: runDir } = teamSession({ team: option("--team") });
+  if (team.board.type !== "tasks") {
+    console.error(
+      "metrics: the quality numbers are read from the team's task graph, and this team keeps its work on a GitHub board (board, .a6g/team.json)"
+    );
+    return 2;
+  }
+  const store = await openTeamStore(team, runDir, home);
+  let numbers;
+  try {
+    numbers = quality(await store.tasks.all(), isLead(team) ? suiteHistory(home) : null, await store.usage.since("0000-00-00"), bounds);
+  } finally {
+    await store.close();
+  }
+  const [since, until] = [option("--since"), option("--until")];
+  if (json) {
+    console.info(JSON.stringify({ team: team.name, since: given("--since") ? since : null, until: given("--until") ? until : null, ...numbers }, null, 2));
+    return 0;
+  }
+  const period =
+    bounds.since !== null && bounds.until !== null
+      ? `${since} to ${until}`
+      : bounds.since !== null
+        ? `since ${since}`
+        : bounds.until !== null
+          ? `until ${until}`
+          : "all of it";
+  console.info(`How team ${team.name}'s merged work went, ${period}:`);
+  for (const line of describeQuality(numbers)) console.info(`  ${line}`);
+  return 0;
+}
+
+export function run(args: string[]): number | Promise<number> {
   const option = (flag: string): string | undefined => {
     const at = args.indexOf(flag);
     return at >= 0 ? args[at + 1] : undefined;
   };
+  if (args.includes("--quality")) return qualityOf(option, (flag) => args.includes(flag), args.includes("--json"));
   const { home, team } = teamSession({ team: option("--team") });
   const project = option("--project") ?? readRegistry(team.name)?.project ?? team.raw.t3ProjectId;
   const since = option("--since") ?? "1970-01-01T00:00:00Z";
@@ -89,16 +141,11 @@ export function run(args: string[]): number {
   }
 
   // --- Claude transcripts: the loop checkout and the T3 worktrees made from it. --------------------------------
-  const projects = join(homedir(), ".claude", "projects");
-  const encode = encodePath;
   const worktrees = worktreesDir(home);
   // Every transcript folder for the loop checkout or a worktree made from it, including worktrees the watchdog has
-  // already removed (their transcripts stay in ~/.claude/projects).
-  const worktreePrefix = `${encode(worktrees)}-`;
-  // No transcripts yet (Claude Code hasn't run on this machine, or under this HOME): T3 Code's counts stand alone.
-  const dirs = (existsSync(projects) ? readdirSync(projects) : [])
-    .filter((name) => name === encode(home) || name.startsWith(worktreePrefix))
-    .map((name) => join(projects, name));
+  // already removed (their transcripts stay in ~/.claude/projects), under every subscription's login. No transcripts
+  // yet (Claude Code hasn't run on this machine, or under this HOME): T3 Code's counts stand alone.
+  const dirs = Object.values(transcriptDirsByAccount(home, worktrees, loginDirs())).flat();
   const sinceMs = Date.parse(since);
   const untilMs = Date.parse(until);
   for (const dir of dirs) {

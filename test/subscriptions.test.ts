@@ -50,7 +50,12 @@ const report = (percent: number | null) =>
 
 describe("reading a subscription's usage", () => {
   test("the weekly limit across all models, when it resets, and a model's own limit; nothing without a report", () => {
-    assert.deepEqual(parseUsageReport(report(52)), { percent: 52, resetsAt: "2026-11-08T16:00:00.684Z", scoped: [{ model: "Fable", percent: 3 }] });
+    assert.deepEqual(parseUsageReport(report(52)), {
+      percent: 52,
+      resetsAt: "2026-11-08T16:00:00.684Z",
+      session: null,
+      scoped: [{ model: "Fable", percent: 3 }],
+    });
     assert.equal(parseUsageReport(report(null)), null, "an API key, or a token without the scope");
     assert.equal(parseUsageReport("not json\n{}"), null);
   });
@@ -228,7 +233,10 @@ describe("a6g budget in percent, a6g subscriptions, and the watchdog", () => {
       const dir = join(w.root, "claude-two");
       mkdirSync(dir);
       assert.equal((await w.a6g("subscriptions", "add", "second", "--config-dir", dir)).code, 0);
-      assert.match((await w.a6g("subscriptions")).out, /default \(this Mac's own login\): not read yet\n {2}second \(.*claude-two\): not read yet/);
+      assert.match(
+        (await w.a6g("subscriptions")).out,
+        /default \(this Mac's own login\): not read yet\n.*not signed in.*\n {2}second \(.*claude-two\): not read yet/
+      );
       assert.equal((await w.a6g("subscriptions", "remove", "second")).code, 0);
       assert.notEqual((await w.a6g("subscriptions", "remove", "default")).code, 0);
     } finally {

@@ -14,7 +14,9 @@ const KIND_LABEL: Record<Kind, string> = {
   research: "Research",
   test: "Test",
   "test-infra": "Test infrastructure",
+  scaffold: "Scaffolding (the repository's structure)",
   journey: "Journey (groups tasks)",
+  design: "Design check-in (the foundation waits for your word)",
 };
 
 // An admin adds a task as the operator; anyone else suggests one for the planner to triage.

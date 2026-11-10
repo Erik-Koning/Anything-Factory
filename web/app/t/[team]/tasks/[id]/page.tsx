@@ -21,7 +21,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const [task, tasks, origins] = await Promise.all([store.tasks.get(id), store.tasks.all(), originsFor(team.name, viewer)]);
   if (!task) notFound();
   const admin = can(viewer, "proposals:decide", team.name);
-  const decide = admin && (PROPOSALS.includes(task.status) || task.status === "triage") && task.kind !== "journey";
+  const decide = admin && (PROPOSALS.includes(task.status) || task.status === "triage") && task.kind !== "journey" && task.kind !== "design";
   const answer = admin && waitsOnOperator(task);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const base = `/t/${team.name}`;

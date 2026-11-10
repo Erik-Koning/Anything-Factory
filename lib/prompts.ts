@@ -13,7 +13,7 @@ import { contactRule } from "./contact.ts";
 import { PLANNER_LABEL } from "./labels.ts";
 import { policyStates } from "./policies.ts";
 import { multiMachine } from "./tasks/machines.ts";
-import { SCREEN_RISKS } from "./tasks/model.ts";
+import { CLAIMANTS, SCREEN_RISKS } from "./tasks/model.ts";
 import { hash, localTime, writeFileAtomic } from "./util.ts";
 
 const read = (path: string): string => (existsSync(path) ? readFileSync(path, "utf8").trim() : "");
@@ -74,6 +74,8 @@ function laneText(team: Team, role: string): string {
 }
 
 function commandsFor(team: Team, role: string): string {
+  // Whether the team has a security reviewer: what its reviewer and the blast radius say about security paths.
+  const secured = Boolean(team.roles["security-reviewer"]);
   const lines = [
     "`a6g gate [--quick]`: the team's checks (what CI runs), in the checkout you're in.",
     "`a6g env status`: whether the team's environment is up, and its URLs.",
@@ -91,6 +93,10 @@ function commandsFor(team: Team, role: string): string {
       "`a6g drain <role…>` / `a6g drain off`: stop new members of those roles starting while the environment resets.",
       "`a6g metrics [--since <ISO time>]`: what the team has cost so far."
     );
+    if (team.board.type === "tasks")
+      lines.push(
+        "`a6g metrics --quality [--since <ISO time>]`: how the merged work went: reviews passed first time, what the check after merges found, journeys proven, flaky tests, and the cost and time of a merged task."
+      );
     if (team.pages) lines.push("`a6g pages run [ids…]`: check the pages on the team's app and record the results.");
     if (team.push?.pullRequest)
       lines.push(
@@ -107,23 +113,30 @@ function commandsFor(team: Team, role: string): string {
       );
     if (role === "planner" && team.mode === "cycles")
       lines.push("`a6g cycle close --report-file <file>`: close the cycle; the report goes to the operator.");
-    if ((role === "planner" || role === "reviewer") && team.tasks.store === "mongo" && team.tasks.lead)
+    if (["planner", "reviewer", "security-reviewer"].includes(role) && team.tasks.store === "mongo" && team.tasks.lead)
       lines.push("`a6g task fetch <id>`: a task's branch as a worker pushed it, before its review (the verdict and the merge fetch it too).");
-    if (role === "builder" || role === "tester")
+    if (CLAIMANTS.includes(role))
       lines.push('`a6g task claim [<id>]`, `a6g task submit <id>`, `a6g task release <id> [--blocked "…"]`: take, hand in or hand back your task.');
     if (role === "approver")
       lines.push(
         "`a6g task approve|reject|research|escalate <id>`: your verdicts on proposals. `a6g request show|note <id>`: what a stakeholder asked for, and what you found.",
         `A proposal made of a stakeholder's words carries the planner's screen (\`a6g task show\`). ${team.approval.stakeholders === "operator" ? "On this team the operator approves all of them: escalate each, with what you found." : "Escalate any screened risky, and any you'd screen risky yourself, whatever its screen says."} Risky: any of ${SCREEN_RISKS.join("; ")}.`
       );
-    if (role === "reviewer" || role === "tester" || role === "builder")
+    if (role === "reviewer" || role === "security-reviewer" || CLAIMANTS.includes(role))
       lines.push(
-        "`a6g blast [<sha>] [--json]`: what a change touches (run it in the checkout of that commit): importers, related files, their tests, UI, critical paths."
+        `\`a6g blast [<sha>] [--json]\`: what a change touches (run it in the checkout of that commit): importers, related files, their tests, UI, critical paths${secured ? ", and the security paths it changes" : ""}.`
       );
   }
   if (role === "reviewer")
     lines.push(
-      '`a6g verdict review <branch> approve|changes --sha <the commit you reviewed> --note "<one line>"`: record your verdict on exactly that commit. An approval also takes `--risk low|medium|high`, how much the change could break (a high-risk change merges only with its tests), and `--shots "<what you looked at>"` when you looked. It\'s refused if the branch has moved past it; review what was added and record again. The merge queue merges only the commit you approved.'
+      '`a6g verdict review <branch> approve|changes --sha <the commit you reviewed> --note "<one line>"`: record your verdict on exactly that commit. An approval also takes `--risk low|medium|high`, how much the change could break (a high-risk change merges only with its tests), and `--shots "<what you looked at>"` when you looked. It\'s refused if the branch has moved past it; review what was added and record again. The merge queue merges only the commit you approved.' +
+        (secured
+          ? " Add `--security` to an approval to send the branch on to the security reviewer: when it changes who can do what, what someone can see, or what moves money, and `a6g blast` lists no security path for it (one that does is theirs already). It then merges once they've passed it too."
+          : "")
+    );
+  if (role === "security-reviewer")
+    lines.push(
+      "`a6g verdict security <branch> pass|issues --sha <the commit you reviewed> --note \"<one line>\"`: record your verdict on exactly that commit. It's refused if the branch has moved past it; read what was added and record again. `issues` sends the task back to its builder with your note; the merge queue merges the branch only once you've passed its tip."
     );
   if (role === "ux-specialist")
     lines.push(
@@ -148,13 +161,14 @@ function boardText(team: Team, role: string): string {
     ].join("\n");
   }
   const intro =
-    "The board is the team's task graph (`a6g task`): one task per piece of work, each with a status and a history of who moved it. Statuses: `triage` (a finding), `proposed` (scored work waiting for approval), `researching`, `approved` (ready to claim), `building` (claimed by a builder or tester, on a machine, with a lease its heartbeats renew), `review`, `done`, `blocked`, `question`, `rejected`. A journey whose tasks are all done is due its verification (`a6g task list` says so). `a6g task list` shows what's open (`--all` everything), `a6g task show <id>` one task.";
+    "The board is the team's task graph (`a6g task`): one task per piece of work, each with a status and a history of who moved it. Statuses: `triage` (a finding), `proposed` (scored work waiting for approval), `researching`, `approved` (ready to claim), `building` (claimed by a builder, tester or the scaffolder, on a machine, with a lease its heartbeats renew), `review`, `done`, `blocked`, `question`, `rejected`. A journey whose tasks are all done is due its verification (`a6g task list` says so). `a6g task list` shows what's open (`--all` everything), `a6g task show <id>` one task.";
   const finding =
-    'File each finding as `a6g task add "<what\'s wrong, in a few words>" --kind bug|ux|test-infra|feature --sev blocker|major|minor --body-file <file>` (steps, what happened, what should, the screenshot\'s path); it goes to triage. Search `a6g task list --all` first so you don\'t repeat one, and add to an existing task with `a6g task note <id> "…"`.';
+    'File each finding as `a6g task add "<what\'s wrong, in a few words>" --kind bug|ux|test|test-infra|feature --sev blocker|major|minor --body-file <file>` (steps, what happened, what should, the screenshot\'s path); it goes to triage. Search `a6g task list --all` first so you don\'t repeat one, and add to an existing task with `a6g task note <id> "…"`.';
   const byRole: Record<string, string> = {
     planner: `You own it. Triage findings: give each its severity, area and files (\`a6g task edit <id> --sev … --area … --files …\`), then approve it (\`a6g task approve <id>\`) when your rules let you approve the findings other members file, or \`a6g task status <id> proposed\` for the approver (or rejected or question, with \`--reason\`). Shape work (\`a6g task add\`, \`edit\`: a journey as \`--kind journey\` with its tasks naming it as \`--parent\`, dependencies as \`--after\`, where it lands as \`--files\`), and score every proposal but a journey, which only groups tasks (\`a6g task score\`). ${approvalText(team)} The merge queue marks what it merges done; you never approve your own proposals or mark code done.`,
     builder: `Take your task with \`a6g task claim\` (the next approved one, or the one your brief names), hand it in with \`a6g task submit <id>\` once it's committed and the gate passes, or hand it back with \`a6g task release <id> --blocked "<why>"\`. When what you change could break much (money, sign-in, data, code many files import, a flow people depend on), its tests come in the same branch: the reviewer judges the risk, and a high-risk change merges only with them. ${finding}`,
     tester: `Take your task with \`a6g task claim\` (the next approved test work, or the one your brief names), hand it in with \`a6g task submit <id>\`, or back with \`a6g task release <id> --blocked "<why>"\`. ${finding}`,
+    scaffolder: `Take your task with \`a6g task claim\` (the next approved scaffold or test-infra work, then test work where the team has no tester, or the one your brief names), hand it in with \`a6g task submit <id>\` once it's committed and the gate passes, or hand it back with \`a6g task release <id> --blocked "<why>"\`. What a feature needs from you comes as a test-infra task the feature waits for. ${finding}`,
     approver: `You decide on proposals: \`a6g task approve <id> [--note]\`, \`reject <id> --reason\`, \`research <id> --note "<what to find out>"\`, or \`escalate <id> --reason\` (it goes to the operator). ${approvalText(team)}`,
   };
   return [intro, byRole[role] ?? finding, severity].join("\n");
@@ -175,7 +189,7 @@ function proposalsText(team: Team): string {
   return `The approver approves proposals up to size ${team.approval.maxSize}; anything larger, or a change of scope, is escalated to the operator (team.json approval). A journey only groups tasks: nobody approves it, only its tasks.`;
 }
 
-// Builders and testers get their own worktree from delegate_task; everyone else shares the team's checkout, which
+// Builders, testers and the scaffolder get their own worktree from delegate_task; everyone else shares the team's checkout, which
 // is T3's default.
 const isolationOf = (lane: Lane): string => (lane.worktree ? "worktree" : "shared");
 
@@ -183,9 +197,10 @@ function teamTable(team: Team): string {
   const rows = Object.entries(team.roles)
     .filter(([role]) => role !== "planner")
     .map(
-      ([role, lane]) => `| ${role} | ${code(instanceId(team, role))} | ${code(`"${isolationOf(lane)}"`)} | ${lane.limit} | ${ROLES[role]?.summary ?? ""} |`
+      ([role, lane]) =>
+        `| ${role} | ${code(instanceId(team, role))} | ${code(`"${lane.model}"`)} | ${code(`"${isolationOf(lane)}"`)} | ${lane.limit} | ${ROLES[role]?.summary ?? ""} |`
     );
-  return ["| Role | providerInstanceId | isolation | At most | Does |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
+  return ["| Role | providerInstanceId | model | isolation | At most | Does |", "| --- | --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
 // What leaves the machine: the planner's pushes, if any, a team on several machines' branches, and a GitHub board's
@@ -203,6 +218,33 @@ function pushText(team: Team): string {
     return `Pushes: only the planner, ${planner}.${pull}${board} Nothing else leaves this machine.`;
   }
   return board ? `Pushes: none, so the code stays on this machine.${board} Nothing else leaves it.` : "Pushes: none. Everything stays on this machine.";
+}
+
+// Secrets: stored through a manager with the value on standard input, never written where the conversation shows it.
+function secretsText(team: Team, role: string): string {
+  const stores = policyStates(team).find((policy) => policy.id === "secrets")?.state === "allow";
+  const how = team.roles[role]?.readOnly
+    ? "You store none: say which one is needed in your report."
+    : stores
+      ? `Store one through the project's secret manager with the value on standard input: generated in the pipe (${code("openssl rand -hex 32 | npx sst secret set AuthSecret")}), or from a variable or file that already holds it (${code('printf %s "$API_TOKEN" | gh secret set API_TOKEN')}). The guard passes that form for ${code("sst secret set")}, ${code("vercel env add <NAME> --environment <preview|development>")}, ${code("gh secret set")}, ${code("doppler secrets set <NAME> --silent")} and ${code("gcloud secrets versions add <NAME> --data-file=-")}, for your own stage or a preview; a store for production goes the way a deploy does.`
+      : "This team stores none: the operator sets them.";
+  return list([
+    "A secret's value never appears in a command, a message, a task, a commit or a file you write: not typed, not echoed, not printed back to check it.",
+    how,
+    `A value only a person has (a provider's API key, a live credential) is the operator's to set: say which name is needed, where, and what for${role === "planner" ? "" : " (the planner asks the operator)"}; never ask for the value itself.`,
+    "To check one, list names or run what uses it. Code reads a secret from the manager or the environment, never from a literal, and tests generate their own.",
+    `${code("a6g task submit")} and the merge queue read every commit of a branch for live keys, private keys and secrets files, and refuse a branch that holds one, even where a later commit took it out.`,
+  ]);
+}
+
+// Who the team works for (team.json operator), where it changes what the team asks them. A team that says nothing
+// reads as it always did: a technical operator, asked what Article 10 says they're asked.
+function operatorText(team: Team): string | null {
+  if (!team.operator.technical)
+    return "**The operator** isn't technical: never ask them about the platform, the stack or the architecture. The team makes those choices itself, takes the safer one each time (managed, mainstream, little to run, a cost with a ceiling), records each with its reason in the design record, and goes on. What they're asked, through the board and in plain words, is what the product should do, what it may cost, and what needs an account or a key of theirs.";
+  if (team.operator.designCheckIn)
+    return "**The operator** is technical, and agrees the foundation before features are built on it: that's the design check-in, a `design` task the planner raises once the skeleton and the harness have merged and the design record is written. Until they've agreed it, only scaffold and test-infra work is claimed.";
+  return null;
 }
 
 export function compile(team: LoadedTeam, role: string): string {
@@ -231,11 +273,12 @@ export function compile(team: LoadedTeam, role: string): string {
         pushText(team),
         `Protected branches, never pushed or merged into by the team: ${team.protectedBranches.map(code).join(", ")}.`,
         role === "planner" && team.owner ? `The operator: ${team.owner} (Article 10).` : null,
+        operatorText(team),
         role === "planner" ? `Messages to the operator (team.json contact), ${contactRule(team.contact)}` : null,
       ].filter((line) => line !== null)
     ),
     role === "planner"
-      ? `## Your team members\n\nStart each with \`${"mcp__t3-code__delegate_task"}\`, \`mode: "async"\`, \`model: "${team.model}"\`, and \`target.providerInstanceId\` and the top-level \`isolation\` from this table. The instance gives the member its role, its rules and its hooks. \`isolation: "worktree"\` gives a builder or tester its own checkout, made from the integration branch's commit; without it (\`"shared"\`, the default) a member works in the team's checkout, which only the reviewer, the UX specialist and the innovator do, changing nothing there. The guard refuses a start over a limit, or a builder or tester without its worktree.\n\n${teamTable(team)}`
+      ? `## Your team members\n\nStart each with \`${"mcp__t3-code__delegate_task"}\`, \`mode: "async"\`, and from this table \`target.providerInstanceId\`, \`target.model\` and the top-level \`isolation\`. The instance gives the member its role, its rules and its hooks; the model is the one the team's rules give the role, and a member started without it would run on whichever model T3 Code lists first. \`isolation: "worktree"\` gives a builder or tester its own checkout, made from the integration branch's commit; without it (\`"shared"\`, the default) a member works in the team's checkout, which only the reviewer, the UX specialist and the innovator do, changing nothing there. The guard refuses a start over a limit, on another model than its role's, or a builder or tester without its worktree.\n\n${teamTable(team)}`
       : null,
     `## Your lane\n\n${laneText(team, role)}`,
     `## Commands\n\n${commandsFor(team, role)}`,
@@ -254,6 +297,7 @@ export function compile(team: LoadedTeam, role: string): string {
             .join("; ")}.`
         : ""
     }`,
+    `## Secrets\n\n${secretsText(team, role)}`,
     `## Read first\n\n${list([
       ...(existsSync(join(team.home, "CLAUDE.md")) ? ["`CLAUDE.md` (the repository's own rules; already in your context)"] : []),
       ...existingDocs(team).map(code),

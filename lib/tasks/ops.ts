@@ -16,7 +16,9 @@ import {
   type Kind,
   MERGE,
   move,
+  type MoveContext,
   moveRefusal,
+  needsSecurity,
   nowIso,
   newTask,
   SEVERITIES,
@@ -40,7 +42,13 @@ import { openStore, type Store, update } from "./store.ts";
 export async function closeMerged(
   store: Store,
   ids: string[],
-  { branch, sha, tip, rebasedFrom }: { branch: string; sha: string; tip?: string; rebasedFrom?: string | undefined }
+  {
+    branch,
+    sha,
+    tip,
+    rebasedFrom,
+    journeyProof,
+  }: { branch: string; sha: string; tip?: string; rebasedFrom?: string | undefined; journeyProof?: MoveContext["journeyProof"] }
 ): Promise<{ closed: string[]; skipped: string[] }> {
   const closed: string[] = [];
   const skipped: string[] = [];
@@ -58,25 +66,30 @@ export async function closeMerged(
     else closed.push(task.id);
   }
   // What waited on these closes with them, or goes back to work.
-  const settled = await settleWaits(store, MERGE);
+  const settled = await settleWaits(store, MERGE, journeyProof);
   closed.push(...settled.filter((s) => s.to === "done").map((s) => s.id));
   return { closed, skipped };
 }
 
 // The tasks waiting on others (Wait in model.ts) that can settle now, moved by `by`: the merge queue right after a
-// merge, the watchdog each run. Closing one can settle another that waited on it, so it looks again, a few times.
-export async function settleWaits(store: Store, by: Actor): Promise<{ id: string; to: Status; why: string }[]> {
+// merge, the watchdog each run. Closing one can settle another that waited on it, so it looks again, a few times. A
+// journey closes only where its specs can be checked (`journeyProof`, the merge queue's), never by the watchdog.
+export async function settleWaits(
+  store: Store,
+  by: Actor,
+  journeyProof?: MoveContext["journeyProof"]
+): Promise<{ id: string; to: Status; why: string }[]> {
   const settled: { id: string; to: Status; why: string }[] = [];
   for (let pass = 0; pass < 5; pass++) {
     const all = await store.tasks.all();
     const due = all.flatMap((t) => {
       const outcome = waitOutcome(t, all);
-      return outcome ? [{ t, ...outcome }] : [];
+      return outcome && !(t.kind === "journey" && outcome.to === "done" && !journeyProof) ? [{ t, ...outcome }] : [];
     });
     if (!due.length) break;
     for (const { t, to, why } of due) {
       try {
-        await update(store.tasks, t.id, (x) => move(x, to, "settle", by, { all }, { why }));
+        await update(store.tasks, t.id, (x) => move(x, to, "settle", by, { all, ...(journeyProof ? { journeyProof } : {}) }, { why }));
         settled.push({ id: t.id, to, why });
       } catch (error) {
         if (!(error instanceof Refused)) throw error;
@@ -86,12 +99,13 @@ export async function settleWaits(store: Store, by: Actor): Promise<{ id: string
   return settled;
 }
 
-// A merge that conflicts: the branch's task goes back to be claimed again on its branch and rebased. The round it went
-// back with is cleared, since a rebase rewrites it. Resolves to why it wasn't sent back, or null.
+// A merge that conflicts, or a branch that holds a secret (`rebuild` says what to do about it): the branch's task goes
+// back to be claimed again on its branch and rebased. The round it went back with is cleared, since a rebase rewrites
+// it. Resolves to why it wasn't sent back, or null.
 export async function sendBackToRebase(
   store: Store,
   id: string,
-  { branch, integration }: { branch: string; integration: string }
+  { branch, integration, rebuild }: { branch: string; integration: string; rebuild?: string }
 ): Promise<string | null> {
   if (!(await store.tasks.get(id))) return `no task ${id}`;
   const all = await store.tasks.all();
@@ -99,7 +113,7 @@ export async function sendBackToRebase(
   await update(store.tasks, id, (t) => {
     why = moveRefusal(t, "approved", "conflict", MERGE, { all, branch });
     if (why) return t;
-    const text = `conflicts with ${integration}: rebase ${branch} onto it (git rebase ${integration}), run the gate, and submit`;
+    const text = rebuild ?? `conflicts with ${integration}: rebase ${branch} onto it (git rebase ${integration}), run the gate, and submit`;
     return move(
       t,
       "approved",
@@ -254,7 +268,9 @@ export async function importBoard(store: Store, board: string, run: string, team
       }
       const status = STATUS_OF[(field("status") ?? "triage").toLowerCase()] ?? "triage";
       const rawKind = (field("kind") ?? "bug").toLowerCase();
-      const kind: Kind = (KINDS as readonly string[]).includes(rawKind) ? (rawKind as Kind) : (KIND_OF[rawKind] ?? "chore");
+      // Never the design check-in: an open one holds every feature (model.ts claimRefusal), and it's the planner's or
+      // the operator's to add (add.ts), not a file's on the old board.
+      const kind: Kind = rawKind !== "design" && (KINDS as readonly string[]).includes(rawKind) ? (rawKind as Kind) : (KIND_OF[rawKind] ?? "chore");
       const rawSev = (field("sev") ?? field("severity") ?? "").toLowerCase();
       const severity = (SEVERITIES as readonly string[]).includes(rawSev) ? (rawSev as Severity) : null;
       const heading = /^#\s+(.+)$/m.exec(text)?.[1]?.trim();
@@ -328,7 +344,10 @@ export function summary(
         .join("; ")}.`
     );
   const review = by("review");
-  if (review.length) parts.push(`Waiting for review: ${review.map((t) => `${line(t)}${t.branch ? ` [${t.branch}]` : ""}`).join("; ")}.`);
+  if (review.length)
+    parts.push(
+      `Waiting for review: ${review.map((t) => `${line(t)}${t.branch ? ` [${t.branch}]` : ""}${needsSecurity(t) ? " (needs the security reviewer)" : ""}`).join("; ")}.`
+    );
   const due = all.filter((j) => journeyDue(j, all));
   if (due.length) parts.push(`Journeys due their verification: ${due.map(line).join("; ")}.`);
   // An approved journey with nothing left open and nothing done never comes due by itself: it needs tasks or an end.

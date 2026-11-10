@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import type { Team } from "./config.ts";
-import { lines, NAMES_ONLY, parseShell, type ShellCommand, withoutExcludes } from "./shell.ts";
+import { lines, NAMES_ONLY, parseShell, type ShellCommand, SUBSTITUTED, unwrap, withoutExcludes } from "./shell.ts";
 
 // What a team may not do. Two kinds:
 // - Policies: outward-facing or irreversible actions, denied by default. An operator unlocks one per team in
@@ -28,8 +28,12 @@ const anywhere = (pattern: string): RegExp => new RegExp(pattern);
 const ASK = "If the work needs it, the planner asks the operator.";
 
 // A rule's test over one line: a regex, or code where a regex can't say it well (runsDeployTask, namesEnvFile).
+// whole: over the command itself, for a rule that needs more than a line holds (what the command is fed).
+// reason: its own, where the policy's wouldn't tell the agent what to do instead.
 export interface Matcher {
   test(line: string): boolean;
+  whole?(command: ShellCommand): boolean;
+  reason?: string;
 }
 
 export type PolicyState = "allow" | "deny";
@@ -50,11 +54,13 @@ export interface Policy {
 }
 // A rule in force: its test over the guard's reading of a command, what the agent is told, where it came from, and
 // whether it reads free text too (the policies' text rules and a team's own rules do).
+// yields: it steps aside for a secret stored the quiet way (quietStore), on a team whose secrets policy allows that.
 export interface CommandRule {
   rule: Matcher;
   reason: string;
   source: string;
   text: boolean;
+  yields?: boolean;
 }
 
 // A deploy task in a monorepo's task runner: turbo run deploy, turbo web#deploy, turbo deploy:prod, nx deploy web,
@@ -122,6 +128,255 @@ export const runsDeployTask: Matcher = {
   },
 };
 
+// --- Secrets through a manager ---------------------------------------------------------------------------------
+
+// A secret stored through a secret manager's CLI with its value on standard input: generated in the pipe, or read
+// from a variable or a file that already holds it, so it's in no command, no message and no UI.
+//   openssl rand -hex 32 | npx sst secret set AuthSecret
+//   printf %s "$API_TOKEN" | gh secret set API_TOKEN
+// That's how a team is meant to store one, so on a team whose secrets policy allows it (the default) the policies
+// that name these tools step aside for exactly that form (quietStore). What no team unlocks is in CORE: a value
+// written in the command, and the commands that print stored values back.
+// Each form was read from the tool's own documentation or help (docs/plans/harness-security.md). A tool that deploys
+// as it stores (wrangler secret put), or takes the value only on its command line, isn't here: its policy decides.
+interface StoreForm {
+  // The form a refusal shows.
+  usage: string;
+  // The subcommands that store.
+  verbs: string[][];
+  // Options that take a value, so the value isn't read as an operand.
+  valued: string[];
+  // The options a quiet store may carry: any other leaves the command to the tool's own policy.
+  known: string[];
+  // Options that carry the secret's value.
+  value: string[];
+  // Options that name what it's stored for: a stage, an environment, a config, a project.
+  target: string[];
+  // Operands after the subcommand, at most: the name, and for Vercel its environment and git branch.
+  operands: number;
+}
+const VERCEL: StoreForm = {
+  usage: "vercel env add <NAME> --environment <preview|development>",
+  verbs: [["env", "add"]],
+  valued: ["--environment", "--git-branch", "--type", "--value", "--cwd", "--scope", "-S", "--team", "-T", "--token", "-t", "--local-config", "-A"],
+  known: ["--environment", "--git-branch", "--type", "--sensitive", "--no-sensitive", "--force", "--yes", "-y"],
+  value: ["--value"],
+  target: ["--environment"],
+  operands: 3,
+};
+const STORES: Record<string, StoreForm> = {
+  sst: {
+    usage: "sst secret set <Name> [--stage <stage>] [--fallback]",
+    verbs: [["secret", "set"]],
+    valued: ["--stage", "--config"],
+    known: ["--stage", "--fallback"],
+    value: [],
+    target: ["--stage"],
+    operands: 1,
+  },
+  vercel: VERCEL,
+  vc: VERCEL,
+  gh: {
+    usage: "gh secret set <NAME> [--env <environment>] [--app <app>]",
+    verbs: [["secret", "set"]],
+    valued: ["-b", "--body", "-e", "--env", "-f", "--env-file", "-o", "--org", "-r", "--repos", "-v", "--visibility", "-a", "--app", "-R", "--repo"],
+    known: ["-a", "--app", "-e", "--env"],
+    value: ["-b", "--body"],
+    target: ["-e", "--env"],
+    operands: 1,
+  },
+  doppler: {
+    usage: "doppler secrets set <NAME> --silent [--project <project>] [--config <config>]",
+    verbs: [["secrets", "set"]],
+    valued: ["-p", "--project", "-c", "--config", "--visibility", "--type", "-t", "--token", "--api-host", "--scope", "--config-dir", "--configuration"],
+    known: ["--silent", "-p", "--project", "-c", "--config", "--visibility", "--type", "--no-interactive"],
+    value: [],
+    target: ["-c", "--config"],
+    operands: 1,
+  },
+  gcloud: {
+    usage: "gcloud secrets versions add <NAME> --data-file=- [--project <project>]",
+    verbs: [
+      ["secrets", "versions", "add"],
+      ["secrets", "create"],
+    ],
+    valued: [
+      "--data-file",
+      "--project",
+      "--location",
+      "--locations",
+      "--replication-policy",
+      "--labels",
+      "--account",
+      "--configuration",
+      "--impersonate-service-account",
+      "--format",
+      "--verbosity",
+      "--billing-project",
+      "--kms-key-name",
+      "--expire-time",
+      "--ttl",
+      "--next-rotation-time",
+      "--rotation-period",
+      "--topics",
+      "--set-annotations",
+      "--version-aliases",
+    ],
+    known: ["--data-file", "--project", "--location", "--locations", "--replication-policy", "--labels", "--quiet", "-q"],
+    value: [],
+    target: ["--project"],
+    operands: 1,
+  },
+};
+
+export interface SecretStore {
+  tool: string;
+  usage: string;
+  // The command itself carries the value: --body, --value, a word after the name, NAME=value.
+  shown: boolean;
+  // The tool prints the value back unless it's told not to (doppler, without --silent).
+  loud: boolean;
+  // What it's stored for is production, as far as a name tells: a stage, environment, config or project whose name
+  // holds prod or live, one the guard can't read (a variable), or a Vercel variable with no environment named.
+  production: boolean;
+  // Read in full: the name, and only the options known for the tool.
+  plain: boolean;
+}
+
+// A command's operands and its options, each with its value: --opt=value, --opt value and -o value for the options
+// that take one, -ovalue for a short one.
+function argsOf(args: string[], valued: string[]): { operands: string[]; given: [string, string | null][] } {
+  const operands: string[] = [];
+  const given: [string, string | null][] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
+    if (arg === "--") {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (!/^-./.test(arg)) operands.push(arg);
+    else if (arg.startsWith("--")) {
+      const [option = "", inline] = arg.split(/=(.*)/s, 2);
+      given.push([option, inline ?? (valued.includes(option) ? (args[++i] ?? "") : null)]);
+    } else if (valued.includes(arg.slice(0, 2))) given.push([arg.slice(0, 2), arg.length > 2 ? arg.slice(2).replace(/^=/, "") : (args[++i] ?? "")]);
+    else given.push([arg, null]);
+  }
+  return { operands, given };
+}
+
+const PRODUCTION = /pro?d|live|\$/i;
+// pnpm, yarn and bun run a tool by its name (pnpm sst secret set Name); a tool may carry a version (sst@latest).
+const toolAt = (words: string[]): { tool: string; args: string[] } => {
+  const at = /^(?:pnpm|yarn|bun)$/.test(basename(words[0] ?? "")) ? 1 : 0;
+  return { tool: basename(words[at] ?? "").replace(/@[\w.^~<>=-]+$/, ""), args: words.slice(at + 1) };
+};
+
+// The secret store one command's words are, or null.
+export function storeIn(words: string[]): SecretStore | null {
+  const { tool, args } = toolAt(words);
+  const form = Object.hasOwn(STORES, tool) ? STORES[tool] : undefined;
+  if (!form) return null;
+  const { operands, given } = argsOf(args, form.valued);
+  const verb = form.verbs.find((names) => names.every((name, i) => operands[i] === name));
+  if (!verb) return null;
+  const rest = operands.slice(verb.length);
+  const valuesOf = (names: string[]): string[] => given.flatMap(([option, value]) => (names.includes(option) ? [value ?? ""] : []));
+  // An option the guard doesn't know may take a value, so a word after the name is called the value only without one.
+  const read = given.every(([option]) => form.known.includes(option));
+  const targets = [...valuesOf(form.target), ...(form === VERCEL ? rest.slice(1, 2) : [])];
+  const data = valuesOf(["--data-file"]);
+  return {
+    tool,
+    usage: form.usage,
+    shown: valuesOf(form.value).length > 0 || (tool === "doppler" && rest.some((word) => word.includes("="))) || (read && rest.length > form.operands),
+    loud: tool === "doppler" && !given.some(([option]) => option === "--silent"),
+    production: targets.some((target) => PRODUCTION.test(target)) || (form === VERCEL && !targets.length),
+    // gcloud reads standard input as --data-file=-; a secret created without one is empty.
+    plain:
+      read &&
+      rest.length >= 1 &&
+      rest.length <= form.operands &&
+      (tool !== "gcloud" || (data.length ? data.every((file) => file === "-") : verb.length === 2)),
+  };
+}
+
+// The store a command runs, behind whatever wraps it.
+export function storeOf(command: ShellCommand): SecretStore | null {
+  for (const words of unwrap(command.words)) {
+    const store = storeIn(words);
+    if (store) return store;
+  }
+  return null;
+}
+
+// What a store is fed, when the command says: only what the shell fills in as it runs (a variable, a substitution).
+// Anything else is the value, written out.
+const EXPANDS = new RegExp(String.raw`^(?:\s|\$\w+|\$\{\w+\}|${SUBSTITUTED.replace(/[$()]/g, "\\$&")})*$`);
+const writtenOut = (command: ShellCommand): boolean => command.fed.some((text) => !EXPANDS.test(text));
+// What may stand in front of a quiet store: a package runner, or a time limit. Anything else (a variable set for
+// the command could name another account or stage) leaves it to the tool's own policy.
+const RUNNERS = /^(?:npx(?: (?:-y|--yes))?|bunx|pnpm (?:exec|dlx)|yarn (?:exec|dlx)|bun x|npm exec(?: --)?|g?timeout \S+)$/;
+
+// A secret stored the quiet way: read in full, its value on standard input, not for production.
+export function quietStore(command: ShellCommand): boolean {
+  const variants = unwrap(command.words);
+  const store = storeIn(variants.at(-1) ?? []);
+  if (!store || store.shown || store.loud || store.production || !store.plain || writtenOut(command)) return false;
+  for (let i = 0; i + 1 < variants.length; i++) {
+    const outer = variants[i] as string[];
+    const inner = variants[i + 1] as string[];
+    const front = outer.slice(0, outer.length - inner.length);
+    if (!inner.every((word, k) => word === outer[front.length + k]) || !RUNNERS.test(front.join(" "))) return false;
+  }
+  return true;
+}
+
+// Why a store wasn't taken for the quiet form, said before the reason of the policy that then refuses it.
+const notQuiet = (store: SecretStore): string =>
+  store.production
+    ? "A secret stored for production is judged as the tool's other commands are (a stage, environment, config or project whose name holds prod or live, or is a variable the guard can't read; a Vercel variable with no environment named): store it for your own stage or a preview."
+    : `A secret store passes in the form the guard reads in full: <the value's source> | ${store.usage}, with nothing in front but a package runner (npx, pnpm exec) or timeout. This one is judged as the tool's other commands are.`;
+
+const overWords = (test: (store: SecretStore, command: ShellCommand) => boolean): Matcher => ({
+  test: () => false,
+  whole(command) {
+    const store = storeOf(command);
+    return store !== null && test(store, command);
+  },
+});
+const storesSecret = overWords(() => true);
+const valueInCommand = overWords((store, command) => store.shown || writtenOut(command));
+const loudStore = overWords((store) => store.loud);
+const storesForProduction: Matcher = {
+  ...overWords((store) => store.production),
+  reason: `a secret stored for production changes what the next deploy runs, so it goes the way a deploy does (a stage, environment, config or project whose name holds prod or live, or is a variable the guard can't read; a Vercel variable with no environment named). Store it for your own stage or a preview. ${ASK}`,
+};
+
+// Commands that print stored secrets' values, or write them to a file.
+const dopplerPrints: Matcher = {
+  test(line: string): boolean {
+    const { tool, args } = toolAt(line.split(/\s+/).filter(Boolean));
+    if (tool !== "doppler") return false;
+    const { operands, given } = argsOf(args, STORES["doppler"]?.valued ?? []);
+    if (operands[0] !== "secrets") return false;
+    return operands[1] === undefined ? !given.some(([option]) => option === "--only-names") : /^(?:get|download|substitute)$/.test(operands[1]);
+  },
+};
+const PRINTS: Matcher[] = [
+  sub("sst", "secret\\s+list"),
+  sub("vercel|vc", "env\\s+pull"),
+  sub("gcloud", "(?:alpha\\s+|beta\\s+)?secrets\\s+versions\\s+access"),
+  anywhere(String.raw`${START}${VIA}aws${AT}\s.*\bsecretsmanager\s+(?:batch-)?get-secret-value${END}`),
+  anywhere(String.raw`${START}${VIA}aws${AT}\s.*\bssm\s+get-parameter\S*\s.*--with-decryption${END}`),
+  sub("heroku", "config(?::get)?"),
+  sub("vault", "kv\\s+get|read"),
+  sub("op", "read|item\\s+get"),
+  anywhere(String.raw`${START}${VIA}kubectl${AT}\s.*\bget\s+secrets?(?:/\S+)?\s.*(?:-o\s*|--output[=\s]\s*)(?!name\b|wide\b)\S`),
+  sub("firebase", "functions:secrets:access"),
+  dopplerPrints,
+];
+const printsSecrets: Matcher = { test: (line) => PRINTS.some((rule) => rule.test(line)) };
+
 export const POLICIES: Policy[] = [
   {
     id: "deploy",
@@ -144,6 +399,7 @@ export const POLICIES: Policy[] = [
       "nx run web:deploy",
       "sam deploy",
       "/bin/bash -c 'vercel deploy'",
+      "openssl rand -hex 32 | doppler secrets set SESSION_KEY --silent --config prd",
     ],
     default: "deny",
     summary: "deploying: hosting and app-store CLIs, and package scripts named deploy, release or publish",
@@ -162,6 +418,7 @@ export const POLICIES: Policy[] = [
       // A package script named for one, ending there or at a separator: deploy, deploy:prod, release-notes; not shipping.
       anywhere(String.raw`${START}(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?(?:deploy|release|publish|ship)(?:[:#-][\w:#-]*)?${END}`),
       runsDeployTask,
+      storesForProduction,
     ],
   },
   {
@@ -184,6 +441,7 @@ export const POLICIES: Policy[] = [
       "npx prisma db push",
       "pnpm drizzle-kit push",
       "a6g lock app -- npx supabase db push",
+      "a6g env use -- npx supabase db push",
       "pnpm -C packages/db exec drizzle-kit push",
       "supabase --workdir app db push",
       'mongosh "mongodb://team:secret@cluster0.abc12.mongodb.net/a6g"',
@@ -310,6 +568,18 @@ export const POLICIES: Policy[] = [
     reason: `nothing the team does moves money. ${ASK}`,
     rules: [word("stripe")],
     text: [anywhere(String.raw`\b[rs]k_live_[A-Za-z0-9]`)],
+  },
+  {
+    id: "secrets",
+    examples: [
+      "openssl rand -hex 32 | npx sst secret set AuthSecret",
+      'printf %s "$API_TOKEN" | gh secret set API_TOKEN',
+      "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent",
+    ],
+    default: "allow",
+    summary: "storing secrets through a secret manager (sst secret set, vercel env add, gh secret set, doppler secrets set, gcloud secrets)",
+    reason: `this team stores no secrets: the operator sets them. ${ASK}`,
+    rules: [storesSecret],
   },
   {
     id: "dependencies",
@@ -538,8 +808,19 @@ export const CORE: [Matcher, string][] = [
   [/\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(-[a-zA-Z]+\s+)*(\/|~|\$HOME|\/Users\/[^/\s]+)\/?(\s|$)/, "that would delete far too much."],
   [namesEnvFile, "env files hold secrets; agents never read or write them. The team's environment has what it needs."],
   [
-    /\bsecurity\s+(find|dump|export|add|delete|set)-|\bca\.a6g\.(email|whatsapp)\b|\bgh\s+auth\s+token\b|\.ssh\/id_|\baws\s+configure\s+get\b/,
+    /\bsecurity\s+(find|dump|export|add|delete|set)-|\bca\.a6g\.(email|whatsapp)\b|\bgh\s+auth\s+token\b|\.ssh\/id_|\baws\s+configure\s+get\b|\bgcloud\s+auth\s+(application-default\s+)?print-(access|identity)-token\b/,
     "credentials are never read or changed by the team.",
+  ],
+  // A secret is stored without being seen (the secrets policy, above): its value is never written in a command, and
+  // nothing prints one back.
+  [
+    valueInCommand,
+    "a secret's value never goes in a command, where the conversation and the UI show it: pipe it in, generated (openssl rand -hex 32 | sst secret set Name; a placeholder can be generated too) or from a variable or file that already holds it (printf %s \"$NAME\" | sst secret set Name). A value only a person has is the operator's to set.",
+  ],
+  [loudStore, "doppler prints a stored value back unless it's told not to: add --silent."],
+  [
+    printsSecrets,
+    "that prints stored secrets' values into the conversation, or writes them to a file. The team stores a secret without seeing it: to check one, list names, or run what uses it.",
   ],
   [
     OPERATOR_COMMANDS,
@@ -617,19 +898,38 @@ export function refusal(team: Team, command: string): CommandRule | null {
 // The first rule one command breaks. Most of the factory's rules read it without its free text (a commit message
 // that mentions vercel deploy deploys nothing); the rules for data that reaches outside (a live key) and a team's own
 // rules read that text too.
+// A secret stored the quiet way passes the rules that yield to it; a store one of them refuses is told why it wasn't
+// taken for that.
 export function brokenRule(rules: CommandRule[], command: ShellCommand): CommandRule | null {
   const plain = lines(command);
   const all = [...new Set([...plain, ...lines(command, { withText: true })])];
-  return rules.find((rule) => (rule.text ? all : plain).some((line) => rule.rule.test(line))) ?? null;
+  const store = rules.some((rule) => rule.yields) ? storeOf(command) : null;
+  const quiet = store !== null && quietStore(command);
+  const broken =
+    rules.find((rule) => !(quiet && rule.yields) && (rule.rule.whole?.(command) || (rule.text ? all : plain).some((line) => rule.rule.test(line)))) ??
+    null;
+  return broken?.yields && store ? { ...broken, reason: `${notQuiet(store)} Here: ${broken.reason}` } : broken;
 }
+
+// The policies that name the secret managers' CLIs: their rules step aside for a quiet store.
+const YIELDS = new Set(["deploy", "cloud", "github"]);
 
 // Every command rule in force for a team: core, the policies it denies, and its own `never` list.
 export function commandRules(team: Team): CommandRule[] {
   const rules: CommandRule[] = CORE.map(([rule, reason]) => ({ rule, reason, source: "core", text: false }));
-  for (const policy of policyStates(team)) {
+  const states = policyStates(team);
+  const stores = states.some((policy) => policy.id === "secrets" && policy.state === "allow");
+  // A team that stores no secrets is told so before a tool's own policy speaks.
+  for (const policy of [...states.filter(({ id }) => id === "secrets"), ...states.filter(({ id }) => id !== "secrets")]) {
     if (policy.state !== "deny") continue;
     for (const rule of [...policy.rules, ...(policy.forTeam?.(team) ?? [])])
-      rules.push({ rule, reason: policy.reason, source: `policy ${policy.id}`, text: false });
+      rules.push({
+        rule,
+        reason: rule.reason ?? policy.reason,
+        source: `policy ${policy.id}`,
+        text: false,
+        ...(stores && YIELDS.has(policy.id) && rule !== storesForProduction ? { yields: true } : {}),
+      });
     for (const rule of policy.text ?? []) rules.push({ rule, reason: policy.reason, source: `policy ${policy.id}`, text: true });
   }
   for (const { rule, reason } of team.never) rules.push({ rule: new RegExp(rule), reason, source: "team", text: true });

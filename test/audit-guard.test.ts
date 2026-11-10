@@ -28,7 +28,9 @@ function hook(name: string, home: string, input: Record<string, unknown>, env: N
 }
 
 const delegate = "mcp__t3-code__delegate_task";
-const builderInstance = { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" };
+// The fixture names no models, so its builders, testers and reviewers run on the factory's default for them.
+const OPUS = "claude-opus-5-5";
+const builderInstance = { target: { providerInstanceId: "a6g-fixture-builder", model: OPUS }, isolation: "worktree" };
 
 describe("the guard audit's findings stay fixed", { concurrency: true }, () => {
   test("1: a shell redirect can't write or read env files", () => {
@@ -138,8 +140,11 @@ describe("the guard audit's findings stay fixed", { concurrency: true }, () => {
       bash(home, "builder", `rm -f ${run}/paused`, "refuse", options),
       bash(home, "builder", "echo '{}' > ~/.claude/settings.json", "refuse", options),
       bash(home, "builder", `echo '{}' > ${t3Home}/userdata/settings.json`, "refuse", options),
-      tool(home, "planner", "Write", { file_path: join(run, "complete") }, "allow", { run }),
-      bash(home, "planner", `touch ${run}/complete`, "allow", { run }),
+      // Done is computed, not claimed: a6g complete writes the marker once the finish line holds.
+      tool(home, "planner", "Write", { file_path: join(run, "complete") }, "refuse", { run }),
+      bash(home, "planner", `touch ${run}/complete`, "refuse", { run }),
+      bash(home, "planner", "a6g complete", "allow", { run }),
+      tool(home, "planner", "Write", { file_path: join(run, "idle") }, "allow", { run }),
     ]);
   });
 
@@ -328,10 +333,10 @@ describe("the guard audit's findings stay fixed", { concurrency: true }, () => {
   test("engine 1: builders start in a worktree, and nobody renames or deletes the integration branch", () => {
     const { home, inWorktree } = withWorktree();
     return holds([
-      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" } }, "refuse"),
-      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-tester" }, isolation: "shared" }, "refuse"),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: OPUS } }, "refuse"),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-tester", model: OPUS }, isolation: "shared" }, "refuse"),
       tool(home, "planner", delegate, builderInstance, "allow"),
-      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer" } }, "allow"),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: OPUS } }, "allow"),
       bash(home, "builder", "git branch -m a6g/b1-login", "refuse"),
       bash(home, "planner", "git branch -m a6g/old-next", "refuse"),
       bash(home, "builder", "git branch -M a6g/b1-x a6g/next", "refuse"),

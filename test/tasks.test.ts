@@ -14,6 +14,7 @@ import {
   branchFor,
   claimRefusal,
   DEFAULT_WEIGHTS,
+  designOpen,
   journeyDue,
   MERGE,
   moveRefusal,
@@ -127,6 +128,22 @@ describe("the task model", () => {
     assert.match(statusRefusal(task({ id: "8", status: "proposed" }), "rejected", "builder") ?? "", /only the planner/);
   });
 
+  test("a journey with finished work under it is rejected by the operator only", () => {
+    const journey = task({ id: "3", status: "approved", kind: "journey" });
+    const open = task({ id: "4", status: "approved", parent: "3" });
+    assert.equal(statusRefusal(journey, "rejected", "planner", [journey, open]), null, "nothing finished under it: the planner's to reject");
+    const done = task({ id: "5", status: "done", parent: "3" });
+    assert.match(
+      statusRefusal(journey, "rejected", "planner", [journey, open, done]) ?? "",
+      /journey 3 has finished work under it \(#5\), so its tests are still owed, and rejecting it is the operator's call: raise it/
+    );
+    // Merged once and reopened since: reopening its work isn't a way to drop the journey.
+    const reopened = task({ id: "6", status: "approved", parent: "3", history: [{ at: "x", by: MERGE, what: "merged", to: "done", sha: "abc1234" }] });
+    assert.match(statusRefusal(journey, "rejected", "planner", [journey, reopened]) ?? "", /finished work under it \(#6\)/);
+    assert.equal(statusRefusal(journey, "rejected", OPERATOR, [journey, done]), null, "the operator may");
+    assert.equal(statusRefusal(task({ id: "7", status: "approved" }), "rejected", "planner", [done]), null, "only a journey is owed tests");
+  });
+
   test("the move table, walked whole, keeps the rules nobody may break", () => {
     const VIAS: Via[] = ["status", "approve", "reject", "research", "escalate", "claim", "release", "submit", "changes", "merge", "expire", "settle"];
     const ACTORS = ["planner", "approver", "builder", "tester", "reviewer", "ux-specialist", OPERATOR, MERGE, WATCHDOG];
@@ -206,6 +223,31 @@ describe("the task model", () => {
       "2"
     );
     assert.equal(nextClaim(all, "tester")?.id, "4");
+  });
+
+  test("the scaffolder claims scaffold and test-infra work first, then specs; builders claim none of it", () => {
+    const all = [
+      task({ id: "1", kind: "test", severity: "blocker" }),
+      task({ id: "2", kind: "test-infra", priority: 1 }),
+      task({ id: "3", kind: "scaffold", priority: 5 }),
+      task({ id: "4", kind: "feature" }),
+    ];
+    assert.match(claimRefusal(all[2] as Task, "builder", all) ?? "", /scaffold work, which the builder doesn't take/);
+    assert.match(claimRefusal(all[1] as Task, "builder", all) ?? "", /test-infra work/);
+    assert.match(claimRefusal(all[2] as Task, "tester", all) ?? "", /scaffold work/);
+    assert.match(claimRefusal(all[3] as Task, "scaffolder", all) ?? "", /feature work, which the scaffolder doesn't take/);
+    assert.equal(nextClaim(all, "scaffolder")?.id, "3", "its own work before a spec, even a blocker spec");
+    assert.equal(
+      nextClaim(
+        all.filter((t) => t.kind !== "scaffold" && t.kind !== "test-infra"),
+        "scaffolder"
+      )?.id,
+      "1",
+      "then specs"
+    );
+    assert.equal(nextClaim(all, "tester")?.id, "1", "a tester takes specs first");
+    assert.equal(branchFor(task({ id: "7", title: "Set up Playwright" }), "scaffolder", "a6g"), "a6g/s7-set-up-playwright");
+    assert.equal(ticketOf("a6g/s7-set-up-playwright", "a6g"), "7");
   });
 
   test("branch names carry the task's number, which the merge reads back", () => {
@@ -636,6 +678,28 @@ describe("raising to the operator, and waiting on other tasks", () => {
     assert.match(moveRefusal(blockedAgain, "done", "settle", WATCHDOG, { all: await store.tasks.all() }) ?? "", /waits on no other task/);
     assert.match(moveRefusal(blockedAgain, "done", "settle", "planner", { all: [] }) ?? "", /doesn't settle tasks/);
   });
+
+  test("a journey folded into tasks closes only where its specs can be checked: the merge queue, with its proof", async () => {
+    const store = fileStore(tmp("a6g-run-"), "fixture");
+    const add = (fields: Partial<Task> & Pick<Task, "title" | "status">) =>
+      store.tasks.create(newTask({ team: "fixture", kind: "feature", by: "planner", ...fields }));
+    const fix = await add({ title: "Last fix", status: "approved", approval: { by: "approver", at: "x", note: "" } });
+    const journey = await add({
+      title: "Pay a need",
+      kind: "journey",
+      status: "blocked",
+      wait: { on: [fix.id], then: "close", by: "planner", at: nowIso() },
+    });
+    await update(store.tasks, fix.id, (t) => ({ ...t, status: "done" as const }));
+    // The watchdog can't read the suite's results: it leaves the journey for the merge queue.
+    assert.deepEqual(await settleWaits(store, WATCHDOG), []);
+    assert.deepEqual(await settleWaits(store, MERGE, () => "1 of journey 2's tests didn't pass"), []);
+    assert.equal((await store.tasks.get(journey.id))?.status, "blocked");
+    assert.deepEqual(
+      (await settleWaits(store, MERGE, () => null)).map((s) => [s.id, s.to]),
+      [[journey.id, "done"]]
+    );
+  });
 });
 
 describe("claims over time", () => {
@@ -724,6 +788,29 @@ describe("a 0.3 files board", () => {
     assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), []);
     writeFileSync(join(home, ".a6g/run/board/f-20261027-0200-more.md"), "kind: bug\nsev: major\n\nMore.\n");
     assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), ["15"]);
+  });
+});
+
+describe("a ticket on the old board that calls itself the design check-in", () => {
+  test("comes across as a chore: a file never files the check-in, which would hold every feature", async () => {
+    const { home, run } = setup();
+    write(join(home, ".a6g/run/board"), {
+      "3-design.md": "status: ready\nkind: design\n\n# Rethink the stack\n\nIn another language.\n",
+      "4-sign-in.md": "status: ready\nkind: feature\n\n# Sign-in\n\nWith a password.\n",
+    });
+    const store = fileStore(run, "fixture");
+    assert.deepEqual(await importBoard(store, join(home, ".a6g/run/board"), run, "fixture", "planner"), ["3", "4"]);
+    const all = await store.tasks.all();
+    assert.deepEqual(
+      all.map((t) => [t.id, t.kind, t.status]),
+      [
+        ["3", "chore", "approved"],
+        ["4", "feature", "approved"],
+      ]
+    );
+    assert.equal(designOpen(all), null);
+    assert.equal(nextClaim(all, "builder")?.id, "3");
+    assert.equal(claimRefusal(all[1] as Task, "builder", all), null);
   });
 });
 
@@ -894,11 +981,11 @@ describe("the audit's findings stay fixed", () => {
     assert.deepEqual([(await store().tasks.get("1"))?.status, (await store().tasks.get("1"))?.approval], ["proposed", null]);
     await a6g(["task", "add", "Journey", "--kind", "journey"], as("planner"));
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
-    assert.match((await a6g(["task", "status", "1", "building"], as(null))).out, /only when a builder or tester claims it/, "not even the operator");
+    assert.match((await a6g(["task", "status", "1", "building"], as(null))).out, /only when a member claims it/, "not even the operator");
   });
 
   test("an approved task edited in what it is goes back for approving; a journey needs no approval of its own", async () => {
-    const { as, store } = setup(team({ approval: { mode: "full" } }));
+    const { as, store } = setup(team({ approval: { mode: "full" }, harness: { journeys: "required" } }));
     await a6g(["task", "add", "Thing"], as("planner"));
     await a6g(["task", "score", "1", ...SCORE, ...GATE, "--confidence", "data", "--size", "S", "--why", "x"], as("planner"));
     await a6g(["task", "approve", "1"], as("approver"));
@@ -916,9 +1003,49 @@ describe("the audit's findings stay fixed", () => {
     await a6g(["task", "score", "3", ...SCORE, ...GATE, "--confidence", "data", "--size", "S", "--why", "x"], as("planner"));
     assert.equal((await a6g(["task", "approve", "3"], as("approver"))).code, 0, "no journey approval first");
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
+    assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks \(--parent 2\); move them out first/);
     await update(store().tasks, "3", (t) => ({ ...t, status: "done" as const }));
-    assert.equal((await a6g(["task", "status", "2", "done"], as("planner"))).code, 0, "its task done, the planner closes it");
-    assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks/);
+    // The operator requires this team's journeys to be proven by their specs (harness.journeys "required"): with no
+    // suite yet, the journey isn't done. The operator's call is still theirs.
+    assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /the team's harness has no suite yet/);
+    // With finished work under it, the journey's tests are owed: no longer being a journey, losing that work, or being
+    // rejected would each stop them being asked for, so each is the operator's call.
+    assert.match(
+      (await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out,
+      /journey 2 has finished work under it, so its tests are still owed: what kind it is, is the operator's call/
+    );
+    assert.match(
+      (await a6g(["task", "edit", "3", "--parent", "none"], as("planner"))).out,
+      /task 3 is finished work under journey 2, whose tests it's owed: moving it out is the operator's call/
+    );
+    const rejecting = await a6g(["task", "status", "2", "rejected", "--reason", "we dropped it"], as("planner"));
+    assert.notEqual(rejecting.code, 0);
+    assert.match(rejecting.out, /journey 2 has finished work under it \(#3\), so its tests are still owed, and rejecting it is the operator's call/);
+    assert.deepEqual(
+      [(await store().tasks.get("2"))?.kind, (await store().tasks.get("2"))?.status, (await store().tasks.get("3"))?.parent],
+      ["journey", "proposed", "2"]
+    );
+    assert.equal((await a6g(["task", "status", "2", "done"], as(null))).code, 0, "the operator closes it");
+    // Nor does a task that's done already become a journey, done with nothing asked of it.
+    assert.match(
+      (await a6g(["task", "edit", "3", "--kind", "journey", "--parent", "none"], as("planner"))).out,
+      /task 3 is finished work under journey 2|task 3 is done, and a journey is done only by its tests: making it one is the operator's call/
+    );
+    await a6g(["task", "add", "Chore"], as("planner"));
+    await update(store().tasks, "4", (t) => ({ ...t, status: "done" as const }));
+    const made = await a6g(["task", "edit", "4", "--kind", "journey"], as("planner"));
+    assert.notEqual(made.code, 0);
+    assert.match(made.out, /task 4 is done, and a journey is done only by its tests: making it one is the operator's call \(or reopen it first\)/);
+    assert.equal((await store().tasks.get("4"))?.kind, "feature");
+    // Left out, journeys are required only once there's a suite: until then (and where they're optional) the planner
+    // closes one once its tasks are done, as before, tester or not.
+    for (const harness of [undefined, { journeys: "optional" }] as const) {
+      const open = setup(team({ approval: { mode: "full" }, ...(harness ? { harness } : {}) }));
+      await a6g(["task", "add", "Checkout", "--kind", "journey"], open.as("planner"));
+      await a6g(["task", "add", "Pay", "--parent", "1"], open.as("planner"));
+      await update(open.store().tasks, "2", (t) => ({ ...t, status: "done" as const }));
+      assert.equal((await a6g(["task", "status", "1", "done"], open.as("planner"))).code, 0, "its task done, the planner closes it");
+    }
   });
 
   test("text that starts with -- is text; --help prints the usage; the rules name CLAUDE.md only when there is one", async () => {

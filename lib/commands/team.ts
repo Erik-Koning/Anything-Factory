@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { instanceId, loadTeam, type RawTeam, type Team } from "../config.ts";
+import { instanceId, loadTeam, modelsOf, type RawTeam, type Team } from "../config.ts";
+import { defaultModel } from "../models.ts";
 import {
   defaultRunDir,
   A6G_HOME,
@@ -21,14 +22,24 @@ import {
   versionDir,
 } from "../paths.ts";
 import { readHold, readLimits } from "../holds.ts";
-import { subscriptionWeek } from "../subscriptions.ts";
+import {
+  accounts,
+  chooseFor,
+  describeWait,
+  SUBSCRIPTION_NAME,
+  subscriptionLimits,
+  subscriptionState,
+  subscriptionWeek,
+  teamUses,
+} from "../subscriptions.ts";
+import { plannerBusy, readSteering, retirePlanner, steer } from "../steer.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, readJson, writeJson } from "../util.ts";
 import { acquireSlot } from "../lock.ts";
-import { answers, applyTeamControls, BUSY, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
+import { answers, applyTeamControls, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
 import {
@@ -42,9 +53,12 @@ import {
   pauseControl,
   resumeControl,
 } from "../tasks/controls.ts";
-import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
+import { fileDesignCheckIn } from "../tasks/design.ts";
+import { designOpen, nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
+import { openTeamStore } from "../tasks/ops.ts";
+import { checkDue, fileGaps, readVerifyLog } from "../verify.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
 
@@ -83,6 +97,7 @@ export async function register(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["force", "worker"] });
   const home = homeFrom(positional[0]);
   const code = registerTeam(home, { force: Boolean(options["force"]), worker: Boolean(options["worker"]) });
+  if (code === 0 && !options["worker"]) await fileAtRegister(home);
   if (code === 0) await publishTeam(home);
   return code;
 }
@@ -104,6 +119,35 @@ async function publishTeam(home: string): Promise<void> {
     }
   } catch (error) {
     console.warn(`  couldn't publish ${team.name}'s settings for the web app: ${(error as Error).message.split("\n")[0]}`);
+  }
+}
+
+// What register files on the team's board without running anything, for the planner: the design check-in, where the
+// operator asked to agree the foundation (lib/tasks/design.ts), and the harness's gaps the factory can see: a team with
+// a scaffolder and no manifest yet (lib/verify.ts fileGaps; the merge queue files the rest after merges).
+async function fileAtRegister(home: string): Promise<void> {
+  const team = loadTeam(home);
+  const run = readRegistry(team.name)?.run;
+  const gaps = Boolean(team.roles["scaffolder"]);
+  if (team.board.type !== "tasks" || !run || (!gaps && !team.operator.designCheckIn)) return;
+  try {
+    const store = await openTeamStore(team, run, home);
+    try {
+      const design = await fileDesignCheckIn(store, team);
+      if (design) console.info(`  the design check-in is #${design}: the team builds the foundation, then asks you; features wait until you've agreed it`);
+      // The setting turned off doesn't end a check-in already filed: the task holds the features, not the setting.
+      const open = team.operator.designCheckIn ? null : designOpen(await store.tasks.all());
+      if (open)
+        console.warn(
+          `  note: the design check-in #${open.id} is still open (${open.status}) and holds features, though operator.designCheckIn is off now: a6g task status ${open.id} done ends it`
+        );
+      const filed = gaps ? await fileGaps(store, team, home, null) : [];
+      if (filed.length) console.info(`  the harness's gaps, for the planner to triage: ${filed.map((id) => `#${id}`).join(", ")}`);
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    console.warn(`  note: couldn't file the design check-in or the harness's gaps (${(error as Error).message.split("\n")[0]})`);
   }
 }
 
@@ -141,6 +185,21 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
 
   const instances: Record<string, t3.ProviderInstance> = {};
   const roles = Object.keys(team.roles).filter((role) => !worker || role === "builder");
+  // Each role stays on the subscription its instance runs on (the watchdog moves it, lib/steer.ts); a new role starts
+  // on the first open one the operator listed for it (a6g subscriptions use), else this Mac's own login.
+  const logins = accounts();
+  const before = t3.teamInstances(team.name) ?? {};
+  const fresh = chooseFor(
+    roles.filter((role) => !before[role]),
+    {},
+    { use: teamUses()[team.name], accounts: logins, state: subscriptionState(), limits: subscriptionLimits() }
+  );
+  const homeOf = (role: string): string | null => {
+    const had = before[role];
+    if (had) return had.homePath;
+    const chosen = fresh.roles[role];
+    return chosen ? (logins.find((a) => a.name === chosen)?.configDir ?? null) : null;
+  };
   for (const role of roles) {
     const prompt = writePrompt(team, role, run);
     const flags = [
@@ -156,11 +215,15 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
       launchArgs: flags.join(" "),
       environment: memberEnvironment(team, role, { home, run, version }),
       compactAt: role === "planner" ? team.plannerCompactAt : null,
+      homePath: homeOf(role),
     });
   }
   t3.writeTeam({ team: team.name, instances, project, setup: team.worktreeSetup, branchPrefix: team.branchPrefix });
 
   mkdirSync(teamsDir, { recursive: true });
+  // The roles this machine runs, each with its model; `model` is the one its watchdog starts first.
+  const models = Object.fromEntries(Object.entries(modelsOf(team)).filter(([role]) => roles.includes(role)));
+  const first = worker ? "builder" : "planner";
   const entry: RegistryEntry = {
     name: team.name,
     title: team.title,
@@ -169,7 +232,8 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     project,
     version,
     plannerInstance: instanceId(team, "planner"),
-    model: team.model,
+    model: models[first] ?? defaultModel(first),
+    models,
     health: team.environment.health,
     needsDocker: team.environment.needsDocker,
     worktreesDir: t3.worktreesDir(home),
@@ -188,10 +252,40 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
   console.info(
     `  roles${worker ? " (a worker: builders only; testers test on the lead, where the environment runs)" : ""}: ${roles.map((role) => `${role} (${instanceId(team, role)})`).join(", ")}`
   );
+  console.info(`  models: ${describeModels(models)}`);
+  // The subscriptions each role runs on, chosen now rather than at the watchdog's next run (else at that run).
+  let steered: ReturnType<typeof steer> = null;
+  try {
+    steered = steer({ name: team.name, run, worker });
+  } catch (error) {
+    console.warn(`  note: couldn't choose the subscriptions now (${(error as Error).message.split("\n")[0]}); the watchdog does at its next run`);
+  }
+  for (const line of steered?.said ?? []) console.info(`  ${line}`);
+  const on = steered?.steering.roles ?? {};
+  if (Object.values(on).some((name) => name !== null) || Object.keys(steered?.steering.waiting ?? {}).length)
+    console.info(`  subscriptions: ${describeSteering(steered?.steering ?? null)}`);
   if (existsSync(join(run, "planner-thread")))
     console.info(`  a planner is running; it keeps the flags it started with until a6g rotate ${team.name} (members started from now get the new ones)`);
   else console.info(`  start it: a6g start ${team.name}`);
   return 0;
+}
+
+// Each model and the roles on it, in a line: "claude-fable-5-1 for the planner and scaffolder; claude-opus-5-5 for …".
+export function describeModels(models: Record<string, string>): string {
+  const on = new Map<string, string[]>();
+  for (const [role, model] of Object.entries(models)) on.set(model, [...(on.get(model) ?? []), role]);
+  return [...on].map(([model, roles]) => `${model} for the ${roles.join(", ")}`).join("; ");
+}
+
+// Each role's subscription on this machine, and those that wait, in a line (lib/steer.ts).
+export function describeSteering(steering: ReturnType<typeof readSteering>): string {
+  if (!steering) return "not chosen yet";
+  const on = Object.entries(steering.roles).map(([role, name]) => {
+    const moving = Object.hasOwn(steering.moving, role) ? `, moving to ${steering.moving[role] ?? "this Mac's own login"} once it's free` : "";
+    return `${role} on ${name ?? "this Mac's own login"}${moving}`;
+  });
+  const waiting = Object.entries(steering.waiting).map(([role, wait]) => `${role} waits: ${describeWait(wait)}`);
+  return [...on, ...waiting].join("; ");
 }
 
 export function unregister(argv: string[]): number {
@@ -343,17 +437,24 @@ export async function pause(argv: string[]): Promise<number> {
   return 0;
 }
 
-const BUDGET_USAGE = "usage: a6g budget <team> [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
+const BUDGET_USAGE =
+  "usage: a6g budget <team> [--account <subscription>] [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume | --no-auto-resume] [--restart] [--clear]";
 
 // a6g budget <team>: the team's spending limits, in API-equivalent dollars (lib/budget.ts enforces them: a warning at
 // four fifths, a pause after the work under way at the limit, a pause now a tenth past it). With no limit given, what
 // they are and what's spent. A limit left out keeps its value and 0 removes it; --restart counts the total from now;
 // --auto-resume starts a team the budget paused for a day or week again when the next one starts; --clear removes all.
+// With --account, the limits are on what the team spends on that subscription: reaching one moves the team to its next
+// subscription (lib/steer.ts) rather than pausing it, and --clear removes only those.
 export async function budget(argv: string[]): Promise<number> {
   operatorOnly("budget");
   const { positional, options } = parseArgs(argv, { booleans: ["auto-resume", "no-auto-resume", "restart", "clear"] });
   const entry = entryFor(positional[0] ?? die(BUDGET_USAGE));
   if (!entry.tasks) die(`${entry.name} keeps its tickets on a GitHub board, which has no budget`);
+  const account = options["account"] === undefined ? null : typeof options["account"] === "string" ? options["account"].trim() : "";
+  if (account !== null && !SUBSCRIPTION_NAME.test(account)) die(`${BUDGET_USAGE}\n(--account: a subscription's name, as a6g subscriptions lists it)`);
+  if (account && !accounts().some((a) => a.name === account))
+    console.warn(`a6g: note: ${account} isn't a subscription on this Mac (a6g subscriptions add); the limits apply wherever it's one`);
   // The limits in force are the store's (the web app may have changed them a moment ago, and a worker never applies
   // them); the run folder's copy only when the store can't be reached.
   let current = readLimits(entry.run);
@@ -368,7 +469,8 @@ export async function budget(argv: string[]): Promise<number> {
     console.error(`a6g: couldn't read the budget from the task graph (${(error as Error).message.split("\n")[0]}); showing this machine's copy`);
   }
   // Each limit in dollars ("40") or as a share of one subscription's week ("60%", over 100% for more than one
-  // subscription's worth). One unit for the whole budget: limits given in the other one drop those not given.
+  // subscription's worth). One unit for the whole budget: limits given in the other one drop those not given, and a
+  // subscription's own are in the budget's unit.
   const keys = ["daily", "weekly", "total"] as const;
   const units = new Set(
     keys.flatMap((key) => (typeof options[key] === "string" ? [String(options[key]).trim().endsWith("%") ? "subscription" : "usd"] : []))
@@ -376,9 +478,15 @@ export async function budget(argv: string[]): Promise<number> {
   if (units.size > 1) die("give every limit in dollars, or every limit as a percentage of a subscription, not some of each");
   const unit: "usd" | "subscription" = units.size ? ([...units][0] as "usd" | "subscription") : (current?.unit ?? "usd");
   const switched = unit !== (current?.unit ?? "usd");
+  const inForce = current !== null && (keys.some((key) => current?.[key] !== null) || Object.keys(current.accounts ?? {}).length > 0);
+  if (account && switched && inForce)
+    die(
+      `${entry.name}'s budget is in ${current?.unit === "subscription" ? "percent of a subscription's week" : "dollars"}: give the limits on ${account} the same way (or change the budget's own first)`
+    );
+  const base: Partial<Record<(typeof keys)[number], number | null>> | null = account ? (current?.accounts?.[account] ?? null) : current;
   const amount = (key: (typeof keys)[number]): number | null => {
     const given = options[key];
-    if (typeof given !== "string") return switched ? null : (current?.[key] ?? null);
+    if (typeof given !== "string") return switched ? null : (base?.[key] ?? null);
     const n = Number(given.trim().replace(/^\$/, "").replace(/%$/, ""));
     const max = unit === "subscription" ? 10_000 : 1_000_000;
     if (!Number.isFinite(n) || n < 0 || n > max)
@@ -390,7 +498,10 @@ export async function budget(argv: string[]): Promise<number> {
   const words = (limits: Limits): string => {
     const one = (n: number | null) => (n === null ? "none" : limits.unit === "subscription" ? `${n}%` : `$${n}`);
     const shares = limits.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : "";
-    return `${one(limits.daily)} a day, ${one(limits.weekly)} a week, ${one(limits.total)} in all since ${limits.since.slice(0, 10)}${shares}`;
+    const each = Object.entries(limits.accounts ?? {}).map(
+      ([name, own]) => `; on ${name}: ${one(own.daily)} a day, ${one(own.weekly)} a week, ${one(own.total)} in all`
+    );
+    return `${one(limits.daily)} a day, ${one(limits.weekly)} a week, ${one(limits.total)} in all since ${limits.since.slice(0, 10)}${shares}${each.join("")}`;
   };
   const asked = ["daily", "weekly", "total", "auto-resume", "no-auto-resume", "restart", "clear"].some((key) => options[key] !== undefined);
   if (!asked) {
@@ -403,17 +514,27 @@ export async function budget(argv: string[]): Promise<number> {
     if (spend) console.info(describeSpend(spend, current));
     return 0;
   }
+  const own = (limits: { daily: number | null; weekly: number | null; total: number | null }): boolean =>
+    limits.daily !== null || limits.weekly !== null || limits.total !== null;
   let limits: Limits | null = null;
-  if (!options["clear"]) {
+  if (account || !options["clear"]) {
+    // The subscriptions' own limits: kept in the same unit, dropped with a switch of the budget's, this one's as asked.
+    const each = { ...(switched ? {} : (current?.accounts ?? {})) };
+    if (account) {
+      const mine = { daily: amount("daily"), weekly: amount("weekly"), total: amount("total") };
+      if (options["clear"] || !own(mine)) delete each[account];
+      else each[account] = mine;
+    }
     limits = {
-      daily: amount("daily"),
-      weekly: amount("weekly"),
-      total: amount("total"),
+      daily: account ? (current?.daily ?? null) : amount("daily"),
+      weekly: account ? (current?.weekly ?? null) : amount("weekly"),
+      total: account ? (current?.total ?? null) : amount("total"),
       since: options["restart"] || !current ? nowIso() : current.since,
       autoResume: options["auto-resume"] ? true : options["no-auto-resume"] ? false : (current?.autoResume ?? false),
       unit,
+      ...(Object.keys(each).length ? { accounts: each } : {}),
     };
-    if (limits.daily === null && limits.weekly === null && limits.total === null) limits = null;
+    if (!own(limits) && !limits.accounts) limits = null;
   }
   await recordControl(entry, async () => budgetControl(entry.name, OPERATOR, limits));
   const week = subscriptionWeek();
@@ -422,6 +543,10 @@ export async function budget(argv: string[]): Promise<number> {
       ? `a6g: ${entry.name}'s budget is ${words(limits)}; the watchdog holds the team to it from its next run${switched && current ? ` (the limits that were in ${current.unit === "subscription" ? "percent" : "dollars"} and weren't given again are dropped)` : ""}`
       : `a6g: ${entry.name} has no budget now`
   );
+  if (account && limits?.accounts?.[account])
+    console.info(
+      `a6g: once the team reaches a limit on ${account}, it moves to its next subscription (a6g subscriptions use), and roles with none left wait`
+    );
   if (limits?.unit === "subscription")
     console.info(
       week
@@ -465,18 +590,9 @@ export async function rotate(argv: string[]): Promise<number> {
   const refused = await watchOnce(entry.name, () => {
     old = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
     if (!old) return null;
-    const busy = t3.runningChildren(old);
-    if (busy === null) return "T3 Code's database couldn't be read, so it isn't known whether the planner's members are running; try again";
-    if (busy) return `the planner has ${busy} members running; they report to it, so rotate once they've finished`;
-    const thread = t3.threadShow(old);
-    if (!thread && t3.threadExists(old) !== false) return `T3 Code couldn't say what planner ${old} is doing; try again`;
-    if (thread && !thread.archived && BUSY.includes(thread.status ?? ""))
-      return `the planner is in the middle of a turn (${thread.status}); rotate once it's idle`;
-    // Waiting on a person: an answer would resume the old planner beside the new one.
-    if (thread && !thread.archived && (thread.status === "waiting" || (thread.pendingRequestCount ?? 0) > 0))
-      return "the planner is waiting for an answer in T3 Code; answer it (or dismiss the request), then rotate";
-    writeFileSync(join(entry.run, "planner-thread.retired"), `${old}\n`, { flag: "a" });
-    rmSync(file);
+    const busy = plannerBusy(entry.run, "rotate");
+    if (busy) return busy;
+    retirePlanner(entry.run);
     return null;
   });
   if (refused) die(`rotate: ${refused}`);
@@ -506,6 +622,9 @@ export async function status(argv: string[]): Promise<number> {
     console.info(
       `   members running: ${counts.length ? counts.map((row) => `${row.instance.replace(`a6g-${name}-`, "")} ${row.n}`).join(", ") : planner ? "none" : "-"}`
     );
+    const steering = readSteering(entry.run);
+    if (steering && (Object.values(steering.roles).some((on) => on !== null) || Object.keys(steering.waiting).length))
+      console.info(`   subscriptions: ${describeSteering(steering)}`);
     const health = entry.health ?? [];
     if (health.length) {
       const up = await Promise.all(health.map((target) => answers(target)));
@@ -524,6 +643,11 @@ export async function status(argv: string[]): Promise<number> {
     if (spend) console.info(`   ${describeSpend(spend, readLimits(entry.run))}`);
     const drain = join(entry.home, ".a6g", "run", "state", "drain");
     if (existsSync(drain)) console.info(`   draining: ${readFileSync(drain, "utf8").trim()} (a6g drain off, from the team's checkout)`);
+    // The merge queue's last check of the integration branch: its pages and its end-to-end suite.
+    const checked = readVerifyLog(entry.home).at(-1);
+    if (checked) console.info(`   checked after merges: ${checked}`);
+    const due = checkDue(entry.home);
+    if (due) console.info(`   a check after merges is due${due.after ? ` (after ${due.after})` : ""}: the next merge runs it`);
     const kept = keptWorktrees(entry.run);
     if (kept.length)
       console.info(

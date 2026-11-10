@@ -152,6 +152,86 @@ describe("a6g serve", () => {
     }
   });
 
+  test("a question shows what was asked and takes an answer; the design check-in takes nothing else", async () => {
+    const s = await served();
+    try {
+      const at = new Date(Date.now() - 60_000).toISOString();
+      const asked = {
+        by: "planner",
+        at,
+        reason: "The skeleton runs end to end. (a) agreed as built (b) change something",
+        recommendation: "(a) agreed as built",
+      };
+      const design = await s.store.tasks.create({
+        ...newTask({
+          team: "fixture",
+          title: "Design check-in",
+          kind: "design",
+          status: "question",
+          by: "merge-queue",
+          body: "Planner, this is yours to carry",
+        }),
+        ask: asked,
+        history: [{ at, by: "planner", what: "triage → question", from: "triage", to: "question" }],
+      });
+      const card = async () => /<li class="proposal">[\s\S]*?<\/li>/.exec(await (await fetch(s.url)).text())?.[0] ?? "";
+      const shown = await card();
+      assert.match(shown, /Why it's yours:<\/b> The skeleton runs end to end\. \(a\) agreed as built \(b\) change something/);
+      assert.match(shown, /The team recommends:<\/b> \(a\) agreed as built/);
+      assert.match(shown, new RegExp(`action="/api/tasks/${design.id}/answer"`));
+      assert.doesNotMatch(shown, /Approve|Reject|Not scored yet|yours to carry/, "answered, not approved or rejected");
+
+      const empty = await post(`${s.url}/api/tasks/${design.id}/answer`, { text: "  " });
+      assert.equal(empty.status, 400);
+      // Reject, posted by hand, would open the gate: a rejected check-in is one the operator wants none of.
+      const rejected = await post(`${s.url}/api/tasks/${design.id}/reject`, { reason: "I'd rather it were SQLite" });
+      assert.equal(rejected.status, 422);
+      assert.match(((await rejected.json()) as { output: string }).output, /which you answer rather than approve or reject/);
+      assert.equal((await s.store.tasks.get(design.id))?.status, "question");
+
+      const answered = await post(`${s.url}/api/tasks/${design.id}/answer`, { text: "--(b) SQLite instead of Postgres" });
+      const result = (await answered.json()) as { ok: boolean; output: string };
+      assert.deepEqual([answered.status, result.ok], [200, true], result.output);
+      const task = await s.store.tasks.get(design.id);
+      assert.deepEqual([task?.status, task?.notes.at(-1)?.by, task?.notes.at(-1)?.kind], ["question", "operator", "answer"]);
+      assert.equal(task?.notes.at(-1)?.text, "--(b) SQLite instead of Postgres", "an answer that starts with -- stays an answer");
+      assert.match(await card(), /You answered:<\/b> --\(b\) SQLite instead of Postgres/);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test("blocked work raised to the operator waits for them too, with an answer box; a block the team sorts doesn't", async () => {
+    const s = await served();
+    try {
+      assert.match(await (await fetch(s.url)).text(), /0 waiting for you[\s\S]*Nothing is waiting for you\./);
+      const at = new Date(Date.now() - 60_000).toISOString();
+      const blocked = (title: string) => ({
+        ...newTask({ team: "fixture", title, kind: "feature", status: "blocked", by: "planner", body: "Send the weekly digest by email." }),
+        history: [{ at, by: "planner", what: "building → blocked", from: "building", to: "blocked" }],
+      });
+      const raised = await s.store.tasks.create({
+        ...blocked("Weekly digest"),
+        ask: { by: "planner", at, reason: "It needs a sending domain only you can verify.", recommendation: "Verify mail.example.org" },
+      });
+      await s.store.tasks.create(blocked("Waits on another task"));
+      const html = await (await fetch(s.url)).text();
+      assert.match(html, /1 waiting for you/);
+      const cards = html.match(/<li class="proposal">[\s\S]*?<\/li>/g) ?? [];
+      assert.equal(cards.length, 1, "only the block raised to the operator");
+      assert.match(cards[0] ?? "", /Weekly digest[\s\S]*Why it's yours:<\/b> It needs a sending domain only you can verify\./);
+      assert.match(cards[0] ?? "", new RegExp(`action="/api/tasks/${raised.id}/answer"`));
+      assert.doesNotMatch(cards[0] ?? "", /Approve|Reject/, "the planner unblocks it once the operator has said how");
+
+      const answered = await post(`${s.url}/api/tasks/${raised.id}/answer`, { text: "Verified, go ahead" });
+      assert.equal(answered.status, 200);
+      const task = await s.store.tasks.get(raised.id);
+      assert.deepEqual([task?.status, task?.notes.at(-1)?.kind, task?.notes.at(-1)?.text], ["blocked", "answer", "Verified, go ahead"]);
+    } finally {
+      await s.close();
+    }
+  });
+
   test("with a token, every request needs it: ?token= once, then the cookie or the header", async () => {
     const s = await served({ token: "s3cret-token" });
     try {

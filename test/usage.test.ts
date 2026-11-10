@@ -223,7 +223,20 @@ describe("what a team spent", () => {
   test("today, this week from Monday, and in all or since the budget began, every machine's added up", () => {
     assert.equal(weekOf(now), "2026-11-02");
     assert.equal(dayOf(now), "2026-11-04");
-    assert.deepEqual({ ...spendOf(days, now), at: "" }, { day: "2026-11-04", today: 1.5, week: 3.5, total: 8.5, since: null, unpriced: 0, at: "" });
+    assert.deepEqual(
+      { ...spendOf(days, now), at: "" },
+      {
+        day: "2026-11-04",
+        today: 1.5,
+        week: 3.5,
+        total: 8.5,
+        since: null,
+        unpriced: 0,
+        at: "",
+        // Rows from before subscriptions were told apart ran on the machine's own login.
+        accounts: { default: { today: 1.5, week: 3.5, total: 8.5 } },
+      }
+    );
     assert.equal(spendOf(days, now, new Date("2026-11-02T09:00:00").toISOString()).total, 3.5);
   });
 

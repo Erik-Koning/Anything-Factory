@@ -223,3 +223,176 @@ describe("env files, whatever they're called", () => {
     for (const command of ["ls -la .env*", "cat .env.example", "cat docs/canada-staging.env.example"]) assert.equal(refused(t, command), null, command);
   });
 });
+
+describe("secrets through a manager", () => {
+  const all = (state: "allow" | "deny") => team({ policies: Object.fromEntries(POLICIES.map((p) => [p.id, state])) });
+  const QUIET = [
+    "openssl rand -hex 32 | sst secret set AuthSecret",
+    "openssl rand -hex 32 | npx sst secret set AuthSecret --stage dev",
+    "openssl rand -hex 32 | pnpm sst secret set AuthSecret --fallback",
+    "openssl rand -hex 32 | pnpm exec sst secret set AuthSecret",
+    "timeout 60 npx sst secret set AuthSecret < key.txt",
+    'printf %s "$AUTH" | sst secret set AuthSecret',
+    'printf "%s\\n" "${AUTH}" | sst secret set AuthSecret',
+    'echo -n "$(openssl rand -hex 32)" | sst secret set AuthSecret',
+    'sst secret set AuthSecret <<< "$AUTH"',
+    "sst secret set AuthSecret <<EOF\n$AUTH\nEOF",
+    "openssl rand -hex 32 | vercel env add SESSION_KEY --environment preview",
+    "openssl rand -hex 32 | vercel env add SESSION_KEY development --sensitive",
+    'printf %s "$API_TOKEN" | gh secret set API_TOKEN',
+    "openssl rand -hex 32 | gh secret set API_TOKEN --env staging --app actions",
+    "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent",
+    "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent -p app -c dev",
+    "openssl rand -hex 32 | gcloud secrets versions add session-key --data-file=-",
+    "openssl rand -hex 32 | gcloud secrets create session-key --data-file - --replication-policy automatic",
+  ];
+
+  test("a secret piped into a manager passes on a team that deploys nothing, reaches no cloud and uses gh for issues", () => {
+    const t = team();
+    for (const policy of ["deploy", "cloud", "github"]) assert.equal(policyStates(t).find((p) => p.id === policy)?.state, "deny");
+    for (const command of QUIET) assert.equal(refused(t, command), null, command);
+    // The tools' other commands are as refused as before.
+    for (const command of ["sst deploy", "npx sst dev", "vercel env ls", "gh secret list", "gh secret delete API_TOKEN", "gcloud secrets list"])
+      assert.match(refused(t, command)?.source ?? "", /^policy (deploy|cloud|github)$/, command);
+  });
+
+  test("the value written in the command is refused, whatever the team unlocks", () => {
+    for (const command of [
+      "sst secret set AuthSecret hunter2",
+      'sst secret set AuthSecret "$AUTH"',
+      'npx sst secret set AuthSecret "$(openssl rand -hex 32)"',
+      "pnpm sst secret set AuthSecret hunter2 --stage dev",
+      "echo hunter2 | sst secret set AuthSecret",
+      "printf 'hunter%s' 2 | sst secret set AuthSecret",
+      "sst secret set AuthSecret <<< hunter2",
+      "sst secret set AuthSecret <<EOF\nhunter2\nEOF",
+      'echo "${AUTH:-hunter2}" | sst secret set AuthSecret',
+      "vercel env add SESSION_KEY preview --value hunter2",
+      "vercel env add SESSION_KEY --environment preview --value=hunter2",
+      'gh secret set API_TOKEN --body "$API_TOKEN"',
+      "gh secret set API_TOKEN -bhunter2",
+      "gh -R acme/app secret set API_TOKEN -b hunter2",
+      "doppler secrets set SESSION_KEY=hunter2 --silent",
+      "doppler secrets set SESSION_KEY hunter2 --silent",
+      "timeout 30 doppler secrets set SESSION_KEY=hunter2 OTHER=x --silent",
+    ])
+      for (const t of [team(), all("allow"), all("deny")]) assert.equal(refused(t, command)?.source, "core", command);
+    assert.match(refused(all("allow"), "sst secret set AuthSecret hunter2")?.reason ?? "", /pipe it in.*openssl rand -hex 32 \| sst secret set Name/);
+    // A word after the name is called the value only when every option was read.
+    assert.equal(refused(all("allow"), "openssl rand -hex 32 | sst secret set AuthSecret --profile work"), null);
+  });
+
+  test("what prints stored values back is refused, whatever the team unlocks", () => {
+    for (const command of [
+      "sst secret list",
+      "npx sst secret list --stage dev",
+      "pnpm sst --stage dev secret list",
+      "vercel env pull",
+      "vercel env pull .env.development.local",
+      "doppler secrets",
+      "doppler secrets --json",
+      "doppler secrets get SESSION_KEY --plain",
+      "doppler secrets download --no-file --format env",
+      "openssl rand -base64 32 | doppler secrets set SESSION_KEY",
+      "gcloud secrets versions access latest --secret=session-key",
+      "gcloud beta secrets versions access 3 --secret session-key",
+      "gcloud auth print-access-token",
+      "aws secretsmanager get-secret-value --secret-id app/session",
+      "aws --profile dev ssm get-parameters-by-path --path /app --with-decryption",
+      "heroku config -a app",
+      "heroku config:get SESSION_KEY",
+      "vault kv get secret/app",
+      "vault read secret/data/app",
+      "op read op://dev/app/session",
+      "kubectl get secret app -o yaml",
+      "kubectl -n app get secrets -ojsonpath='{.items[*].data}'",
+      "firebase functions:secrets:access SESSION_KEY",
+    ])
+      assert.equal(refused(all("allow"), command)?.source, "core", command);
+    assert.match(refused(all("allow"), "openssl rand -base64 32 | doppler secrets set SESSION_KEY")?.reason ?? "", /--silent/);
+    // What shows names, or runs with them, shows no value.
+    for (const command of [
+      "doppler secrets --only-names",
+      "doppler run -- node server.js",
+      "gh secret list",
+      "vercel env ls",
+      "gcloud secrets list",
+      "aws ssm get-parameter --name /app/flag",
+      "heroku config:set FLAG=on",
+      "kubectl get secrets -o name",
+      "kubectl get secrets",
+      "grep -rn 'sst secret list' docs/",
+      "git commit -m 'never run sst secret list'",
+      "echo doppler secrets",
+    ])
+      assert.equal(refused(all("allow"), command), null, command);
+  });
+
+  test("a store for production, or one the guard can't read in full, is left to the tool's own policy", () => {
+    const t = team();
+    const PRODUCTION = [
+      "openssl rand -hex 32 | sst secret set AuthSecret --stage production",
+      "openssl rand -hex 32 | sst secret set AuthSecret --stage=prod-eu",
+      'openssl rand -hex 32 | sst secret set AuthSecret --stage "$STAGE"',
+      "openssl rand -hex 32 | vercel env add SESSION_KEY",
+      "openssl rand -hex 32 | vercel env add SESSION_KEY production",
+      "openssl rand -hex 32 | vercel env add SESSION_KEY --environment production",
+      "openssl rand -hex 32 | gh secret set API_TOKEN --env production",
+      "openssl rand -hex 32 | gh secret set API_TOKEN -e live",
+      "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent --config prd",
+      "openssl rand -hex 32 | gcloud secrets versions add session-key --data-file=- --project acme-prod",
+    ];
+    for (const command of PRODUCTION) {
+      assert.equal(refused(t, command)?.source, "policy deploy", command);
+      assert.match(refused(t, command)?.reason ?? "", /production/, command);
+      assert.equal(refused(all("allow"), command), null, command);
+    }
+    // With deploys unlocked, a production store still needs the tool's own policy.
+    const deploys = team({ policies: { deploy: "allow" } });
+    assert.equal(refused(deploys, "openssl rand -hex 32 | sst secret set AuthSecret --stage production"), null);
+    assert.equal(refused(deploys, "openssl rand -hex 32 | gh secret set API_TOKEN --env production")?.source, "policy github");
+    assert.equal(
+      refused(deploys, "openssl rand -hex 32 | gcloud secrets versions add session-key --data-file=- --project acme-prod")?.source,
+      "policy cloud"
+    );
+    // Anything in front but a runner or a time limit, a variable set for the command, an option it doesn't know.
+    const UNREAD: [string, string][] = [
+      ["openssl rand -hex 32 | SST_STAGE=production sst secret set AuthSecret", "policy deploy"],
+      ["openssl rand -hex 32 | AWS_PROFILE=other npx sst secret set AuthSecret", "policy deploy"],
+      ["openssl rand -hex 32 | env sst secret set AuthSecret", "policy deploy"],
+      ["openssl rand -hex 32 | a6g lock sst -- npx sst secret set AuthSecret", "policy deploy"],
+      ["openssl rand -hex 32 | sst secret set AuthSecret --verbose", "policy deploy"],
+      ["openssl rand -hex 32 | sst secret set AuthSecret --config other/sst.config.ts", "policy deploy"],
+      ["openssl rand -hex 32 | gh secret set API_TOKEN --org acme", "policy github"],
+      ["openssl rand -hex 32 | gh secret set API_TOKEN --repo acme/other", "policy github"],
+      ["gh secret set --env-file secrets.txt", "policy github"],
+      ["openssl rand -hex 32 | gh secret set API_TOKEN --no-store", "policy github"],
+      ["gcloud secrets versions add session-key --data-file=key.txt", "policy cloud"],
+      ["openssl rand -hex 32 | gcloud secrets versions add session-key --data-file=- --impersonate-service-account x@y.iam", "policy cloud"],
+    ];
+    for (const [command, source] of UNREAD) {
+      assert.equal(refused(t, command)?.source, source, command);
+      assert.match(refused(t, command)?.reason ?? "", /secret store passes in the form/, command);
+      assert.equal(refused(all("allow"), command), null, command);
+    }
+  });
+
+  test("a team that stores no secrets: every store is refused, and told so first", () => {
+    const t = team({ policies: { secrets: "deny" } });
+    for (const command of QUIET) {
+      assert.equal(refused(t, command)?.source, "policy secrets", command);
+      assert.match(refused(t, command)?.reason ?? "", /the operator sets them/);
+    }
+    assert.equal(
+      refused(team({ policies: { secrets: "deny", deploy: "allow" } }), "openssl rand -hex 32 | sst secret set AuthSecret")?.source,
+      "policy secrets"
+    );
+    assert.equal(refused(t, "doppler secrets --only-names"), null);
+  });
+
+  test("a team's own rule still refuses a store it names", () => {
+    const t = team({ never: [["--stage\\s+main\\b", "main is this project's production stage"]] });
+    assert.equal(refused(t, "openssl rand -hex 32 | sst secret set AuthSecret --stage main")?.source, "team");
+    assert.equal(refused(t, "openssl rand -hex 32 | sst secret set AuthSecret --stage dev"), null);
+  });
+});

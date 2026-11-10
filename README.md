@@ -1,9 +1,10 @@
 # Anything Factory
 
 Anything Factory provisions a software engineering team of Claude Code agents in any code repository, fast. You give
-as much direction as the project needs. A planner then runs builders, a reviewer, an approver, a UX specialist,
-testers and an innovator, until a checkable finish line holds or, for open-ended work, cycle after cycle. The team
-contacts you only when the work is done or a cycle closes, or when a decision would change the outcome a lot.
+as much direction as the project needs. A planner then runs builders, testers, a scaffolder, a reviewer, a UX
+specialist, an approver and an innovator (and a security reviewer, where the app has sign-in, payments or an API of
+its own), until a checkable finish line holds or, for open-ended work, cycle after cycle. The team contacts you only
+when the work is done or a cycle closes, or when a decision would change the outcome a lot.
 
 It's built on [T3 Code](https://github.com/pingdotgg/t3code), which runs the agents' threads, gives each one its own
 worktree, and wakes the planner when a member finishes. Claude Code is each agent. Anything Factory adds the roles, the
@@ -29,11 +30,21 @@ a6g init ~/code/my-app                           # detect, make the team's check
 3. Writes a draft `.a6g/`, pinned to the factory version that wrote it.
 4. Opens the **setup agent**. It asks you only what it couldn't detect: the goal, how done is proven, the team,
    a budget, branches, the board, data, contact, taste, and which policies to unlock. The budget goes into the
-   brief as guidance for the planner; nothing enforces it, so watch `a6g metrics` and pause the team when it's
-   spent. It finishes `.a6g/`, commits it on the integration branch (members' worktrees are made from it), and
-   proves it with `a6g check --run`. If you say so, it registers and starts the team.
+   brief as guidance for the planner, and `a6g budget` holds the team to it (the command is yours to run: the
+   setup agent tells you the line). It finishes `.a6g/`, commits it on the integration branch (members' worktrees
+   are made from it), and proves it with `a6g check --run`. If you say so, it registers and starts the team.
 
 `a6g init --no-interview` writes the draft only, and prints the same steps for you to do by hand.
+
+**A new project.** Where nothing is built yet, say what you want made and `init` drafts a team that starts with the
+foundation. The setup agent asks what you've already fixed (a host, a database, a language) and proposes the rest
+from what the product needs; the scaffolder completes it, builds a skeleton that runs end to end with its checks,
+and writes the design down in `docs/architecture.md`: each choice, why, what else was weighed, what it costs to run
+and how it's changed later. Then the team **checks the design with you** and builds no feature until you've agreed
+it (`operator.designCheckIn`). If you're not technical, it doesn't ask: it takes the safer choice each time, records
+it, and comes to you only about the product, what it may cost and the accounts it needs (`operator.technical`,
+which the setup agent works out without asking; `a6g init --non-technical` says it outright). The interview runs on
+Fable; `--model` names another.
 
 To watch a team:
 
@@ -41,6 +52,7 @@ To watch a team:
 a6g teams                  # every team on this Mac, its version, and whether it's active, pausing, paused or complete
 a6g status                 # each team: planner, members running, its environment, what it spent, what's drained
 a6g metrics --team my-app  # agents, runs, model requests, tokens and time per role
+a6g metrics --quality --team my-app --since 2026-03-01   # how the merged work went (below)
 a6g pause my-app           # and a6g resume my-app; a6g rotate my-app for a fresh planner
 ```
 
@@ -48,20 +60,74 @@ What a team spends is counted from its agents' Claude transcripts each watchdog 
 task, priced at the API-equivalent rate (`lib/prices.ts`; on a subscription, how fast it uses your limits). `a6g status`
 shows today, this week and in all; the web app adds each day and the costliest journeys and tasks.
 
+How the merged work went is `a6g metrics --quality [--since <time>] [--until <time>] [--json]`, read from what the
+factory records anyway (each task's history, what the check after merges filed, the suite's recorded runs, the spend
+on each task's branch), so no agent reports any of it:
+
+- **Merged:** the tasks the merge queue merged in the period, by kind. A task counts once, at its last merge.
+- **Reviews passed first time:** of the merged tasks a review approved, the share that never had a round of changes
+  (a reviewer's, or the security reviewer's issues).
+- **Found after merge:** the failures the check after merges filed in the period (a page, a test, who a page is
+  served to, the app down), per merged task, and how many of them the planner has rejected since. The harness's gaps,
+  package advisories and findings about the checks themselves (a suite that didn't run, a flaky test, fewer tests) are
+  counted apart: no merge broke those.
+- **Journeys proven:** of the team's journeys, those whose tagged tests all passed in the newest recorded run of the
+  suite.
+- **Flaky tests:** the tests that passed only on a retry in the period's recorded runs (the last 20 runs are kept).
+- **Cost per merged task:** what ran on the merged tasks' branches, on any day, at the API-equivalent rate and as the
+  watchdog last counted it, beside all the team spent in the period.
+- **Claimed to merged:** the median time from a task's first claim to its merge.
+
+A number that can't be known says so, and why, rather than read 0: the suite's runs are kept on the team's lead
+machine, so journeys and flaky tests are known there. A date alone is its first moment in UTC, so `--until 2026-04-01`
+takes in all of March. The numbers need the task graph: a team on a GitHub board is told so.
+
 To hold a team to a budget: `a6g budget my-app --daily 40 --weekly 200 --total 1500` (dollars, API-equivalent; a limit
 left out keeps its value, 0 removes it; `a6g budget my-app` shows them). Or as shares of a Claude subscription:
 `a6g budget my-app --weekly 60% --total 300%`, where 100% is one subscription's weekly limit and more is more than one
 subscription's worth. The watchdog reads each subscription's usage every quarter hour, from Claude Code's own usage
 report (`claude -p /usage`, a local command that uses nothing), and with what the Mac used that week, every session's,
 works out what one subscription's week comes to in API-equivalent dollars; `a6g subscriptions` shows it. Until there's
-a reading with 5% of the week used, a budget in shares isn't checked, and says so. Several subscriptions: give each its
-own Claude Code config folder (`CLAUDE_CONFIG_DIR`, as Claude Code's docs say for several accounts), then
-`a6g subscriptions add <name> --config-dir <dir>`. At 80% of a limit you're warned, once per day,
-week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now. Resume it
-and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the budget):
-you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when the next
-day or week does. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach, `a6g pause`
-still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
+a reading with 5% of the week used, a budget in shares isn't checked, and says so. At 80% of a limit you're warned, once
+per day, week or budget; at 100% the team pauses after the work under way, with the report; at 110% it pauses now.
+Resume it and the budget leaves that limit alone for the rest of its day or week (for the total, until you change the
+budget): you chose to carry on. With `--auto-resume`, a team only the daily or weekly budget paused starts again when
+the next day or week does. `a6g start` never lifts a pause; `a6g resume` does. With the task graph out of reach,
+`a6g pause` still stops the team on this machine, and on a worker machine pause and resume are that machine's alone.
+
+### Teams on several subscriptions
+
+Each subscription is a Claude Code login in a config folder of its own (`CLAUDE_CONFIG_DIR`, as Claude Code's docs say
+for several accounts); this Mac's own login (`~/.claude`) is `default`. A team's roles run on one through T3 Code's own
+setting for it (each instance's `homePath`), so the factory never touches the login itself:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-b claude auth login        # sign the second subscription in, once
+a6g subscriptions add b --config-dir ~/.claude-b
+a6g subscriptions use app default,b                     # app runs on default, and on b when default closes
+a6g subscriptions use site b,default                    # site the other way round
+a6g subscriptions use app b --role builder              # or one role on a list of its own
+a6g subscriptions limit default --weekly 85%            # keep 15% of default's week for yourself
+a6g subscriptions limit all --weekly 170%               # the two weeks added up
+a6g budget site --account b --weekly 40%                # site may take 40% of b's week, then it moves to default
+```
+
+A subscription closes at your limit for it, at the limit across all of them, once its week or five hours are used up
+(until it resets), or for one team at that team's own budget on it (`a6g budget --account`, in the budget's unit). The
+watchdog reads each one every quarter hour, every five minutes when one is near a limit, and keeps every role on the
+first open subscription in its list. A role moves only when nothing of it is at work, since T3 Code would resume a
+session under the new login, where it isn't: a member role once its members at work finish (none of it starts in
+between, which is soon: each does one task), and the planner once it's idle with no member running, when its thread
+is retired and a fresh one starts on the new subscription at the next run. A role goes back up its list once the
+earlier subscription is five points under its limits. A role none is open to waits: the guard starts none of its
+members, a waiting planner gets no ticks and keeps its messages for when it can work, the roles still open carry on,
+and it picks up by itself when one opens. You're told of every move and wait; `a6g subscriptions` shows each one's usage, limits and
+the teams on it, and `a6g status` each team's. A team's spend is counted on the subscription each request ran on, and
+a budget in percent counts each against that subscription's own week.
+
+The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
+list. The limits read each subscription's own usage, so they hold wherever it's used; what a week comes to in dollars
+counts what the reading Mac used, so for a subscription used on two Macs it's an underestimate.
 
 To stop a team gracefully, let what it's doing finish first: `a6g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets
@@ -122,7 +188,7 @@ whatever else uses the number.
  launchd ─ watchdog (every 5 min, every team) ─── tick ───▶ PLANNER (a T3 Code thread)
             restarts T3, Docker · stuck? · prunes worktrees              │ delegate_task (the guard counts the limits)
                                                                          ▼
-          builders and testers (own worktrees) · reviewer · UX specialist · innovator
+ builders, testers, scaffolder (own worktrees) · reviewer · security reviewer · UX specialist · innovator
                     │ a branch                     │ a6g verdict … @ the exact commit
                     ▼                              ▼
    a6g merge --queue: lane ✓ · approval of this commit ✓ · full gate on the merged result ✓
@@ -140,6 +206,11 @@ claude --agent a6g:<role>                                 the role's prompt, fro
                                                           the constitution's articles + the team's rules
        --setting-sources project [--strict-mcp-config]    none of your personal skills, plugins or connectors
 ```
+
+Each role runs on its own model: Fable for the planner, the innovator and the scaffolder, who decide what gets built
+and on what, and Opus for the roles that build it and check it. `model` and `roles.<role>.model` in `team.json`
+change that ([docs/team.md](docs/team.md#models)); the planner passes each member's to T3 Code, and the guard refuses
+a member started on any other.
 
 The appended prompt is **compiled**, never written by hand. It combines:
 
@@ -163,6 +234,74 @@ recompiles it.
 
 **The stop gate** keeps a builder or tester from finishing with uncommitted work, a misnamed branch, or a failing
 quick gate. **The merge queue** (`a6g merge`) is the only way into the integration branch.
+
+**Secrets don't merge.** `a6g task submit` and the merge queue read every commit a branch would bring in (the lines each
+adds, its message, the files it adds or changes) and refuse the branch that holds a live credential by its shape (a
+private key, a live Stripe key or webhook secret, an AWS access key id, a GitHub, Slack, Anthropic, OpenAI or SendGrid
+token) or a secrets file, even when a later commit took it out. The refusal names the file, the line and the commit,
+never the value; the branch is rebuilt without it, and a real key that reached a commit is yours to rotate. Test-mode
+keys, JWTs and text that only looks random are left alone: nothing passes this refusal, so it fires only on what's
+real by construction.
+
+## Checks that hold
+
+A team's work is checked by scripts as well as by agents, and the checks are run again after merges, so what was done
+stays done.
+
+- **Page checks from day one.** The factory carries its own Playwright and Chromium (`a6g self-install` downloads it).
+  `a6g pages` loads each page at desktop, laptop and phone, light and dark, signed in where it needs to be. It checks
+  the HTTP status, errors in the console, sideways scrolling, axe's WCAG A/AA violations, touch targets under
+  `pages.minTarget` on phones, text clipped by its box and controls with no visible focus, and takes screenshots with
+  animations off. When the UX specialist passes a page, its screenshots are kept, and later checks say which pages
+  look different since.
+- **The scaffolder** (`plugin/agents/scaffolder.md`) owns the means of checking: Playwright in the repository, a
+  sign-in for each kind of user, test data kept apart per run (`A6G_NAMESPACE`), stand-ins for outside services,
+  stable screenshots, and the harness manifest (`.a6g/harness.json`) that tells the factory the pages, sign-ins, colour
+  schemes and suite. It claims `scaffold` work (an empty repository's skeleton, a new app or package) and `test-infra`
+  work, and specs where the team has no tester. Setup drafts one for any app.
+- **Journeys as specs.** A journey's specs are Playwright tests tagged `@journey-<id>`, written by a tester or the
+  scaffolder, never by who built it (the merge queue refuses a builder's branch that touches one). A journey is done
+  only on a run of the suite that holds all its merges and where they passed, and `a6g finish` needs the whole suite
+  passing at the head (`harness.journeys`). `a6g complete` marks the work complete only when the finish line holds.
+- **After merges.** Every queued merge, however it ends, runs the check that's due, and the last of a burst runs it
+  once for the newest commit, holding the merge and app locks so nothing moves under it. It asks the app first: an app
+  that's down is one blocker finding, nothing else is checked, and the check stays due. Then every page and the whole
+  suite, with one retry. What newly fails becomes a finding, naming the merges since it last passed. So does a suite
+  that didn't run, and one that checks less than it did at the check before (fewer tests, or more told to skip or to
+  fail) unless you allowed the commit. A test that passes only on its retry is filed as flaky, journeys without specs
+  are filed, journeys whose tests now pass are closed, and the planner is woken. Rejecting a finding quiets that
+  failure, not that page: a different failure, or the same one after a pass, is filed again.
+- **Who a page refuses.** A page in the manifest says who must not be served it
+  (`"refuses": ["member", "signed-out"]`), and `a6g pages` asks for it as each of them. Sent to another path, or
+  answered 401, 403 or 404, is refused; served is a failure, and a blocker finding when the check after merges files
+  it. A refusal counts only from a sign-in the same run showed live, so a session that ran out never reads as one.
+  Where the app has two or more kinds of user, a suite with no test tagged `@access` (one user opening another's
+  record by its address) is a gap the factory files once.
+- **Vulnerable packages are a finding.** When a lockfile changes, and once a week when none does, the check after
+  merges runs the package manager's own audit of what ships (`npm audit --omit=dev`, `pnpm audit --prod`). A package
+  with an advisory of its own at high or critical becomes a task, at most five open at once, the worst first. It
+  never fails a merge, package names and versions go to the registry the install already uses, and
+  `"security": { "audit": false }` in team.json turns it off.
+- **A security reviewer** (`plugin/agents/security-reviewer.md`), on a team whose roles list it. A branch that changes
+  sign-in, permissions, payments, webhooks or the data's shape (by its paths, and by your own `security.paths`), or
+  that a reviewer sent on (`a6g verdict review <branch> approve --security`), merges only once the security reviewer
+  has passed its tip: `a6g verdict security <branch> pass --sha <tip>`. Its `issues` send the task back like a
+  review's changes. Once a cycle the planner also starts it with no branch, to sweep who can reach which page and
+  which record. Setup drafts one for an app with sign-in, payments or an API of its own; a team without the role is
+  asked for nothing. [docs/team.md](docs/team.md) has the paths.
+- **Checking less is your call.** A branch that removes a page or the suite from the manifest, takes a state out of a
+  page's `refuses`, skips, filters or retries a test, or leaves fewer tests merges only once you allow that exact
+  commit: `a6g harness allow <branch> --sha <commit> --why "…"`.
+- **One environment, used one run at a time.** Runs against the team's app (`a6g pages`, `a6g e2e`, and a member's own
+  `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them. `a6g env use` waits
+  `--wait-min` minutes for it (8 unless said), and ends a command that holds it past `--max-min` (30 unless said, 120
+  at most) with everything it started, so a run that hangs doesn't keep merges waiting.
+
+```bash
+a6g pages status                     # each page: its checks, its UX verdict, and whether it looks different
+a6g e2e status                       # which journeys have specs, and how the last run went
+a6g harness check                    # does the manifest load
+```
 
 ## The task graph
 
@@ -191,6 +330,9 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   of a stakeholder's words (a feature request, a suggestion from the web app) is yours to approve whatever the mode
   (`approval.stakeholders`, `"screened"` to let the approver approve what the planner screened clear, never what it
   screened risky). Every move of a task, by whom and from where, is one table in `lib/tasks/model.ts`.
+- **The design check-in.** A team with one (`operator.designCheckIn`) has a `design` task from its first
+  `a6g register`. Until you've agreed the design, only `scaffold` and `test-infra` tasks are claimed. The planner
+  raises it once the foundation has merged; only your answer closes it.
 - **Claims.** Builders and testers claim the next approved task their role builds (blockers, then majors, then
   priority), never two on the same files, under a lease their heartbeats renew; the watchdog returns a claim whose
   member went quiet. The Stop hook won't let a member finish holding one: it submits or releases it.
@@ -211,8 +353,8 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   others: once they're done it closes (it was folded into them) or goes back to work, and once one is rejected it
   goes back to the planner. The merge queue settles it as it merges, and the watchdog every minute.
 - **Answers.** What waits on you (every `question`, and blocks raised to you) you answer on the web app's Waiting on
-  you page, with the options the question offers: a note by the operator marked as the answer
-  (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
+  you page, with the options the question offers, or with `a6g task answer <id> "…"`: a note by the operator marked
+  as the answer (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
   `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `a6g request add` takes a stakeholder's request; `a6g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks
@@ -228,13 +370,14 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Cycles.** With `"mode": "cycles"` a team has no finish line: it builds, verifies journeys, sweeps for regressions
   and closes each cycle with a report (`a6g cycle close`), and rests when nothing is left until new work arrives.
 
-`a6g serve` is your page for one team, on the machine it runs on: the request form, the proposals to approve or
-reject, the board and the graph. It listens on 127.0.0.1 and always asks for a token, so the team's own agents on
-this machine can't use it: one made at start and printed in the address to open, or yours in `A6G_SERVE_TOKEN`.
-That token is yours alone: it approves work and shows stakeholders' names. Give a stakeholder a link of their own
-with `a6g request stakeholders add --name "…" --email "…" --role "…"`: it opens only the request form and their own
-requests, and what they send is attributed to them; `a6g request stakeholders revoke <sN>` ends it. For people on
-other machines, serve on an address they can reach (`--host`).
+`a6g serve` is your page for one team, on the machine it runs on: the request form, what waits on you (proposals to
+approve or reject, and questions and blocked work raised to you, each with a box for your answer), the board and the
+graph. It listens on 127.0.0.1 and always asks for a token, so the team's own agents on this machine can't use it: one
+made at start and printed in the address to open, or yours in `A6G_SERVE_TOKEN`. That token is yours alone: it approves
+work and shows stakeholders' names. Give a stakeholder a link of their own with `a6g request stakeholders add --name "…"
+--email "…" --role "…"`: it opens only the request form and their own requests, and what they send is attributed to
+them; `a6g request stakeholders revoke <sN>` ends it. For people on other machines, serve on an address they can reach
+(`--host`).
 
 ### Across machines
 
@@ -302,30 +445,33 @@ Everything else is generated from these two, and nothing in it is edited by hand
 Local and reversible work is allowed. Outward-facing and irreversible actions are denied until you unlock them in
 `team.json` (`"policies": {"deploy": "allow"}`):
 
-| Policy         | Denied by default                                                                                                                                                                                                                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `deploy`       | Hosting and app-store CLIs (Vercel, Netlify, Fly, Wrangler, SST, SAM, Firebase, Convex, EAS, …), and package scripts or turbo/nx tasks named deploy, release or publish                                                                                                                                                            |
-| `cloud`        | aws, gcloud, az, terraform, pulumi, kubectl, helm, …                                                                                                                                                                                                                                                                               |
-| `hosted-data`  | Linking, pushing, migrating or dumping hosted databases (Supabase, Prisma migrate deploy, PlanetScale, Neon, Turso, …)                                                                                                                                                                                                             |
-| `publish`      | npm, pnpm, yarn, lerna, cargo, gem and twine publishing; docker, podman and buildah push (including docker image and compose push)                                                                                                                                                                                                 |
-| `github`       | gh beyond issues, labels, search and reading PRs and runs (no workflows, API, PRs, releases or settings). The planner's own pull request goes through `a6g pr` instead                                                                                                                                                             |
-| `messages`     | mail, Slack or Discord webhooks, SMS and email APIs from the shell. The planner emails only you, through its email tool                                                                                                                                                                                                            |
-| `network`      | Reaching other hosts from the shell (curl, wget, httpie, nc, ssh, scp, rsync, …): only this machine (localhost, its containers) and the hosts `team.json` lists in `hosts` (`"api.example.com"`, `"*.example.com"`). Claude's own web tools still read pages and search, but a URL can't carry much: https, short, nothing encoded |
-| `payments`     | The Stripe CLI and live payment keys                                                                                                                                                                                                                                                                                               |
-| `dependencies` | (allowed by default) adding packages                                                                                                                                                                                                                                                                                               |
+| Policy         | Denied by default                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deploy`       | Hosting and app-store CLIs (Vercel, Netlify, Fly, Wrangler, SST, SAM, Firebase, Convex, EAS, …), and package scripts or turbo/nx tasks named deploy, release or publish                                                                                                                                                                                                                                           |
+| `cloud`        | aws, gcloud, az, terraform, pulumi, kubectl, helm, …                                                                                                                                                                                                                                                                                                                                                              |
+| `hosted-data`  | Linking, pushing, migrating or dumping hosted databases (Supabase, Prisma migrate deploy, PlanetScale, Neon, Turso, …)                                                                                                                                                                                                                                                                                            |
+| `publish`      | npm, pnpm, yarn, lerna, cargo, gem and twine publishing; docker, podman and buildah push (including docker image and compose push)                                                                                                                                                                                                                                                                                |
+| `github`       | gh beyond issues, labels, search and reading PRs and runs (no workflows, API, PRs, releases or settings). The planner's own pull request goes through `a6g pr` instead                                                                                                                                                                                                                                            |
+| `messages`     | mail, Slack or Discord webhooks, SMS and email APIs from the shell. The planner emails only you, through its email tool                                                                                                                                                                                                                                                                                           |
+| `network`      | Reaching other hosts from the shell (curl, wget, httpie, nc, ssh, scp, rsync, …): only this machine (localhost, its containers) and the hosts `team.json` lists in `hosts` (`"api.example.com"`, `"*.example.com"`). Claude's own web tools still read pages and search, but a URL can't carry much: https, short, nothing encoded                                                                                |
+| `payments`     | The Stripe CLI and live payment keys                                                                                                                                                                                                                                                                                                                                                                              |
+| `secrets`      | (allowed by default) storing a secret through a secret manager with the value on standard input, never in the command: `openssl rand -hex 32 \| npx sst secret set AuthSecret`, and the same form for `vercel env add`, `gh secret set`, `doppler secrets set --silent` and `gcloud secrets versions add --data-file=-`. For the team's own stage or a preview; a store for production goes the way a deploy does |
+| `dependencies` | (allowed by default) adding packages                                                                                                                                                                                                                                                                                                                                                                              |
 
-Never unlocked: secrets and env files, the machine's services, force pushes and rewritten history, protected
-branches, and the factory's own files. A team adds its own rules in `never`, each with an example command that
+Never unlocked: reading secrets and env files, a secret's value written in a command (an argument, `--body`, a
+literal piped in) and commands that print stored values (`sst secret list`, `vercel env pull`, `gcloud secrets
+versions access`), the machine's services, force pushes and rewritten history, protected branches, and the
+factory's own files. A team adds its own rules in `never`, each with an example command that
 `a6g check` proves is refused.
 
 ## Commands
 
 `a6g help` lists them all.
 
-| For                                                    | Commands                                                                                                                                                                                                                              |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions` |
-| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `progress`, `pages`, `pr`, `task`, `request`, `cycle`, `blast`                                                                                                   |
+| For                                                    | Commands                                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions`, `harness allow` |
+| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `request`, `cycle`, `blast`                                                                                |
 
 ## T3 Code and Claude Code
 
@@ -398,10 +544,31 @@ To make a release:
   get past a pattern. For hard guarantees, scope the credentials on the machine (for example, a GitHub token that
   can only read code and write issues) and protect production with required reviewers. See the constitution's
   Part IV.
+- **The factory's records are files, and every member runs as you.** What ran and passed, the verdicts, your
+  allowances and the complete marker live in `.a6g/run/state` and the team's run folder. The guard refuses the file
+  tools, shell writes and a program's code that names them (`node -e`, `python -c`, a here-document), which stops a
+  member that reaches for the quick way. A member that sets out to forge one (a script that builds the path in
+  pieces) can: nothing on the machine tells its writes from the factory's. Records a member can't write need a
+  second user on the machine, or a signature made with a key members can't read; that's not built.
+- **A stored secret is read one command at a time.** The guard passes a store whose every word it can read: the
+  tool, the secret's name, where it goes, and a value that comes from standard input. It can't see what an earlier
+  command left behind: a stage exported before the store (`export SST_STAGE=production`), or a value typed into a
+  variable first and piped in by name. Production secrets are safest where the constitution's Part IV puts them: off
+  the machine, behind credentials the team doesn't hold.
+- **The security checks go by what can be named.** Who a page refuses is measured by where the page ends: an app
+  that refuses in place, with a 200 at the same address, can't be told from one that serves the page, so that page's
+  rule is proved by a test tagged `@access` instead. The security reviewer is asked for by a branch's paths, or by a
+  reviewer who sends the branch on: a change to who can do what in a file neither names merges on the review alone.
+  Secrets are kept out of merges by their shape, so a password or a signing secret with no shape of its own isn't
+  seen. The package audit reads npm and pnpm lockfiles; a repository on another package manager gets a log line.
 - **Platform:** macOS only for now. The watchdog is a launchd job, notifications use `osascript`, and the email
   key is kept in the Keychain.
 - **No interrupt:** T3 Code 0.1.x has no command to interrupt a thread, so the watchdog notifies you instead.
-- **One shared environment per team:** full runs and rebuilds are serialised by locks, not isolated.
+- **One shared environment per team:** runs, rebuilds and the checks after merges take turns under locks; they aren't
+  isolated. A branch that changes the database's schema can't be tried against it before it merges (prove it with
+  tests on an in-memory database); the check after its merge tries it.
+- **Page checks run after merges, not before.** Builders and reviewers run `a6g pages shots` on a branch's own
+  preview, but nothing yet enforces it.
 
 ## License
 

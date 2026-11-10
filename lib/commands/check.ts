@@ -16,11 +16,13 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { instanceId, type Lane, type LoadedTeam, loadTeam, ROLES, type Team } from "../config.ts";
 import { contactRule } from "../contact.ts";
+import { HARNESS_FILE, pagePlan, readHarness } from "../harness.ts";
 import { FACTORY_ROOT, findHome, versionDir } from "../paths.ts";
 import { ALLOWED_EXAMPLES, policyStates } from "../policies.ts";
 import { compile } from "../prompts.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, which } from "../util.ts";
+import { unknownSignIns } from "./pages.ts";
 import { githubRepo, remoteUrl, shownUrl } from "./pr.ts";
 
 // One self-test case: a tool call as a role would make it, and what the guard must do with it. `says`: what the
@@ -93,6 +95,12 @@ export function guardCases(team: Team): GuardCase[] {
     if (team.roles["builder"]) bash("builder", "a6g task claim", "allow", "a builder claiming a task");
   }
   bash(builder, "cat .env", "refuse", "reading an env file");
+  // A secret is stored without being seen, whatever the team unlocks.
+  bash(builder, "sst secret set AuthSecret a6g-check-value", "refuse", "a secret's value written in a command");
+  bash(builder, "npx sst secret list", "refuse", "printing stored secrets");
+  for (const role of roles.filter((r) => team.roles[r]?.readOnly))
+    bash(role, "openssl rand -hex 32 | doppler secrets set A6G_CHECK --silent", "refuse", "a read-only role storing a secret");
+  bash(builder, `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`, "refuse", "a program's code writing a record");
   bash(builder, "a6g register", "refuse", "an operator's command");
   if (team.environment.script && builder !== "planner") {
     bash(builder, `${team.environment.script.split(/\s+/)[0] ?? ""} reset`, "refuse", "resetting the environment by its script");
@@ -108,13 +116,15 @@ export function guardCases(team: Team): GuardCase[] {
     if (policyStates(team).find((policy) => policy.id === "github")?.state === "deny")
       bash("planner", "gh pr create --fill", "refuse", "a pull request opened with gh itself, which a6g pr does instead");
   }
-  for (const policy of policyStates(team))
-    for (const example of policy.examples)
-      bash(builder, example, policy.state === "deny" ? "refuse" : "allow", `policy ${policy.id} (${policy.state}): ${example}`);
-  // Ordinary work, unless the team's own rules keep this role from it (a team may narrow e2e runs to its testers).
+  // What the team's own rules keep this role from, whatever a policy allows (a team may narrow e2e runs to its testers,
+  // or name a stage no secret is stored for).
   const narrowed = (command: string) =>
     team.never.some(({ rule }) => new RegExp(rule).test(command)) ||
     team.commandOwners.some(({ rule, roles }) => new RegExp(rule).test(command) && !roles.includes(builder));
+  for (const policy of policyStates(team))
+    for (const example of policy.examples)
+      bash(builder, example, policy.state === "deny" || narrowed(example) ? "refuse" : "allow", `policy ${policy.id} (${policy.state}): ${example}`);
+  // Ordinary work, unless the team's own rules narrow it.
   for (const example of ALLOWED_EXAMPLES)
     if (narrowed(example)) bash(builder, example, "refuse", `ordinary work the team's own rules narrow: ${example}`);
     else bash(builder, example, "allow", `ordinary work: ${example}`);
@@ -128,14 +138,17 @@ export function guardCases(team: Team): GuardCase[] {
   );
   add("planner", "mcp__t3-code__delegate_task", { target: { providerInstanceId: instanceId(team, "planner") } }, "refuse", "starting a second planner");
   const building = roles.find((r) => team.roles[r]?.worktree);
-  if (building)
+  if (building) {
+    const target = { providerInstanceId: instanceId(team, building), model: team.roles[building]?.model };
+    add("planner", "mcp__t3-code__delegate_task", { target }, "refuse", `starting a ${building} without a worktree of its own (isolation: "worktree")`);
     add(
       "planner",
       "mcp__t3-code__delegate_task",
-      { target: { providerInstanceId: instanceId(team, building) } },
+      { target: { ...target, model: "another-model" }, isolation: "worktree" },
       "refuse",
-      `starting a ${building} without a worktree of its own (isolation: "worktree")`
+      `starting a ${building} on another model than its role's (${target.model})`
     );
+  }
   bash("planner", `git branch -m ${team.branch} a6g-check`, "refuse", "renaming the integration branch");
   bash("planner", 'gh issue create --title "a6g check" --body x', "refuse", "an issue the planner opens without its label");
   add(builder, "Monitor", { command: "cat .env", description: "a6g check" }, "refuse", "a command run through Monitor");
@@ -254,6 +267,15 @@ export async function check(argv: string[]): Promise<number> {
   for (const warning of team.warnings) line("warn", `team.json: ${warning}`);
   if (team.problems.length) return summary(team, failures);
   line("ok", `team.json loads: ${Object.keys(team.roles).length} roles, integration branch ${team.branch}`);
+  // The team's harness manifest, once its scaffolder has written one.
+  const manifest = readHarness(home);
+  for (const problem of manifest.problems) line("FAIL", problem);
+  for (const problem of unknownSignIns(pagePlan(team, manifest.harness))) line("FAIL", `team.json pages.list: ${problem}`);
+  if (manifest.harness && !manifest.problems.length)
+    line(
+      "ok",
+      `${HARNESS_FILE} loads: ${manifest.harness.pages.length} pages${manifest.harness.e2e ? `, the suite in ${manifest.harness.e2e.config}` : ""}${manifest.harness.auth ? `, sign-ins ${Object.keys(manifest.harness.auth.states).join(", ")}` : ""}`
+    );
 
   const scripts = [team.environment.script, team.gate.full, team.gate.quick, team.afterMerge]
     .filter((command) => command !== null)
@@ -462,7 +484,7 @@ function summary(team: Team, failures: number): number {
   for (const [role, lane] of Object.entries(team.roles)) {
     const writes = lane.write.length ? lane.write.map((rule) => (rule === "*" ? "anything" : rule)).join(", ") : "nothing (read-only)";
     console.info(
-      `  - ${role}${role === "planner" ? "" : ` (up to ${lane.limit} at once)`}: ${ROLES[role]?.summary ?? ""}; writes ${writes}${lane.deny.length ? `, never ${lane.deny.join(", ")}` : ""}`
+      `  - ${role} (${role === "planner" ? "" : `up to ${lane.limit} at once, `}on ${lane.model}): ${ROLES[role]?.summary ?? ""}; writes ${writes}${lane.deny.length ? `, never ${lane.deny.join(", ")}` : ""}`
     );
   }
   console.info(

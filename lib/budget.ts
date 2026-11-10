@@ -6,7 +6,7 @@
 // decides, as controls in the team's store, the same as the operator's.
 import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "./tasks/controls.ts";
 import type { Task } from "./tasks/model.ts";
-import { dollars, limitDollars, percentOf, type Spend, weekOf } from "./tasks/spend.ts";
+import { type AccountSpend, dollars, limitDollars, percentOf, type Spend, weekOf } from "./tasks/spend.ts";
 
 export const WARN_AT = 0.8;
 export const HARD_AT = 1.1;
@@ -31,12 +31,59 @@ function periodOf(name: (typeof LIMITS)[number]["name"], spend: Spend, limits: L
   return `total:${limits.since.slice(0, 10)}`;
 }
 
+// What was spent against a limit, in words: shares of a subscription's week when the budget is in shares and the week
+// is known, dollars otherwise.
+function spentWords(spent: number, cap: number, per: string, limits: Limits, week: number | null | undefined): string {
+  return limits.unit === "subscription" && week
+    ? `${percentOf(spent, week)}% of the ${cap}% ${per} budget (shares of a subscription's week)`
+    : `${dollars(spent)} of the ${dollars(cap)} ${per} budget`;
+}
+
+// Each of the team's limits on one subscription (Limits.accounts), against what it spent there, in that subscription's
+// week when the budget is in shares: its share of the limit, or null when the week isn't measured yet.
+function accountShares(
+  limits: Limits | null,
+  spend: Spend
+): { name: string; limit: (typeof LIMITS)[number]; cap: number; share: number | null; said: string }[] {
+  const out: { name: string; limit: (typeof LIMITS)[number]; cap: number; share: number | null; said: string }[] = [];
+  if (!limits) return out;
+  for (const [name, caps] of Object.entries(limits.accounts ?? {})) {
+    const spent: AccountSpend = spend.accounts?.[name] ?? { today: 0, week: 0, total: 0 };
+    const week = spent.subscriptionWeek ?? spend.subscriptionWeek;
+    for (const limit of LIMITS) {
+      const cap = caps[limit.name];
+      if (!cap) continue;
+      const capDollars = limitDollars(cap, limits, week);
+      const amount = spent[limit.spent];
+      out.push({ name, limit, cap, share: capDollars === null ? null : amount / capDollars, said: spentWords(amount, cap, limit.per, limits, week) });
+    }
+  }
+  return out;
+}
+
+// The subscriptions the team's own budget on each has closed to it, and why: it moves on to its next one (lib/steer.ts).
+export function accountClosures(limits: Limits | null, spend: Spend | null): Record<string, string> {
+  const closed: Record<string, string> = {};
+  if (!spend) return closed;
+  for (const { name, share, said } of accountShares(limits, spend))
+    if (share !== null && share >= 1) closed[name] ??= `the team has spent ${said} on ${name}`;
+  return closed;
+}
+
 export function budgetCheck(team: string, limits: Limits | null, spend: Spend, controls: Control[], all: Task[], paused: boolean): BudgetMove {
   const move: BudgetMove = { warn: [], control: null, why: null };
   if (!limits) return move;
   const hold = holdOf(controls);
-  // The operator carried on past a pause the budget made for this limit and period, and hasn't changed the budget since.
-  const lastChange = controls.findLastIndex((c) => c.kind === "budget");
+  // The operator carried on past a pause the budget made for this limit and period, and hasn't changed the budget since:
+  // its own limits, that is (a change to its limits on one subscription alone decides nothing about that pause).
+  const own = (l: Limits | null): string => JSON.stringify(l ? [l.daily, l.weekly, l.total, l.unit ?? "usd", l.since] : null);
+  let lastChange = -1;
+  let was: string | null = null;
+  controls.forEach((c, i) => {
+    if (c.kind !== "budget") return;
+    if (own(c.limits) !== was) lastChange = i;
+    was = own(c.limits);
+  });
   const overridden = (trigger: string): boolean => {
     const paused = controls.findIndex((c) => c.kind === "pause" && c.by === "budget" && c.trigger?.startsWith(trigger));
     if (paused < 0) return false;
@@ -64,10 +111,7 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
     }
     const share = spent / capDollars;
     const trigger = periodOf(limit.name, spend, limits);
-    const said =
-      limits.unit === "subscription" && week
-        ? `${percentOf(spent, week)}% of the ${cap}% ${limit.per} budget (shares of a subscription's week)`
-        : `${dollars(spent)} of the ${dollars(cap)} ${limit.per} budget`;
+    const said = spentWords(spent, cap, limit.per, limits, week);
     if (share >= WARN_AT)
       move.warn.push({
         key: `budget-${trigger}-${cap}${limits.unit === "subscription" ? "pct" : ""}`,
@@ -82,6 +126,29 @@ export function budgetCheck(team: string, limits: Limits | null, spend: Spend, c
       graceful = { ...pauseControl(all, team, { scope: "tasks", by: "budget", note: `${said} is spent` }), trigger };
       why ??= `The team has spent ${said}: it pauses once the work under way is merged.`;
     }
+  }
+  // The team's budget on one subscription: a warning at four fifths, and at the limit word that the team moves on (the
+  // watchdog closes that subscription to it, lib/steer.ts).
+  for (const { name, limit, cap, share, said } of accountShares(limits, spend)) {
+    if (share === null) {
+      if (!move.warn.some((w) => w.key === "budget-unmeasured"))
+        move.warn.push({
+          key: "budget-unmeasured",
+          text: "The team's budget is in shares of a subscription, and there's no reading of the subscription yet (a6g subscriptions): it isn't checked until there is.",
+        });
+      continue;
+    }
+    if (share < WARN_AT) continue;
+    const trigger = `${periodOf(limit.name, spend, limits)}@${name}`;
+    const pct = limits.unit === "subscription" ? "pct" : "";
+    move.warn.push(
+      share >= 1
+        ? {
+            key: `budget-${trigger}-${cap}${pct}-spent`,
+            text: `The team has spent ${said} on ${name}: it moves to its next subscription, and roles with none left wait.`,
+          }
+        : { key: `budget-${trigger}-${cap}${pct}`, text: `The team has spent ${said} on ${name} (API-equivalent).` }
+    );
   }
   move.control = hard ?? graceful;
   move.why = move.control ? why : null;

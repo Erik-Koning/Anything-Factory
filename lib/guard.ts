@@ -15,7 +15,7 @@ import { FACTORY_PATH, factoryWrite, instanceId, type Lane, laneAllows, normaliz
 import { messageKind, waitReason } from "./contact.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
-import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, webRefusal } from "./policies.ts";
+import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, storeOf, webRefusal } from "./policies.ts";
 import { type HookInput, inSetup, inTeam, setupRole, teamSession } from "./session.ts";
 import {
   expandPath,
@@ -25,11 +25,15 @@ import {
   NAMES_ONLY,
   operands,
   parseShell,
+  runsCode,
   type ShellCommand,
   stripGlob,
   unwrap,
   withoutExcludes,
 } from "./shell.ts";
+import { waitRefusal } from "./steer.ts";
+import { CLAIMANTS } from "./tasks/model.ts";
+import { accounts } from "./subscriptions.ts";
 import { runningByInstance, T3_HOME, TOOLS } from "./t3.ts";
 import { escapeRegex } from "./util.ts";
 
@@ -579,6 +583,9 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     ],
     [a6g("env\\s+(?:up|reset|restart|down)"), ["planner"], "only the planner starts, resets or stops the team's environment."],
     [a6g("pages\\s+run"), ["planner"], "the planner records page results; use a6g pages shots to check anything yourself."],
+    [a6g("e2e\\s+run"), ["planner"], "the planner records the suite's results; use a6g e2e try to run it yourself."],
+    [a6g("complete"), ["planner"], "the planner marks the work complete, once the finish line holds."],
+    [a6g("harness\\s+allow"), [], "allowing a branch that checks less is the operator's call (Article 5): say why in your report."],
     [
       a6g("task\\s+(?:edit|score|status|import|screen)"),
       ["planner"],
@@ -596,13 +603,14 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
       ["approver", ...(team.approval.findings === "planner" ? ["planner"] : [])],
       "the approver (or the operator) decides on proposals, and nobody approves their own (Article 4).",
     ],
-    [a6g("task\\s+(?:claim|release|submit)"), ["builder", "tester", "planner"], "builders and testers claim, release and submit tasks."],
+    [a6g("task\\s+(?:claim|release|submit)"), [...CLAIMANTS, "planner"], "builders, testers and the scaffolder claim, release and submit tasks."],
     [a6g("request\\s+(?:add|reject|screen)|cycle\\s+close"), ["planner"], "the planner takes in and screens feature requests, and closes cycles."],
     [a6g("request\\s+note"), ["planner", "approver"], "the planner and the approver note what they found about a request."],
-    [a6g("task\\s+fetch"), ["planner", "reviewer"], "the planner and the reviewer fetch a task's branch from the remote."],
+    [a6g("task\\s+fetch"), ["planner", "reviewer", "security-reviewer"], "the planner and the reviewers fetch a task's branch from the remote."],
     [a6g("request\\s+stakeholders"), [], "the stakeholders' names and addresses are the operator's to see (Article 8)."],
     [a6g("task\\s+migrate"), [], "moving the task graph between stores is the operator's."],
     [a6g("verdict\\s+review"), ["reviewer"], "only a reviewer records a review (Article 4)."],
+    [a6g("verdict\\s+security"), ["security-reviewer"], "only the security reviewer records a security review (Article 4)."],
     [a6g("verdict\\s+ux"), ["ux-specialist"], "only the UX specialist records a UX verdict (Article 4)."],
     ...(script
       ? [
@@ -734,7 +742,12 @@ export function check(input: HookInput): void {
   const PAUSED = "the operator paused the team: merge nothing and start no members until a6g resume. Finish your turn.";
   const nonEmpty = (path: string | undefined): path is string => Boolean(path);
   const scratch = [...new Set(["/tmp", "/private/tmp", process.env.TMPDIR].filter(nonEmpty).map(canonical))];
-  // The factory's, T3 Code's and Claude Code's own folders on this machine, and the team's run folder.
+  // The factory's, T3 Code's and Claude Code's own folders on this machine (every subscription's login among them:
+  // a member on one could otherwise change another's settings or hooks), and the team's run folder.
+  let logins: string[] = [];
+  try {
+    logins = accounts().flatMap((a) => (a.configDir ? [a.configDir] : []));
+  } catch {}
   const machine = [
     A6G_HOME,
     join(homedir(), ".a6g"),
@@ -742,6 +755,7 @@ export function check(input: HookInput): void {
     join(homedir(), ".t3"),
     join(homedir(), ".claude"),
     process.env.CLAUDE_CONFIG_DIR,
+    ...logins,
     run ?? undefined,
   ]
     .filter(nonEmpty)
@@ -778,8 +792,8 @@ export function check(input: HookInput): void {
     }
     const ours = inside(absolute, root) || inside(absolute, home);
     if (!ours) {
-      if (role === "planner" && run && (inside(absolute, join(run, "outbox")) || absolute === join(run, "complete") || absolute === join(run, "idle")))
-        return null;
+      // The complete marker is a6g complete's to write, once the finish line holds: done is computed, not claimed.
+      if (role === "planner" && run && (inside(absolute, join(run, "outbox")) || absolute === join(run, "idle"))) return null;
       if (machine.some((dir) => inside(absolute, dir)))
         refuse(`${absolute} belongs to the factory, T3 Code or Claude Code on this machine; the team never writes there.`);
       if (scratch.some((dir) => inside(absolute, dir))) return null;
@@ -962,6 +976,24 @@ export function check(input: HookInput): void {
         if (part && !/\s/.test(part) && (isSecretWord(part, exists) || isSecretWord(stripGlob(part), exists))) refuse(`${part} holds secrets; ${SECRET}`);
   }
 
+  // The factory's proofs are files its commands write: what ran and passed, what the operator allowed, the verdicts
+  // (.a6g/run/state), and that the work is complete (the run folder's marker). A program's own code writes a file
+  // where no rule here reads a path, so a command that runs code and names one of them is refused, whatever the code
+  // does with it. A seatbelt (README, Known limits): a path put together in the code gets through.
+  const PROOFS = /\.a6g\/run\/(?:state|locks|merge)(?![\w.-])/;
+  const marker = run ? `${basename(dirname(run))}/${basename(run)}/complete` : null;
+  function checkProofs(command: ShellCommand): void {
+    if (!runsCode(command.words)) return;
+    const text = [...command.words, ...command.fed].join("\n");
+    const named = PROOFS.exec(text)?.[0] ?? (marker !== null && text.includes(marker) ? "the complete marker" : null);
+    const cwd = canonical(command.cwd);
+    const within = ["state", "locks", "merge"].some((dir) => inside(cwd, join(work, dir))) || (run !== null && inside(cwd, run));
+    if (named === null && !within) return;
+    refuse(
+      `this runs a program's code ${named ? `that names ${named}` : "in the factory's own folder"}, and the factory's records (what ran, what passed, what was allowed, that the work is complete) are written by its commands only. To read one, use cat, jq or grep, or pipe it in (cat <file> | python3 -c …).`
+    );
+  }
+
   // A search that reads past what git skips (grep -r, rg -g '*' or -uu, git grep --no-index) mustn't reach a secret.
   function checkSearches(words: string[], cwd: string): void {
     const grep = grepSearch(words);
@@ -1000,8 +1032,12 @@ export function check(input: HookInput): void {
     for (const command of commands) {
       const broken = brokenRule(rules, command);
       if (broken) refuse(broken.reason);
+      // Storing a secret changes something, which a read-only role doesn't.
+      if (readOnly && storeOf(command))
+        refuse("a read-only role stores no secrets: say which one is needed in your report, and the planner gives it to a member who builds.");
       for (const line of lines(command)) for (const [rule, roles, reason] of owned) if (rule.test(line) && !roles.includes(role)) refuse(reason);
       checkSecrets(command);
+      checkProofs(command);
       // The command that actually runs, its wrappers (timeout, env, a6g lock … --) taken off.
       const words = unwrap(command.words).at(-1) ?? [];
       const git = basename(words[0] ?? "") === "git";
@@ -1074,7 +1110,7 @@ export function check(input: HookInput): void {
     }
   }
 
-  // The planner's limits, enforced: one of this team's instances, in a worktree for the roles that build, no more
+  // The planner's limits, enforced: one of this team's instances, on its role's model, in a worktree for the roles that build, no more
   // members of a role than team.json allows, none of a draining role while the environment resets, and nothing at
   // all while the operator has the team paused.
   function checkDelegate(): void {
@@ -1093,7 +1129,17 @@ export function check(input: HookInput): void {
       .map((r) => instanceId(team, r));
     if (!childRole) return refuse(`start members only on this team's instances (${known.join(", ")}); ${instance ?? "none"} gives no role.`);
     if (childRole === "planner") refuse("there is one planner.");
+    // No subscription open to the role on this machine (lib/steer.ts): its members wait until one opens.
+    const waits = waitRefusal(run, childRole);
+    if (waits) refuse(waits);
     const child = team.roles[childRole];
+    // Each role runs on the model the team's rules give it. T3 Code reads it from the target; without one there, the
+    // member would run on whichever model the instance lists first.
+    const model = named(typeof target === "object" && target !== null ? (target as Record<string, unknown>).model : undefined);
+    if (child && model !== child.model)
+      refuse(
+        `start a ${childRole} with target.model: "${child.model}" (beside target.providerInstanceId), the model the team's rules give the role; ${model ? `${model} isn't it` : "without it, it would run on whichever model T3 Code lists first"}.`
+      );
     if (child?.worktree && args.isolation !== "worktree")
       refuse(
         `start a ${childRole} with isolation: "worktree" (a top-level argument of delegate_task), so it works in a worktree of its own; without it, it would work in the team's checkout.`

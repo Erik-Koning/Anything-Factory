@@ -63,6 +63,12 @@ export function transcriptDirs(home: string, worktrees: string, projects = join(
     .map((name) => join(projects, name));
 }
 
+// The same, in each subscription's Claude Code config folder (lib/subscriptions.ts configDirOf), by its name: a team's
+// agents write their transcripts under the login they run on.
+export function transcriptDirsByAccount(home: string, worktrees: string, configDirs: Record<string, string>): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(configDirs).map(([name, dir]) => [name, transcriptDirs(home, worktrees, join(dir, "projects"))]));
+}
+
 // One request read from a transcript: when, by which agent (null outside the factory's agents), on which model, branch
 // and folder, its tokens, and its API-equivalent cost (null for a model with no price).
 export interface Request {
@@ -143,12 +149,13 @@ export function readRequests(dirs: string[], cursors: Record<string, Cursor>, vi
 
 // Reads what the transcripts added since the last call, adds it to the run folder's totals, and resolves to the days
 // that changed (this machine's, whole), for the store. Only the factory's agents count, and only lines that ran in the
-// checkout or one of its worktrees (a line that says where it ran).
+// checkout or one of its worktrees (a line that says where it ran). With `dirs` by subscription, each row records the
+// subscription its transcripts are under.
 export function collectUsage(opts: {
   run: string;
   team: string;
   machine: string;
-  dirs: string[];
+  dirs: string[] | Record<string, string[]>;
   home?: string;
   worktrees?: string;
   now?: Date;
@@ -157,26 +164,40 @@ export function collectUsage(opts: {
   const ours = (cwd: string | null): boolean =>
     !cwd || !opts.home || cwd === opts.home || cwd.startsWith(`${opts.home}/`) || (opts.worktrees !== undefined && cwd.startsWith(`${opts.worktrees}/`));
   const changed = new Set<string>();
-  readRequests(opts.dirs, state.cursors, (request) => {
-    const { role } = request;
-    if (!role || !ours(request.cwd)) return;
-    const day = dayOf(request.at);
-    const task = request.branch ? (ticketOf(request.branch, request.branch.split("/")[0] ?? "") ?? null) : null;
-    const rows = (state.days[day] ??= []);
-    let row = rows.find((r) => r.role === role && r.model === request.model && r.task === task);
-    if (!row) {
-      row = { role, model: request.model, task, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 };
-      rows.push(row);
-    }
-    row.requests += 1;
-    row.input += request.tokens.input;
-    row.output += request.tokens.output;
-    row.cacheRead += request.tokens.cacheRead;
-    row.cacheWrite += request.tokens.cacheWrite5m + request.tokens.cacheWrite1h;
-    if (request.cost !== null) row.cost = round(row.cost + request.cost);
-    else row.unpriced += 1;
-    changed.add(day);
-  });
+  const groups: [string | undefined, string[]][] = Array.isArray(opts.dirs) ? [[undefined, opts.dirs]] : Object.entries(opts.dirs);
+  for (const [account, dirs] of groups)
+    readRequests(dirs, state.cursors, (request) => {
+      const { role } = request;
+      if (!role || !ours(request.cwd)) return;
+      const day = dayOf(request.at);
+      const task = request.branch ? (ticketOf(request.branch, request.branch.split("/")[0] ?? "") ?? null) : null;
+      const rows = (state.days[day] ??= []);
+      let row = rows.find((r) => r.role === role && r.model === request.model && r.task === task && r.account === account);
+      if (!row) {
+        row = {
+          role,
+          model: request.model,
+          task,
+          ...(account ? { account } : {}),
+          requests: 0,
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0,
+          unpriced: 0,
+        };
+        rows.push(row);
+      }
+      row.requests += 1;
+      row.input += request.tokens.input;
+      row.output += request.tokens.output;
+      row.cacheRead += request.tokens.cacheRead;
+      row.cacheWrite += request.tokens.cacheWrite5m + request.tokens.cacheWrite1h;
+      if (request.cost !== null) row.cost = round(row.cost + request.cost);
+      else row.unpriced += 1;
+      changed.add(day);
+    });
   if (changed.size || !existsSync(stateFile(opts.run))) writeFileAtomic(stateFile(opts.run), `${JSON.stringify(state)}\n`);
   const updatedAt = (opts.now ?? new Date()).toISOString();
   return [...changed].sort().map((day) => ({ team: opts.team, day, machine: opts.machine, rows: state.days[day] ?? [], updatedAt }));

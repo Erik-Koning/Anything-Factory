@@ -1,5 +1,245 @@
 # Changelog
 
+## Unreleased: how a project starts
+
+Tried on a new project (a gateway for sensor boards and its dashboard, from an empty repository), the factory made a
+sound skeleton and a poor record of why. The setup agent had fixed the whole stack in the brief before anyone
+weighed it, the planner's first task listed libraries, versions and files from memory, the scaffolder carried the
+list out, and nobody wrote down an alternative, a running cost or what the operator had and hadn't chosen. Builders
+would have started on it the moment it merged. Tried again with the changes below, the same goal gave a skeleton
+with a slice through every layer, a design record, a CI workflow and a staged image, the harness, and then one
+question to the operator, with no feature claimed before the answer.
+
+- **The design check-in.** `operator.designCheckIn` in `team.json` (drafted by `a6g init` where nothing is built yet)
+  makes `a6g register` file one `design` task. While it's open, only `scaffold` and `test-infra` tasks are claimed.
+  Once the skeleton and the harness have merged, the planner raises it as a question with the design in a few lines;
+  you agree it, or say what to change, and the scaffolder changes it before the planner asks again. Only the
+  operator's answer settles it: the approver and the merge queue can't, the planner can't close one that has no
+  answer since it was asked, and a member can't file one or turn another task into one. While the question waits
+  for you and nothing of the foundation is left to build, the watchdog ticks the planner hourly, not every ten
+  minutes (your answer still reaches it within a minute), and `a6g task show` prints what was asked once.
+- **`a6g task answer <id> "…"`.** Your answer in words to a question, or to a block raised to you, from the
+  terminal: the same note the web app's Waiting on you page writes, passed to the planner within a minute. Until now
+  only the web app could give one, and from the terminal you could only settle a task outright. `a6g task show` says
+  the line when a task waits on you. Only the operator answers; a member that tries is refused. `a6g serve` shows a
+  question with what was asked, what the team recommends and a box for your answer. The design check-in takes an
+  answer and nothing else: `a6g task approve` and `reject` refuse it from everyone (the page's Reject beside it would
+  have marked it as wanting no check-in, and started the features). Blocked work raised to you is on the page's
+  Waiting for you too, with the same box: it was only in the web app's inbox.
+- **A check-in you can read at a glance.** The planner's question at the check-in ran to one paragraph of 1,300
+  characters in the trial. Its rules now ask for under 700, in short labelled sentences (where it runs and what that
+  costs, the data, how clients reach it, the stack, what's left out), the record's path for the rest, and the options
+  written so the web app's inbox offers them as choices. The check-in task's own text, which the inbox and its emails
+  show, says what the task is and how it ends; how the planner carries it is in the planner's rules.
+- **A reply settles the check-in too.** Where your replies reach the team (`a6g connect email`), a reply to the
+  check-in's message is recorded as your answer on the task: the planner puts "Design check-in" in that message's
+  subject, and the watchdog, which checks a reply came from you, writes it there before passing it on. Before, the
+  planner was told to act on the reply and then refused, since only an answer on the task counts, and the features
+  stayed held until you answered again somewhere else. A reply the planner reads for itself still isn't one: its
+  rules and the refusal now say so, and tell it to ask you to answer on the task.
+- **Found reading the change again.** A ticket on the old board with `kind: design` is imported as a chore, never as
+  a check-in that holds the whole team. A graceful pause no longer waits for approved work the open check-in holds:
+  it's listed as waiting for your answer, and the pause settles. The web app's inbox offers no Approve or Reject on
+  the check-in. `a6g task answer` and `a6g task note` keep everything after the id (`agreed -- but use Postgres` was
+  cut at the dashes and recorded as "agreed") and refuse `--text` with more words after the id. `a6g register` says
+  when a check-in is still open though `operator.designCheckIn` is off, `team.json` is warned about one asked for on
+  a GitHub board (none is filed there), a member with nothing to claim is told when the check-in is why, and the
+  refusals you get before the check-in is raised no longer point at `a6g task answer`, which can't take one yet.
+- **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
+  agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
+  role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time
+  (managed, mainstream, little to run, a cost with a ceiling), records each choice, and asks only what the product
+  should do, what it may cost and what needs an account or a key of theirs, in plain words. No check-in is held.
+  Articles 3 and 10 say the same.
+- **The scaffolder chooses, and writes it down.** Its rules for starting a repository now run from what the product
+  needs: where it runs and what that costs a month, its shape, its data, every edge and its protocol, then the stack
+  (current stable versions, checked rather than remembered), keys, and how it ships (a staged image that runs as
+  non-root, a health check, migrations on release, a CI workflow that runs the gate's scripts). The skeleton is a
+  thin slice through every layer, so builders copy one way of validating a request, shaping an error, reaching the
+  data and drawing a page; hardware the team doesn't have gets a simulator, as part of the foundation and not as a
+  feature after it. `docs/architecture.md` is the design record: each choice, the need behind it, what else was
+  weighed, what it costs to run, how it's changed later, and which choices were the operator's. The trial's skeleton
+  had no backup, no word on HTTPS and no dependency updates, and its CI ran no browser test: the rules now name what
+  a project needs to keep running (a backup with a restore that was tried, how it's reached over HTTPS, readable
+  logs, updates proposed by Dependabot or Renovate), and the CI workflow runs the end-to-end suite too.
+- **Setup proposes, and says whose each choice is.** For an empty repository the setup agent asks what the operator
+  has already fixed and proposes the rest; the brief keeps the two apart, and nothing setup chose goes in the
+  direction's "Always ask me". The planner's founding task says what's needed, never which libraries or files.
+- **`a6g init --model`.** The setup interview runs on Fable unless another is named: what it settles, every task
+  after is built on.
+- **Upgrading.** Nothing changes for a team whose `team.json` has no `operator` key. To hold a check-in on a running
+  team, add `"operator": { "designCheckIn": true }` and run `a6g register`; `a6g task status <id> done` from you ends
+  it.
+
+## Unreleased: a model for each role
+
+- **Each role runs on its own model.** `roles.<role>.model` in `team.json` sets one role's, and `model` every role's
+  that names none. Left out, the planner, the innovator and the scaffolder run on Fable (`claude-fable-5-1`), since a
+  wrong plan or a wrong foundation costs every task built on it, and the builder, tester, reviewer, security reviewer,
+  UX specialist and approver on Opus (`claude-opus-5-5`). `fable`, `opus`, `sonnet` and `haiku` name the newest model
+  of the family this version knows; a model id is used as written. `a6g register` records and prints each role's
+  model, `a6g check` shows them, and a model the price table doesn't know is a warning (a budget can't count it).
+- **The planner passes each member's model where T3 Code reads it, and the guard holds it there.** The planner's
+  table has a model column, passed as `target.model`. Until now the rules named one model beside `mode`, at the top
+  level of `delegate_task`, where T3 Code 0.1.7 reads none: a member started that way ran on whichever model its
+  instance lists first. The guard now refuses a member started on another model than its role's, or on none, and says
+  which to pass.
+- **Upgrading.** A team whose `team.json` names no model moves its planner, innovator and scaffolder to Fable at its
+  next `a6g register` (the planner at its next `a6g rotate`). Fable costs 2.5 times Opus per token, and a Claude
+  subscription counts it against a weekly limit of its own. `"model": "opus"` keeps every role on Opus. A team that
+  already set `model` keeps every role on it. A planner started before the upgrade is told the model to pass by the
+  guard's refusal the first time it starts a member.
+
+## Unreleased: security, and how the merged work went
+
+- **Secrets are stored through a secret manager, their values never in a command.** A new policy, `secrets`, allowed
+  by default (`"secrets": "deny"` turns it off): one command that stores one secret, with its value on standard input,
+  passes the rules that otherwise refuse the tool. `openssl rand -hex 32 | npx sst secret set AuthSecret`, and the same
+  form for `vercel env add <NAME> --environment <env>`, `gh secret set`, `doppler secrets set --silent` and
+  `gcloud secrets versions add --data-file=-`. The value is generated in the pipe or comes from the team's
+  environment by name. A store that names production, or a target the guard can't read, is left to the deploy policy,
+  and read-only roles store none. The prompts say it: a secret the work makes is generated in the pipe; one from a
+  third party is yours, asked for by name with the command you'd run.
+- **Never, whatever is unlocked:** a secret's value written in a command (an operand, `"$VAR"` as an argument,
+  `--value`, `--body`, literal text piped in), and commands that print stored values (`sst secret list`,
+  `vercel env pull`, `doppler secrets get`, `gcloud secrets versions access`, `aws secretsmanager get-secret-value`,
+  `op read`, `vault kv get`, `heroku config` and their kin). **A team that had unlocked `deploy` or `cloud` could run
+  some of these before; it no longer can.**
+- **Secrets don't merge.** `a6g task submit` and the merge queue read every commit a branch would bring in (the lines
+  each adds, its message, the files it adds or changes) and refuse a live credential by its shape (a private key, a
+  live Stripe key or webhook secret, an AWS access key id, a GitHub, Slack, Anthropic, OpenAI or SendGrid token) or a
+  secrets file, even when a later commit took it out. Nothing passes this refusal, so it fires only on what's real by
+  construction: test-mode keys, JWTs and text that only looks random are left alone, and `.env.example`, `.env.test`
+  and `.env.e2e` pass by name. The refusal names the file, the line and the commit, never the value; the task goes
+  back to be rebuilt without it, and the key is yours to rotate.
+- **A page says who it refuses.** A page in the harness manifest takes `refuses`: the sign-in states, and
+  `signed-out`, that must not be served it. `a6g pages` asks for the page as each of them; sent to another path, or
+  answered 401, 403 or 404, is refused, and a page that's served fails (a blocker finding of its own when the check
+  after merges files it). A refusal counts only from a sign-in the same run showed live, so a session that ran out
+  never reads as one; where nothing shows that, the refusal is "not checked", which fails. Taking a state out of a
+  page's `refuses` is checking less, and so yours to allow.
+- **Access tests are a gap the factory files.** With two or more sign-in states and a suite that ran, a suite with no
+  test tagged `@access` (signed in as one user, refused another's records by their address and through the API) is
+  filed once as a `test` task, like a journey with no spec.
+- **Vulnerable packages are a finding.** When a lockfile the repository tracks isn't the one last audited, and once a
+  week when it is, the check after merges runs the package manager's own audit of what ships (`npm audit --omit=dev`,
+  `pnpm audit --prod`). A package with an advisory of its own at high or critical becomes a `chore` task, severity
+  major, naming the advisories and what moves the app off it; at most five are open at once, the worst first. A
+  rejected one stays quiet until a new advisory names the package. Offline, or a report that can't be read, is a log
+  line, never a failed merge. Package names and versions go to the registry the install already uses;
+  `"security": { "audit": false }` in team.json turns it off.
+- **A new role, the security reviewer** (`plugin/agents/security-reviewer.md`), read-only, on a team whose `roles`
+  list it; setup drafts one for a repository with sign-in, payments or an API of its own. On such a team the merge
+  queue merges a branch only once the security reviewer has passed its tip
+  (`a6g verdict security <branch> pass|issues --sha <tip>`, which only that role records) when the branch changes a
+  security path (sign-in and sessions, permissions, payments and webhooks, migrations, any `.sql` or rules file, by a
+  path's whole words; `security.paths` in team.json adds your own, `"builtIn": false` leaves only yours), when a
+  reviewer sent it on (`a6g verdict review <branch> approve --security`), or when the security reviewer has judged it
+  before. Issues send the task back like a review's changes and count as a round; a rebased branch keeps its pass
+  when `git range-diff` shows the same change. `a6g task show`, `a6g blast` and the planner's context say which tasks
+  wait for one. Once a cycle, and before a finish line, the planner starts it with no branch, to sweep who can reach
+  which page and which record. A team without the role is asked for nothing.
+- **`a6g metrics --quality [--since] [--until] [--json]`: how the merged work went,** read from what the factory
+  records anyway, so no agent reports any of it. Tasks merged, by kind; reviews passed first time; the failures the
+  check after merges filed, per merged task (the harness's gaps, package advisories and findings about the checks
+  themselves counted apart); journeys the newest recorded run of the suite proves; flaky tests; the cost of a merged
+  task beside what the team spent; and the median time from claimed to merged. A number that can't be known says so
+  and why, never 0. It needs the task graph, and the planner may run it.
+
+## Unreleased: the scaffolder, and checks that hold
+
+- **A new role, the scaffolder** (`plugin/agents/scaffolder.md`): it owns the team's means of checking (Playwright in
+  the repository, sign-ins, test data kept apart per run, stand-ins, stable screenshots) and the repository's
+  structure. It claims a new kind, `scaffold`, and `test-infra` (and `test` where the team has no tester); builders
+  claim neither. Branches `a6g/s<id>-…`, always reviewed, and on a team with the task graph merged only for its own
+  approved, open task. Its test and test-infra branches change test and harness files only: tests and their folders,
+  runners' configuration, set-up files, `.env.test`, the suite's CI workflow, and a `package.json` by key
+  (`devDependencies` and test scripts); `harness.lane` in team.json adds paths. Setup drafts one for any app or empty
+  repository, and asks an empty repository's stack.
+- **The harness manifest, `.a6g/harness.json`**, the one factory file the scaffolder writes: pages beside the
+  operator's (with sign-ins and masks), the Playwright project that signs in, how the app switches colour scheme, and
+  the suite's configuration. It only adds checks and holds no command; `a6g check` and the merge queue validate it.
+  `team.json` gains `pages.minTarget`, pages with `as`, `mask`, `ignore` and `schemes`, `harness.journeys` and
+  `harness.lane`, and `pages.list` may be left out when the manifest names the pages.
+- **Page checks in the factory's own browser.** The factory ships Playwright; `self-install` downloads its headless
+  Chromium (about 200 MB, under a time limit), and `doctor` and every check prove it by starting it. `a6g pages` now
+  signs in (a sign-in that fails fails its pages; an old one is never used in its place), switches the app's own dark
+  mode (a dark page that looks like the light one fails), scrolls a page through before it looks, and takes
+  screenshots with animations off and masks painted over. It measures what a person can reach: touch targets under
+  `minTarget` on phones (not what's hidden, disabled or off screen), text cut off by the box that clips it, focus by
+  the pixels around each control (and says how many stops it walked), and a page that ended at another path than the
+  one asked for. A page in team.json takes `ignore` (selectors every check leaves out) and `schemes` (a page with no
+  dark variant). **Pages that passed before may fail these.** A UX pass keeps that commit's screenshots, and
+  `a6g pages status` says which pages look different since. `a6g pages shots` reads the worktree's manifest, so a
+  branch can be checked on its own preview.
+- **Journeys as specs: `a6g e2e run|try|status|done`.** A journey's specs are tests tagged `@journey-<id>`. A journey
+  is done (by the planner, or settled by the merge queue; the watchdog no longer settles one) only on the newest
+  recorded run that holds all its tasks' merges, where every test tagged for it passed: one skipped or told to fail
+  (`test.fail`, however it's spelled) counts against it. A run that didn't run (no report, past its time limit, no
+  browser for the repository's Playwright) proves nothing and disproves nothing, and is said so. Recorded runs set
+  their own retries and forbid `.only`; the time limit ends everything the suite started. Journeys are required once
+  the team has a suite (`harness.journeys` left out), so a team with a tester and no harness closes journeys as
+  before. Then `a6g finish` needs `a6g e2e done`, and **`a6g complete` writes the complete marker**, only when the
+  finish line holds: the planner can no longer write it by hand.
+- **Nobody makes their own proof.** Where a tester or scaffolder can write them, a builder's branch that changes a file
+  holding a journey's tests doesn't merge: a flow that changes gets a test task with it. A journey with finished work
+  under it changes kind or is rejected only by the operator, and a done task becomes a journey only by the operator.
+- **Checking less is the operator's call** (Article 5), and it's measured. The merge queue lists the suite before a
+  branch and with it merged, and refuses one that leaves fewer tests that run, in all or for a journey, or a suite
+  that no longer lists. It also refuses a branch that removes a page, the suite or a sign-in from the manifest, or
+  adds a skip, `.only`, expected failure or filter to the suite's files. All unless the operator runs
+  `a6g harness allow <branch> --sha <commit> --why "…"`, which no agent may run.
+- **After merges, one check of the newest commit.** Every queued merge, however it ends (merged, refused, light, a
+  failed gate, a lock it couldn't take), runs the check that's due, and the last of a burst runs it once: the app's
+  health first (down is one blocker finding, and the check stays due), then every page and the whole suite, with one
+  retry, holding the merge lock, the app lock and a gate slot. What newly fails becomes a finding by `merge-queue`,
+  naming the merges since it last passed. So does a suite that didn't run, and one that checks less than at the check
+  before (fewer tests, or more told to skip or to fail) unless a commit between was allowed. A test that passes only
+  on its retry is filed as flaky; journeys without specs, and a missing harness, are filed once; journeys whose tests
+  now pass are closed. Rejecting a finding quiets that failure, not that page. `a6g status` shows the last check, and
+  one that's due.
+- **`a6g env use [--wait-min M] [--max-min N] -- <command>`** runs a member's command against the team's app under its
+  lock, with `PLAYWRIGHT_BASE_URL` and an `A6G_NAMESPACE` of its own; the guard judges the command inside it. It waits
+  M minutes for the app (8 unless said) and ends a command that holds it past N (30 unless said, 120 at most), with
+  everything it started. The after-merge command passes its hold on the app down, so the checks it runs don't wait on
+  it.
+- **The guard refuses a program's code that names the factory's records** (`node -e`, `python -c`, a here-document
+  that names `.a6g/run/state` or the complete marker): the verdicts, the suite's runs and the operator's allowances
+  are written by the factory's commands only. Reading them with `cat`, `jq` or `grep` is as before. Known limits in
+  the README says what this doesn't stop.
+
+## Unreleased: teams on several Claude subscriptions
+
+- **Each team, or each role in it, runs on the subscriptions you choose, in order.** `a6g subscriptions use <team>
+<sub>[,<sub>…] [--role <role>]` (this machine's choice, never `team.json`'s); a team without one runs on this Mac's own
+  login as before. A role runs on a subscription through T3 Code's own setting for a login of its own (each instance's
+  `homePath`, which sets `CLAUDE_CONFIG_DIR` for its Claude), so the factory doesn't touch the login.
+- **Limits per subscription and across all of them.** `a6g subscriptions limit <sub|all> [--weekly <n>%] [--session
+<n>%]`. A subscription closes at its limit, at the limit across all (their weekly percentages added up), and always
+  once its week or five hours are used up, until it resets, as T3 Code treats a used-up window. The watchdog reads
+  every subscription every quarter hour, every five minutes near a limit.
+- **A team's budget on one subscription.** `a6g budget <team> --account <sub> --daily|--weekly|--total`, in the
+  budget's unit (percent is of that subscription's own week): at the limit the team moves to its next subscription,
+  rather than pausing. The web app's budget form keeps these, and its spend panel shows what the team spent on each.
+- **Moving, and waiting.** The watchdog keeps every role on the first open subscription in its list (`lib/steer.ts`):
+  a role moves only when nothing of it is at work, since T3 Code would resume a session of it under a login that
+  doesn't have it. A member role moves once its members at work finish, starting none in between; the planner once
+  it's idle with no member running (its thread is retired and a fresh one starts on the new subscription at the next
+  run). A role goes back up its list once the earlier one is five points under its limits. A role none is open to
+  waits: the guard starts none of its members, a worker starts none of its builders, a waiting planner gets no tick,
+  no new thread and no message (replies, answers and controls are kept for it), and the planner's ticks name the
+  roles that wait or are moving. A wait is news once: readings that only change its figures send nothing. You're told of each change;
+  `a6g status`, `a6g subscriptions` and `a6g doctor` show where each role runs and what waits
+  (`<run>/subscription.json`).
+- **Spend by subscription.** Each request counts for the login whose transcripts it's in (rows from before count as
+  this Mac's own); `spend.json` gets each subscription's figures and week, and a budget in percent counts each
+  subscription's spend against that one's week. Each subscription's week in dollars is estimated on its own (else its
+  plan's, else all of them).
+- **A subscription is known by its login.** Readings record the login's account and plan; a name signed in to another
+  account starts its estimates again, `add` refuses a second name for the same account, `remove` refuses one a team
+  runs on, and `a6g doctor` checks each one is signed in. The guard keeps members out of every subscription's folder.
+- `a6g metrics` and the watchdog's spend read every subscription's transcripts, not only `~/.claude/projects`.
+
 ## 0.6.1: The web app's new address, and doctor on stale prompts
 
 - **`a6g connect app` goes to `https://app.anythingfactory.dev` by default**, the domain the factory moved to; 0.6.0's

@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import type { Team } from "../config.ts";
 import { machineName } from "../machine.ts";
 import { boardDir, readRegistry } from "../paths.ts";
+import { leakRefusal, leaksInWorktree } from "../secrets.ts";
 import { asOperator, teamSession } from "../session.ts";
 import { describeHold, holdOf } from "../tasks/controls.ts";
 import { betterDiagram } from "../tasks/graph.ts";
@@ -19,7 +20,11 @@ import {
   CONFIDENCE,
   conflictOf,
   type Dimension,
+  designOpen,
   DIMENSIONS,
+  finished,
+  finishedUnder,
+  FOUNDATION,
   fromStakeholder,
   heldHere,
   journeyDue,
@@ -39,6 +44,7 @@ import {
   STATUSES,
   statusRefusal,
   type Screen,
+  securityLine,
   type Task,
   theirWords,
   ticketOf,
@@ -48,9 +54,11 @@ import {
 } from "../tasks/model.ts";
 import { asData, quoted } from "../untrusted.ts";
 import { blastRadius } from "../blast.ts";
+import { journeyProofFor } from "./e2e.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
 import { claimMark, importBoard, leaseMinutes, markClaim, openTeamStore } from "../tasks/ops.ts";
 import { addTask, proposes } from "../tasks/add.ts";
+import { answer, waitsOnOperator } from "../tasks/answer.ts";
 import { type Decision, decide } from "../tasks/decide.ts";
 import { openStore, Refused, type Store, update } from "../tasks/store.ts";
 import { git, gitOk, list, type Options, parseArgs, text as optionText } from "../util.ts";
@@ -58,6 +66,8 @@ import { git, gitOk, list, type Options, parseArgs, text as optionText } from ".
 export const USAGE = `usage: a6g task <command>
   add "<title>" [--kind k] [--sev s] [--body "…" | --body-file f] [--area a] [--files p,q] [--parent id] [--after id,id] [--request rN]
       (a member's finding goes to triage; the planner's work is proposed; yours may be --approved)
+      --kind design: the design check-in, which the planner raises to you once the foundation is built; until you've
+      agreed it (answer it, or a6g task status <id> done), only scaffold and test-infra work is claimed
   list [--status s,t] [--kind k] [--all] [--claimable] [--json]   ·   show <id> [--json]   ·   graph [--out <file>] [--all]
   note <id> "<text>"   ·   screen <id> clear|risky --note "…" (the planner: a stakeholder's words, before they're a proposal)
   edit <id> [--title …] [--body … | --body-file f] [--kind k] [--sev s] [--area a] [--files p,q] [--parent id|none] [--after id,id|none]
@@ -68,6 +78,7 @@ export const USAGE = `usage: a6g task <command>
       blocked: --reason "…" (the planner's to sort), with --recommend "…" to raise it to the operator,
                or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
   ask <id> --reason "…" --recommend "…"   a question or blocked task: why it's the operator's and what the team recommends
+  answer <id> "<your answer>"   yours: what you say to a question, or to a block raised to you (the planner hears within a minute)
   approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…" --recommend "…"
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
   migrate --to mongo|files [--dry-run]   (yours: the whole graph into the other store)`;
@@ -165,6 +176,8 @@ export function detail(t: Task): string {
   if (t.claim) out.push(`claimed by the ${t.claim.role} on ${t.claim.machine} until ${t.claim.until}`);
   if (t.rounds) out.push(`review rounds with changes: ${t.rounds}`);
   if (t.ui !== null || t.critical.length) out.push(`touches: ${[t.ui ? "UI" : null, ...t.critical].filter(Boolean).join(", ") || "no UI"}`);
+  const security = securityLine(t);
+  if (security) out.push(security);
   if (t.gate) out.push(`gate: asked ${t.gate.asked} · instead ${t.gate.simplify} · simplest ${t.gate.simplest}`);
   if (t.score)
     out.push(`score: ${DIMENSIONS.map((d) => `${d} ${t.score?.[d]}`).join(", ")}; confidence ${t.score.confidence}, size ${t.score.size}. ${t.score.why}`);
@@ -180,8 +193,11 @@ export function detail(t: Task): string {
     );
   if (theirs) out.push("", ...asData(t.from ? `stakeholder ${t.from}'s` : "a stakeholder's", t.title, t.body));
   else if (t.body) out.push("", t.body);
-  if (t.notes.length) out.push("", "Notes:", ...t.notes.map((n) => `- ${n.at.slice(0, 16)} ${n.by}: ${n.text}`));
-  out.push("", "History:", ...t.history.slice(-8).map((e) => `- ${e.at.slice(0, 16)} ${e.by}: ${e.what}`));
+  // What was asked of the operator is said once, at the top: the note and the history entry that carry it again point there.
+  const reason = t.ask?.reason ?? "";
+  const once = (text: string): string => (reason && text.endsWith(`: ${reason}`) ? `${text.slice(0, -reason.length)}(as raised, above)` : text);
+  if (t.notes.length) out.push("", "Notes:", ...t.notes.map((n) => `- ${n.at.slice(0, 16)} ${n.by}: ${once(n.text)}`));
+  out.push("", "History:", ...t.history.slice(-8).map((e) => `- ${e.at.slice(0, 16)} ${e.by}: ${once(e.what)}`));
   return out.join("\n");
 }
 
@@ -233,15 +249,35 @@ const listTasks: Handler = async ({ store, who }, _positional, options) => {
   return 0;
 };
 
-const show: Handler = async ({ store }, [id], options) => {
+const show: Handler = async ({ store, who }, [id], options) => {
   const task = await getTask(store, id);
   console.info(options["json"] ? JSON.stringify(asJson(task), null, 2) : detail(task));
+  if (!options["json"] && who === OPERATOR && waitsOnOperator(task)) console.info(`\nYours to answer: a6g task answer ${task.id} "<your answer>"`);
+  return 0;
+};
+
+// Text given after a task's id, or as --text: all of it. Unquoted words with a bare -- among them ("agreed -- but use
+// Postgres") are one text, and both forms at once are refused: an answer cut short could read as agreement.
+function saidIn(rest: string[], options: Options): string {
+  const after = options["--"];
+  const words = [...rest, ...(Array.isArray(after) ? ["--", ...after] : [])];
+  const flagged = optionText(options["text"]);
+  if (flagged !== undefined && words.length) throw new Refused('say it once: in quotes after the id, or as --text "…", not both');
+  return flagged ?? words.join(" ");
+}
+
+// The operator's answer in words to what waits on them, as the web app gives it (lib/tasks/answer.ts): a note marked as
+// the answer, which leaves the task where it is. The watchdog passes it to the planner, which moves the task on.
+const answerTask: Handler = async ({ store, who }, [id, ...rest], options) => {
+  if (!id) throw new Refused('which task: a6g task answer <id> "<your answer>"');
+  const task = await answer(store, id, { who, text: saidIn(rest, options) });
+  console.info(`task ${task.id}: answered. The planner hears within a minute and moves it on.`);
   return 0;
 };
 
 const note: Handler = async ({ store, who }, [id, ...rest], options) => {
   if (who === "unknown") throw new Refused("only the team's members add notes");
-  const text = (optionText(options["text"]) ?? rest.join(" ")).trim();
+  const text = saidIn(rest, options).trim();
   if (!text) throw new Refused('say what: a6g task note <id> "<text>"');
   const task = await getTask(store, id);
   await update(store.tasks, task.id, (t) => withEvent({ ...t, notes: [...t.notes, { at: nowIso(), by: who, text }] }, who, "added a note"));
@@ -279,6 +315,13 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   if (body !== undefined) changes.body = body;
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind");
   if (kind) changes.kind = kind;
+  // The design check-in holds feature work until the operator settles it: it doesn't stop being one, or start as one, by an edit.
+  if (kind && kind !== task.kind && (kind === "design" || task.kind === "design") && who !== OPERATOR)
+    throw new Refused(
+      task.kind === "design"
+        ? `#${task.id} is the design check-in, which the operator settles: what kind it is, is their call`
+        : `the design check-in is a task of its own (a6g task add "…" --kind design), not another task's kind`
+    );
   const sev = optionText(options["sev"]);
   if (sev !== undefined) changes.severity = sev === "none" ? null : (oneOf(sev, SEVERITIES, "--sev") ?? null);
   const area = optionText(options["area"]);
@@ -288,6 +331,9 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   if (parent !== undefined) {
     if (parent !== "none" && (byId.get(parent)?.kind !== "journey" || parent === task.id))
       throw new Refused(`--parent names a journey; #${parent} isn't one`);
+    // Finished work stays under its journey, whose tests it's owed: moved out, the journey could be dropped with it.
+    if (who !== OPERATOR && finished(task) && task.parent && (parent === "none" ? null : parent) !== task.parent)
+      throw new Refused(`task ${task.id} is finished work under journey ${task.parent}, whose tests it's owed: moving it out is the operator's call`);
     changes.parent = parent === "none" ? null : parent;
   }
   if (options["after"] !== undefined) {
@@ -301,8 +347,15 @@ const edit: Handler = async ({ store, who }, [id], options) => {
     changes.after = after;
   }
   if (!Object.keys(changes).length) throw new Refused("nothing to change; see a6g task help");
+  // A journey is done by its tests passing: a task that's done already doesn't become one, with nothing asked of it.
+  if (changes.kind === "journey" && task.kind !== "journey" && task.status === "done" && who !== OPERATOR)
+    throw new Refused(`task ${task.id} is done, and a journey is done only by its tests: making it one is the operator's call (or reopen it first)`);
   if (changes.kind && changes.kind !== "journey" && task.kind === "journey" && all.some((t) => t.parent === task.id))
-    throw new Refused(`journey ${task.id} has tasks (--parent ${task.id}); move them out first`);
+    throw new Refused(
+      finishedUnder(task, all).length && who !== OPERATOR
+        ? `journey ${task.id} has finished work under it, so its tests are still owed: what kind it is, is the operator's call`
+        : `journey ${task.id} has tasks (--parent ${task.id}); move them out first`
+    );
   // What the task is (its title, body and kind) is what was approved: changed, it's approved again before it's built.
   const substance = (["title", "body", "kind"] as const).filter((key) => key in changes);
   const moved = await update(store.tasks, task.id, (t) => {
@@ -364,18 +417,20 @@ const score: Handler = async ({ team, store, who }, [id], options) => {
   return 0;
 };
 
-const setStatus: Handler = async ({ store, who }, [id, to], options) => {
+const setStatus: Handler = async ({ home, team, store, who }, [id, to], options) => {
   const target = oneOf(to, STATUSES, "the status");
   if (!target) throw new Refused(`which status? ${STATUSES.join(", ")}`);
   const task = await getTask(store, id);
   const all = await store.tasks.all();
+  // A journey is done only while its specs pass (the move rules ask; the operator's call is the operator's).
+  const journeyProof = journeyProofFor(home, team);
   // Blocked already: say again what it's blocked on (what it waits for, or raising it to the operator), in place.
   const again = task.status === "blocked" && target === "blocked";
   const refusal = again
     ? who === "planner" || who === OPERATOR
       ? null
       : `only the planner (or the operator) sets a task's status; the ${who} uses its own task commands`
-    : statusRefusal(task, target, who, all);
+    : (statusRefusal(task, target, who, all) ?? (target === "done" && task.kind === "journey" && who !== OPERATOR ? journeyProof(task, all) : null));
   if (refusal) throw new Refused(refusal);
   const reason = optionText(options["reason"]);
   const recommendation = optionText(options["recommend"]) ?? "";
@@ -418,7 +473,7 @@ const setStatus: Handler = async ({ store, who }, [id, to], options) => {
       target,
       "status",
       who,
-      { all },
+      { all, journeyProof },
       {
         fields: { ...notes, ...approval, ...raised, ...waiting },
         why: reason ?? (waitsOn.length ? `waits on ${waitsOn.map((id) => `#${id}`).join(", ")}` : undefined),
@@ -516,7 +571,7 @@ const baseRef = (team: Team, cwd: string): string => {
 const leaseMin = (team: Team): number => leaseMinutes(team.watchdog.stuckAfterMin);
 
 const claim: Handler = async ({ home, team, run, store, who }, [id], options) => {
-  if (!CLAIMS[who]) throw new Refused(`builders and testers claim tasks; you're the ${who}`);
+  if (!CLAIMS[who]) throw new Refused(`builders, testers and the scaffolder claim tasks; you're the ${who}`);
   const worktree = toplevel();
   if (worktree === realpathSync(home)) throw new Refused("claim from your own worktree, not the team's checkout");
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") as Kind | undefined;
@@ -530,7 +585,12 @@ const claim: Handler = async ({ home, team, run, store, who }, [id], options) =>
     if (!target) {
       if (id) throw new Refused(`no task ${id}`);
       const why = hold ? ` the operator is pausing the team after ${describeHold(hold)}, and nothing in that is free.` : "";
-      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why} Say so in your report and stop.`);
+      // Approved work this role takes that the open design check-in holds (model.ts claimRefusal): said, so an idle
+      // team's reports say why.
+      const design = designOpen(all);
+      const held = design && all.some((t) => t.status === "approved" && CLAIMS[who]?.includes(t.kind) && !FOUNDATION.includes(t.kind));
+      const waits = held ? ` Approved work waits for the operator to agree the design (#${design.id}, ${design.status}).` : "";
+      console.info(`nothing to claim: no approved ${CLAIMS[who]?.join(", ")} task is free.${why}${waits} Say so in your report and stop.`);
       return 3;
     }
     const refusal = claimRefusal(target, who, all, hold);
@@ -626,8 +686,11 @@ const toplevelOrNull = (): string | null => {
   }
 };
 
+// How many of a branch's security paths its task names (a6g blast has them all).
+const SECURITY_FILES_KEPT = 50;
+
 const submit: Handler = async ({ team, run, store, who }, [id]) => {
-  if (!CLAIMS[who]) throw new Refused(`builders and testers submit what they built; you're the ${who}`);
+  if (!CLAIMS[who]) throw new Refused(`builders, testers and the scaffolder submit what they built; you're the ${who}`);
   const worktree = toplevel();
   const ctx = { all: [], machine: machineName(), worktree };
   const task = await getTask(store, id);
@@ -644,17 +707,37 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
   if (Number(git(worktree, "rev-list", "--count", `${base}..HEAD`)) === 0)
     throw new Refused(`${branch} has nothing beyond ${team.branch}; release the task instead (a6g task release ${task.id} --blocked "…")`);
   const sha = git(worktree, "rev-parse", "HEAD");
+  // Secrets don't leave the worktree (lib/secrets.ts): read here, before the branch is pushed or reviewed, and again by
+  // the merge queue.
+  const found = leaksInWorktree(worktree, `${base}..HEAD`);
+  if (found.length) throw new Refused(leakRefusal(branch, found));
   // A rework builds on the round it was sent back with, never beside it (a rebase after a conflict starts afresh: the
-  // merge queue clears the round it sent back).
-  if (task.sha && task.sha !== sha && !gitOk(worktree, "merge-base", "--is-ancestor", task.sha, "HEAD"))
+  // merge queue clears the round it sent back). The one other rework that doesn't: a round that held a secret, rebuilt
+  // without it.
+  const heldSecret = (round: string): boolean =>
+    gitOk(worktree, "cat-file", "-e", `${round}^{commit}`) && leaksInWorktree(worktree, `${base}..${round}`).length > 0;
+  if (task.sha && task.sha !== sha && !gitOk(worktree, "merge-base", "--is-ancestor", task.sha, "HEAD") && !heldSecret(task.sha))
     throw new Refused(`this branch doesn't hold the task's last round (${task.sha.slice(0, 9)}); start from it, then submit`);
   if (task.rounds > 0 && task.sha === sha)
     throw new Refused(`this is the commit the reviewer asked changes on (${sha.slice(0, 9)}); make the changes in its notes, then submit`);
-  // What it touches, for the reviewer and the planner: UI (a view check is due) and the team's critical paths.
-  let touches: Pick<Task, "ui" | "critical"> = { ui: null, critical: [] };
+  // What it touches, for the reviewer and the planner: UI (a view check is due), the team's critical paths, and, on a
+  // team with a security reviewer, the security paths that put it in their hands (where it stays, round after round).
+  const reviewed = Boolean(team.roles["security-reviewer"]);
+  let touches: Pick<Task, "ui" | "critical" | "security"> = { ui: null, critical: [], ...(reviewed ? { security: task.security ?? null } : {}) };
   try {
-    const radius = blastRadius(worktree, { base, critical: team.critical });
+    const radius = blastRadius(worktree, { base, critical: team.critical, ...(reviewed ? { security: team.security } : {}) });
     touches = { ui: radius.ui, critical: radius.critical };
+    const was = task.security;
+    if (reviewed)
+      touches.security =
+        radius.security.length || was?.sent || was?.seen
+          ? {
+              files: radius.security.slice(0, SECURITY_FILES_KEPT),
+              ...(was?.sent ? { sent: true } : {}),
+              ...(was?.seen ? { seen: true } : {}),
+              ...(was?.passed ? { passed: was.passed } : {}),
+            }
+          : null;
   } catch {}
   // On a team on several machines the branch goes to the remote, wherever it was built: the lead merges from there,
   // and a rework on another machine starts from it.
@@ -677,7 +760,7 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
 
 // The lead: a task's branch as its submit pushed it, fetched for review, and the commit to review.
 const fetchBranch: Handler = async ({ home, team, store, who }, [id]) => {
-  if (!may(who, ["planner", "reviewer"])) throw new Refused("the planner and the reviewer fetch a task's branch");
+  if (!may(who, ["planner", "reviewer", "security-reviewer"])) throw new Refused("the planner and the reviewers fetch a task's branch");
   const task = await getTask(store, id);
   if (!task.branch) throw new Refused(`task ${task.id} has no branch yet`);
   if (!multiMachine(team)) {
@@ -770,6 +853,7 @@ const OPTIONS: Record<string, string[]> = {
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
   status: ["reason", "recommend", "waits-on", "then"],
   ask: ["reason", "recommend"],
+  answer: ["text"],
   approve: ["note"],
   reject: ["reason"],
   research: ["note"],
@@ -793,6 +877,7 @@ const COMMANDS: Record<string, Handler> = {
   score,
   status: setStatus,
   ask,
+  answer: answerTask,
   approve,
   reject: proposalVerdict("reject", "reason"),
   research: proposalVerdict("research", "note"),

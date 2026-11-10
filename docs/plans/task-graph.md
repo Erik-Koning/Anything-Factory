@@ -67,7 +67,7 @@ review changes, then the task is blocked for the planner to split or decide.
   "id": "142", // numeric, per team; builders' branches carry it (a6g/b142-…)
   "team": "refdocs-voice",
   "title": "Resume a paused recording after reload",
-  "kind": "feature", // feature | bug | ux | test | test-infra | chore | research | journey
+  "kind": "feature", // feature | bug | ux | test | test-infra | scaffold | chore | research | journey | design
   "status": "approved", // see below
   "severity": "major", // blocker | major | minor (bugs and findings)
   "body": "Outcome, what done looks like, repro…",

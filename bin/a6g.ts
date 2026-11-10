@@ -11,6 +11,8 @@ Set up and run a team (the operator)
   a6g doctor                          is this machine ready? (tools, T3 Code's version and contract, watchdog)
   a6g init [<repo>] [options]         detect, make the team's checkout and .a6g/, and interview you to finish it
                                       --name --branch --base --checkout <dir> | --in-place --owner --no-interview
+                                      --non-technical (the team never asks you about the platform or the stack)
+                                      --model <name> (the interview's; fable unless named)
   a6g check [<checkout>] [--run]      prove the setup: rules, adapters, a guard self-test, prompts; --run also
                                       starts the environment and runs the gate
   a6g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);
@@ -19,14 +21,21 @@ Set up and run a team (the operator)
   a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
                                       stop a team now, or once the work (or journeys) under way is merged
   a6g resume <team> [--note "…"]      start it again; the note goes to the planner
-  a6g budget <team> [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
+  a6g budget <team> [--account <sub>] [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
                                       its spending limits, in API-equivalent $ or % of a subscription's week
-                                      (60%; over 100% for more than one): warned at 80%, paused at 100%
+                                      (60%; over 100% for more than one): warned at 80%, paused at 100%;
+                                      --account: its limits on one subscription, which it moves off at 100%
   a6g subscriptions [check | add <name> --config-dir <dir> | remove <name>]
                                       the Claude subscriptions, their usage, and what a subscription's week is in $
+  a6g subscriptions use <team> <sub>[,<sub>…] [--role <role>] [--clear]
+                                      what the team (or one role) runs on here, in order: the next when one closes
+  a6g subscriptions limit <sub|all> [--weekly <n>%] [--session <n>%]
+                                      how much of a subscription the teams may use (all: their weeks added up)
   a6g rotate <team>                   a fresh planner thread (refused while members run)
   a6g status [<team>]  ·  a6g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   a6g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role
+  a6g metrics --quality [--since] [--until] [--json]
+                                      how the merged work went: first-time reviews, found after merge, cost per task
   a6g prompt <team> <role>            the text a role works under
   a6g upgrade <team> [<version>] [--force]   move a team to another installed factory version
   a6g unregister <team>               remove its T3 instances and registry entry (keeps its files)
@@ -38,6 +47,7 @@ Set up and run a team (the operator)
   a6g connect app [--url <url>] [--machine <name>] [--test]   sign in to the web app in your browser and link this
                                       machine to your account: the app shows you it and the teams it runs
                                       ·  a6g disconnect email|whatsapp|heartbeat|app
+  a6g harness allow <branch> --sha <commit> --why "…"   let that commit of a branch check less (the operator's call)
   a6g self-install [--link] [--force] install this checkout's version into ~/.a6g  ·  a6g versions
 
 Team members (the guard decides who may run which)
@@ -45,14 +55,14 @@ Team members (the guard decides who may run which)
   a6g verdict review <branch> approve|changes --sha <commit> --note "…"   ·   a6g verdict ux <subject> pass|issues --ref <commit> --note "…"
   a6g log [--label …] "<entry>"   a6g lock <name> [--slots N] [--wait-min M] -- <cmd>   a6g drain <role…>|off
   a6g gate [--quick]   a6g env up|down|restart|reset|status   a6g finish   a6g progress
-  a6g pages run|shots|status|done
+  a6g pages run|shots|status|done   a6g e2e run|try|status|done   a6g harness check   a6g complete
   a6g pr --title "…" --body-file <file>   the planner's pull request into the branch you promote (push.pullRequest)
 
 The task graph (a6g task help lists every form)
   a6g task add|list|show|note|graph   anyone on the team: findings go to triage, the planner's work is proposed
   a6g task edit|score|status|import   the planner: shape, score (the gate and the matrix) and move tasks
   a6g task approve|reject|research|escalate <id>   the approver (or you), within team.json approval
-  a6g task claim [<id>]  ·  release <id>  ·  submit <id>   builders and testers take the next task, and hand it in
+  a6g task claim [<id>]  ·  release <id>  ·  submit <id>   builders, testers and the scaffolder take the next task
   a6g request add|list|show|note|reject   stakeholders' feature requests (you add them; the planner promotes them)
   a6g cycle close --report-file <f> | list   a cycles team's cycles (team.json mode "cycles")
   a6g blast [<ref>] [--base <branch>] [--json]   what a change touches: importers, related files, tests, UI, critical paths
@@ -145,6 +155,9 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   gate: () => import("../lib/commands/tools.ts").then((m) => m.gate(args)),
   env: () => import("../lib/commands/tools.ts").then((m) => m.env(args)),
   finish: () => import("../lib/commands/tools.ts").then((m) => m.finish()),
+  complete: () => import("../lib/commands/tools.ts").then((m) => m.complete()),
+  e2e: () => import("../lib/commands/e2e.ts").then((m) => m.e2e(args)),
+  harness: () => import("../lib/commands/harness.ts").then((m) => m.harness(args)),
   progress: () => import("../lib/commands/tools.ts").then((m) => m.progress()),
   drain: () => import("../lib/commands/tools.ts").then((m) => m.drain(args)),
   pages: () => import("../lib/commands/pages.ts").then((m) => m.run(args)),

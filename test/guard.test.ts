@@ -51,6 +51,31 @@ describe("guard", () => {
     }
   });
 
+  test("a scaffolder writes the harness manifest but no other rule, and claims its tasks", async () => {
+    const scaffolded = makeRepo(baseTeam({ board: "tasks", roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} } }));
+    await selfTest(scaffolded, guardCases(loadTeam(scaffolded)));
+    await holds([
+      writes(scaffolded, "scaffolder", ".a6g/harness.json", "allow"),
+      writes(scaffolded, "scaffolder", "playwright.config.ts", "allow"),
+      writes(scaffolded, "scaffolder", ".a6g/team.json", "refuse"),
+      writes(scaffolded, "scaffolder", ".a6g/adapters/gate.sh", "refuse"),
+      writes(scaffolded, "builder", ".a6g/harness.json", "refuse"),
+      bash(scaffolded, "scaffolder", "echo '{}' > .a6g/harness.json", "allow"),
+      bash(scaffolded, "scaffolder", "echo x >> .a6g/brief.md", "refuse"),
+      bash(scaffolded, "scaffolder", "a6g task claim", "allow"),
+      bash(scaffolded, "scaffolder", "a6g merge a6g/s1-x", "refuse"),
+      // a6g env use runs its command, so the guard judges that command, as it does a6g lock's.
+      bash(scaffolded, "builder", "a6g env use -- pnpm exec playwright test e2e/a.spec.ts", "allow"),
+      bash(scaffolded, "builder", "a6g env use -- git push origin a6g/next", "refuse"),
+      bash(scaffolded, "builder", "a6g env use --wait-min 2 -- rm -rf .a6g", "refuse"),
+      bash(scaffolded, "builder", "a6g env use -- a6g merge a6g/b1-x", "refuse"),
+      bash(scaffolded, "planner", "a6g e2e run", "allow"),
+      bash(scaffolded, "builder", "a6g e2e run", "refuse"),
+      bash(scaffolded, "builder", "a6g e2e try e2e/a.spec.ts", "allow"),
+      bash(scaffolded, "planner", "a6g harness allow a6g/s1-x --sha abc1234 --why x", "refuse"),
+    ]);
+  });
+
   test("the self-test passes for every example team", async () => {
     for (const file of readdirSync(join(ROOT, "examples"))) {
       const example = makeRepo({ ...(JSON.parse(readFileSync(join(ROOT, "examples", file), "utf8")) as RawTeam), name: "fixture" });
@@ -408,6 +433,18 @@ describe("guard", () => {
     await holds([bash(pushing, "planner", "git push origin a6g/next", "refuse", { run })]);
   });
 
+  test("a secret is stored by the roles that build, its value never in the command", () =>
+    holds([
+      bash(home, "builder", "openssl rand -hex 32 | npx sst secret set AuthSecret", "allow"),
+      bash(home, "planner", 'printf %s "$API_TOKEN" | gh secret set API_TOKEN', "allow"),
+      bash(home, "builder", "openssl rand -hex 32 | npx sst secret set AuthSecret --stage production", "refuse"),
+      bash(home, "builder", "npx sst secret set AuthSecret hunter2", "refuse"),
+      bash(home, "builder", "npx sst secret list", "refuse"),
+      bash(home, "builder", "openssl rand -hex 32 | sst secret set AuthSecret < .env.local", "refuse"),
+      bash(home, "reviewer", "openssl rand -hex 32 | npx sst secret set AuthSecret", "refuse"),
+      bash(home, "reviewer", "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent", "refuse"),
+    ]));
+
   test("read-only roles and roles the team doesn't have", () =>
     holds([
       ...["git checkout -b x", "git stash", "git commit -am x", "git switch main", "git push origin x"].map((c) => bash(home, "reviewer", c, "refuse")),
@@ -459,6 +496,44 @@ describe("guard", () => {
       bash(home, "planner", "echo x >> .a6g/run/state/log.md", "refuse"),
     ]));
 
+  // The proofs are files (what ran and passed, the operator's allowance, the complete marker), and a program's own
+  // code writes a file where the guard reads no path: code that names one doesn't run, and reading stays plain.
+  test("a program's code that names the factory's records isn't run", async () => {
+    const run = `${home}-run`;
+    const names = (said: string) => assert.match(said, /written by its commands only\. To read one, use cat, jq or grep, or pipe it in/);
+    for (const command of [
+      `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`,
+      `python3 -c "open('.a6g/run/state/harness-allow.json', 'w').write('{}')"`,
+      `timeout 30 npx tsx -e "import('fs').then((fs) => fs.writeFileSync('${home}/.a6g/run/state/verdicts.json', '{}'))"`,
+      `perl -e 'open(F, ">.a6g/run/state/verify-suite.json"); print F "{}"'`,
+      `awk 'BEGIN { print "{}" > ".a6g/run/state/verify-suite.json" }'`,
+      "python3 - <<'EOF'\nimport json\njson.dump([], open('.a6g/run/state/e2e/history.json', 'w'))\nEOF",
+      "cat <<'EOF' | node\nrequire('fs').writeFileSync('.a6g/run/locks/merge/pid', '1')\nEOF",
+      `echo "require('fs').rmSync('.a6g/run/state', { recursive: true })" | node`,
+      `node --input-type=module <<< "import { writeFileSync } from 'node:fs'; writeFileSync('.a6g/run/state/tasks.json', '{}')"`,
+      `node -e "require('fs').writeFileSync('${run}/complete', 'now')"`,
+      `python3 -c "import os; open(os.path.expanduser('~/${run.split("/").slice(-2).join("/")}/complete'), 'w')"`,
+      `cd .a6g/run/state && node -e "require('fs').writeFileSync('e2e/history.json', '[]')"`,
+    ]) {
+      const { outcome, said } = await guardAsync(home, "builder", "Bash", { command }, { run });
+      assert.equal(outcome, "refuse", command);
+      names(said);
+    }
+    await holds([
+      bash(home, "planner", `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`, "refuse"),
+      bash(home, "tester", `python3 -c "open('.a6g/run/state/harness-allow.json', 'w')"`, "refuse"),
+      // Reading is cat's, jq's and grep's, and a program may be handed what they read.
+      bash(home, "builder", "cat .a6g/run/state/e2e/history.json | python3 -c 'import json, sys; print(len(json.load(sys.stdin)))'", "allow"),
+      bash(home, "builder", "jq length .a6g/run/state/e2e/history.json", "allow"),
+      bash(home, "builder", "tail -n 20 .a6g/run/state/verify.log && ls .a6g/run/state", "allow"),
+      bash(home, "builder", "grep -c passed .a6g/run/state/e2e/history.json", "allow"),
+      // Code that names nothing of the factory's runs as before, in scratch too.
+      bash(home, "builder", `node -e "require('fs').writeFileSync('.a6g/run/scratch/notes.json', '{}')"`, "allow"),
+      bash(home, "builder", `python3 -c "print(open('src/state/store.ts').read())"`, "allow"),
+      bash(home, "builder", `node -e "console.log('the complete list')"`, "allow"),
+    ]);
+  });
+
   test("owned commands, however they're called", () =>
     holds([
       bash(home, "builder", "node /Users/x/.a6g/versions/0.2.0/bin/a6g.mjs merge a6g/b1-x", "refuse"),
@@ -479,6 +554,7 @@ describe("guard", () => {
   test("outside tools: email, other connectors, starting members", async () => {
     const send = "mcp__claude_ai_Gmail__send_message";
     const delegate = "mcp__t3-code__delegate_task";
+    const opus = "claude-opus-5-5";
     await holds([
       tool(home, "planner", send, { to: ["op@example.com"], subject: "[A6G-Planner] [Fixture team] x" }, "allow"),
       tool(home, "planner", send, { to: ["op@example.com"], subject: "[Fixture team] x" }, "refuse"),
@@ -489,15 +565,15 @@ describe("guard", () => {
       tool(home, "planner", "mcp__claude_ai_Claude_Docs__create", {}, "refuse"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "claudeBuilder" } }, "refuse"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-planner" } }, "refuse"),
-      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, "allow"),
-      tool(home, "builder", delegate, { target: { providerInstanceId: "a6g-fixture-builder" } }, "refuse"),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" }, "allow"),
+      tool(home, "builder", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus } }, "refuse"),
     ]);
     const draining = makeRepo();
     mkdirSync(join(draining, ".a6g/run/state"), { recursive: true });
     writeFileSync(join(draining, ".a6g/run/state/drain"), "builder tester\n");
     await holds([
-      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, "refuse"),
-      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer" } }, "allow"),
+      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" }, "refuse"),
+      tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: opus } }, "allow"),
     ]);
   });
 

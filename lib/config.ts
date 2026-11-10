@@ -6,6 +6,8 @@ import { type Contact, DEFAULT_CONTACT } from "./contact.ts";
 import { teamFile, VERSION_NAME } from "./paths.ts";
 import { POLICIES, type PolicyState } from "./policies.ts";
 import { MACHINE_NAME } from "./machine.ts";
+import { defaultModel, MODEL_ALIASES, MODEL_ID, modelId } from "./models.ts";
+import { priced } from "./prices.ts";
 import { type ApprovalRules, DEFAULT_WEIGHTS, DIMENSIONS, type Dimension, SIZES, type Size } from "./tasks/model.ts";
 import { minutes } from "./util.ts";
 
@@ -18,6 +20,8 @@ export interface RoleSettings {
   mcp?: string[];
   readOnly?: boolean;
   compactAt?: number;
+  // The model the role runs on: an id, or fable, opus, sonnet or haiku (lib/models.ts).
+  model?: string;
 }
 
 export interface PageSpec {
@@ -25,6 +29,13 @@ export interface PageSpec {
   path: string;
   title?: string;
   exclude?: string[];
+  // The sign-in state (the harness's auth.states) the page is seen with, and selectors masked in its screenshots.
+  as?: string;
+  mask?: string[];
+  // The operator's exemptions (team.json only, never the manifest): selectors every in-page check leaves out, and the
+  // colour schemes this page is checked in, in place of pages.schemes.
+  ignore?: string[];
+  schemes?: string[];
 }
 export interface Viewport {
   id: string;
@@ -44,6 +55,8 @@ export interface PagesSettings {
   settleMs?: number;
   base?: string;
   allowedChanges?: string[];
+  // The smallest touch target on a phone, in CSS pixels (the rubric's, else WCAG 2.2 AA's 24).
+  minTarget?: number;
 }
 
 export interface NeverRule {
@@ -78,6 +91,7 @@ export interface RawTeam {
   tasks?: { store?: string; database?: string; lead?: string | null };
   priorities?: { weights?: Record<string, number> };
   approval?: { mode?: string; maxSize?: string; findings?: string; stakeholders?: string };
+  operator?: { technical?: boolean; designCheckIn?: boolean };
   critical?: string[];
   hosts?: string[];
   branchPrefix?: string;
@@ -91,6 +105,8 @@ export interface RawTeam {
   finish?: string | null;
   progress?: string | null;
   pages?: PagesSettings;
+  harness?: { journeys?: "required" | "optional"; lane?: string[] };
+  security?: { audit?: boolean; paths?: string[]; builtIn?: boolean };
   policies?: Record<string, string>;
   never?: (NeverRule | [string, string])[];
   commandOwners?: (CommandOwner | [string, string[], string?])[];
@@ -122,6 +138,8 @@ export interface Lane extends RoleDefaults {
   mcp: string[];
   branch?: string;
   compactAt?: number;
+  // The model its members start on: the role's own in team.json, else the team's, else the role's default.
+  model: string;
 }
 
 export interface Team {
@@ -145,12 +163,16 @@ export interface Team {
   priorities: { weights: Record<Dimension, number> };
   // Who approves the planner's proposals: the operator, the approver up to maxSize, or the approver alone ("full").
   approval: ApprovalRules;
+  // Who the team works for. `technical`: whether they weigh in on the platform, the stack and the architecture; one who
+  // doesn't is never asked about them, and the team picks what's safest for them to own. `designCheckIn`: a project's
+  // foundation (its skeleton and the choices under it) waits for their agreement before features are built on it
+  // (lib/tasks/design.ts); only ever with a technical operator.
+  operator: { technical: boolean; designCheckIn: boolean };
   // Paths (regexes) whose changes get the full review whatever their size.
   critical: string[];
   // Hosts beyond this machine the team may reach (policies.ts network): api.example.com, or *.example.com.
   hosts: string[];
   branchPrefix: string;
-  model: string;
   roles: Record<string, Lane>;
   review: { required: string[]; removedPattern: string | null; maxRounds: number };
   gate: { full: string | null; quick: string | null; concurrency: number };
@@ -160,6 +182,15 @@ export interface Team {
   finish: string | null;
   progress: string | null;
   pages: PagesSettings | null;
+  // Whether a journey needs its specs passing to be done, and the finish line every journey's (a6g e2e done). Left out
+  // ("auto"), that's exactly when the team's checkout has a suite to prove them with (journeysRequired, lib/harness.ts).
+  // `lane`: paths (regular expressions) that count as test and harness files for a scaffolder's test work, beyond the
+  // factory's own list (lib/commands/harness.ts).
+  harness: { journeys: "required" | "optional" | "auto"; lane: string[] };
+  // `audit`: whether the check after merges asks the package registry about the lockfile's packages (lib/packages.ts).
+  // `paths`, `builtIn`: on a team with a security reviewer, the paths whose every change it passes before the merge:
+  // the team's own (regular expressions), and whether the factory's list counts too (lib/blast.ts securityFiles).
+  security: { audit: boolean; paths: string[]; builtIn: boolean };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -191,6 +222,13 @@ export const GMAIL = [
   "mcp__claude_ai_Gmail__get_message",
 ];
 
+// The scaffolder's rule for the harness manifest (lib/harness.ts), the one factory path its lane names.
+export const HARNESS_RULE = "^\\.a6g/harness\\.json$";
+
+// What a worktree role's branches start with after the prefix: a6g/b12-…, a6g/t-12-…, a6g/s12-… (lib/tasks/model.ts
+// branchFor names them the same way).
+export const BRANCH_STEM: Record<string, string> = { builder: "b\\d+-", tester: "t-", scaffolder: "s\\d+-" };
+
 // The roles the factory has prompts for (plugin/agents/<role>.md), and what each is by default.
 export const ROLES: Record<string, RoleDefaults> = {
   planner: {
@@ -201,7 +239,23 @@ export const ROLES: Record<string, RoleDefaults> = {
   },
   builder: { summary: "builds one ticket on its own branch", limit: 2, readOnly: false, write: ["*"], worktree: true },
   tester: { summary: "writes and fixes end-to-end tests on its own branch", limit: 1, readOnly: false, write: [], worktree: true },
+  // The means of checking: the harness (browser runner, sign-ins, fixtures, stand-ins) and its manifest, and a
+  // repository's structure (an app or package skeleton). Its lane is a builder's plus the manifest, which only it writes.
+  scaffolder: {
+    summary: "sets up and keeps the test harness and the repository's structure, on its own branch",
+    limit: 1,
+    readOnly: false,
+    write: ["*", HARNESS_RULE],
+    worktree: true,
+  },
   reviewer: { summary: "reviews one finished branch before it merges", limit: 1, readOnly: true, write: [] },
+  // Asked for by the merge queue only where a branch changes a security path, or the reviewer sent it on.
+  "security-reviewer": {
+    summary: "reviews a branch that changes who can do what, or what moves money, before it merges; sweeps the access model",
+    limit: 1,
+    readOnly: true,
+    write: [],
+  },
   "ux-specialist": { summary: "audits pages and journeys, desktop and phone, light and dark", limit: 1, readOnly: true, write: [] },
   innovator: { summary: "finds what the brief misses and proposes it", limit: 1, readOnly: true, write: [] },
   approver: { summary: "approves or sends back the planner's proposals, within the team's approval rules", limit: 1, readOnly: true, write: [] },
@@ -223,6 +277,7 @@ const KNOWN_KEYS = new Set([
   "tasks",
   "priorities",
   "approval",
+  "operator",
   "critical",
   "hosts",
   "model",
@@ -235,6 +290,8 @@ const KNOWN_KEYS = new Set([
   "finish",
   "progress",
   "pages",
+  "harness",
+  "security",
   "policies",
   "never",
   "commandOwners",
@@ -395,6 +452,16 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(`branch: ${branch} is protected (protectedBranches), so the team could never merge into it; give it its own branch, such as a6g/next`);
 
   const prefix = text(input.branchPrefix, "branchPrefix") ?? "a6g";
+  // A model, by its id or a family's short name. One that doesn't fit reads as left out, so the role keeps a model the
+  // factory can start it on.
+  const model = (value: unknown, where: string): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !MODEL_ID.test(value))
+      return bad(where, `a model: ${Object.keys(MODEL_ALIASES).join(", ")}, or a model id such as ${defaultModel("builder")}`);
+    return modelId(value);
+  };
+  // The team's model, for every role that names none of its own.
+  const teamModel = model(input.model, "model");
   const roles: Record<string, Lane> = {};
   const given = input.roles === undefined ? { planner: {}, builder: {}, reviewer: {} } : (object(input.roles, "roles", null) ?? {});
   for (const [id, value] of Object.entries(given)) {
@@ -406,12 +473,15 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const where = `roles.${id}`;
     // The lane is the factory's defaults plus only these settings, so any other key (such as "worktree") is ignored and
     // can't change what the factory gives the role.
-    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt"]) ?? {};
+    const settings = object(value, where, ["limit", "write", "deny", "branch", "mcp", "readOnly", "compactAt", "model"]) ?? {};
+    const written = list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at)));
     const lane: Lane = {
       ...base,
-      write: list(settings.write, `${where}.write`, (rule, at) => (rule === "*" ? rule : regex(rule, at))) ?? base.write,
+      // The scaffolder keeps the manifest whatever its write says: it's the only lane that names it.
+      write: written ? (id === "scaffolder" ? [...new Set([...written, HARNESS_RULE])] : written) : base.write,
       deny: list(settings.deny, `${where}.deny`, regex) ?? [],
       mcp: list(settings.mcp, `${where}.mcp`, text) ?? base.mcp ?? [],
+      model: model(settings.model, `${where}.model`) ?? teamModel ?? defaultModel(id),
     };
     const limit = whole(settings.limit, `${where}.limit`, 0);
     if (limit !== undefined) lane.limit = limit;
@@ -420,18 +490,26 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const compactAt = whole(settings.compactAt, `${where}.compactAt`, 1);
     if (compactAt !== undefined) lane.compactAt = compactAt;
     const pattern = settings.branch === undefined ? undefined : regex(settings.branch, `${where}.branch`);
-    if (base.worktree) lane.branch = pattern ?? regex(`^${prefix}/${id === "tester" ? "t-" : "b\\d+-"}`, `${where}.branch`);
+    if (base.worktree) lane.branch = pattern ?? regex(`^${prefix}/${BRANCH_STEM[id] ?? "b\\d+-"}`, `${where}.branch`);
     // Only roles that work on their own branch have one; a pattern here would let the merge queue take its branches.
     else if (pattern !== undefined) warnings.push(`${where}.branch: the ${id} works in the shared checkout and has no branch (ignored)`);
     roles[id] = lane;
   }
   if (!roles["planner"]) problems.push("roles.planner: every team has a planner");
+  // A model this version has no price for still runs, but its tokens count for nothing in a6g usage or a budget.
+  const unpriced = new Map<string, string[]>();
+  for (const [id, lane] of Object.entries(roles)) if (!priced(lane.model)) unpriced.set(lane.model, [...(unpriced.get(lane.model) ?? []), id]);
+  for (const [unknown, on] of unpriced)
+    warnings.push(
+      `model: this version has no price for ${unknown} (the ${on.join(", ")}), so a6g usage and a budget can't count what it spends; check the id, or upgrade the factory`
+    );
   // Task branches are named for their task (a6g/b12-…, a6g/t-12-…), so the merge closes the task; a team's own pattern
   // has to accept those names when it keeps a task graph.
   const tasksBoard = input.board === undefined || input.board === "files" || input.board === "tasks";
   for (const [id, sample] of [
     ["builder", `${prefix}/b1-task`],
     ["tester", `${prefix}/t-1-task`],
+    ["scaffolder", `${prefix}/s1-task`],
   ] as const) {
     const pattern = roles[id]?.branch;
     if (tasksBoard && pattern && pattern !== NOTHING && !new RegExp(pattern).test(sample))
@@ -546,10 +624,17 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(
       'approval.stakeholders: "operator" (you approve work from a stakeholder\'s words) or "screened" (the approver too, when the planner screened it clear)'
     );
+  const operatorIn = object(input.operator, "operator", ["technical", "designCheckIn"]) ?? {};
+  const technical = flag(operatorIn.technical, "operator.technical") ?? true;
+  const designCheckIn = flag(operatorIn.designCheckIn, "operator.designCheckIn") ?? false;
+  if (designCheckIn && !technical)
+    warnings.push(
+      "operator.designCheckIn: a check-in on the platform and the stack is for a technical operator; with operator.technical false the team makes those choices, records them and goes on, so none is held"
+    );
 
   const review = object(input.review, "review", ["required", "removedPattern", "maxRounds"]) ?? {};
-  // A tester's branches get the assertion default; null turns it off.
-  let removedPattern: string | null = roles["tester"] ? ASSERTION_PATTERN : null;
+  // A tester's or scaffolder's branches get the assertion default; null turns it off.
+  let removedPattern: string | null = roles["tester"] || roles["scaffolder"] ? ASSERTION_PATTERN : null;
   if (review.removedPattern !== undefined) removedPattern = review.removedPattern === null ? null : regex(review.removedPattern, "review.removedPattern");
   const gate = object(input.gate, "gate", ["full", "quick", "concurrency"]) ?? {};
   const full = textOrNull(gate.full, "gate.full") ?? null;
@@ -598,10 +683,13 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     "schemes",
     "ignoreConsole",
     "settleMs",
+    "minTarget",
   ]);
   if (pagesIn) {
+    const scheme = (value: unknown, at: string): string | undefined =>
+      typeof value === "string" && SCHEMES.includes(value) ? value : bad(at, SCHEMES.join(", "));
     const page = (value: unknown, where: string): PageSpec | undefined => {
-      const spec = object(value, where, ["id", "path", "title", "exclude"]);
+      const spec = object(value, where, ["id", "path", "title", "exclude", "as", "mask", "ignore", "schemes"]);
       if (!spec) return undefined;
       const id = need(spec.id, `${where}.id`, (id, at) =>
         typeof id === "string" && ID.test(id) ? id : bad(at, "letters, digits, _ and - (it names the page's files)")
@@ -611,8 +699,21 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       );
       const title = text(spec.title, `${where}.title`);
       const exclude = list(spec.exclude, `${where}.exclude`, regex);
+      const as = text(spec.as, `${where}.as`);
+      const mask = list(spec.mask, `${where}.mask`, text);
+      const ignore = list(spec.ignore, `${where}.ignore`, text);
+      const schemes = nonEmpty(spec.schemes, `${where}.schemes`, scheme, "at least one colour scheme, or leave it out for the team's");
       if (id === undefined || path === undefined) return undefined;
-      return { id, path, ...(title === undefined ? {} : { title }), ...(exclude === undefined ? {} : { exclude }) };
+      return {
+        id,
+        path,
+        ...(title === undefined ? {} : { title }),
+        ...(exclude === undefined ? {} : { exclude }),
+        ...(as === undefined ? {} : { as }),
+        ...(mask === undefined ? {} : { mask }),
+        ...(ignore === undefined ? {} : { ignore }),
+        ...(schemes === undefined ? {} : { schemes }),
+      };
     };
     const viewport = (value: unknown, where: string): Viewport | undefined => {
       const spec = object(value, where, ["id", "width", "height", "isMobile", "deviceScaleFactor"]);
@@ -635,9 +736,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const nonEmpty = <T>(value: unknown, where: string, item: (value: unknown, where: string) => T | undefined, what: string): T[] | undefined =>
       Array.isArray(value) && !value.length ? bad(where, what) : list(value, where, item);
     pages = {};
-    if (!Array.isArray(pagesIn.list) || !pagesIn.list.length)
-      bad("pages.list", 'the pages to check, at least one (e.g. [{"id": "landing", "path": "/"}])');
-    else pages.list = list(pagesIn.list, "pages.list", page) ?? [];
+    // The operator's pages; the team's harness manifest adds its own, so a team may list none here.
+    if (pagesIn.list !== undefined && (!Array.isArray(pagesIn.list) || !pagesIn.list.length))
+      bad("pages.list", 'the pages to check, at least one (e.g. [{"id": "landing", "path": "/"}]), or leave it out');
+    else if (pagesIn.list !== undefined) pages.list = list(pagesIn.list, "pages.list", page) ?? [];
     const ids = (pages.list ?? []).map((spec) => spec.id);
     for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) problems.push(`pages.list: more than one page is named ${id}`);
     const appUrl =
@@ -653,20 +755,33 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     if (allowedChanges !== undefined) pages.allowedChanges = allowedChanges;
     const viewports = nonEmpty(pagesIn.viewports, "pages.viewports", viewport, "at least one viewport, or leave it out for the defaults");
     if (viewports !== undefined) pages.viewports = viewports;
-    const schemes = nonEmpty(
-      pagesIn.schemes,
-      "pages.schemes",
-      (scheme, at) => (typeof scheme === "string" && SCHEMES.includes(scheme) ? scheme : bad(at, SCHEMES.join(", "))),
-      "at least one colour scheme, or leave it out for light and dark"
-    );
+    const schemes = nonEmpty(pagesIn.schemes, "pages.schemes", scheme, "at least one colour scheme, or leave it out for light and dark");
     if (schemes !== undefined) pages.schemes = schemes;
     const ignoreConsole = list(pagesIn.ignoreConsole, "pages.ignoreConsole", regex);
     if (ignoreConsole !== undefined) pages.ignoreConsole = ignoreConsole;
     const settleMs = whole(pagesIn.settleMs, "pages.settleMs", 0);
     if (settleMs !== undefined) pages.settleMs = settleMs;
+    const minTarget = whole(pagesIn.minTarget, "pages.minTarget", 1);
+    if (minTarget !== undefined) pages.minTarget = minTarget;
   }
   if (finish && PAGES_DONE.test(finish) && input.pages === undefined)
     problems.push('pages: the finish line is a6g pages done, so "pages" must list the pages it checks');
+  const harnessIn = object(input.harness, "harness", ["journeys", "lane"]) ?? {};
+  const harnessLane = list(harnessIn.lane, "harness.lane", regex) ?? [];
+  let harnessJourneys: "required" | "optional" | "auto" = "auto";
+  if (harnessIn.journeys !== undefined) {
+    if (harnessIn.journeys === "required" || harnessIn.journeys === "optional") harnessJourneys = harnessIn.journeys;
+    else
+      problems.push('harness.journeys: "required" (a journey is done only while its specs pass) or "optional"; left out, required once there\'s a suite');
+  }
+  const securityIn = object(input.security, "security", ["audit", "paths", "builtIn"]) ?? {};
+  const securityAudit = flag(securityIn.audit, "security.audit") ?? true;
+  const securityPaths = list(securityIn.paths, "security.paths", regex) ?? [];
+  const securityBuiltIn = flag(securityIn.builtIn, "security.builtIn") ?? true;
+  if ((securityIn.paths !== undefined || securityIn.builtIn !== undefined) && !roles["security-reviewer"])
+    warnings.push(
+      `security.${securityIn.paths !== undefined ? "paths" : "builtIn"}: the team has no security reviewer, so no merge waits for one (add "security-reviewer": { "limit": 1 } to roles, then a6g register)`
+    );
 
   const team: Team = {
     raw,
@@ -691,6 +806,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       findings: findings === "approver" ? "approver" : "planner",
       stakeholders: stakeholders === "screened" ? "screened" : "operator",
     },
+    operator: { technical, designCheckIn: designCheckIn && technical },
     critical: list(input.critical, "critical", regex) ?? [],
     hosts:
       list(input.hosts, "hosts", (value, where) =>
@@ -699,10 +815,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
           : bad(where, "a host, such as api.example.com or *.example.com")
       ) ?? [],
     branchPrefix: prefix,
-    model: text(input.model, "model") ?? "claude-opus-5-5",
     roles,
     review: {
-      required: list(review.required, "review.required", role) ?? ["builder"],
+      // A scaffolder's harness decides what the team's checks can see, so its branches are reviewed like a builder's.
+      required: list(review.required, "review.required", role) ?? (roles["scaffolder"] ? ["builder", "scaffolder"] : ["builder"]),
       removedPattern,
       maxRounds: whole(review.maxRounds, "review.maxRounds", 1) ?? 3,
     },
@@ -721,6 +837,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     // Left out or null: the finish command with done→status. "": none, as 0.2.0 read it.
     progress: input.progress === "" ? null : (textOrNull(input.progress, "progress") ?? (finish ? finish.replace(/\bdone$/, "status") : null)),
     pages,
+    harness: { journeys: harnessJourneys, lane: harnessLane },
+    security: { audit: securityAudit, paths: securityPaths, builtIn: securityBuiltIn },
     policies,
     never,
     commandOwners,
@@ -753,6 +871,12 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(`push.branch: ${push.branch} is protected (protectedBranches); the planner pushes only the team's branch`);
   if (push?.pullRequest && push.pullRequest === push.branch)
     problems.push(`push.pullRequest: ${push.pullRequest} is the branch the planner pushes; name the branch you promote into, such as main`);
+  if (team.operator.designCheckIn && !roles["scaffolder"])
+    warnings.push("operator.designCheckIn: the foundation is the scaffolder's to build, and this team has none; add a scaffolder to roles");
+  if (team.operator.designCheckIn && board.type !== "tasks")
+    warnings.push(
+      'operator.designCheckIn: the check-in is a task in the factory\'s task graph (board "tasks"); on a GitHub board none is filed, so nothing is held'
+    );
   // A team without an approver: its proposals wait for the operator, whatever the mode (said only when it was asked for).
   if (team.approval.mode !== "operator" && !roles["approver"]) team.approval.mode = "operator";
   if (approvalIn.mode !== undefined && approvalIn.mode !== "operator" && !roles["approver"])
@@ -762,6 +886,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   if (!team.owner) warnings.push("owner: nobody to email when the team is done or needs a decision");
   return { team, problems, warnings };
 }
+
+// Each of the team's roles and the model it starts on.
+export const modelsOf = (team: Pick<Team, "roles">): Record<string, string> =>
+  Object.fromEntries(Object.entries(team.roles).map(([role, lane]) => [role, lane.model]));
 
 // One T3 provider instance per role; its id carries the team and the role.
 export const instanceId = (team: Pick<Team, "name">, role: string): string => `a6g-${team.name}-${role}`;

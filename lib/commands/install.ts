@@ -25,6 +25,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { binDir, A6G_HOME, entryOf, FACTORY_ROOT, type FactoryPackage, PACKAGE, readRegistry, VERSION_NAME, versionDir, versionsDir } from "../paths.ts";
+import { installBrowser } from "../browser.ts";
 import { operatorOnly } from "../session.ts";
 import { die, hash, parseArgs, readJson, which } from "../util.ts";
 import { teamNames } from "./team.ts";
@@ -193,14 +194,14 @@ export function selfInstall(argv: string[]): number {
     for (const file of files) cpSync(join(FACTORY_ROOT, file), join(staging, file), { recursive: true });
     for (const script of ["bin/a6g.ts", ...files.filter((f) => f.endsWith(".sh"))])
       if (existsSync(join(staging, script))) chmodSync(join(staging, script), 0o755);
-    // The production dependencies, as this checkout has them installed: axe-core for a6g pages, and the optional
-    // mongodb driver for teams whose tasks are in Mongo. Without them, npm installs them into the release.
+    // The production dependencies, as this checkout has them installed: axe-core and Playwright for a6g pages, and
+    // the optional mongodb driver for teams whose tasks are in Mongo. Without them, npm installs them into the release.
     for (const path of productionModules(FACTORY_ROOT)) cpSync(join(FACTORY_ROOT, path), join(staging, path), { recursive: true });
     if (
-      !existsSync(join(staging, "node_modules", "axe-core")) &&
+      !["axe-core", "playwright"].every((name) => existsSync(join(staging, "node_modules", name))) &&
       spawnSync("npm", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: staging, stdio: "inherit" }).status !== 0
     )
-      console.warn("a6g: couldn't install the production dependencies; a6g pages will report axe-core missing, and Mongo teams the driver");
+      console.warn("a6g: couldn't install the production dependencies; a6g pages will report axe-core or Playwright missing, and Mongo teams the driver");
     const commit = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd: FACTORY_ROOT, encoding: "utf8" }).stdout.trim();
     const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: FACTORY_ROOT, encoding: "utf8" }).stdout.trim() !== "";
     writeFileSync(
@@ -232,6 +233,9 @@ export function selfInstall(argv: string[]): number {
     return 0;
   }
   link(dest, join(A6G_HOME, "current"));
+  // The browser a6g pages checks with (Chromium's headless shell): downloaded once into Playwright's cache, and kept
+  // between releases. A download that fails doesn't undo the install: one line says so, and a6g doctor fails on it.
+  console.info(`a6g: the factory's browser: ${installBrowser(dest)}`);
   // The node the launcher falls back to when PATH has none: the name PATH finds it by (Homebrew's
   // /opt/homebrew/bin/node), not the versioned folder process.execPath resolves to, which an upgrade removes.
   const onPath = which("node");
