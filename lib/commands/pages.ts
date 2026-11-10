@@ -368,7 +368,12 @@ async function focusRings(tab: Tab): Promise<{ stops: number; missing: string[] 
   for (let i = 0; i < FOCUS_STOPS; i++) {
     await tab.keyboard.press("Tab");
     const stop = await tab.evaluate(() => {
-      const el = document.activeElement as HTMLElement | null;
+      // A framework's own development overlay isn't the page (Next.js's, Vite's, Astro's toolbar).
+      const tooling = /^(nextjs-portal|vite-error-overlay|astro-dev-toolbar|vercel-live-feedback)$/i;
+      let el = document.activeElement as HTMLElement | null;
+      if (el && tooling.test(el.tagName)) return { name: "", path: `tooling:${el.tagName}`, visible: true, skip: true };
+      // Focus inside a component's shadow root: the control itself, not its host.
+      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
       if (!el || el === document.body || el === document.documentElement) return null;
       const look = (e: Element | null) => {
         if (!e) return "";
@@ -383,13 +388,17 @@ async function focusRings(tab: Tab): Promise<{ stops: number; missing: string[] 
       el.blur();
       const blurred = look(el) + look(el.parentElement);
       el.focus();
-      return { name, path: parts.join("<"), visible: focused !== blurred };
+      return { name, path: parts.join("<"), visible: focused !== blurred, skip: false };
     });
     if (!stop || seen.has(stop.path)) break;
+    if (stop.skip) {
+      seen.add(stop.path);
+      continue;
+    }
     seen.add(stop.path);
     if (!stop.visible) missing.push(stop.name);
   }
-  return { stops: seen.size, missing };
+  return { stops: [...seen].filter((path) => !path.startsWith("tooling:")).length, missing };
 }
 
 // The share of pixels that differ between two screenshots (1 when their sizes differ), compared in a blank page.

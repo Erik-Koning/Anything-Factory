@@ -22,7 +22,8 @@ const page = (body: string, style = "") =>
   button { min-width: 48px; min-height: 48px }
   ${style}</style></head><body><main>${body}</main></body></html>`;
 const site: Record<string, string> = {
-  "/": page("<h1>Fine</h1><p>Read <a href='/x'>this link</a> in a sentence.</p><button>Go</button>"),
+  // Next.js's development overlay takes a tab stop; it isn't the page, so it isn't held to the rubric.
+  "/": page("<h1>Fine</h1><p>Read <a href='/x'>this link</a> in a sentence.</p><button>Go</button><nextjs-portal tabindex='0'></nextjs-portal>"),
   "/small": page("<h1>Small</h1><button class='tiny'>x</button>", ".tiny { min-width: 0; min-height: 0; width: 20px; height: 20px; padding: 0 }"),
   "/clipped": page(
     "<h1>Clipped</h1><div class='box'>A sentence much too long for its narrow box</div>",
