@@ -19,6 +19,7 @@ import { differentLooks, recordPages, refusalProblems, servedIt, type PageResult
 import type { LoadedTeam, Team } from "./config.ts";
 import { HARNESS_FILE, pagePlan, readHarness } from "./harness.ts";
 import { acquire, sameProcess, startOf } from "./lock.ts";
+import { auditFinding, auditKey, auditPackages, type AuditRound, auditSignature, recordAudited, type Runner } from "./packages.ts";
 import { stateDir } from "./paths.ts";
 import { ACCESS_TAG, checks, journeysOf, passed, type SpecResult, type SuiteRecord } from "./suite.ts";
 import { addTask } from "./tasks/add.ts";
@@ -287,6 +288,35 @@ export async function fileFailures(
   return filed;
 }
 
+// The findings a package audit makes: one per package with an advisory at high or critical, the worst first, and no
+// more than a handful open at once (an old lockfile can name dozens, and the rest are filed as these close). A
+// package the audit no longer names is remembered as passed.
+const AUDIT_OPEN = 5;
+export async function fileAudit(store: Store, team: Team, memory: Memory, round: AuditRound, at: string): Promise<{ filed: string[]; waiting: number }> {
+  const filed: string[] = [];
+  let waiting = 0;
+  let open = (await store.tasks.all()).filter((t) => t.body.includes("(a6g: audit:") && t.status !== "done" && t.status !== "rejected").length;
+  for (const { lockfile, command, vulnerable } of round.audited) {
+    const named = new Set(vulnerable.map((pkg) => auditKey(lockfile, pkg.name)));
+    for (const key of Object.keys(memory)) if (key.startsWith(auditKey(lockfile, "")) && !named.has(key) && memory[key]) memory[key].passed = true;
+    for (const pkg of vulnerable) {
+      if (open >= AUDIT_OPEN) {
+        waiting++;
+        continue;
+      }
+      const id = await fileFailure(store, team, memory, auditKey(lockfile, pkg.name), auditSignature(pkg), {
+        ...auditFinding(lockfile, command, pkg, at),
+        kind: "chore",
+        severity: "major",
+      });
+      if (!id) continue;
+      filed.push(id);
+      open++;
+    }
+  }
+  return { filed, waiting };
+}
+
 // The suite as the last check ran it (state/verify-suite.json): what the next check's run is compared with. The
 // check's own, so a run recorded between two checks (a6g e2e run) doesn't become what "before" means.
 type Counted = Pick<SpecResult, "id" | "tags" | "outcome">;
@@ -365,10 +395,12 @@ export interface CheckOptions {
   // How long between asking a quiet app again, and how long to wait for the merge and app locks: shortened by tests.
   healthWaitMs?: number;
   lockWaitMin?: number;
+  // What runs a package manager's audit: a test's own.
+  audit?: Runner;
 }
 
 // One check of the integration branch's head, holding merge, app and gate in that order.
-async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWaitMs = 5000, lockWaitMin }: CheckOptions): Promise<Checked> {
+async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWaitMs = 5000, lockWaitMin, audit }: CheckOptions): Promise<Checked> {
   const state = stateDir(home);
   const holder = "the merge queue's check";
   const log = (text: string): void => appendFileSync(join(state, "verify.log"), `${localTime()} ${text}\n`);
@@ -517,6 +549,17 @@ async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWa
         if (suite?.ran)
           writeJson(baselineFile(state), { commit: at, specs: suite.specs.map(({ id, tags, outcome }) => ({ id, tags, outcome })) } satisfies Baseline);
 
+        // The packages the app ships, when a lockfile changed or a week has passed. Whatever goes wrong is a line in
+        // the log: the check goes on.
+        let packages: AuditRound | null = null;
+        if (team.security.audit)
+          try {
+            packages = await auditPackages(home, state, audit ? { run: audit } : {});
+            said.push(...packages.said);
+          } catch (error) {
+            said.push(`the package audit didn't run: ${firstLine(error)}`);
+          }
+
         const different = Object.keys(differentLooks(state));
         let filed: string[] = [];
         let closed: string[] = [];
@@ -532,11 +575,18 @@ async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWa
               if (id) filed.push(id);
             }
             filed.push(...(await fileGaps(store, team, home, suite?.ran ? suite : null)));
+            if (packages) {
+              const audited = await fileAudit(store, team, memory, packages, at);
+              filed.push(...audited.filed);
+              if (audited.waiting)
+                said.push(`${audited.waiting} more vulnerable package${audited.waiting === 1 ? " waits" : "s wait"} for the ones filed to close`);
+            }
             // What waited on this run: a journey whose tasks are done closes once its tests pass.
             closed = (await settleWaits(store, MERGE, journeyProofFor(home, team))).filter((s) => s.to === "done").map((s) => s.id);
           });
         filed = [...new Set(filed)];
         writeJson(filedFile(state), memory);
+        if (packages) recordAudited(state, packages);
         writeJson(lastFile(state), { commit: at, at: new Date().toISOString() });
         const ids = (list: string[]): string => list.map((id) => `#${id}`).join(", ");
         log(

@@ -512,9 +512,13 @@ describe("team.json: what normalize checks", { concurrency: true }, () => {
       { ...base, finish: "" },
       { ...base, vars: { A: 1 } },
       { ...base, vars: { CLAUDE_X: "y" } },
+      { ...base, security: {} },
+      { ...base, security: { audit: false } },
     ];
     const rejected: Record<string, unknown>[] = [
       { name: "t" },
+      { ...base, security: { audit: "weekly" } },
+      { ...base, security: false },
       { ...base, name: "" },
       { ...base, name: "2048" },
       { ...base, name: "Bad" },

@@ -187,7 +187,15 @@ audit --omit=dev --json` beside a `package-lock.json`, `pnpm audit --prod --json
   next check. It never fails a merge.
 - **It calls the registry the install already uses** (package names and versions go to it). `"security":
 {"audit": false}` in team.json turns it off.
-- **Where:** `lib/audit.ts` (the commands and the two report readers), `lib/verify.ts`.
+- **Where:** `lib/packages.ts` (the commands and the two report readers), `lib/verify.ts` (`fileAudit`).
+- **As built, beyond the above:** the reports in `test/fixtures` are what npm 11 and pnpm 12 printed for a project
+  pinned to old releases, with and without a registry to reach. A package is filed for an advisory of its own: one
+  that's in the report only because it brings a vulnerable package isn't a second finding, and the first says which
+  of the app's own dependencies brings it. At most five findings are open at once, the worst first, so an old
+  lockfile doesn't fill triage on the day a team upgrades; the rest are filed as those close. Only lockfiles the
+  repository tracks are audited (none under `node_modules`), the five nearest the root. A lockfile is remembered as
+  audited only once its findings are filed. The module isn't `lib/audit.ts`: the tests named `audit-*` are the
+  regressions from an earlier review of the factory itself.
 
 ### 33. A security reviewer: the one new agent
 
@@ -310,7 +318,7 @@ Defaults are chosen; say if you'd choose otherwise.
 - [x] G1. Secrets through a manager (35)
 - [x] G2. Secrets don't merge (31)
 - [x] G3. `refuses` and the `@access` gap (29, 30)
-- [ ] G4. The package audit (32)
+- [x] G4. The package audit (32)
 - [ ] G5. The security reviewer (33)
 - [ ] H. The quality numbers (34)
 - [ ] README, CHANGELOG, `docs/team.md`

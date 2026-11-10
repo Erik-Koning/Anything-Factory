@@ -101,6 +101,7 @@ export interface RawTeam {
   progress?: string | null;
   pages?: PagesSettings;
   harness?: { journeys?: "required" | "optional"; lane?: string[] };
+  security?: { audit?: boolean };
   policies?: Record<string, string>;
   never?: (NeverRule | [string, string])[];
   commandOwners?: (CommandOwner | [string, string[], string?])[];
@@ -175,6 +176,8 @@ export interface Team {
   // `lane`: paths (regular expressions) that count as test and harness files for a scaffolder's test work, beyond the
   // factory's own list (lib/commands/harness.ts).
   harness: { journeys: "required" | "optional" | "auto"; lane: string[] };
+  // `audit`: whether the check after merges asks the package registry about the lockfile's packages (lib/packages.ts).
+  security: { audit: boolean };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -267,6 +270,7 @@ const KNOWN_KEYS = new Set([
   "progress",
   "pages",
   "harness",
+  "security",
   "policies",
   "never",
   "commandOwners",
@@ -724,6 +728,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     else
       problems.push('harness.journeys: "required" (a journey is done only while its specs pass) or "optional"; left out, required once there\'s a suite');
   }
+  const securityIn = object(input.security, "security", ["audit"]) ?? {};
+  const securityAudit = flag(securityIn.audit, "security.audit") ?? true;
 
   const team: Team = {
     raw,
@@ -780,6 +786,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     progress: input.progress === "" ? null : (textOrNull(input.progress, "progress") ?? (finish ? finish.replace(/\bdone$/, "status") : null)),
     pages,
     harness: { journeys: harnessJourneys, lane: harnessLane },
+    security: { audit: securityAudit },
     policies,
     never,
     commandOwners,

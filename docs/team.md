@@ -208,6 +208,24 @@ called. A pattern that matches a `package.json` allows all of it. Its `scaffold`
 On a team with the task graph, a scaffolder's branch merges only for its own approved, open task, since that task's
 kind decides which of the two it is.
 
+## `security`
+
+`"security": { "audit": false }` turns off the package audit. Left out (the default), the check after merges runs the
+package manager's own audit of what ships, beside each lockfile the repository tracks: `npm audit --omit=dev` for a
+`package-lock.json`, `pnpm audit --prod` for a `pnpm-lock.yaml`. It runs when a lockfile isn't the one last audited,
+and once a week when it is, since advisories arrive for packages that didn't change.
+
+- **What's filed:** one `chore` task per package with an advisory of its own at high or critical, severity major. It
+  names the advisories, whether the package is the app's own dependency or comes with another, and what moves the
+  app off it. At most five are open at once, the worst first; the rest are filed as those close.
+- **Quiet when you've answered:** a rejected finding stays quiet until a new advisory at high or critical names the
+  package.
+- **What it sends:** the audit asks the registry the install already uses, so the names and versions of the packages
+  go to it. Nothing else does.
+- **It never fails a merge.** A registry that can't be reached, a manager that isn't installed, or a report that
+  can't be read is a line in the check's log (`a6g status`), and the audit is tried again at the next check. A
+  `yarn.lock` or `bun.lock` gets one line saying it isn't audited.
+
 ## The harness manifest: `.a6g/harness.json`
 
 The team's own means of checking, written by its scaffolder (the only lane that names it), reviewed and merged like
@@ -250,8 +268,9 @@ the repository's own Playwright with the configuration it names.
 - **Checking less is the operator's call.** The merge queue lists the suite (`playwright test --list`) before a
   branch and with it merged, and refuses one that leaves fewer tests that run (in all, or for a journey), or a suite
   that no longer lists. It also refuses a branch that removes a page, the suite or a sign-in from the manifest, takes a
-  state out of a page's `refuses`, or changes the suite's configuration there, and one that adds a skip, `.only`, expected failure or filter to the
-  suite's files (a listing can't see one inside a test). All unless the operator allowed that exact commit:
+  state out of a page's `refuses`, or changes the suite's configuration there, and one that adds a skip, `.only`,
+  expected failure or filter to the suite's files (a listing can't see one inside a test). All unless the operator
+  allowed that exact commit:
   `a6g harness allow <branch> --sha <commit> --why "…"`. Where the suite can't be listed in the merge's worktree,
   before the gate or after it, the merge says so and goes on. The check after merges measures the same from what ran:
   a run with fewer tests than the check before it, or more told to skip or to fail, is a finding unless a commit

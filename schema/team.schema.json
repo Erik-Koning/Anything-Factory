@@ -583,6 +583,16 @@
         }
       }
     },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audit": {
+          "type": "boolean",
+          "description": "Whether the check after merges runs the package manager's audit of what ships (npm audit --omit=dev, pnpm audit --prod) when a lockfile changed, and weekly, and files each package with an advisory at high or critical. It sends the registry the names and versions of the packages. Default true."
+        }
+      }
+    },
     "policies": {
       "type": "object",
       "additionalProperties": false,
