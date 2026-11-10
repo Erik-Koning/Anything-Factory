@@ -237,7 +237,9 @@ the repository's own Playwright with the configuration it names.
   changes the suite's configuration there, and one that adds a skip, `.only`, expected failure or filter to the
   suite's files (a listing can't see one inside a test). All unless the operator allowed that exact commit:
   `a6g harness allow <branch> --sha <commit> --why "…"`. Where the suite can't be listed in the merge's worktree,
-  before the gate or after it, the merge says so and goes on; the check after merges compares what passed.
+  before the gate or after it, the merge says so and goes on. The check after merges measures the same from what ran:
+  a run with fewer tests than the check before it, or more told to skip or to fail, is a finding unless a commit
+  between them was allowed.
 - **Nobody makes their own proof.** On a team with a tester or a scaffolder, a builder's branch that changes a file
   holding a journey's tests (one that names an `@journey-` tag, or that the listing shows a tagged test in) doesn't
   merge, allowed or not: a flow that changes gets a test task with it.

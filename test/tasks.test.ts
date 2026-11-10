@@ -1002,6 +1002,17 @@ describe("the audit's findings stay fixed", () => {
       ["journey", "proposed", "2"]
     );
     assert.equal((await a6g(["task", "status", "2", "done"], as(null))).code, 0, "the operator closes it");
+    // Nor does a task that's done already become a journey, done with nothing asked of it.
+    assert.match(
+      (await a6g(["task", "edit", "3", "--kind", "journey", "--parent", "none"], as("planner"))).out,
+      /task 3 is finished work under journey 2|task 3 is done, and a journey is done only by its tests: making it one is the operator's call/
+    );
+    await a6g(["task", "add", "Chore"], as("planner"));
+    await update(store().tasks, "4", (t) => ({ ...t, status: "done" as const }));
+    const made = await a6g(["task", "edit", "4", "--kind", "journey"], as("planner"));
+    assert.notEqual(made.code, 0);
+    assert.match(made.out, /task 4 is done, and a journey is done only by its tests: making it one is the operator's call \(or reopen it first\)/);
+    assert.equal((await store().tasks.get("4"))?.kind, "feature");
     // Left out, journeys are required only once there's a suite: until then (and where they're optional) the planner
     // closes one once its tasks are done, as before, tester or not.
     for (const harness of [undefined, { journeys: "optional" }] as const) {

@@ -1,8 +1,9 @@
 import { baseTeam, commit, a6g, git, makeRepo, ROOT, write } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
+import { startOf } from "../lib/lock.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 
 // Each checkout's run folder beside it (the default is the team's name, which every fixture shares).
@@ -371,6 +372,36 @@ describe("merge queue", { concurrency: true }, () => {
     result = await merge(home, "a6g/s1-less");
     assert.equal(result.code, 0, result.out);
     assert.ok(!existsSync(join(home, ".a6g/run/merge")), "the scratch worktree is gone");
+  });
+
+  test("a queued merge is marked by its process and when it started, clears its mark however it ends, and runs the check that's due", async () => {
+    const home = makeRepo(baseTeam({ gate: { full: "sleep 2", quick: "true" } }));
+    const state = join(home, ".a6g/run/state");
+    const mark = (name: string): string => join(state, "merges", "pending", `${name}.json`);
+    const until = async (done: () => boolean): Promise<void> => {
+      for (let i = 0; i < 300 && !done(); i++) await new Promise((next) => setTimeout(next, 100));
+      assert.ok(done(), "it finished");
+    };
+    branch(home, "a6g/b1-x", { "src/x.ts": "1\n" });
+    await approve(home, "a6g/b1-x");
+    const queued = await merge(home, "a6g/b1-x", "--queue");
+    assert.equal(queued.code, 0, queued.out);
+    assert.match(queued.out, /a6g\/b1-x queued/);
+    const written = JSON.parse(readFileSync(mark("a6g_b1-x"), "utf8")) as { pid: number; started: string | null };
+    assert.equal(written.started, startOf(written.pid), "the queued process, and when it started");
+    await until(() => !existsSync(mark("a6g_b1-x")));
+    assert.equal(record(home, "a6g/b1-x").result, "merged");
+    assert.match(readFileSync(join(state, "verify.log"), "utf8"), /[0-9a-f]{9} nothing to check\n$/);
+    assert.ok(!existsSync(join(state, "verify-due.json")));
+
+    // One that's refused (nobody approved it) clears its mark too, and runs the check a merge before it left due.
+    branch(home, "a6g/b2-y", { "src/y.ts": "1\n" });
+    writeFileSync(join(state, "verify-due.json"), JSON.stringify({ at: new Date().toISOString(), after: "a6g/b1-x" }));
+    await merge(home, "a6g/b2-y", "--queue");
+    await until(() => existsSync(join(state, "merges", "a6g_b2-y.json")) && !existsSync(mark("a6g_b2-y")));
+    assert.equal(record(home, "a6g/b2-y").result, "refused");
+    assert.ok(!existsSync(join(state, "verify-due.json")), "the check ran");
+    assert.equal(readFileSync(join(state, "verify.log"), "utf8").trim().split("\n").length, 2);
   });
 
   test("closes the tickets it's told to, and refuses a dirty checkout", async () => {

@@ -150,9 +150,10 @@ export async function runPlaywright(
 }
 
 // How a test went. `excused` is one declared to fail (test.fail, test.info().fail()) that did: Playwright calls that
-// expected, and it proves nothing. `flaky` passed on a retry. `listed` has no result (a listing, or a run that never
-// reached it).
-export type Outcome = "passed" | "failed" | "flaky" | "skipped" | "excused" | "listed";
+// expected, and it proves nothing. `flaky` passed on a retry. `skipped` was told to skip, wherever that was said (its
+// declaration, its body, a hook). `unreached` wasn't told to and didn't run: an earlier test of its group failed, or
+// the run stopped at its failure limit. `listed` has no result (a listing, or a run that never got to it).
+export type Outcome = "passed" | "failed" | "flaky" | "skipped" | "excused" | "unreached" | "listed";
 export interface SpecResult {
   // file › describe › title [project]: the same test across runs.
   id: string;
@@ -204,7 +205,7 @@ export function specsOf(report: Report | null, dir?: string): SpecResult[] {
 function outcomeOf({ status, expectedStatus: expected, annotations = [], results = [] }: ReportTest): Outcome {
   if (expected === "skipped") return "skipped";
   if (!results.length) return annotations.some((a) => a.type === "fail") ? "excused" : "listed";
-  if (status === "skipped") return "skipped";
+  if (status === "skipped") return "unreached";
   if (status === "unexpected") return "failed";
   if (expected === "failed") return "excused";
   if (status === "flaky") return "flaky";
@@ -236,6 +237,14 @@ export function scrub(text: string): string {
     .slice(0, 300);
 }
 
+// Why a run left no report, from the last of what it printed: without a stack's frames, which say where Playwright
+// was and not what went wrong.
+export function lastSaid(tail: string): string {
+  const lines = tail.split("\n").filter((line) => line.trim());
+  const said = lines.filter((line) => !/^\s*at\s/.test(line));
+  return scrub((said.length ? said : lines).slice(-3).join("\n"));
+}
+
 // The config's folder holds the suite: a run's report file names tests relative to it.
 export const configDir = (dir: string, config: string): string => dirname(join(dir, config));
 
@@ -253,4 +262,6 @@ export interface SuiteRecord {
   errors: string[];
 }
 export const passed = (spec: Pick<SpecResult, "outcome">): boolean => spec.outcome === "passed" || spec.outcome === "flaky";
+// A test that's there to check something: every one but those told to skip or to fail. One a run didn't reach still is.
+export const checks = (spec: Pick<SpecResult, "outcome">): boolean => spec.outcome !== "skipped" && spec.outcome !== "excused";
 export const readSuiteRecord = (file: string): SuiteRecord | null => readJson<SuiteRecord | null>(file, null);

@@ -216,15 +216,21 @@ stays done.
   scaffolder, never by who built it (the merge queue refuses a builder's branch that touches one). A journey is done
   only on a run of the suite that holds all its merges and where they passed, and `a6g finish` needs the whole suite
   passing at the head (`harness.journeys`). `a6g complete` marks the work complete only when the finish line holds.
-- **After merges.** When the merge queue has merged the last of a burst, it checks the integration branch: every page
-  and the whole suite, with one retry, holding the merge and app locks so nothing moves under it. What newly fails
-  becomes a finding, naming the merges since it last passed; a test that passes only on its retry is filed as flaky;
-  journeys without specs are filed; and the planner is woken.
+- **After merges.** Every queued merge, however it ends, runs the check that's due, and the last of a burst runs it
+  once for the newest commit, holding the merge and app locks so nothing moves under it. It asks the app first: an app
+  that's down is one blocker finding, nothing else is checked, and the check stays due. Then every page and the whole
+  suite, with one retry. What newly fails becomes a finding, naming the merges since it last passed. So does a suite
+  that didn't run, and one that checks less than it did at the check before (fewer tests, or more told to skip or to
+  fail) unless you allowed the commit. A test that passes only on its retry is filed as flaky, journeys without specs
+  are filed, journeys whose tests now pass are closed, and the planner is woken. Rejecting a finding quiets that
+  failure, not that page: a different failure, or the same one after a pass, is filed again.
 - **Checking less is your call.** A branch that removes a page or the suite from the manifest, skips, filters or
   retries a test, or leaves fewer tests merges only once you allow that exact commit:
   `a6g harness allow <branch> --sha <commit> --why "…"`.
 - **One environment, used one run at a time.** Runs against the team's app (`a6g pages`, `a6g e2e`, and a member's own
-  `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them.
+  `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them. `a6g env use` waits
+  `--wait-min` minutes for it (8 unless said), and ends a command that holds it past `--max-min` (30 unless said, 120
+  at most) with everything it started, so a run that hangs doesn't keep merges waiting.
 
 ```bash
 a6g pages status                     # each page: its checks, its UX verdict, and whether it looks different

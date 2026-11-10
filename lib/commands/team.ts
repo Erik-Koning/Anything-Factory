@@ -56,7 +56,7 @@ import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
 import { openTeamStore } from "../tasks/ops.ts";
-import { fileGaps, readVerifyLog } from "../verify.ts";
+import { checkDue, fileGaps, readVerifyLog } from "../verify.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
 
@@ -622,6 +622,8 @@ export async function status(argv: string[]): Promise<number> {
     // The merge queue's last check of the integration branch: its pages and its end-to-end suite.
     const checked = readVerifyLog(entry.home).at(-1);
     if (checked) console.info(`   checked after merges: ${checked}`);
+    const due = checkDue(entry.home);
+    if (due) console.info(`   a check after merges is due${due.after ? ` (after ${due.after})` : ""}: the next merge runs it`);
     const kept = keptWorktrees(entry.run);
     if (kept.length)
       console.info(

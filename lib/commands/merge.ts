@@ -32,7 +32,7 @@ import { ticketOf, type Task } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
-import { pendingDir, verifyAfterMerge } from "../verify.ts";
+import { clearQueued, markQueued, pendingDir, verifyAfterMerge } from "../verify.ts";
 import { journeyProofFor } from "./e2e.ts";
 import {
   allowed,
@@ -188,7 +188,18 @@ async function pushWaiting(): Promise<number> {
   return 0;
 }
 
+// A queued run clears its own queue mark however it ends (refused, timed out, thrown), so the check after merges never
+// waits for a merge that's over (lib/verify.ts).
 export async function run(argv: string[]): Promise<number> {
+  const mark = process.env.A6G_MERGE_QUEUED ? process.env.A6G_MERGE_MARK : undefined;
+  try {
+    return await merge(argv);
+  } finally {
+    if (mark) clearQueued(mark);
+  }
+}
+
+async function merge(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["queue", "light", "no-journeys", "no-after", "skip-after", "push"], repeat: ["closes"] });
   const branch = positional[0];
   if (!branch && options["push"] === true) return pushWaiting();
@@ -243,20 +254,32 @@ export async function run(argv: string[]): Promise<number> {
   if (queue !== undefined && !["false", "0", "no"].includes(String(queue)) && !process.env.A6G_MERGE_QUEUED) {
     const rest = argv.filter((arg) => !/^--queue(=.*)?$/.test(arg));
     const log = openSync(join(state, "merges", `${safe}.log`), "w");
+    const mark = join(pendingDir(state), `${safe}.json`);
     const child = spawn(process.execPath, [entryOf(FACTORY_ROOT), "merge", ...rest], {
       cwd: home,
       detached: true,
       stdio: ["ignore", log, log],
-      env: { ...process.env, A6G_MERGE_QUEUED: "1" },
+      env: { ...process.env, A6G_MERGE_QUEUED: "1", A6G_MERGE_MARK: mark },
     });
     // Marked as queued until it finishes, so the check after merges waits for the last of a burst (lib/verify.ts).
-    mkdirSync(pendingDir(state), { recursive: true });
-    writeJson(join(pendingDir(state), `${safe}.json`), { pid: child.pid, at: new Date().toISOString() });
+    if (child.pid) markQueued(mark, child.pid);
     child.unref();
     closeSync(log);
     console.info(`merge: ${branch} queued. The result comes as a message and in your next wake's context; the log is .a6g/run/state/merges/${safe}.log.`);
     return 0;
   }
+
+  // The check after merges (lib/verify.ts): a queued merge, however it ends, runs one that's due, since a merge before
+  // it may have left its check to this one; and a merge that landed marks one due.
+  const check = async (merged: boolean): Promise<void> => {
+    if (!process.env.A6G_MERGE_QUEUED || !runDir) return;
+    try {
+      const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
+      await verifyAfterMerge(home, team, runDir, branch, { merged, wake: (text) => planner && threadSend(planner, text) });
+    } catch (error) {
+      console.error(`merge: the check after merges failed: ${(error as Error).message}`);
+    }
+  };
 
   const release = await acquire(home, "merge", {
     slots: 1,
@@ -268,6 +291,7 @@ export async function run(argv: string[]): Promise<number> {
     record("timed-out", `another merge held the merge lock for ${waitMin(120)} min; nothing was merged, queue it again`);
     console.error(`merge: another merge held the merge lock for ${waitMin(120)} min; nothing was merged`);
     wake();
+    await check(false);
     return TIMED_OUT;
   }
   let code: number;
@@ -294,8 +318,6 @@ export async function run(argv: string[]): Promise<number> {
   }
 
   const light = Boolean(options["light"] || options["no-journeys"]);
-  // Whether the app is up on the merged result: no after-merge command to run, or it ran and passed.
-  let afterOk = true;
   if (code === 0 && team.afterMerge && !options["no-after"] && !options["skip-after"]) {
     const after = spawnSync("git", ["rev-parse", "HEAD"], { cwd: home, encoding: "utf8" }).stdout.trim();
     const output: string[] = [];
@@ -320,7 +342,6 @@ export async function run(argv: string[]): Promise<number> {
       .slice(-3)
       .join(" ");
     const outcome = busy ? `didn't run, the app lock stayed busy for ${waitMin(120)} min` : status === 0 ? "ok" : `FAILED, exit ${status}`;
-    afterOk = !busy && status === 0;
     const last = kept.last;
     if (last) {
       kept.last = { ...last, message: `${last.message} after merge: ${outcome} ${summary}`.trim() };
@@ -336,17 +357,10 @@ export async function run(argv: string[]): Promise<number> {
     } catch (error) {
       console.error(`merge: pruning finished worktrees failed: ${(error as Error).message}`);
     }
-    rmSync(join(pendingDir(state), `${safe}.json`), { force: true });
-    // The check after merges: the pages and the suite on the merged result, unless the app may be down or the planner
-    // asked for a light merge. The next merge's check covers what this one skips.
-    if (code === 0 && afterOk && !light && runDir)
-      try {
-        const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
-        await verifyAfterMerge(home, team, runDir, branch, { wake: (text) => planner && threadSend(planner, text) });
-      } catch (error) {
-        console.error(`merge: the check after merges failed: ${(error as Error).message}`);
-      }
-    else if (code === 0 && !afterOk) console.info("merge: no check after this merge: the after-merge command didn't pass, so the app may be down");
+    // The pages and the suite on the merged result. A light merge, or one that didn't land, marks no check due, and
+    // still runs one an earlier merge left. Whether the app came back up after an after-merge command that failed is
+    // the check's to find: it asks the app first.
+    await check(code === 0 && !light);
   }
   return code;
 }

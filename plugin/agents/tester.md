@@ -31,7 +31,9 @@ your report instead of starting it (the planner owns it).
 7. **Run your specs** in the foreground, and make sure a spec for an unbuilt feature fails for the right reason
    (the missing feature, not a broken selector). Never run a suite in the background: its completion wakes you
    for another whole turn. Run them through `a6g env use -- <the e2e command> [files]`: it holds the team's app so a
-   merge doesn't restart it under you, and gives your run its own `A6G_NAMESPACE`.
+   merge doesn't restart it under you, and gives your run its own `A6G_NAMESPACE`. Merges wait while you hold it, so
+   run the specs you're working on, not the whole suite: a command still running after 30 minutes is ended
+   (`--max-min`, 120 at most).
 8. **Format, lint and commit** your tests the way the project does (`git commit -m "Specs: <what>" -- <paths>`),
    then hand the task in: `a6g task submit <id>`. If you can't finish it, hand it back with the reason
    (`a6g task release <id> --blocked "…"`).

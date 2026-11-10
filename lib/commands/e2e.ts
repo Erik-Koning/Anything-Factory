@@ -15,7 +15,7 @@ import type { LoadedTeam, Team } from "../config.ts";
 import { type Harness, journeysRequired, pagePlan, readHarness } from "../harness.ts";
 import { stateDir, workDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
-import { journeysOf, passed as ok, reachedTests, runPlaywright, scrub, type SpecResult, specsOf, type SuiteRecord } from "../suite.ts";
+import { journeysOf, lastSaid, passed as ok, reachedTests, runPlaywright, scrub, type SpecResult, specsOf, type SuiteRecord } from "../suite.ts";
 import type { Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
@@ -79,11 +79,19 @@ export async function recordSuite(home: string, team: Team, { retries = 0, names
     errors: [
       ...(ran.timedOut ? [`it ran past ${timeoutMin} minutes (e2e.timeoutMin) and was stopped`] : []),
       ...(ran.report?.errors ?? []).map((error) => scrub(error.message ?? "")),
-      ...(!ran.report && !ran.timedOut ? [`no report: ${scrub(ran.tail.split("\n").slice(-3).join("\n"))}`] : []),
+      ...(!ran.report && !ran.timedOut ? [`no report: ${lastSaid(ran.tail)}`] : []),
     ].filter(Boolean),
   };
   writeJson(historyFile(home), [record, ...suiteHistory(home)].slice(0, KEEP));
   return record;
+}
+
+// Takes a recorded run back out: the checkout moved under it, so it speaks for no commit.
+export function forgetRun(home: string, record: Pick<SuiteRecord, "commit" | "at">): void {
+  writeJson(
+    historyFile(home),
+    suiteHistory(home).filter((kept) => !(kept.at === record.at && kept.commit === record.commit))
+  );
 }
 
 // "3 passed, 1 failed, 1 expected to fail": what a run's tests came to.
@@ -95,6 +103,7 @@ export function tally(specs: SpecResult[]): string {
     ...(count("flaky") ? [`${count("flaky")} flaky`] : []),
     ...(count("skipped") ? [`${count("skipped")} skipped`] : []),
     ...(count("excused") ? [`${count("excused")} expected to fail`] : []),
+    ...(count("unreached") + count("listed") ? [`${count("unreached") + count("listed")} not reached`] : []),
   ].join(", ");
 }
 
@@ -107,6 +116,7 @@ export const summary = (record: SuiteRecord): string =>
     : `the suite didn't run: ${notRun(record)}`;
 
 const LABEL: Partial<Record<SpecResult["outcome"], string>> = { failed: "FAIL ", flaky: "flaky", excused: "expected to fail:", skipped: "skip " };
+const SAID: Partial<Record<SpecResult["outcome"], string>> = { excused: "expected to fail", unreached: "not reached", listed: "not reached" };
 function printRun(record: { specs: SpecResult[]; errors: string[] }, { all = false } = {}): void {
   for (const spec of record.specs.filter((s) => s.outcome === "failed" || s.outcome === "flaky" || (all && s.outcome === "excused")))
     console.info(`  ${LABEL[spec.outcome]} ${spec.id}${spec.error ? `: ${spec.error}` : ""}`);
@@ -125,7 +135,7 @@ export function unprovenIn(record: SuiteRecord, id: string): string | null {
   if (!failing.length) return null;
   return `${failing.length} of journey ${id}'s ${tagged.length} tests didn't pass at ${at}: ${failing
     .slice(0, 3)
-    .map((spec) => (spec.outcome === "failed" ? spec.title : `${spec.title} (${spec.outcome === "excused" ? "expected to fail" : spec.outcome})`))
+    .map((spec) => (spec.outcome === "failed" ? spec.title : `${spec.title} (${SAID[spec.outcome] ?? spec.outcome})`))
     .join("; ")}`;
 }
 

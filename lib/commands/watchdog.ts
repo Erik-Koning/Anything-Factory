@@ -39,7 +39,7 @@ import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
 import * as t3 from "../t3.ts";
-import { die, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
+import { answers, die, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
 import { settleTeamWaits } from "../waits.ts";
 
 const LABEL = "ca.a6g.watchdog";
@@ -271,15 +271,7 @@ export function passReplies(replies: Reply[], run: string, tell: (text: string) 
   }
 }
 
-export async function answers(target: string): Promise<boolean> {
-  const any = target.startsWith("any:");
-  try {
-    const response = await fetch(any ? target.slice(4) : target, { signal: AbortSignal.timeout(5000), redirect: "manual" });
-    return any || response.status < 400;
-  } catch {
-    return false;
-  }
-}
+export { answers };
 
 // The team's lock in its run folder (which launchd can read): one watcher at a time, up to a minute's wait. The same
 // slot as lib/lock.ts's, so a dead holder's lock is taken over safely, and a holder releases only its own.

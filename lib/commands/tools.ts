@@ -1,13 +1,13 @@
 // The commands team members run: verdict, log, lock, gate, env, finish, progress and drain. Each works for the
 // team the caller belongs to (its instance sets A6G_HOME_DIR) or the checkout a person runs it in.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { withLock } from "../lock.ts";
+import { acquire, TIMED_OUT, withLock } from "../lock.ts";
 import type { LoadedTeam } from "../config.ts";
 import { journeysRequired, pagePlan, readHarness } from "../harness.ts";
 import { e2eDone, namespaceOf } from "./e2e.ts";
-import { holdingApp, keepLooks } from "./pages.ts";
+import { keepLooks } from "./pages.ts";
 import { stateDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { blastRadius } from "../blast.ts";
@@ -261,8 +261,9 @@ export async function gate(argv: string[]): Promise<number> {
 }
 
 // a6g env up|reset|restart|down|status: the team's environment script, run from the team's checkout.
-// a6g env use [--wait-min M] -- <command>: anyone's command against the team's app, where it's run, holding the app
-// lock (so a merge doesn't restart the app under it), with PLAYWRIGHT_BASE_URL and an A6G_NAMESPACE of its own.
+// a6g env use [--wait-min M] [--max-min N] -- <command>: anyone's command against the team's app, where it's run,
+// holding the app lock (so a merge doesn't restart the app under it), with PLAYWRIGHT_BASE_URL and an A6G_NAMESPACE of
+// its own. It waits M minutes for the app, and a command that holds it past N is ended, so nothing holds it for good.
 export async function env(argv: string[]): Promise<number> {
   const sub = argv[0] ?? "status";
   if (sub === "use") return envUse(argv.slice(1));
@@ -275,28 +276,102 @@ export async function env(argv: string[]): Promise<number> {
   return runIn(home, team.environment.script, [sub, ...argv.slice(1)]);
 }
 
+// How long a command may hold the team's app when it doesn't say (--max-min), and the most it may ask for: a check
+// after merges waits 30 minutes for the app, and a merge two hours.
+const USE_MAX_MIN = 30;
+const USE_MOST_MIN = 120;
+const USE_USAGE = `usage: a6g env use [--wait-min M] [--max-min N] -- <command>  (waits M minutes for the app, 8 unless said; ends the command after N, ${USE_MAX_MIN} unless said, ${USE_MOST_MIN} at most)`;
+
+// Runs `command` in a process group of its own, so its time limit ends all of it (what it started too): past `maxMin`
+// the group is asked to stop, and ended `graceMs` later. Resolves to its exit code, or 124 when the limit ended it.
+function runLimited(
+  command: string[],
+  { cwd, env, maxMin, graceMs = 10_000 }: { cwd: string; env: NodeJS.ProcessEnv; maxMin: number; graceMs?: number }
+): Promise<{ status: number; ended: boolean }> {
+  const child = spawn(command[0] ?? "", command.slice(1), { cwd, env, stdio: "inherit", detached: true });
+  const signalGroup = (signal: NodeJS.Signals): void => {
+    try {
+      if (child.pid) process.kill(-child.pid, signal);
+    } catch {}
+  };
+  // A group of its own doesn't hear the terminal's Ctrl-C, or a signal sent to this process: pass it on.
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const passOn = (signal: NodeJS.Signals): void => signalGroup(signal);
+  for (const signal of signals) process.on(signal, passOn);
+  let ended = false;
+  const timers: NodeJS.Timeout[] = [];
+  return new Promise<number>((done) => {
+    child.on("error", (error) => {
+      console.error(`env use: ${error.message}`);
+      done(127);
+    });
+    child.on("exit", (code, signal) => done(code ?? (signal ? 1 : 0)));
+    timers.push(
+      setTimeout(() => {
+        ended = true;
+        signalGroup("SIGTERM");
+        timers.push(setTimeout(() => signalGroup("SIGKILL"), graceMs));
+        timers.push(setTimeout(() => done(124), graceMs * 1.5));
+      }, maxMin * 60_000)
+    );
+  }).then((status) => {
+    for (const timer of timers) clearTimeout(timer);
+    for (const signal of signals) process.off(signal, passOn);
+    // Past its limit, nothing of the group goes on holding what the command held.
+    if (ended) signalGroup("SIGKILL");
+    return { status: ended ? 124 : status, ended };
+  });
+}
+
 async function envUse(argv: string[]): Promise<number> {
   const dash = argv.indexOf("--");
   const command = dash >= 0 ? argv.slice(dash + 1) : [];
-  if (!command.length) {
-    console.error("usage: a6g env use [--wait-min M] -- <command>");
+  const { options } = parseArgs(dash >= 0 ? argv.slice(0, dash) : argv);
+  let waitMin = 8;
+  let maxMin = USE_MAX_MIN;
+  try {
+    waitMin = minutes(optionText(options["wait-min"]), waitMin);
+    maxMin = minutes(optionText(options["max-min"]), maxMin);
+  } catch (error) {
+    console.error(`env use: ${(error as Error).message}\n${USE_USAGE}`);
+    return 2;
+  }
+  if (!command.length || !(maxMin > 0)) {
+    console.error(USE_USAGE);
+    return 2;
+  }
+  if (maxMin > USE_MOST_MIN) {
+    console.error(
+      `env use: --max-min ${maxMin} is more than the ${USE_MOST_MIN} minutes anything may hold the team's app; split the work, or ask the planner`
+    );
     return 2;
   }
   const { home, team } = teamSession();
   const appUrl = pagePlan(team, readHarness(home).harness).appUrl;
   const here = process.cwd();
   const namespace = namespaceOf(here, team.branchPrefix);
-  const run = () =>
-    spawnSync(command[0] ?? "", command.slice(1), {
-      cwd: here,
-      stdio: "inherit",
-      env: { ...process.env, A6G_NAMESPACE: namespace, ...(appUrl ? { PLAYWRIGHT_BASE_URL: appUrl } : {}) },
-    }).status ?? 1;
+  // Inside something that holds the app already (an after-merge command), the lock is that holder's.
+  const held = process.env.A6G_APP_LOCK === "held";
+  const release = held
+    ? null
+    : await acquire(home, "app", { slots: 1, waitMin, holder: `env use (${namespace})`, onWait: (text) => console.error(`env use: ${text}`) });
+  if (!held && !release) {
+    console.error(`env use: the team's app stayed busy for ${waitMin} minutes (a merge restarting it, or another run); try again`);
+    return TIMED_OUT;
+  }
   try {
-    return await holdingApp(home, `env use (${namespace})`, async () => run());
-  } catch (error) {
-    console.error(`env use: ${(error as Error).message}`);
-    return 75;
+    const { status, ended } = await runLimited(command, {
+      cwd: here,
+      env: { ...process.env, A6G_APP_LOCK: "held", A6G_NAMESPACE: namespace, ...(appUrl ? { PLAYWRIGHT_BASE_URL: appUrl } : {}) },
+      maxMin,
+    });
+    if (ended)
+      console.error(
+        `env use: the command held the team's app for ${maxMin} minutes (--max-min) and was ended, with everything it started. Run less at a time, or say --max-min (${USE_MOST_MIN} at most).`
+      );
+    return status;
+  } finally {
+    release?.();
   }
 }
 

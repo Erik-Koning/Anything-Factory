@@ -109,3 +109,14 @@ export function die(message: string, code = 2): never {
   console.error(`a6g: ${message}`);
   process.exit(code);
 }
+
+// Whether a health address answers: any:<url> takes any answer at all, a plain URL one below 400. Five seconds each.
+export async function answers(target: string): Promise<boolean> {
+  const any = target.startsWith("any:");
+  try {
+    const response = await fetch(any ? target.slice(4) : target, { signal: AbortSignal.timeout(5000), redirect: "manual" });
+    return any || response.status < 400;
+  } catch {
+    return false;
+  }
+}

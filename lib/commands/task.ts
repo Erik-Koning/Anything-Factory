@@ -307,6 +307,9 @@ const edit: Handler = async ({ store, who }, [id], options) => {
     changes.after = after;
   }
   if (!Object.keys(changes).length) throw new Refused("nothing to change; see a6g task help");
+  // A journey is done by its tests passing: a task that's done already doesn't become one, with nothing asked of it.
+  if (changes.kind === "journey" && task.kind !== "journey" && task.status === "done" && who !== OPERATOR)
+    throw new Refused(`task ${task.id} is done, and a journey is done only by its tests: making it one is the operator's call (or reopen it first)`);
   if (changes.kind && changes.kind !== "journey" && task.kind === "journey" && all.some((t) => t.parent === task.id))
     throw new Refused(
       finishedUnder(task, all).length && who !== OPERATOR

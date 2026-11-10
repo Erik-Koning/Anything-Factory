@@ -77,8 +77,11 @@ describe("the suite's report", () => {
     // test.fail(), test.fail("…"), test.info().fail(): Playwright calls the failure expected.
     assert.equal(ran("expected", "failed", "failed"), "excused");
     assert.equal(ran("unexpected", "failed", "passed"), "failed", "told to fail, and it passed");
+    // Told to skip, wherever that was said (its declaration, its body, a hook), against one a run didn't get to (an
+    // earlier test of its serial group failed, or the run was cut short): that one still checks something.
     assert.equal(ran("skipped", "skipped", "skipped"), "skipped");
-    assert.equal(ran("skipped", "passed", "interrupted"), "skipped");
+    assert.equal(ran("skipped", "passed", "skipped"), "unreached");
+    assert.equal(ran("skipped", "passed", "interrupted"), "unreached");
     // A listing has no results: what a test is declared with is all there is.
     assert.equal(one({ status: "skipped", expectedStatus: "passed", results: [] }), "listed");
     assert.equal(one({ status: "skipped", expectedStatus: "skipped", results: [], annotations: [{ type: "fixme" }] }), "skipped");
