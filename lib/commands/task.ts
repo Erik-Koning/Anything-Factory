@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import type { Team } from "../config.ts";
 import { machineName } from "../machine.ts";
 import { boardDir, readRegistry } from "../paths.ts";
+import { leakRefusal, leaksInWorktree } from "../secrets.ts";
 import { asOperator, teamSession } from "../session.ts";
 import { describeHold, holdOf } from "../tasks/controls.ts";
 import { betterDiagram } from "../tasks/graph.ts";
@@ -659,9 +660,16 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
   if (Number(git(worktree, "rev-list", "--count", `${base}..HEAD`)) === 0)
     throw new Refused(`${branch} has nothing beyond ${team.branch}; release the task instead (a6g task release ${task.id} --blocked "…")`);
   const sha = git(worktree, "rev-parse", "HEAD");
+  // Secrets don't leave the worktree (lib/secrets.ts): read here, before the branch is pushed or reviewed, and again by
+  // the merge queue.
+  const found = leaksInWorktree(worktree, `${base}..HEAD`);
+  if (found.length) throw new Refused(leakRefusal(branch, found));
   // A rework builds on the round it was sent back with, never beside it (a rebase after a conflict starts afresh: the
-  // merge queue clears the round it sent back).
-  if (task.sha && task.sha !== sha && !gitOk(worktree, "merge-base", "--is-ancestor", task.sha, "HEAD"))
+  // merge queue clears the round it sent back). The one other rework that doesn't: a round that held a secret, rebuilt
+  // without it.
+  const heldSecret = (round: string): boolean =>
+    gitOk(worktree, "cat-file", "-e", `${round}^{commit}`) && leaksInWorktree(worktree, `${base}..${round}`).length > 0;
+  if (task.sha && task.sha !== sha && !gitOk(worktree, "merge-base", "--is-ancestor", task.sha, "HEAD") && !heldSecret(task.sha))
     throw new Refused(`this branch doesn't hold the task's last round (${task.sha.slice(0, 9)}); start from it, then submit`);
   if (task.rounds > 0 && task.sha === sha)
     throw new Refused(`this is the commit the reviewer asked changes on (${sha.slice(0, 9)}); make the changes in its notes, then submit`);

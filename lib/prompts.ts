@@ -219,6 +219,7 @@ function secretsText(team: Team, role: string): string {
     how,
     `A value only a person has (a provider's API key, a live credential) is the operator's to set: say which name is needed, where, and what for${role === "planner" ? "" : " (the planner asks the operator)"}; never ask for the value itself.`,
     "To check one, list names or run what uses it. Code reads a secret from the manager or the environment, never from a literal, and tests generate their own.",
+    `${code("a6g task submit")} and the merge queue read every commit of a branch for live keys, private keys and secrets files, and refuse a branch that holds one, even where a later commit took it out.`,
   ]);
 }
 

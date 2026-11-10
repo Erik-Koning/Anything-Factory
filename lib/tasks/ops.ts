@@ -98,12 +98,13 @@ export async function settleWaits(
   return settled;
 }
 
-// A merge that conflicts: the branch's task goes back to be claimed again on its branch and rebased. The round it went
-// back with is cleared, since a rebase rewrites it. Resolves to why it wasn't sent back, or null.
+// A merge that conflicts, or a branch that holds a secret (`rebuild` says what to do about it): the branch's task goes
+// back to be claimed again on its branch and rebased. The round it went back with is cleared, since a rebase rewrites
+// it. Resolves to why it wasn't sent back, or null.
 export async function sendBackToRebase(
   store: Store,
   id: string,
-  { branch, integration }: { branch: string; integration: string }
+  { branch, integration, rebuild }: { branch: string; integration: string; rebuild?: string }
 ): Promise<string | null> {
   if (!(await store.tasks.get(id))) return `no task ${id}`;
   const all = await store.tasks.all();
@@ -111,7 +112,7 @@ export async function sendBackToRebase(
   await update(store.tasks, id, (t) => {
     why = moveRefusal(t, "approved", "conflict", MERGE, { all, branch });
     if (why) return t;
-    const text = `conflicts with ${integration}: rebase ${branch} onto it (git rebase ${integration}), run the gate, and submit`;
+    const text = rebuild ?? `conflicts with ${integration}: rebase ${branch} onto it (git rebase ${integration}), run the gate, and submit`;
     return move(
       t,
       "approved",

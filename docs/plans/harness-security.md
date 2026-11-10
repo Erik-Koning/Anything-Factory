@@ -124,6 +124,12 @@ The other half of 35: wherever a value ended up, it doesn't reach the repository
   the planner tells the operator, who rotates the key. A test that needs a private key generates one. A secrets file
   that holds no secrets is the operator's to commit.
 - **Where:** `lib/secrets.ts` (the shapes, the patch reader), `lib/commands/merge.ts` before the lane checks.
+- **As built, beyond the above:** `a6g task submit` reads the branch too, before it's pushed (on a team on several
+  machines a submit sends the branch to the remote) and before a review is spent on it. Commit messages are read. A
+  merge commit's own lines (the ones neither parent had) are read. At the merge queue the branch's task goes back to
+  be claimed and rebuilt, its round cleared; at submit, a round that held a secret is the one rework that needn't
+  build on its round. A private key is its header with a key under it: the header alone is what code that parses
+  one holds. A placeholder (one character repeated) is no key. A secrets file moved, not changed, isn't an addition.
 
 ### 29. Access rules in the manifest
 
@@ -258,6 +264,7 @@ Each phase ends with its tests, `npm test` and `npx prettier --check .` passing,
 - **Reading a secret out of one manager into another** (`op read … | sst secret set …`): a team that keeps its
   secrets in one and deploys from another.
 - **`printenv` and `env` printing the team's environment:** a value seen in a transcript.
+- **The planner's own commits read before a push:** they reach the integration branch without the merge queue.
 - **A key written into a file, caught as it's written** (the guard reading what Write and Edit hold): a branch
   refused at the merge for it, after the work was done.
 - **Test-mode keys and unshaped secrets in the merge check:** one that reaches the repository.
@@ -288,7 +295,7 @@ Defaults are chosen; say if you'd choose otherwise.
 ## Checklist
 
 - [x] G1. Secrets through a manager (35)
-- [ ] G2. Secrets don't merge (31)
+- [x] G2. Secrets don't merge (31)
 - [ ] G3. `refuses` and the `@access` gap (29, 30)
 - [ ] G4. The package audit (32)
 - [ ] G5. The security reviewer (33)

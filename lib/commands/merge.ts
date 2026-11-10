@@ -24,6 +24,7 @@ import { FACTORY_PATH, factoryWrite, laneAllows, roleForBranch, type Team } from
 import { HARNESS_FILE, readHarness } from "../harness.ts";
 import { acquire, TIMED_OUT, withLock } from "../lock.ts";
 import { entryOf, FACTORY_ROOT, readRegistry, stateDir, workDir } from "../paths.ts";
+import { leakRefusal, leaksInRange } from "../secrets.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { machineName } from "../machine.ts";
 import { isTest } from "../blast.ts";
@@ -406,6 +407,23 @@ async function mergeLocked({
     return { code };
   };
   const integration = team.branch;
+  // The branch's task goes back to be claimed and rebuilt (a conflict, a secret), on whichever machine claims it: the
+  // branch is on the remote. What's said of it, to end the refusal.
+  const sentBack = async (rebuild?: string): Promise<string> => {
+    const id = ticketOf(branch, team.branchPrefix);
+    if (team.board.type !== "tasks" || !id) return "";
+    try {
+      const store = await openTeamStore(team, run, home);
+      try {
+        const why = await sendBackToRebase(store, id, { branch, integration, ...(rebuild ? { rebuild } : {}) });
+        return why ? ` (task ${id} wasn't sent back: ${why})` : `; task ${id} went back to be claimed and ${rebuild ? "rebuilt" : "rebased"}`;
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      return ` (task ${id} couldn't be sent back: ${(error as Error).message})`;
+    }
+  };
   const scratch = join(workDir(home), "merge");
   const cleanup = () => {
     if (g("worktree", "remove", "--force", scratch).status !== 0) rmSync(scratch, { recursive: true, force: true });
@@ -435,6 +453,12 @@ async function mergeLocked({
         .map(([r, l]) => `${r}: ${l.branch}`)
         .join(", ")})`
     );
+  // Secrets don't merge (lib/secrets.ts): read in every commit the branch would bring, before anything else is.
+  const leaks = leaksInRange(raw, `${integration}..${tip}`);
+  if (leaks.length) {
+    const why = leakRefusal(branch, leaks);
+    return fail(2, "refused", `${why}${await sentBack(why)}`);
+  }
   // --no-renames lists both sides of a rename, so a move can't hide a deletion outside the lane. -z gives each path
   // as it is: git quotes unusual ones otherwise, and a quoted path matches no lane rule.
   const paths = (...args: string[]): string[] =>
@@ -623,22 +647,7 @@ async function mergeLocked({
     });
     if (merged.status !== 0) {
       spawnSync("git", ["merge", "--abort"], { cwd: scratch });
-      // Its task goes back to be claimed and rebased, on whichever machine claims it (the branch is on the remote).
-      let back = "";
-      const id = ticketOf(branch, team.branchPrefix);
-      if (team.board.type === "tasks" && id)
-        try {
-          const store = await openTeamStore(team, run, home);
-          try {
-            const why = await sendBackToRebase(store, id, { branch, integration });
-            back = why ? ` (task ${id} wasn't sent back: ${why})` : `; task ${id} went back to be claimed and rebased`;
-          } finally {
-            await store.close();
-          }
-        } catch (error) {
-          back = ` (task ${id} couldn't be sent back: ${(error as Error).message})`;
-        }
-      return fail(3, "conflict", `${branch} conflicts with ${integration}; rebase it onto ${integration}${back}`);
+      return fail(3, "conflict", `${branch} conflicts with ${integration}; rebase it onto ${integration}${await sentBack()}`);
     }
     // Two changes to the manifest can merge into one that doesn't load, and with no manifest nothing here checks.
     const mergedProblems = touchesHarness ? readHarness(scratch).problems : [];

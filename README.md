@@ -196,6 +196,14 @@ recompiles it.
 **The stop gate** keeps a builder or tester from finishing with uncommitted work, a misnamed branch, or a failing
 quick gate. **The merge queue** (`a6g merge`) is the only way into the integration branch.
 
+**Secrets don't merge.** `a6g task submit` and the merge queue read every commit a branch would bring in (the lines each
+adds, its message, the files it adds or changes) and refuse the branch that holds a live credential by its shape (a
+private key, a live Stripe key or webhook secret, an AWS access key id, a GitHub, Slack, Anthropic, OpenAI or SendGrid
+token) or a secrets file, even when a later commit took it out. The refusal names the file, the line and the commit,
+never the value; the branch is rebuilt without it, and a real key that reached a commit is yours to rotate. Test-mode
+keys, JWTs and text that only looks random are left alone: nothing passes this refusal, so it fires only on what's
+real by construction.
+
 ## Checks that hold
 
 A team's work is checked by scripts as well as by agents, and the checks are run again after merges, so what was done
