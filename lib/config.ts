@@ -28,6 +28,10 @@ export interface PageSpec {
   // The sign-in state (the harness's auth.states) the page is seen with, and selectors masked in its screenshots.
   as?: string;
   mask?: string[];
+  // The operator's exemptions (team.json only, never the manifest): selectors every in-page check leaves out, and the
+  // colour schemes this page is checked in, in place of pages.schemes.
+  ignore?: string[];
+  schemes?: string[];
 }
 export interface Viewport {
   id: string;
@@ -632,8 +636,10 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     "minTarget",
   ]);
   if (pagesIn) {
+    const scheme = (value: unknown, at: string): string | undefined =>
+      typeof value === "string" && SCHEMES.includes(value) ? value : bad(at, SCHEMES.join(", "));
     const page = (value: unknown, where: string): PageSpec | undefined => {
-      const spec = object(value, where, ["id", "path", "title", "exclude", "as", "mask"]);
+      const spec = object(value, where, ["id", "path", "title", "exclude", "as", "mask", "ignore", "schemes"]);
       if (!spec) return undefined;
       const id = need(spec.id, `${where}.id`, (id, at) =>
         typeof id === "string" && ID.test(id) ? id : bad(at, "letters, digits, _ and - (it names the page's files)")
@@ -645,6 +651,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       const exclude = list(spec.exclude, `${where}.exclude`, regex);
       const as = text(spec.as, `${where}.as`);
       const mask = list(spec.mask, `${where}.mask`, text);
+      const ignore = list(spec.ignore, `${where}.ignore`, text);
+      const schemes = nonEmpty(spec.schemes, `${where}.schemes`, scheme, "at least one colour scheme, or leave it out for the team's");
       if (id === undefined || path === undefined) return undefined;
       return {
         id,
@@ -653,6 +661,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
         ...(exclude === undefined ? {} : { exclude }),
         ...(as === undefined ? {} : { as }),
         ...(mask === undefined ? {} : { mask }),
+        ...(ignore === undefined ? {} : { ignore }),
+        ...(schemes === undefined ? {} : { schemes }),
       };
     };
     const viewport = (value: unknown, where: string): Viewport | undefined => {
@@ -695,12 +705,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     if (allowedChanges !== undefined) pages.allowedChanges = allowedChanges;
     const viewports = nonEmpty(pagesIn.viewports, "pages.viewports", viewport, "at least one viewport, or leave it out for the defaults");
     if (viewports !== undefined) pages.viewports = viewports;
-    const schemes = nonEmpty(
-      pagesIn.schemes,
-      "pages.schemes",
-      (scheme, at) => (typeof scheme === "string" && SCHEMES.includes(scheme) ? scheme : bad(at, SCHEMES.join(", "))),
-      "at least one colour scheme, or leave it out for light and dark"
-    );
+    const schemes = nonEmpty(pagesIn.schemes, "pages.schemes", scheme, "at least one colour scheme, or leave it out for light and dark");
     if (schemes !== undefined) pages.schemes = schemes;
     const ignoreConsole = list(pagesIn.ignoreConsole, "pages.ignoreConsole", regex);
     if (ignoreConsole !== undefined) pages.ignoreConsole = ignoreConsole;
