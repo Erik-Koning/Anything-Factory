@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { budgetCheck } from "../lib/budget.ts";
+import { budgetCheck, pausedUntil, resumesWhen } from "../lib/budget.ts";
 import { readHold, readLimits } from "../lib/holds.ts";
-import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "../lib/tasks/controls.ts";
+import { budgetControl, type Control, holdOf, type Limits, pauseControl, resumeControl } from "../lib/tasks/controls.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 import { newTask, type Task } from "../lib/tasks/model.ts";
 import type { Spend } from "../lib/tasks/spend.ts";
@@ -129,6 +129,69 @@ describe("the budget's rules", () => {
     const operator = control(pauseControl(graph, "app", { scope: "now", by: "operator" }));
     assert.equal(budgetCheck("app", auto, spend({ day: "2026-11-05" }), [paused, operator], graph, true).control, null);
   });
+
+  test("a new week ends a daily and a weekly pause together, and says so", () => {
+    const auto = limits({ autoResume: true, weekly: 50 });
+    const daily = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "daily:2026-11-08" });
+    const weekly = control({ ...pauseControl(graph, "app", { scope: "now", by: "budget" }), trigger: "weekly:2026-11-02" });
+    for (const order of [
+      [daily, weekly],
+      [weekly, daily],
+    ]) {
+      const monday = budgetCheck("app", auto, spend({ day: "2026-11-09" }), order, graph, true);
+      assert.equal(monday.control?.kind, "resume");
+      assert.equal(monday.control?.trigger, "weekly:2026-11-09");
+      assert.match(monday.control?.note ?? "", /a new week: the weekly budget starts again/);
+    }
+  });
+
+  test("with autoResume, a change to the budget that leaves nothing over starts a team only the budget paused", () => {
+    const paused = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "daily:2026-11-04" });
+    const settled = control(pauseControl(graph, "app", { scope: "now", by: "watchdog" }));
+    const raise = (fields: Partial<Limits>) => control({ ...budgetControl("app", "operator", limits(fields)), trigger: null });
+    const raised = limits({ daily: 20, autoResume: true });
+    const resumed = budgetCheck("app", raised, spend({ today: 12 }), [paused, settled, raise({ daily: 20, autoResume: true })], graph, true);
+    assert.equal(resumed.control?.kind, "resume");
+    assert.equal(resumed.control?.by, "budget");
+    assert.match(resumed.why ?? "", /The budget changed, and the team is under every limit now/);
+    assert.equal(
+      budgetCheck("app", limits({ daily: 20 }), spend({ today: 12 }), [paused, raise({ daily: 20 })], graph, true).control,
+      null,
+      "without autoResume it stays paused"
+    );
+    assert.equal(
+      budgetCheck("app", limits({ daily: 11, autoResume: true }), spend({ today: 12 }), [paused, raise({ daily: 11, autoResume: true })], graph, true)
+        .control,
+      null,
+      "still over the new limit"
+    );
+    assert.equal(
+      budgetCheck("app", raised, spend({ today: 12 }), [raise({ daily: 20, autoResume: true }), paused], graph, true).control,
+      null,
+      "a change before the pause isn't one after it"
+    );
+    // The total waits for the operator, and raising it is the operator's decision.
+    const total = control({ ...pauseControl(graph, "app", { scope: "now", by: "budget" }), trigger: "total:2026-10-01" });
+    const more = limits({ total: 200, autoResume: true });
+    assert.equal(budgetCheck("app", more, spend({ total: 120 }), [total], graph, true).control, null);
+    assert.equal(budgetCheck("app", more, spend({ total: 120 }), [total, raise({ total: 200, autoResume: true })], graph, true).control?.kind, "resume");
+  });
+
+  test("the operator hears when auto-resume starts the team again", () => {
+    const auto = limits({ autoResume: true, weekly: 50 });
+    assert.match(
+      budgetCheck("app", auto, spend({ today: 10 }), [], graph, false).why ?? "",
+      /it pauses once the work under way is merged\. With auto-resume, it starts again tomorrow\./
+    );
+    assert.match(budgetCheck("app", auto, spend({ today: 10, week: 50 }), [], graph, false).why ?? "", /With auto-resume, it starts again on Monday\./);
+    assert.doesNotMatch(budgetCheck("app", auto, spend({ today: 10, total: 100 }), [], graph, false).why ?? "", /auto-resume/, "the total is over too");
+    assert.doesNotMatch(budgetCheck("app", limits(), spend({ today: 10 }), [], graph, false).why ?? "", /auto-resume/);
+    assert.equal(resumesWhen(["daily"], { autoResume: true }), "tomorrow");
+    const paused = control({ ...pauseControl(graph, "app", { scope: "tasks", by: "budget" }), trigger: "daily:2026-11-04" });
+    assert.equal(pausedUntil([paused], auto), "tomorrow");
+    assert.equal(pausedUntil([paused], limits()), null);
+    assert.equal(pausedUntil([paused, control(pauseControl(graph, "app", { scope: "now", by: "operator" }))], auto), null);
+  });
 });
 
 // A Claude Code transcript with one request of the planner's, today: $4 in, $20 out per million on Claude Opus 5.5.
@@ -227,6 +290,35 @@ describe("a6g budget and the watchdog", () => {
       assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
       assert.equal(holdOf(await store.controls.all())?.scope, "now");
       assert.ok(existsSync(join(w.run, "paused")));
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("with auto-resume, a paused team is told when it starts again, and raising the budget starts it", async () => {
+    const { w, store } = await world();
+    try {
+      assert.equal((await w.a6g("budget", "fixture", "--daily", "5", "--auto-resume")).code, 0);
+      transcript(w.root, w.home, 8);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.match(
+        (await w.a6g("start", "fixture")).out,
+        /paused \(by its budget, .*\): auto-resume starts it again tomorrow at the earliest, or a6g resume fixture now/
+      );
+      // Still over the new limit, and auto-resume turned off: it stays paused, and the operator is told how to start it.
+      const lower = await w.a6g("budget", "fixture", "--daily", "6", "--no-auto-resume");
+      assert.match(lower.out, /the budget paused fixture, and it stays paused: a6g resume fixture starts it/);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(existsSync(join(w.run, "paused")));
+      // Raised, with auto-resume: nothing is over, so the next run starts it again.
+      const raised = await w.a6g("budget", "fixture", "--daily", "20", "--auto-resume");
+      assert.match(raised.out, /with auto-resume, the watchdog starts it again at its next run if nothing is over now/);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      const resumed = (await store.controls.all()).at(-1);
+      assert.deepEqual([resumed?.kind, resumed?.by], ["resume", "budget"]);
+      assert.ok(!existsSync(join(w.run, "paused")));
+      assert.ok(w.calls().some((c) => /The team starts again: the budget changed, and nothing is over it now\. Carry on\./.test(c)));
     } finally {
       await w.close();
     }

@@ -1,10 +1,12 @@
 import { baseTeam, bash, type GuardCase, type GuardOptions, git, guardAsync, holds, makeRepo, ROOT, tmp, tool, write } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { type GuardCase as SelfTestCase, guardCases } from "../lib/commands/check.ts";
 import { loadTeam, type RawTeam } from "../lib/config.ts";
+import { writePace } from "../lib/pace.ts";
 import { compile } from "../lib/prompts.ts";
 
 const at = (home: string, path: string) => (path.startsWith("/") ? path : join(home, path));
@@ -499,6 +501,35 @@ describe("guard", () => {
       tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" }, "refuse"),
       tool(draining, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer" } }, "allow"),
     ]);
+    // The budget's pace, as the planner's context saved it: no more new builders than it allows while it's fresh.
+    const paced = makeRepo();
+    mkdirSync(`${paced}-run`, { recursive: true });
+    const why = "$2.00 is left under the daily $10.00 (a6g task pace).";
+    writePace(`${paced}-run`, { allow: { builder: 0, tester: 1 }, why }, { builder: 0, tester: 0 });
+    const starting = { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" };
+    // A T3 Code database with nobody at work, so the guard can count.
+    const t3 = tmp("a6g-t3-");
+    mkdirSync(join(t3, "userdata"));
+    const db = join(t3, "userdata", "statev2.sqlite");
+    execFileSync("sqlite3", [db], { input: readFileSync(join(ROOT, "test", "fake-t3", "schema.sql"), "utf8") });
+    const counted = { env: { T3CODE_HOME: t3 } };
+    const refused = await guardAsync(paced, "planner", delegate, starting, counted);
+    assert.equal(refused.outcome, "refuse");
+    assert.match(refused.said, /the budget can finish no new builder's work now: \$2\.00 is left under the daily \$10\.00/);
+    await holds([tool(paced, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer" } }, "allow", counted)]);
+    // Starts, not heads: one new builder allowed, and one has started and already finished. Its slot is free, but the
+    // money its work needs isn't.
+    writePace(`${paced}-run`, { allow: { builder: 1 }, why }, { builder: 0 });
+    await holds([tool(paced, "planner", delegate, starting, "allow", counted)]);
+    execFileSync("sqlite3", [
+      db,
+      "insert into orchestration_v2_projection_subagents (subagent_id, thread_id, parent_node_id, provider, origin, status, updated_at, payload_json, provider_instance_id) values ('sa-1', 'planner', 'node', 'claudeAgent', 'mcp', 'completed', '2026-11-09T12:00:00.000Z', '{}', 'a6g-fixture-builder')",
+    ]);
+    const again = await guardAsync(paced, "planner", delegate, starting, counted);
+    assert.equal(again.outcome, "refuse");
+    assert.match(again.said, /1 new builder member has started since the pace was worked out, as many as the budget can finish now/);
+    writePace(`${paced}-run`, { allow: { builder: 0 }, why: "old" }, { builder: 0 }, new Date(Date.now() - 3 * 3600_000));
+    await holds([tool(paced, "planner", delegate, starting, "allow", counted)]);
   });
 
   test("secrets", () =>

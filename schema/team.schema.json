@@ -83,6 +83,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "Planner only: compact its context at this many tokens."
+        },
+        "minQueue": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Innovator only: the planner starts it whenever fewer than this many ideas (features not yet started) are queued. Default 5; 0 leaves it to the planner."
         }
       }
     },

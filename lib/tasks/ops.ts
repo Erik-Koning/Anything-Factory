@@ -6,11 +6,13 @@
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { basename, join } from "node:path";
 import { acquireSlot } from "../lock.ts";
-import { hash, readJson, writeJson } from "../util.ts";
+import { hash, localTime, readJson, writeJson } from "../util.ts";
 import {
   type Actor,
+  CLAIMS,
   type FeatureRequest,
   heldHere,
+  ideasQueued,
   journeyDue,
   KINDS,
   type Kind,
@@ -29,9 +31,14 @@ import {
   waitOutcome,
 } from "./model.ts";
 import { quoted } from "../untrusted.ts";
-import type { Team } from "../config.ts";
+import { instancesOf, type Team } from "../config.ts";
+import { readLimits } from "../holds.ts";
 import { machineName } from "../machine.ts";
+import { type Pace, pace } from "../pace.ts";
 import { boardDir } from "../paths.ts";
+import { runningByInstance, startedByInstance } from "../t3.ts";
+import { holdOf } from "./controls.ts";
+import type { Spend } from "./spend.ts";
 import { openStore, type Store, update } from "./store.ts";
 
 // The merge queue: each task the merge closes is done. What it doesn't close is named in `skipped`, with why (the move
@@ -302,11 +309,22 @@ export async function openTeamStore(team: Pick<Team, "name" | "tasks">, run: str
 
 // --- The planner's view ----------------------------------------------------------------------------------------------
 
-// A few lines for the planner's context: counts by status, what's due, what's claimed. Kept short: hook context is
-// shown in full only under about 10,000 characters.
+// The ideas queue against the team's minimum (roles.innovator.minQueue): innovators at work now (null: unknown), whether
+// the budget's pace has room for nothing new, and the innovator's last pass that finished (when it started and ended).
+export interface IdeasState {
+  min: number;
+  running: number | null;
+  budgetBound: boolean;
+  lastPass?: { started: string; ended: string } | null;
+}
+// After a pass that filed nothing, the next isn't asked for (only started with a focus) for this long.
+export const IDEAS_RETRY_MIN = 360;
+
+// A few lines for the planner's context: counts by status, what's due, what's claimed, the ideas queue. Kept short:
+// hook context is shown in full only under about 10,000 characters.
 export function summary(
   all: Task[],
-  { now = Date.now(), approval, requests = [] }: { now?: number; approval: string; requests?: FeatureRequest[] }
+  { now = Date.now(), approval, requests = [], ideas }: { now?: number; approval: string; requests?: FeatureRequest[]; ideas?: IdeasState | undefined }
 ): string {
   const by = (status: Status) => all.filter((t) => t.status === status);
   const counts = (["triage", "proposed", "researching", "approved", "building", "review", "question", "blocked"] as Status[])
@@ -363,5 +381,60 @@ export function summary(
     );
   const blocked = by("blocked");
   if (blocked.length) parts.push(`Blocked: ${blocked.map(line).slice(0, 6).join("; ")}.`);
+  // The claim keeps two tasks apart by their files or area; one that names neither can collide with anything.
+  const claimed = Object.values(CLAIMS).flat();
+  const nowhere = by("approved").filter((t) => claimed.includes(t.kind) && !t.files.length && !t.area);
+  if (nowhere.length)
+    parts.push(
+      `Approved with no --files or --area, so the claim can't keep them off other work: ${nowhere
+        .slice(0, 8)
+        .map((t) => `#${t.id}`)
+        .join(", ")} (a6g task edit <id> --files …).`
+    );
+  if (ideas) {
+    const queued = ideasQueued(all);
+    const shown = `${queued
+      .slice(0, 6)
+      .map((t) => `#${t.id}`)
+      .join(", ")}${queued.length > 6 ? ", …" : ""}`;
+    const head = `Ideas queued (features not yet started): ${queued.length}${queued.length ? ` (${shown})` : ""}`;
+    const under = `, under the ${ideas.min} the team keeps`;
+    // A pass that filed nothing (no idea or finding by the innovator since it started) isn't asked for again at once.
+    const pass = ideas.lastPass;
+    const retry = pass ? Date.parse(pass.ended) + IDEAS_RETRY_MIN * 60_000 : 0;
+    const fruitless = pass && retry > now && !all.some((t) => t.by === "innovator" && t.createdAt >= pass.started);
+    if (queued.length >= ideas.min) parts.push(`${head}; the team keeps at least ${ideas.min}.`);
+    else if (ideas.running) parts.push(`${head}${under}; an innovator is at work.`);
+    else if (ideas.budgetBound) parts.push(`${head}${under}, but the budget has room only for the work under way: no innovator until it has more.`);
+    else if (fruitless)
+      parts.push(
+        `${head}${under}, but the innovator's last pass (ended ${localTime(new Date(pass.ended))}) filed nothing: start it again after ${localTime(new Date(retry))}, or now with a focus.`
+      );
+    else parts.push(`${head}${under}: start the innovator.`);
+  }
   return parts.join("\n");
+}
+
+// The pace now (lib/pace.ts), from the store, the run folder's spend and budget, and T3 Code's counts of members at work
+// (`counts`, by instance, when the caller has read them) and of those ever started, which pace.json keeps for the guard.
+export async function measurePace(
+  team: Team,
+  run: string,
+  store: Store,
+  { all, counts }: { all?: Task[]; counts?: Record<string, number> | null } = {}
+): Promise<Pace & { started: Record<string, number> | null }> {
+  const roles = Object.keys(team.roles).filter((role) => CLAIMS[role]);
+  const instances = roles.flatMap((role) => instancesOf(team, role));
+  const byRole = (n: Record<string, number> | null): Record<string, number> | null =>
+    n && Object.fromEntries(roles.map((role) => [role, instancesOf(team, role).reduce((sum, id) => sum + (n[id] ?? 0), 0)]));
+  const measured = pace({
+    all: all ?? (await store.tasks.all()),
+    days: await store.usage.since("0000-00-00"),
+    spend: readJson<Spend | null>(join(run, "spend.json"), null),
+    limits: readLimits(run),
+    running: byRole(counts === undefined ? runningByInstance(instances) : counts),
+    slots: Object.fromEntries(roles.map((role) => [role, team.roles[role]?.limit ?? 0])),
+    hold: holdOf(await store.controls.all()),
+  });
+  return { ...measured, started: byRole(startedByInstance(instances)) };
 }

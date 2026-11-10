@@ -73,6 +73,11 @@ describe("config", () => {
     assert.match(problems({ name: "ok", branch: "x", never: [{ rule: "x" }] }), /never\[0\]\.reason/);
     assert.match(problems({ name: "ok", branch: "x", isolation: "loose" }), /isolation/);
     assert.match(normalize({ name: "ok", branch: "x", flavour: 1 } as RawTeam, "").warnings.join("\n"), /unknown key "flavour"/);
+    assert.match(problems({ name: "ok", branch: "x", roles: { planner: {}, innovator: { minQueue: -1 } } }), /roles\.innovator\.minQueue/);
+    const queue = normalize({ name: "ok", branch: "x", roles: { planner: {}, builder: { minQueue: 3 }, innovator: { minQueue: 0 } } } as RawTeam, "");
+    assert.match(queue.warnings.join("\n"), /roles\.builder\.minQueue: only the innovator's keeps ideas queued \(ignored\)/);
+    assert.equal(queue.team.roles["innovator"]?.minQueue, 0);
+    assert.equal(queue.team.roles["builder"]?.minQueue, undefined);
   });
 
   test("older [rule, reason] and [title, command] arrays are accepted", () => {

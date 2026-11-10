@@ -126,6 +126,7 @@ Each entry in `roles` takes:
 | `mcp`       | Outside tools the role may call. The planner has the Gmail tools by default; the guard lets email go only to `owner`                                                                                                                                             |
 | `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, ux-specialist and innovator                                                                                                                                                   |
 | `compactAt` | (planner) T3 Code compacts the planner's context at this many tokens (default 160000)                                                                                                                                                                            |
+| `minQueue`  | (innovator) The planner starts the innovator whenever fewer than this many ideas (features not yet started) are queued (default 5; 0 leaves it to the planner)                                                                                                   |
 
 The roles are planner, builder, tester, reviewer, ux-specialist, innovator and approver (the reviewer, the UX
 specialist, the innovator and the approver are read-only). Their prompts are in the factory

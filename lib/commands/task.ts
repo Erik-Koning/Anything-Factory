@@ -14,6 +14,7 @@ import {
   askRefusal,
   blockRefusal,
   branchFor,
+  claimRank,
   claimRefusal,
   CLAIMS,
   CONFIDENCE,
@@ -49,7 +50,8 @@ import {
 import { asData, quoted } from "../untrusted.ts";
 import { blastRadius } from "../blast.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
-import { claimMark, importBoard, leaseMinutes, markClaim, openTeamStore } from "../tasks/ops.ts";
+import { claimMark, importBoard, leaseMinutes, markClaim, measurePace, openTeamStore } from "../tasks/ops.ts";
+import { writePace } from "../pace.ts";
 import { addTask, proposes } from "../tasks/add.ts";
 import { type Decision, decide } from "../tasks/decide.ts";
 import { openStore, Refused, type Store, update } from "../tasks/store.ts";
@@ -63,7 +65,7 @@ export const USAGE = `usage: a6g task <command>
   edit <id> [--title …] [--body … | --body-file f] [--kind k] [--sev s] [--area a] [--files p,q] [--parent id|none] [--after id,id|none]
   score <id> --pain N --reach N --revenue N --wow N --distribution N --leverage N --urgency N --risk N
              --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…"]
-  status <id> <status> [--reason "…"]   ·   import
+  status <id> <status> [--reason "…"]   ·   import   ·   pace (the planner: what the budget can finish, so how many to start)
       question: --reason "why it's the operator's" --recommend "what the team would do" (both required)
       blocked: --reason "…" (the planner's to sort), with --recommend "…" to raise it to the operator,
                or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
@@ -226,7 +228,7 @@ const listTasks: Handler = async ({ store, who }, _positional, options) => {
   if (options["claimable"]) {
     const role = CLAIMS[who] ? who : "builder";
     const hold = holdOf(await store.controls.all());
-    all = all.filter((t) => claimRefusal(t, role, everything, hold) === null);
+    all = all.filter((t) => claimRefusal(t, role, everything, hold) === null).sort(claimRank(everything));
   }
   if (options["json"]) console.info(JSON.stringify(all.map(asJson), null, 2));
   else console.info(all.length ? all.map((t) => line(t, everything)).join("\n") : "no tasks");
@@ -705,6 +707,16 @@ const graph: Handler = async ({ home, team, run, store, who }, _positional, opti
   return 0;
 };
 
+// The pace again (lib/pace.ts), as the planner's context gives it at every wake: after approving or reshaping work
+// mid-turn, what the budget can finish now. The guard holds the planner's starts to it.
+const paceNow: Handler = async ({ team, run, store, who }) => {
+  need(who, ["planner"], "pacing the team's starts");
+  const pace = await measurePace(team, run, store);
+  writePace(run, pace, pace.started);
+  console.info(pace.text);
+  return 0;
+};
+
 const importTasks: Handler = async ({ home, run, team, store, who }) => {
   need(who, ["planner"], "importing the board");
   const ids = await importBoard(store, boardDir(home), run, team.name, who);
@@ -779,6 +791,7 @@ const OPTIONS: Record<string, string[]> = {
   submit: [],
   fetch: [],
   graph: ["out", "all"],
+  pace: [],
   import: [],
   migrate: ["to", "dry-run"],
 };
@@ -801,6 +814,7 @@ const COMMANDS: Record<string, Handler> = {
   release,
   submit,
   graph,
+  pace: paceNow,
   fetch: fetchBranch,
   import: importTasks,
   migrate: migrateTasks,

@@ -15,7 +15,7 @@ import type { Team } from "../config.ts";
 import { entryOf, FACTORY_ROOT } from "../paths.ts";
 import { operatorOnly, teamSession } from "../session.ts";
 import { betterDiagram, layout } from "../tasks/graph.ts";
-import { claimOrder, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
+import { claimRank, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { Refused, type Store } from "../tasks/store.ts";
 import { parseArgs, text as optionText } from "../util.ts";
@@ -549,8 +549,9 @@ function boardSection(tasks: Task[]): string {
   <div class="small">${meta(t)}</div>
   ${claimOf(t)}
 </li>`;
+  const rank = claimRank(tasks);
   const columns = STATUSES.flatMap((status) => {
-    const list = tasks.filter((t) => t.status === status).sort(claimOrder);
+    const list = tasks.filter((t) => t.status === status).sort(rank);
     if (!list.length) return [];
     const cards = `<ul class="plain cards">${list.map(card).join("\n")}</ul>`;
     // Finished work piles up; it's there when wanted.

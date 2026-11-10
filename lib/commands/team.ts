@@ -20,6 +20,7 @@ import {
   teamsDir,
   versionDir,
 } from "../paths.ts";
+import { pausedUntil } from "../budget.ts";
 import { readHold, readLimits } from "../holds.ts";
 import { subscriptionWeek } from "../subscriptions.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
@@ -219,10 +220,13 @@ export async function start(argv: string[]): Promise<number> {
   // the watch (the setup agent runs it too). A paused file with no pause recorded (an earlier version's) it lifts.
   if (entry.tasks && !entry.worker) {
     let hold: ReturnType<typeof holdOf> = null;
+    let when: string | null = null;
     try {
       const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
       try {
-        hold = holdOf(await store.controls.all());
+        const controls = await store.controls.all();
+        hold = holdOf(controls);
+        when = pausedUntil(controls, limitsOf(controls));
       } finally {
         await store.close();
       }
@@ -231,7 +235,7 @@ export async function start(argv: string[]): Promise<number> {
     }
     if (hold) {
       console.info(
-        `a6g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): a6g resume ${entry.name} starts it again`
+        `a6g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): ${when ? `auto-resume starts it again ${when} at the earliest, or a6g resume ${entry.name} now` : `a6g resume ${entry.name} starts it again`}`
       );
       return status([entry.name]);
     }
@@ -357,10 +361,13 @@ export async function budget(argv: string[]): Promise<number> {
   // The limits in force are the store's (the web app may have changed them a moment ago, and a worker never applies
   // them); the run folder's copy only when the store can't be reached.
   let current = readLimits(entry.run);
+  let held = false;
   try {
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
-      current = limitsOf(await store.controls.all());
+      const controls = await store.controls.all();
+      current = limitsOf(controls);
+      held = holdOf(controls)?.by === "budget";
     } finally {
       await store.close();
     }
@@ -422,6 +429,13 @@ export async function budget(argv: string[]): Promise<number> {
       ? `a6g: ${entry.name}'s budget is ${words(limits)}; the watchdog holds the team to it from its next run${switched && current ? ` (the limits that were in ${current.unit === "subscription" ? "percent" : "dollars"} and weren't given again are dropped)` : ""}`
       : `a6g: ${entry.name} has no budget now`
   );
+  // A change doesn't lift a pause the budget made, but with auto-resume the watchdog does once nothing is over.
+  if (held)
+    console.info(
+      limits?.autoResume
+        ? `a6g: the budget paused ${entry.name}; with auto-resume, the watchdog starts it again at its next run if nothing is over now, else when the next day or week does`
+        : `a6g: the budget paused ${entry.name}, and it stays paused: a6g resume ${entry.name} starts it`
+    );
   if (limits?.unit === "subscription")
     console.info(
       week
