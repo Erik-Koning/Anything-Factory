@@ -557,7 +557,7 @@
       "properties": {
         "journeys": {
           "enum": ["required", "optional"],
-          "description": "Whether the finish line needs every journey's specs passing (a6g e2e done); required by default with a scaffolder or tester."
+          "description": "Whether a journey is done only while its specs pass, and the finish line needs every journey's (a6g e2e done). Left out, that's exactly when the team's harness manifest has a suite."
         }
       }
     },

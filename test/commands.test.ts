@@ -52,6 +52,27 @@ describe("team members' commands", { concurrency: true }, () => {
     assert.equal(finish.code, 1);
     assert.match((await a6g(["progress"], as(home, "planner"))).out, /halfway/);
   });
+
+  test("a team with no finish line can still be marked complete; one whose finish command fails can't", async () => {
+    const home = makeRepo();
+    const run = tmp("a6g-run-");
+    const session = (role: string) => ({ cwd: home, env: { ...as(home, role).env, A6G_RUN: run } });
+    const none = await a6g(["finish"], session("planner"));
+    assert.equal(none.code, 2);
+    assert.match(none.out, /no finish command \(team\.json finish\), and no suite its journeys must pass/);
+    assert.equal((await a6g(["complete"], session("builder"))).code, 2, "the planner's alone");
+    const done = await a6g(["complete"], session("planner"));
+    assert.equal(done.code, 0, done.out);
+    assert.match(done.out, /the team has no finish line to hold; the work is marked complete/);
+    assert.ok(existsSync(join(run, "complete")));
+
+    const failing = makeRepo(baseTeam({ finish: "echo not yet && exit 1" }));
+    const other = tmp("a6g-run-");
+    const refused = await a6g(["complete"], { cwd: failing, env: { ...as(failing, "planner").env, A6G_RUN: other } });
+    assert.equal(refused.code, 1);
+    assert.match(refused.out, /the finish line doesn't hold/);
+    assert.ok(!existsSync(join(other, "complete")));
+  });
 });
 
 describe("a6g init --no-interview", () => {

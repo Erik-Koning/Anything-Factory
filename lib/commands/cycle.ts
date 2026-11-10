@@ -3,6 +3,7 @@
 // sends it with the next message the team's contact setting allows.
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { journeysRequired } from "../harness.ts";
 import { asOperator, teamSession } from "../session.ts";
 import { suiteGaps } from "./e2e.ts";
 import { OPERATOR } from "../tasks/model.ts";
@@ -57,13 +58,12 @@ export async function cycle(argv: string[]): Promise<number> {
         .slice(0, 80) ?? "";
     const draft = join(run, "outbox", `${new Date().toISOString().slice(0, 10)}-cycle-${number}.md`);
     // How the end-to-end suite stands, in the factory's words, so a cycle's report can't leave it out.
-    const suite =
-      team.harness.journeys === "required"
-        ? suiteGaps(
-            home,
-            (await store.tasks.all()).filter((t) => t.kind === "journey")
-          )
-        : null;
+    const suite = journeysRequired(home, team)
+      ? suiteGaps(
+          home,
+          (await store.tasks.all()).filter((t) => t.kind === "journey")
+        )
+      : null;
     const standing =
       suite === null
         ? ""

@@ -176,9 +176,10 @@ that's a set of pages, `"finish": "a6g pages done"`.
 
 ## `harness`
 
-`"harness": { "journeys": "required" }` (the default for a team with a scaffolder or a tester): a journey is done only
-while its specs pass, and `a6g finish` (so `a6g complete`) needs `a6g e2e done`: the suite passed at the integration
-branch's head, and every journey has a test tagged `@journey-<id>` that passed. `"optional"` turns both off.
+`"harness": { "journeys": "required" }`: a journey is done only while its specs pass, and `a6g finish` (so
+`a6g complete`) needs `a6g e2e done`: the suite passed at the integration branch's head, and every journey has a test
+tagged `@journey-<id>` that passed. `"optional"` turns both off. Left out (the default), journeys are required once
+the team has a suite (the manifest's `e2e`), so a team with a tester and no harness yet closes its journeys as before.
 
 ## The harness manifest: `.a6g/harness.json`
 

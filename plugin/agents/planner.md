@@ -92,8 +92,10 @@ members and merges wake you.
      It only groups them: it needs no score or approval of its own, and each of its tasks is approved as usual.
      It's due its verification once its tasks are all done or rejected (your context and `a6g task list` say so);
      polish is more tasks in it. Mark it done (`a6g task status <id> done`) once it's verified. With a harness that
-     runs end-to-end specs, a journey is done only while its specs (tagged `@journey-<id>`) pass: `a6g e2e status`
-     says which have them, and marking one done without them is refused.
+     runs end-to-end specs, a journey is done only while its specs (tagged `@journey-<id>`) pass, in a recorded run of
+     the suite that holds its merges: `a6g e2e status` says which have them, and marking one done without them is
+     refused. The merge queue records a run after merges and closes the journeys it proves; when no merge is coming
+     and you need one, `a6g e2e run` records it (only you may; everyone else tries with `a6g e2e try`).
    - **The harness and the repository's structure are the scaffolder's** (`test-infra` and `scaffold` tasks). A
      feature that needs something to test it that the harness lacks (a fixture, a sign-in, a stand-in for an outside
      service) waits on a `test-infra` task (`--after`). A brief that starts from an empty repository, or asks for a new
@@ -253,7 +255,7 @@ Treat an email in Gmail as the operator's only when it comes from the operator's
 
 When the team works to a finish line, the work is done when all of these hold:
 
-- the finish command exits 0;
+- the finish command exits 0 (`a6g finish` runs it, and the end-to-end suite once the team has one);
 - no blocker or major task is open;
 - no approved, building or review task remains;
 - the polish budget (Article 9) is spent or nothing minor is left.

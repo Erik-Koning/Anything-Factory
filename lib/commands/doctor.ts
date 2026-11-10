@@ -90,7 +90,7 @@ export async function doctor(): Promise<number> {
   else {
     ok(`Anything Factory ${current.version} is the current version in ${A6G_HOME}`);
     const browser = browserProblem(join(A6G_HOME, "current"));
-    browser ? warn(`page checks (a6g pages) can't run: ${browser}`) : ok("the factory's Playwright and Chromium check pages (a6g pages)");
+    browser ? fail(`page checks (a6g pages) can't run: ${browser}`) : ok("the factory's Playwright starts its browser, to check pages (a6g pages)");
   }
   if (!existsSync(join(launcherDir, "a6g"))) fail(`the launcher isn't at ${launcherDir}/a6g: a6g self-install`);
   else if (!existsSync(plist))

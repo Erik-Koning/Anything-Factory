@@ -12,7 +12,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LoadedTeam, Team } from "../config.ts";
-import { type Harness, pagePlan, readHarness } from "../harness.ts";
+import { type Harness, journeysRequired, pagePlan, readHarness } from "../harness.ts";
 import { stateDir, workDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { journeysOf, runPlaywright, type SpecResult, specsOf, type SuiteRecord } from "../suite.ts";
@@ -105,7 +105,7 @@ function printRun(record: SuiteRecord | { specs: SpecResult[]; errors: string[];
 // tasks' merges had tests tagged with it, and they all passed. Always null on a team whose journeys are optional.
 export function journeyProofFor(home: string, team: Team): (journey: Task, all: Task[]) => string | null {
   return (journey, all) => {
-    if (team.harness.journeys !== "required") return null;
+    if (!journeysRequired(home, team)) return null;
     const { harness } = readHarness(home);
     if (!harness?.e2e)
       return `journey ${journey.id} is done once its specs pass, and the team's harness has no suite yet (.a6g/harness.json e2e): that's a test-infra task for the scaffolder`;

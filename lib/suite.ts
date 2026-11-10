@@ -4,16 +4,20 @@
 // the run's data in the environment, and its output folder outside the checkout, so a run never leaves it dirty.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { readJson } from "./util.ts";
 
-// The repository's Playwright command-line entry, or null when it has none installed.
-export function playwrightCli(dir: string): string | null {
-  for (const name of ["@playwright/test", "playwright"]) {
-    const cli = join(dir, "node_modules", name, "cli.js");
-    if (existsSync(cli)) return cli;
+// The repository's Playwright command-line entry, or null when it has none installed: the nearest node_modules from
+// `from` (the configuration's folder) upward, as Node finds it. So a monorepo's apps/web/node_modules is found before
+// the root's, and from the merge's scratch worktree (inside the checkout) the checkout's own.
+export function playwrightCli(from: string): string | null {
+  for (let dir = resolve(from); ; dir = dirname(dir)) {
+    for (const name of ["@playwright/test", "playwright"]) {
+      const cli = join(dir, "node_modules", name, "cli.js");
+      if (existsSync(cli)) return cli;
+    }
+    if (dirname(dir) === dir) return null;
   }
-  return null;
 }
 
 export interface SuiteRun {
@@ -60,13 +64,13 @@ export async function runPlaywright(
   dir: string,
   { config, args = [], env = {}, timeoutMin, work }: { config: string; args?: string[]; env?: Record<string, string>; timeoutMin: number; work: string }
 ): Promise<SuiteRun> {
-  const cli = playwrightCli(dir);
+  const cli = playwrightCli(configDir(dir, config));
   if (!cli)
     return {
       status: 2,
       timedOut: false,
       report: null,
-      tail: `no Playwright in ${dir}/node_modules (@playwright/test): install the repository's dependencies`,
+      tail: `no Playwright (@playwright/test) in a node_modules from ${configDir(dir, config)} up: install the repository's dependencies`,
     };
   mkdirSync(work, { recursive: true });
   const reportFile = join(work, "report.json");

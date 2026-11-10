@@ -233,8 +233,9 @@ export function selfInstall(argv: string[]): number {
     return 0;
   }
   link(dest, join(A6G_HOME, "current"));
-  // The Chromium a6g pages checks with: downloaded once into Playwright's cache, and kept between releases.
-  console.info(`a6g: the factory's Chromium: ${installBrowser(dest)}`);
+  // The browser a6g pages checks with (Chromium's headless shell): downloaded once into Playwright's cache, and kept
+  // between releases. A download that fails doesn't undo the install: one line says so, and a6g doctor fails on it.
+  console.info(`a6g: the factory's browser: ${installBrowser(dest)}`);
   // The node the launcher falls back to when PATH has none: the name PATH finds it by (Homebrew's
   // /opt/homebrew/bin/node), not the versioned folder process.execPath resolves to, which an upgrade removes.
   const onPath = which("node");

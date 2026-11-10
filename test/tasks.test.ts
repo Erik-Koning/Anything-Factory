@@ -945,7 +945,7 @@ describe("the audit's findings stay fixed", () => {
   });
 
   test("an approved task edited in what it is goes back for approving; a journey needs no approval of its own", async () => {
-    const { as, store } = setup(team({ approval: { mode: "full" } }));
+    const { as, store } = setup(team({ approval: { mode: "full" }, harness: { journeys: "required" } }));
     await a6g(["task", "add", "Thing"], as("planner"));
     await a6g(["task", "score", "1", ...SCORE, ...GATE, "--confidence", "data", "--size", "S", "--why", "x"], as("planner"));
     await a6g(["task", "approve", "1"], as("approver"));
@@ -964,17 +964,20 @@ describe("the audit's findings stay fixed", () => {
     assert.equal((await a6g(["task", "approve", "3"], as("approver"))).code, 0, "no journey approval first");
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
     await update(store().tasks, "3", (t) => ({ ...t, status: "done" as const }));
-    // This team has a tester, so its journeys are proven by their specs (harness.journeys "required"): with no suite
-    // yet, the journey isn't done. The operator's call is still theirs.
+    // The operator requires this team's journeys to be proven by their specs (harness.journeys "required"): with no
+    // suite yet, the journey isn't done. The operator's call is still theirs.
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /the team's harness has no suite yet/);
     assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks/);
     assert.equal((await a6g(["task", "status", "2", "done"], as(null))).code, 0, "the operator closes it");
-    // Where journeys are optional, the planner closes one once its tasks are done, as before.
-    const optional = setup(team({ approval: { mode: "full" }, harness: { journeys: "optional" } }));
-    await a6g(["task", "add", "Checkout", "--kind", "journey"], optional.as("planner"));
-    await a6g(["task", "add", "Pay", "--parent", "1"], optional.as("planner"));
-    await update(optional.store().tasks, "2", (t) => ({ ...t, status: "done" as const }));
-    assert.equal((await a6g(["task", "status", "1", "done"], optional.as("planner"))).code, 0, "its task done, the planner closes it");
+    // Left out, journeys are required only once there's a suite: until then (and where they're optional) the planner
+    // closes one once its tasks are done, as before, tester or not.
+    for (const harness of [undefined, { journeys: "optional" }] as const) {
+      const open = setup(team({ approval: { mode: "full" }, ...(harness ? { harness } : {}) }));
+      await a6g(["task", "add", "Checkout", "--kind", "journey"], open.as("planner"));
+      await a6g(["task", "add", "Pay", "--parent", "1"], open.as("planner"));
+      await update(open.store().tasks, "2", (t) => ({ ...t, status: "done" as const }));
+      assert.equal((await a6g(["task", "status", "1", "done"], open.as("planner"))).code, 0, "its task done, the planner closes it");
+    }
   });
 
   test("text that starts with -- is text; --help prints the usage; the rules name CLAUDE.md only when there is one", async () => {

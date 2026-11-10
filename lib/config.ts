@@ -166,9 +166,9 @@ export interface Team {
   finish: string | null;
   progress: string | null;
   pages: PagesSettings | null;
-  // Whether the finish line needs every journey's specs passing (a6g e2e done): "required" by default for a team with
-  // a scaffolder or a tester, who write them.
-  harness: { journeys: "required" | "optional" };
+  // Whether a journey needs its specs passing to be done, and the finish line every journey's (a6g e2e done). Left out
+  // ("auto"), that's exactly when the team's checkout has a suite to prove them with (journeysRequired, lib/harness.ts).
+  harness: { journeys: "required" | "optional" | "auto" };
   policies: Record<string, PolicyState>;
   never: NeverRule[];
   commandOwners: CommandOwner[];
@@ -710,10 +710,11 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   if (finish && PAGES_DONE.test(finish) && input.pages === undefined)
     problems.push('pages: the finish line is a6g pages done, so "pages" must list the pages it checks');
   const harnessIn = object(input.harness, "harness", ["journeys"]) ?? {};
-  let harnessJourneys: "required" | "optional" = roles["scaffolder"] || roles["tester"] ? "required" : "optional";
+  let harnessJourneys: "required" | "optional" | "auto" = "auto";
   if (harnessIn.journeys !== undefined) {
     if (harnessIn.journeys === "required" || harnessIn.journeys === "optional") harnessJourneys = harnessIn.journeys;
-    else problems.push('harness.journeys: "required" (the finish line needs every journey\'s specs passing) or "optional"');
+    else
+      problems.push('harness.journeys: "required" (a journey is done only while its specs pass) or "optional"; left out, required once there\'s a suite');
   }
 
   const team: Team = {

@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withLock } from "../lock.ts";
-import { pagePlan, readHarness } from "../harness.ts";
+import type { LoadedTeam } from "../config.ts";
+import { journeysRequired, pagePlan, readHarness } from "../harness.ts";
 import { e2eDone, namespaceOf } from "./e2e.ts";
 import { holdingApp, keepLooks } from "./pages.ts";
 import { stateDir } from "../paths.ts";
@@ -299,33 +300,38 @@ async function envUse(argv: string[]): Promise<number> {
   }
 }
 
-// a6g finish / a6g progress: the team's finish line and its status, run from the team's checkout. Where the team's
-// journeys are required (team.json harness.journeys), the finish line also needs the end-to-end suite done: passed at
-// the head, every journey with specs that passed (a6g e2e done).
+// The team's finish line, run from its checkout: its finish command, when it has one, and, where its journeys are
+// required (journeysRequired), the end-to-end suite done: passed at the head, every journey with specs that passed
+// (a6g e2e done). Null when the team has neither, so there's no line to hold.
+async function finishLine(home: string, team: LoadedTeam, run: string): Promise<number | null> {
+  const own = team.finish ? runIn(home, team.finish) : null;
+  if (!journeysRequired(home, team)) return own;
+  const suite = await e2eDone(home, team, run);
+  return own ? own : suite;
+}
+
+// a6g finish / a6g progress: the finish line and its status.
 export async function finish(): Promise<number> {
   const { home, team, run } = teamSession();
-  if (!team.finish) {
-    console.error("finish: the team has no finish command (team.json finish)");
-    return 2;
-  }
-  const own = runIn(home, team.finish);
-  if (team.harness.journeys !== "required") return own;
-  const suite = await e2eDone(home, team, run);
-  return own !== 0 ? own : suite;
+  const code = await finishLine(home, team, run);
+  if (code === null) console.error("finish: the team has no finish command (team.json finish), and no suite its journeys must pass");
+  return code ?? 2;
 }
 
 // a6g complete: the planner marks the work complete, only once the finish line holds (a6g finish); the guard keeps the
-// marker from being written any other way.
+// marker from being written any other way. A team with no finish line has nothing more to hold.
 export async function complete(): Promise<number> {
   if (plannerOnly("complete")) return 2;
-  const { run } = teamSession();
-  const code = await finish();
-  if (code !== 0) {
+  const { home, team, run } = teamSession();
+  const code = await finishLine(home, team, run);
+  if (code) {
     console.error("complete: the finish line doesn't hold, so the work isn't complete (above: why)");
     return 1;
   }
   writeFileSync(join(run, "complete"), `${new Date().toISOString()}\n`);
-  console.info("complete: the finish line holds; the work is marked complete, and the watchdog drops to a nightly tick");
+  console.info(
+    `complete: ${code === null ? "the team has no finish line to hold" : "the finish line holds"}; the work is marked complete, and the watchdog drops to a nightly tick`
+  );
   return 0;
 }
 export function progress(): number {

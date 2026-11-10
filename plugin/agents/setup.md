@@ -110,7 +110,7 @@ In `.a6g/`, write:
 - **`rubric.md`:** a short UX rubric, if the product has a UI. If it names a smallest touch target, put it in
   `team.json` as `pages.minTarget` too: the factory checks it on phones. Leave the list of pages, the sign-ins and
   the end-to-end suite to the team: its scaffolder writes them in `.a6g/harness.json`, and the finish line counts its
-  journeys' specs (`harness.journeys`, required by default with a scaffolder or tester).
+  journeys' specs once that suite exists (`harness.journeys`; leave it out).
 - **`roles/<role>.md`:** only for something one role needs that doesn't belong in `notes.md`.
 - **`adapters/`:**
   - `env.sh` (`up`, `down`, `status`, `reset` and `restart` for the team's own environment);

@@ -1,4 +1,4 @@
-import { baseTeam, git, makeRepo, ROOT, write } from "./helpers.ts";
+import { baseTeam, git, makeRepo, ROOT, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -8,7 +8,8 @@ import { after, before, describe, test } from "node:test";
 import { browserProblem } from "../lib/browser.ts";
 import { journeyProofFor, namespaceOf, recordSuite, suiteGaps, suiteHistory } from "../lib/commands/e2e.ts";
 import { loadTeam, type RawTeam } from "../lib/config.ts";
-import { journeysOf, scrub, specsOf } from "../lib/suite.ts";
+import { journeysRequired } from "../lib/harness.ts";
+import { journeysOf, playwrightCli, scrub, specsOf } from "../lib/suite.ts";
 import { moveRefusal, newTask, type Task } from "../lib/tasks/model.ts";
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(userInfo().homedir, "Library", "Caches", "ms-playwright");
@@ -73,6 +74,47 @@ describe("the suite's report", () => {
     git(home, "checkout", "-q", "-b", "a6g/s3-harness");
     assert.equal(namespaceOf(home, "a6g"), "s3");
   });
+
+  test("journeys are required once there's a suite, unless the operator says", () => {
+    const roles = { planner: {}, builder: {}, reviewer: {}, tester: { write: ["^e2e/"] }, scaffolder: {} };
+    const bare = makeRepo(baseTeam({ board: "tasks", roles }));
+    assert.equal(loadTeam(bare).harness.journeys, "auto");
+    assert.ok(!journeysRequired(bare, loadTeam(bare)), "a tester and a scaffolder, and no suite yet: journeys close as before");
+    const pagesOnly = makeRepo(baseTeam({ board: "tasks", roles }), { ".a6g/harness.json": { pages: [{ id: "home", path: "/" }] } });
+    assert.ok(!journeysRequired(pagesOnly, loadTeam(pagesOnly)), "pages alone aren't a suite");
+    const manifest = { ".a6g/harness.json": { e2e: { config: "playwright.config.ts" } } };
+    const suite = makeRepo(baseTeam({ board: "tasks", roles }), manifest);
+    assert.ok(journeysRequired(suite, loadTeam(suite)));
+    const optional = makeRepo(baseTeam({ board: "tasks", roles, harness: { journeys: "optional" } }), manifest);
+    assert.ok(!journeysRequired(optional, loadTeam(optional)), "the operator's word wins");
+    const required = makeRepo(baseTeam({ board: "tasks", roles, harness: { journeys: "required" } }));
+    assert.ok(journeysRequired(required, loadTeam(required)));
+  });
+
+  test("Playwright is found from the configuration's folder upward", () => {
+    const home = makeRepo();
+    assert.equal(playwrightCli(home), null);
+    write(home, { "apps/web/node_modules/@playwright/test/cli.js": "", "apps/web/e2e/playwright.config.ts": "" });
+    assert.equal(playwrightCli(join(home, "apps", "web", "e2e")), join(home, "apps", "web", "node_modules", "@playwright", "test", "cli.js"));
+    assert.equal(playwrightCli(home), null, "not downward");
+    // The merge's scratch worktree is inside the checkout, so the checkout's own install is found from it.
+    write(home, { "node_modules/playwright/cli.js": "", ".a6g/run/merge/playwright.config.ts": "" });
+    assert.equal(playwrightCli(join(home, ".a6g", "run", "merge")), join(home, "node_modules", "playwright", "cli.js"));
+    assert.equal(playwrightCli(join(home, "apps", "web")), join(home, "apps", "web", "node_modules", "@playwright", "test", "cli.js"), "the nearest");
+  });
+
+  test("the factory's browser is proven by starting it: one that isn't downloaded is said so", () => {
+    const before = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.PLAYWRIGHT_BROWSERS_PATH = tmp("a6g-no-browsers-");
+    try {
+      assert.match(
+        browserProblem() ?? "",
+        /the factory's browser \(Chromium's headless shell\) can't start: it isn't downloaded\. a6g self-install fetches it/
+      );
+    } finally {
+      process.env.PLAYWRIGHT_BROWSERS_PATH = before;
+    }
+  });
 });
 
 describe("journeys as specs, in a real browser", { skip: noBrowser ?? false }, () => {
@@ -111,7 +153,7 @@ describe("journeys as specs, in a real browser", { skip: noBrowser ?? false }, (
     mkdirSync(join(home, "node_modules"), { recursive: true });
     for (const name of ["playwright", "playwright-core"]) symlinkSync(join(ROOT, "node_modules", name), join(home, "node_modules", name));
     const loaded = loadTeam(home);
-    assert.equal(loaded.harness.journeys, "required", "a team with a scaffolder requires its journeys");
+    assert.ok(journeysRequired(home, loaded), "a team with a suite requires its journeys");
     const first = git(home, "rev-parse", "HEAD");
     const journeys = [task({ id: "1", kind: "journey", status: "approved" }), task({ id: "2", kind: "journey", status: "approved" })];
     const all = [...journeys, task({ id: "3", parent: "1", sha: first }), task({ id: "4", parent: "2", sha: first })];

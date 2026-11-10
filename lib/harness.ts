@@ -173,6 +173,12 @@ export function readHarness(dir: string, ref?: string): { harness: Harness | nul
   return { harness, problems: problems.map((problem) => `${HARNESS_FILE} ${problem}`) };
 }
 
+// Whether the team's journeys need their specs passing: the operator's word (team.json harness.journeys), else exactly
+// when the team's checkout has a suite to prove them with. A team with no suite yet closes its journeys as it always
+// did, and the finish line asks every journey's tests once there is one.
+export const journeysRequired = (home: string, team: Team): boolean =>
+  team.harness.journeys === "auto" ? Boolean(readHarness(home).harness?.e2e) : team.harness.journeys === "required";
+
 // What a branch's manifest checks less than the integration branch's: the operator's call (Article 5). Pages gone,
 // or seen at another path or signed in otherwise; the suite or its sign-ins gone, or another configuration.
 export function narrowing(before: Harness | null, after: Harness | null): string[] {
