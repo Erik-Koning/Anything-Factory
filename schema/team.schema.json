@@ -28,7 +28,7 @@
       "description": "45m, 6h, 2d, or minutes."
     },
     "roleName": {
-      "enum": ["planner", "builder", "tester", "reviewer", "ux-specialist", "innovator", "approver"]
+      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "ux-specialist", "innovator", "approver"]
     },
     "id": {
       "type": "string",
@@ -376,6 +376,9 @@
             }
           ],
           "description": "Testers need write: where the tests live."
+        },
+        "scaffolder": {
+          "$ref": "#/$defs/role"
         },
         "reviewer": {
           "$ref": "#/$defs/role"

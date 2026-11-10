@@ -14,6 +14,7 @@ const KIND_LABEL: Record<Kind, string> = {
   research: "Research",
   test: "Test",
   "test-infra": "Test infrastructure",
+  scaffold: "Scaffolding (the repository's structure)",
   journey: "Journey (groups tasks)",
 };
 

@@ -51,6 +51,22 @@ describe("guard", () => {
     }
   });
 
+  test("a scaffolder writes the harness manifest but no other rule, and claims its tasks", async () => {
+    const scaffolded = makeRepo(baseTeam({ board: "tasks", roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} } }));
+    await selfTest(scaffolded, guardCases(loadTeam(scaffolded)));
+    await holds([
+      writes(scaffolded, "scaffolder", ".a6g/harness.json", "allow"),
+      writes(scaffolded, "scaffolder", "playwright.config.ts", "allow"),
+      writes(scaffolded, "scaffolder", ".a6g/team.json", "refuse"),
+      writes(scaffolded, "scaffolder", ".a6g/adapters/gate.sh", "refuse"),
+      writes(scaffolded, "builder", ".a6g/harness.json", "refuse"),
+      bash(scaffolded, "scaffolder", "echo '{}' > .a6g/harness.json", "allow"),
+      bash(scaffolded, "scaffolder", "echo x >> .a6g/brief.md", "refuse"),
+      bash(scaffolded, "scaffolder", "a6g task claim", "allow"),
+      bash(scaffolded, "scaffolder", "a6g merge a6g/s1-x", "refuse"),
+    ]);
+  });
+
   test("the self-test passes for every example team", async () => {
     for (const file of readdirSync(join(ROOT, "examples"))) {
       const example = makeRepo({ ...(JSON.parse(readFileSync(join(ROOT, "examples", file), "utf8")) as RawTeam), name: "fixture" });

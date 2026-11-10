@@ -244,6 +244,9 @@ export function draftTeam(found: Detected, { name, branch, owner }: { name: stri
     approver: { limit: 1 },
     ...(found.ui.length ? { "ux-specialist": { limit: 1 } } : {}),
     ...(found.e2e.length && tests ? { tester: { limit: 1, write: [tests] } } : {}),
+    // Anything with an app (or nothing yet) gets the harness's owner: it sets the browser checks up where the
+    // repository has none, keeps them working, and makes an empty repository's skeleton.
+    ...(app ? { scaffolder: { limit: 1 } } : {}),
   };
   if (roles["tester"] && roles["builder"] && tests) roles["builder"].deny = [tests];
   return {

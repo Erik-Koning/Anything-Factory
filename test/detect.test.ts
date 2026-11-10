@@ -75,6 +75,8 @@ describe("detect", () => {
     assert.deepEqual(team.roles.tester?.write, ["^e2e/"]);
     assert.deepEqual(team.roles.builder?.deny, ["^e2e/"]);
     assert.ok(team.roles["ux-specialist"], "a UI gets a UX specialist");
+    assert.equal(team.roles.scaffolder?.limit, 1, "an app gets the harness's owner");
+    assert.deepEqual(team.review.required, ["builder", "scaffolder"]);
     assert.deepEqual(team.board, { type: "tasks" }, "no GitHub remote, so the task graph");
     assert.equal(team.environment.needsDocker, true, "Supabase runs in Docker");
     assert.equal(team.worktreeSetup, "pnpm install --frozen-lockfile --prefer-offline");
@@ -88,6 +90,7 @@ describe("detect", () => {
     git(cli, "add", "-A");
     const draft = draftTeam(detect(cli), { name: "tally", branch: "a6g/next" });
     assert.deepEqual([draft.environment?.script, draft.afterMerge], [null, null]);
+    assert.equal(draft.roles?.["scaffolder"], undefined, "a library has no browser harness to own");
     write(cli, { "public/index.html": "<h1>Tally</h1>\n" });
     git(cli, "add", "-A");
     assert.equal(draftTeam(detect(cli), { name: "tally", branch: "a6g/next" }).environment?.script, ".a6g/adapters/env.sh");

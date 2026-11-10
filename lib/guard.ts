@@ -31,6 +31,7 @@ import {
   withoutExcludes,
 } from "./shell.ts";
 import { waitRefusal } from "./steer.ts";
+import { CLAIMANTS } from "./tasks/model.ts";
 import { accounts } from "./subscriptions.ts";
 import { runningByInstance, T3_HOME, TOOLS } from "./t3.ts";
 import { escapeRegex } from "./util.ts";
@@ -598,7 +599,7 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
       ["approver", ...(team.approval.findings === "planner" ? ["planner"] : [])],
       "the approver (or the operator) decides on proposals, and nobody approves their own (Article 4).",
     ],
-    [a6g("task\\s+(?:claim|release|submit)"), ["builder", "tester", "planner"], "builders and testers claim, release and submit tasks."],
+    [a6g("task\\s+(?:claim|release|submit)"), [...CLAIMANTS, "planner"], "builders, testers and the scaffolder claim, release and submit tasks."],
     [a6g("request\\s+(?:add|reject|screen)|cycle\\s+close"), ["planner"], "the planner takes in and screens feature requests, and closes cycles."],
     [a6g("request\\s+note"), ["planner", "approver"], "the planner and the approver note what they found about a request."],
     [a6g("task\\s+fetch"), ["planner", "reviewer"], "the planner and the reviewer fetch a task's branch from the remote."],

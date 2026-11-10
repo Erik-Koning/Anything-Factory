@@ -47,7 +47,7 @@ describe("the engine audit's findings stay fixed", { concurrency: 8 }, () => {
     assert.match(planner, /\| builder \| `a6g-fixture-builder` \| `"worktree"` \|/);
     assert.match(planner, /\| tester \| `a6g-fixture-tester` \| `"worktree"` \|/);
     assert.match(planner, /\| reviewer \| `a6g-fixture-reviewer` \| `"shared"` \|/);
-    assert.match(readFileSync(join(ROOT, "plugin/agents/planner.md"), "utf8"), /`"worktree"` for builders and testers/);
+    assert.match(readFileSync(join(ROOT, "plugin/agents/planner.md"), "utf8"), /`"worktree"` for builders, testers and the scaffolder/);
   });
 
   test("#2 the watchdog removes only finished worktrees that hold nothing to lose", async () => {

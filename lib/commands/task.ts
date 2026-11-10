@@ -516,7 +516,7 @@ const baseRef = (team: Team, cwd: string): string => {
 const leaseMin = (team: Team): number => leaseMinutes(team.watchdog.stuckAfterMin);
 
 const claim: Handler = async ({ home, team, run, store, who }, [id], options) => {
-  if (!CLAIMS[who]) throw new Refused(`builders and testers claim tasks; you're the ${who}`);
+  if (!CLAIMS[who]) throw new Refused(`builders, testers and the scaffolder claim tasks; you're the ${who}`);
   const worktree = toplevel();
   if (worktree === realpathSync(home)) throw new Refused("claim from your own worktree, not the team's checkout");
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") as Kind | undefined;
@@ -627,7 +627,7 @@ const toplevelOrNull = (): string | null => {
 };
 
 const submit: Handler = async ({ team, run, store, who }, [id]) => {
-  if (!CLAIMS[who]) throw new Refused(`builders and testers submit what they built; you're the ${who}`);
+  if (!CLAIMS[who]) throw new Refused(`builders, testers and the scaffolder submit what they built; you're the ${who}`);
   const worktree = toplevel();
   const ctx = { all: [], machine: machineName(), worktree };
   const task = await getTask(store, id);

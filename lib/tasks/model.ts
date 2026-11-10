@@ -3,7 +3,7 @@
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
 import { type Hold, holdRefusal } from "./controls.ts";
 
-export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "chore", "research", "journey"] as const;
+export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "scaffold", "chore", "research", "journey"] as const;
 export type Kind = (typeof KINDS)[number];
 export const STATUSES = ["triage", "proposed", "researching", "approved", "building", "review", "done", "blocked", "question", "rejected"] as const;
 export type Status = (typeof STATUSES)[number];
@@ -228,6 +228,8 @@ export type Actor = string;
 export const OPERATOR = "operator";
 export const MERGE = "merge-queue";
 export const WATCHDOG = "watchdog";
+// The roles that claim tasks from the graph and hand them in (CLAIMS says which kinds).
+export const CLAIMANTS = ["builder", "tester", "scaffolder"];
 
 // The kinds a member files as findings, which the planner may approve (team.json approval.findings).
 export const FINDINGS: Kind[] = ["bug", "ux", "test", "test-infra"];
@@ -409,15 +411,15 @@ const RULES: Rule[] = [
   { via: "escalate", by: ["approver"], from: ["proposed"], to: ["question"], check: first(notJourney, approverActs) },
   { via: "escalate", by: [OPERATOR], from: OPERATOR_FROM, to: ["question"] },
 
-  { via: "claim", by: ["builder", "tester"], from: ["approved"], to: ["building"], check: (t, _to, actor, { all }) => claimRefusal(t, actor, all) },
+  { via: "claim", by: CLAIMANTS, from: ["approved"], to: ["building"], check: (t, _to, actor, { all }) => claimRefusal(t, actor, all) },
   {
     via: "release",
-    by: ["builder", "tester", "planner", OPERATOR],
+    by: [...CLAIMANTS, "planner", OPERATOR],
     from: ["building"],
     to: ["approved", "blocked"],
     check: holderOrPlanner,
   },
-  { via: "submit", by: ["builder", "tester"], from: ["building"], to: ["review"], check: holder },
+  { via: "submit", by: CLAIMANTS, from: ["building"], to: ["review"], check: holder },
   { via: "changes", by: ["reviewer", OPERATOR], from: ["review"], to: ["approved", "blocked"], check: sameBranch },
   { via: "merge", by: [MERGE], from: ["approved", "blocked", "question", "review"], to: ["done"], check: merged },
   // A branch that conflicts goes back to be claimed again and rebased.
@@ -433,9 +435,9 @@ const DOES: Record<Via, string> = {
   reject: "reject proposals",
   research: "send proposals back for research",
   escalate: "escalate proposals",
-  claim: "claim tasks; builders and testers do",
+  claim: "claim tasks; builders, testers and the scaffolder do",
   release: "release tasks",
-  submit: "submit tasks; builders and testers submit what they built",
+  submit: "submit tasks; builders, testers and the scaffolder submit what they built",
   changes: "ask for changes",
   merge: "merge",
   conflict: "send a conflicting branch back",
@@ -471,7 +473,7 @@ function notFrom(t: Task, to: Status, via: Via): string {
 // Why `actor` can't move `task` to `to` through `via`, or null when it can.
 export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx: MoveContext): string | null {
   if (task.status === to) return `task ${task.id} is already ${to}`;
-  if (to === "building" && via !== "claim") return "a task is building only when a builder or tester claims it (a6g task claim)";
+  if (to === "building" && via !== "claim") return "a task is building only when a member claims it (a6g task claim)";
   const theirs = RULES.filter((rule) => rule.via === via && rule.by.includes(actor));
   if (!theirs.length)
     return via === "status"
@@ -547,11 +549,16 @@ export function waitOutcome(t: Task, all: Task[]): { to: Status; why: string } |
   return t.approval ? { to: "approved", why: `${ids} done: back to work` } : { to: "proposed", why: `${ids} done: back to the planner, never approved` };
 }
 
-// Which kinds each role builds.
+// Which kinds each role builds, its own first: a plain claim takes the first of those before the rest. The scaffolder
+// owns the harness (test-infra) and the repository's structure (scaffold), and writes specs where the team has no
+// tester; a tester keeps test-infra where the team has no scaffolder. Builders claim neither, so nobody writes the
+// only spec of a journey they built.
 export const CLAIMS: Record<string, Kind[]> = {
   builder: ["feature", "bug", "ux", "chore"],
   tester: ["test", "test-infra"],
+  scaffolder: ["scaffold", "test-infra", "test"],
 };
+const OWN: Record<string, Kind[]> = { tester: ["test"], scaffolder: ["scaffold", "test-infra"] };
 
 const SEVERITY_ORDER: Record<string, number> = { blocker: 0, major: 1, minor: 3 };
 // Claim order: blockers, then majors, then the rest by priority (unscored work after scored) with minor findings last
@@ -581,7 +588,7 @@ export function conflictOf(task: Task, building: Task[]): Task | null {
 // (controls.ts), which lets only the work it finishes be claimed.
 export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold | null = null): string | null {
   const kinds = CLAIMS[role];
-  if (!kinds) return `the ${role} doesn't claim tasks; builders and testers do`;
+  if (!kinds) return `the ${role} doesn't claim tasks; builders, testers and the scaffolder do`;
   if (task.status !== "approved") return `task ${task.id} is ${task.status}, not approved`;
   if (!kinds.includes(task.kind)) return `task ${task.id} is ${task.kind} work, which the ${role} doesn't take (it takes ${kinds.join(", ")})`;
   const byId = new Map(all.map((t) => [t.id, t]));
@@ -597,10 +604,16 @@ export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold |
 
 // The task `role` should claim next, of those it may: the first in claim order.
 export function nextClaim(all: Task[], role: string, kind?: Kind, hold: Hold | null = null): Task | null {
-  return all.filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null).sort(claimOrder)[0] ?? null;
+  const own = OWN[role] ?? CLAIMS[role] ?? [];
+  const first = (t: Task): number => (own.includes(t.kind) ? 0 : 1);
+  return (
+    all
+      .filter((t) => (kind === undefined || t.kind === kind) && claimRefusal(t, role, all, hold) === null)
+      .sort((a, b) => first(a) - first(b) || claimOrder(a, b))[0] ?? null
+  );
 }
 
-// The branch name a claimant uses, matching its role's pattern (a6g/b142-resume-a-recording, a6g/t-142-…).
+// The branch name a claimant uses, matching its role's pattern (a6g/b142-resume-a-recording, a6g/t-142-…, a6g/s142-…).
 export function branchFor(task: Task, role: string, prefix: string): string {
   const slug =
     task.title
@@ -609,7 +622,7 @@ export function branchFor(task: Task, role: string, prefix: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 40)
       .replace(/-+$/, "") || "task";
-  return role === "tester" ? `${prefix}/t-${task.id}-${slug}` : `${prefix}/b${task.id}-${slug}`;
+  return role === "tester" ? `${prefix}/t-${task.id}-${slug}` : `${prefix}/${role === "scaffolder" ? "s" : "b"}${task.id}-${slug}`;
 }
 
 // The ticket a branch's name gives: the number in the first part after the prefix (a6g/b12-x/v2-y closes 12, and a

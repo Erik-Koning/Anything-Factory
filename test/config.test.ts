@@ -110,6 +110,24 @@ describe("config", () => {
     assert.equal(roleOfAgent(undefined), "");
   });
 
+  test("a scaffolder works on its own branch with a builder's lane plus the harness manifest, and is reviewed", () => {
+    const { team, problems } = norm({ ...baseTeam(), roles: { planner: {}, builder: {}, reviewer: {}, scaffolder: {} } });
+    assert.deepEqual(problems, []);
+    assert.equal(team.roles.scaffolder?.branch, "^a6g/s\\d+-");
+    assert.equal(team.roles.scaffolder?.worktree, true);
+    assert.equal(roleForBranch(team, "a6g/s12-playwright"), "scaffolder");
+    assert.equal(roleForBranch(team, "a6g/b12-playwright"), "builder");
+    assert.ok(laneAllows(team, "scaffolder", "playwright.config.ts"));
+    assert.ok(!factoryWrite(team, "scaffolder", ".a6g/harness.json"), "the manifest is in its lane");
+    assert.ok(factoryWrite(team, "scaffolder", ".a6g/team.json"), "the rules are not");
+    assert.ok(factoryWrite(team, "scaffolder", ".a6g/adapters/gate.sh"), "nor the gate");
+    assert.ok(factoryWrite(team, "builder", ".a6g/harness.json"), "only the scaffolder writes the manifest");
+    assert.deepEqual(team.review.required, ["builder", "scaffolder"]);
+    assert.ok(team.review.removedPattern, "removed assertions need a review");
+    assert.deepEqual(norm(baseTeam()).team.review.required.includes("scaffolder"), false, "no scaffolder, no default for one");
+    assert.match(norm({ ...baseTeam(), roles: { planner: {}, scaffolder: { branch: "^a6g/x-" } } }).problems.join("\n"), /roles\.scaffolder\.branch/);
+  });
+
   test("the factory's own paths", () => {
     for (const path of [
       ".a6g/team.json",

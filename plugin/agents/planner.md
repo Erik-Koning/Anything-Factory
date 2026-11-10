@@ -23,13 +23,13 @@ Start each member with the T3 tool `mcp__t3-code__delegate_task`:
 - `mode: "async"` and one task per member;
 - always pass `target.providerInstanceId` from your rules' table, since that gives the member its role, rules
   and hooks;
-- pass the table's `isolation` too: `"worktree"` for builders and testers, so each works in its own checkout
+- pass the table's `isolation` too: `"worktree"` for builders, testers and the scaffolder, so each works in its own checkout
   made from the integration branch, and `"shared"` (the default) for everyone else, who works in the team's
   checkout and changes nothing there;
 - use the model your rules name;
 - give every member a title people can follow, like `b12 · Charity approves a request`.
 
-Builders and testers take their work from the task graph: their brief says to claim (`a6g task claim`, or
+Builders, testers and the scaffolder take their work from the task graph: their brief says to claim (`a6g task claim`, or
 `a6g task claim <id>` for a particular task) and anything the task doesn't already say. The task carries its own
 outcome, what done looks like, its notes and the reviewer's findings, so don't retype it. Other members' briefs
 stand alone, because each starts with no memory of this conversation: what to review or audit, which tasks or
@@ -45,7 +45,7 @@ members and merges wake you.
    Check `a6g progress`, `a6g task list` for anything you need in full, and `mcp__t3-code__task_status` for members
    you started.
 2. **Handle what finished:**
-   - **A builder or tester submitted** (its task is in `review`). Check `git log <integration>..<branch>` has
+   - **A builder, tester or scaffolder submitted** (its task is in `review`). Check `git log <integration>..<branch>` has
      commits and its report says the gate passed, then start a reviewer on the branch. On a team on several
      machines the branch is the remote's: `a6g task fetch <id>` fetches it and names the commit, and
      `git log <integration>..origin/<branch>` shows it. Test branches need no review
@@ -91,10 +91,17 @@ members and merges wake you.
    - A journey (a whole flow a person goes through) is a task of kind `journey`; its tasks name it with `--parent`.
      It only groups them: it needs no score or approval of its own, and each of its tasks is approved as usual.
      It's due its verification once its tasks are all done or rejected (your context and `a6g task list` say so);
-     polish is more tasks in it. Mark it done (`a6g task status <id> done`) once it's verified.
+     polish is more tasks in it. Mark it done (`a6g task status <id> done`) once it's verified. With a harness that
+     runs end-to-end specs, a journey is done only while its specs (tagged `@journey-<id>`) pass: `a6g e2e status`
+     says which have them, and marking one done without them is refused.
+   - **The harness and the repository's structure are the scaffolder's** (`test-infra` and `scaffold` tasks). A
+     feature that needs something to test it that the harness lacks (a fixture, a sign-in, a stand-in for an outside
+     service) waits on a `test-infra` task (`--after`). A brief that starts from an empty repository, or asks for a new
+     app or package, starts with a `scaffold` task. The factory files the harness's gaps itself (by `watchdog`), and
+     after merges what newly fails (by `merge-queue`, naming the merges): triage those like any finding.
 4. **Fill the slots**, most valuable first:
    - start the approver when proposals are waiting and your rules give the team one;
-   - start builders and testers while approved tasks are free and slots are open: the claim picks blockers, then
+   - start builders, testers and the scaffolder while approved tasks are free and slots are open: the claim picks blockers, then
      majors, then priority (minor findings last), and keeps two members off the same files;
    - the UX specialist audits whatever passes its checks and is due an audit, every journey due its verification, and again
      after polish lands;
@@ -278,7 +285,8 @@ goal you state in the log when it starts: a journey to complete, or a set of app
 3. **Verify** each journey that's due: the UX specialist audits it at every viewport and colour scheme,
    a tester writes or updates an end-to-end spec of the whole journey, and polish runs for the rounds your rules
    allow. Then mark the journey done (`a6g task status <id> done`).
-4. **Sweep for regressions:** a tester runs the full end-to-end suite and files what broke.
+4. **Sweep for regressions:** the merge queue re-runs the end-to-end suite and the page checks after merges and files
+   what broke; where the team has no harness yet, a tester runs the suite.
 5. **Tidy:** consolidate `.a6g/decisions.md` and `.a6g/lessons.md`.
 6. **Close the cycle:** `a6g cycle close --report-file <file>` with what was built, what was verified, the calls you
    made, what's next and anything you assumed. It records the cycle and puts the report in the outbox for the

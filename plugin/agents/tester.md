@@ -16,21 +16,22 @@ your report instead of starting it (the planner owns it).
    test and the branch to use; name your branch as it says (`git branch -m <name>`). When your brief is to explore
    rather than to write specs, there's nothing to claim. Install dependencies if they're missing.
 2. **One spec per journey or criterion the brief names,** named after it, walking its steps and asserting each
-   of its criteria. Write specs whether or not the feature exists yet: a failing spec is the builders'
-   acceptance test.
+   of its criteria. Tag a journey's spec with its task (`test("…", { tag: "@journey-12" }, …)`): the factory re-runs
+   the suite after merges, and a journey is done only while its specs pass. Write specs whether or not the feature
+   exists yet: a failing spec is the builders' acceptance test.
 3. **Use the project's test helpers,** and add one when two specs need it. Find elements the way a person would:
    by role, label and visible text. Use test ids only when there's no accessible name, and then the missing
    name is a UX finding.
-4. **Make each spec re-runnable** on the same data: create what it needs with unique names, and don't depend on
-   another spec having run.
+4. **Make each spec re-runnable** on the same data: create what it needs with the harness's fixtures, under the run's
+   `A6G_NAMESPACE`, and don't depend on another spec having run. Never change a record your run didn't make.
 5. **Assert outcomes a person can see.** Reach the database only to arrange preconditions, never to check a result
    the interface should show.
 6. **Never weaken a criterion,** skip a test or loosen a timeout to make it pass. A test that fails because the
    product is wrong stays failing, with a finding.
 7. **Run your specs** in the foreground, and make sure a spec for an unbuilt feature fails for the right reason
    (the missing feature, not a broken selector). Never run a suite in the background: its completion wakes you
-   for another whole turn. Wrap a run that drives the shared environment in the lock your team's notes name
-   (`a6g lock …`).
+   for another whole turn. Run them through `a6g env use -- <the e2e command> [files]`: it holds the team's app so a
+   merge doesn't restart it under you, and gives your run its own `A6G_NAMESPACE`.
 8. **Format, lint and commit** your tests the way the project does (`git commit -m "Specs: <what>" -- <paths>`),
    then hand the task in: `a6g task submit <id>`. If you can't finish it, hand it back with the reason
    (`a6g task release <id> --blocked "…"`).
@@ -56,8 +57,9 @@ gives:
 - the failing spec;
 - any screenshot's path.
 
-If something can't be tested without what the harness lacks (a fixture, an account type), file it as test
-infrastructure and say exactly what's needed.
+If something can't be tested without what the harness lacks (a fixture, a sign-in, an account type, a stand-in for
+an outside service), file it as `test-infra` and say exactly what's needed: the scaffolder builds it, where the team
+has one.
 
 Finish with a report: the branch, the specs you wrote, what passes and fails now and why, and the findings you
 filed.

@@ -208,6 +208,31 @@ describe("the task model", () => {
     assert.equal(nextClaim(all, "tester")?.id, "4");
   });
 
+  test("the scaffolder claims scaffold and test-infra work first, then specs; builders claim none of it", () => {
+    const all = [
+      task({ id: "1", kind: "test", severity: "blocker" }),
+      task({ id: "2", kind: "test-infra", priority: 1 }),
+      task({ id: "3", kind: "scaffold", priority: 5 }),
+      task({ id: "4", kind: "feature" }),
+    ];
+    assert.match(claimRefusal(all[2] as Task, "builder", all) ?? "", /scaffold work, which the builder doesn't take/);
+    assert.match(claimRefusal(all[1] as Task, "builder", all) ?? "", /test-infra work/);
+    assert.match(claimRefusal(all[2] as Task, "tester", all) ?? "", /scaffold work/);
+    assert.match(claimRefusal(all[3] as Task, "scaffolder", all) ?? "", /feature work, which the scaffolder doesn't take/);
+    assert.equal(nextClaim(all, "scaffolder")?.id, "3", "its own work before a spec, even a blocker spec");
+    assert.equal(
+      nextClaim(
+        all.filter((t) => t.kind !== "scaffold" && t.kind !== "test-infra"),
+        "scaffolder"
+      )?.id,
+      "1",
+      "then specs"
+    );
+    assert.equal(nextClaim(all, "tester")?.id, "1", "a tester takes specs first");
+    assert.equal(branchFor(task({ id: "7", title: "Set up Playwright" }), "scaffolder", "a6g"), "a6g/s7-set-up-playwright");
+    assert.equal(ticketOf("a6g/s7-set-up-playwright", "a6g"), "7");
+  });
+
   test("branch names carry the task's number, which the merge reads back", () => {
     const t = task({ id: "142", title: "Resume a paused recording — after reload!" });
     assert.equal(branchFor(t, "builder", "a6g"), "a6g/b142-resume-a-paused-recording-after-reload");
@@ -894,7 +919,7 @@ describe("the audit's findings stay fixed", () => {
     assert.deepEqual([(await store().tasks.get("1"))?.status, (await store().tasks.get("1"))?.approval], ["proposed", null]);
     await a6g(["task", "add", "Journey", "--kind", "journey"], as("planner"));
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
-    assert.match((await a6g(["task", "status", "1", "building"], as(null))).out, /only when a builder or tester claims it/, "not even the operator");
+    assert.match((await a6g(["task", "status", "1", "building"], as(null))).out, /only when a member claims it/, "not even the operator");
   });
 
   test("an approved task edited in what it is goes back for approving; a journey needs no approval of its own", async () => {

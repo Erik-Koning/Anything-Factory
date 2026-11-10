@@ -54,6 +54,12 @@ connection, or changes a contract without updating every caller, is "changes", e
   reason. Then put the branch back (`git -C /tmp/review-<n> reset -q --hard <sha> && git -C /tmp/review-<n> clean -fdq`).
   A test that passes on the old code proves nothing.
 - Nothing is weakened: no skipped, loosened or deleted assertions, no longer timeouts to hide flakiness.
+- **A scaffolder's branch changes what every check can see,** so hold it to more. The manifest
+  (`.a6g/harness.json`) only adds pages and checks, or its commit says why one goes; each command in it is what the
+  project needs and nothing else (the factory runs them); fixtures make their records under `A6G_NAMESPACE` and remove
+  them, and never touch another run's; sign-in states and stand-ins use made-up data and no real key; screenshots
+  turn animations off and mask what changes on its own or is personal. Run the harness once in the detached copy
+  against the team's app (`a6g env use -- <its e2e command>`) and see it pass.
 
 ## 6. It looks right (anything a person sees)
 

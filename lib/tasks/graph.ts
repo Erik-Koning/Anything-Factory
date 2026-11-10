@@ -17,6 +17,7 @@ const ICON: Record<Kind, string> = {
   ux: "eye",
   test: "check",
   "test-infra": "gear",
+  scaffold: "gear",
   chore: "gear",
   research: "search",
   journey: "layers",

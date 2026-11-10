@@ -191,6 +191,10 @@ export const GMAIL = [
   "mcp__claude_ai_Gmail__get_message",
 ];
 
+// What a worktree role's branches start with after the prefix: a6g/b12-…, a6g/t-12-…, a6g/s12-… (lib/tasks/model.ts
+// branchFor names them the same way).
+export const BRANCH_STEM: Record<string, string> = { builder: "b\\d+-", tester: "t-", scaffolder: "s\\d+-" };
+
 // The roles the factory has prompts for (plugin/agents/<role>.md), and what each is by default.
 export const ROLES: Record<string, RoleDefaults> = {
   planner: {
@@ -201,6 +205,15 @@ export const ROLES: Record<string, RoleDefaults> = {
   },
   builder: { summary: "builds one ticket on its own branch", limit: 2, readOnly: false, write: ["*"], worktree: true },
   tester: { summary: "writes and fixes end-to-end tests on its own branch", limit: 1, readOnly: false, write: [], worktree: true },
+  // The means of checking: the harness (browser runner, sign-ins, fixtures, stand-ins) and its manifest, and a
+  // repository's structure (an app or package skeleton). Its lane is a builder's plus the manifest, which only it writes.
+  scaffolder: {
+    summary: "sets up and keeps the test harness and the repository's structure, on its own branch",
+    limit: 1,
+    readOnly: false,
+    write: ["*", "^\\.a6g/harness\\.json$"],
+    worktree: true,
+  },
   reviewer: { summary: "reviews one finished branch before it merges", limit: 1, readOnly: true, write: [] },
   "ux-specialist": { summary: "audits pages and journeys, desktop and phone, light and dark", limit: 1, readOnly: true, write: [] },
   innovator: { summary: "finds what the brief misses and proposes it", limit: 1, readOnly: true, write: [] },
@@ -420,7 +433,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     const compactAt = whole(settings.compactAt, `${where}.compactAt`, 1);
     if (compactAt !== undefined) lane.compactAt = compactAt;
     const pattern = settings.branch === undefined ? undefined : regex(settings.branch, `${where}.branch`);
-    if (base.worktree) lane.branch = pattern ?? regex(`^${prefix}/${id === "tester" ? "t-" : "b\\d+-"}`, `${where}.branch`);
+    if (base.worktree) lane.branch = pattern ?? regex(`^${prefix}/${BRANCH_STEM[id] ?? "b\\d+-"}`, `${where}.branch`);
     // Only roles that work on their own branch have one; a pattern here would let the merge queue take its branches.
     else if (pattern !== undefined) warnings.push(`${where}.branch: the ${id} works in the shared checkout and has no branch (ignored)`);
     roles[id] = lane;
@@ -432,6 +445,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
   for (const [id, sample] of [
     ["builder", `${prefix}/b1-task`],
     ["tester", `${prefix}/t-1-task`],
+    ["scaffolder", `${prefix}/s1-task`],
   ] as const) {
     const pattern = roles[id]?.branch;
     if (tasksBoard && pattern && pattern !== NOTHING && !new RegExp(pattern).test(sample))
@@ -548,8 +562,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     );
 
   const review = object(input.review, "review", ["required", "removedPattern", "maxRounds"]) ?? {};
-  // A tester's branches get the assertion default; null turns it off.
-  let removedPattern: string | null = roles["tester"] ? ASSERTION_PATTERN : null;
+  // A tester's or scaffolder's branches get the assertion default; null turns it off.
+  let removedPattern: string | null = roles["tester"] || roles["scaffolder"] ? ASSERTION_PATTERN : null;
   if (review.removedPattern !== undefined) removedPattern = review.removedPattern === null ? null : regex(review.removedPattern, "review.removedPattern");
   const gate = object(input.gate, "gate", ["full", "quick", "concurrency"]) ?? {};
   const full = textOrNull(gate.full, "gate.full") ?? null;
@@ -702,7 +716,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     model: text(input.model, "model") ?? "claude-opus-5-5",
     roles,
     review: {
-      required: list(review.required, "review.required", role) ?? ["builder"],
+      // A scaffolder's harness decides what the team's checks can see, so its branches are reviewed like a builder's.
+      required: list(review.required, "review.required", role) ?? (roles["scaffolder"] ? ["builder", "scaffolder"] : ["builder"]),
       removedPattern,
       maxRounds: whole(review.maxRounds, "review.maxRounds", 1) ?? 3,
     },
