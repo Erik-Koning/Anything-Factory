@@ -3,11 +3,12 @@
 // team.json, the factory reads it from the team's checkout, never a worktree's copy, so a branch can't change the
 // checks it's held to (a worktree's copy is read only to try a branch, recording nothing).
 //
-// It only adds: pages to check (joining team.json's pages.list), the sign-ins they need, how the app switches colour
-// scheme, and where the end-to-end suite's Playwright configuration is. It holds no command: the factory runs the
-// repository's own Playwright with that configuration. Whatever could loosen a check (the app's address, console
-// messages to ignore, the smallest touch target, what a page's source is) stays the operator's, in team.json; and a
-// branch that narrows what the manifest checks needs the operator's approval (narrowing, lib/commands/merge.ts).
+// It only adds: pages to check (joining team.json's pages.list), the sign-ins they need, who each page must not be
+// served to, how the app switches colour scheme, and where the end-to-end suite's Playwright configuration is. It
+// holds no command: the factory runs the repository's own Playwright with that configuration. Whatever could loosen a
+// check (the app's address, console messages to ignore, the smallest touch target, what a page's source is) stays the
+// operator's, in team.json; and a branch that narrows what the manifest checks needs the operator's approval
+// (narrowing, lib/commands/merge.ts).
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +16,8 @@ import type { PageSpec, PagesSettings, Team } from "./config.ts";
 
 export const HARNESS_FILE = ".a6g/harness.json";
 export const SCHEME_NAMES = ["light", "dark"];
+// In a page's `refuses`: nobody signed in.
+export const SIGNED_OUT = "signed-out";
 
 // How a colour scheme is switched on, for apps that don't follow the browser's own setting.
 export interface SchemeSetup {
@@ -30,6 +33,9 @@ export interface HarnessPage {
   as?: string;
   // CSS selectors painted over in screenshots: what changes on its own, or is personal (Article 8).
   mask?: string[];
+  // Who the app must not serve the page to: sign-in states, and "signed-out". Each is asked for it (a6g pages), and
+  // has to be sent elsewhere or answered 401, 403 or 404.
+  refuses?: string[];
 }
 export interface Harness {
   // The suite: the repository's Playwright configuration, and how long a whole run may take.
@@ -89,17 +95,19 @@ export function parseHarness(input: unknown): { harness: Harness; problems: stri
     if (project && Object.keys(states).length) harness.auth = { project, states };
   }
   if (root.pages !== undefined && !Array.isArray(root.pages)) bad("pages", "a list of pages");
+  const stateNames = Object.keys(harness.auth?.states ?? {});
+  // Each state a page refuses, and where it's said: checked once every page is read.
+  const refused: { where: string; state: string }[] = [];
   for (const [i, value] of (Array.isArray(root.pages) ? root.pages : []).entries()) {
     const where = `pages[${i}]`;
-    const spec = record(value, where, ["id", "path", "title", "as", "mask"]);
+    const spec = record(value, where, ["id", "path", "title", "as", "mask", "refuses"]);
     if (!spec) continue;
     const id = typeof spec.id === "string" && ID.test(spec.id) ? spec.id : bad(`${where}.id`, "letters, digits, _ and - (it names the page's files)");
     const path =
       typeof spec.path === "string" && spec.path.startsWith("/") ? spec.path : bad(`${where}.path`, "the page's path on the app, starting with /");
     const title = text(spec.title, `${where}.title`);
     const as = text(spec.as, `${where}.as`);
-    if (as !== undefined && !harness.auth?.states[as])
-      bad(`${where}.as`, `a sign-in state auth.states names (${Object.keys(harness.auth?.states ?? {}).join(", ") || "none yet"})`);
+    if (as !== undefined && !harness.auth?.states[as]) bad(`${where}.as`, `a sign-in state auth.states names (${stateNames.join(", ") || "none yet"})`);
     let mask: string[] | undefined;
     if (spec.mask !== undefined) {
       if (!Array.isArray(spec.mask)) bad(`${where}.mask`, "a list of CSS selectors");
@@ -108,13 +116,44 @@ export function parseHarness(input: unknown): { harness: Harness; problems: stri
           typeof selector === "string" && selector.trim() ? [selector] : (bad(`${where}.mask[${j}]`, "a CSS selector") ?? [])
         );
     }
+    const refuses: string[] = [];
+    if (spec.refuses !== undefined) {
+      if (!Array.isArray(spec.refuses) || !spec.refuses.length)
+        bad(`${where}.refuses`, `who the page must not be served to: a list of sign-in states and "${SIGNED_OUT}"`);
+      else
+        for (const [j, state] of spec.refuses.entries()) {
+          const at = `${where}.refuses[${j}]`;
+          if (state === SIGNED_OUT && stateNames.includes(SIGNED_OUT))
+            bad(at, `"${SIGNED_OUT}" means nobody signed in, and auth.states names a sign-in ${SIGNED_OUT}: give that state another name`);
+          else if (state !== SIGNED_OUT && !(typeof state === "string" && stateNames.includes(state)))
+            bad(at, `"${SIGNED_OUT}", or a sign-in state auth.states names (${stateNames.join(", ") || "none yet"})`);
+          else if (state === (as ?? SIGNED_OUT))
+            bad(at, `the page is seen ${as ? `as ${as}` : "signed out"} ("as"), so it can't refuse ${as ? "that state" : "whoever is signed out"} too`);
+          else if (refuses.includes(state)) bad(at, `${state} is listed twice`);
+          else {
+            refuses.push(state);
+            if (state !== SIGNED_OUT) refused.push({ where: at, state });
+          }
+        }
+    }
     if (id === undefined || path === undefined) continue;
     if (harness.pages.some((page) => page.id === id)) {
       bad(`${where}.id`, `more than one page is named ${id}`);
       continue;
     }
-    harness.pages.push({ id, path, ...(title === undefined ? {} : { title }), ...(as === undefined ? {} : { as }), ...(mask?.length ? { mask } : {}) });
+    harness.pages.push({
+      id,
+      path,
+      ...(title === undefined ? {} : { title }),
+      ...(as === undefined ? {} : { as }),
+      ...(mask?.length ? { mask } : {}),
+      ...(refuses.length ? { refuses } : {}),
+    });
   }
+  // A refusal counts only from a sign-in a run can prove, so some page has to be seen as each state that's refused.
+  for (const { where, state } of refused)
+    if (!harness.pages.some((page) => page.as === state))
+      bad(where, `no page is seen as ${state} ("as": "${state}"), and a refusal counts only from a sign-in a page shows to be live`);
   for (const [name, value] of Object.entries(record(root.schemes, "schemes", null) ?? {})) {
     const where = `schemes.${name}`;
     if (!SCHEME_NAMES.includes(name)) {
@@ -180,7 +219,8 @@ export const journeysRequired = (home: string, team: Team): boolean =>
   team.harness.journeys === "auto" ? Boolean(readHarness(home).harness?.e2e) : team.harness.journeys === "required";
 
 // What a branch's manifest checks less than the integration branch's: the operator's call (Article 5). Pages gone,
-// or seen at another path or signed in otherwise; the suite or its sign-ins gone, or another configuration.
+// or seen at another path or signed in otherwise, or refusing fewer; the suite or its sign-ins gone, or another
+// configuration.
 export function narrowing(before: Harness | null, after: Harness | null): string[] {
   if (!before) return [];
   const found: string[] = [];
@@ -191,6 +231,7 @@ export function narrowing(before: Harness | null, after: Harness | null): string
     else if (same.path !== page.path) found.push(`page ${page.id} moves from ${page.path} to ${same.path}`);
     else if ((same.as ?? "") !== (page.as ?? ""))
       found.push(`page ${page.id} is seen ${same.as ? `as ${same.as}` : "signed out"} instead of ${page.as ? `as ${page.as}` : "signed out"}`);
+    else for (const state of page.refuses ?? []) if (!same.refuses?.includes(state)) found.push(`page ${page.id} no longer refuses ${state}`);
   }
   if (before.e2e && !now.e2e) found.push("the end-to-end suite is no longer run");
   else if (before.e2e && now.e2e && before.e2e.config !== now.e2e.config)
@@ -204,7 +245,7 @@ export function narrowing(before: Harness | null, after: Harness | null): string
 
 // What a6g pages checks: the operator's settings and pages (team.json), with the manifest's pages after them, its
 // sign-ins and its scheme set-up.
-export type PageCheck = PageSpec & Pick<HarnessPage, "as" | "mask">;
+export type PageCheck = PageSpec & Pick<HarnessPage, "as" | "mask" | "refuses">;
 export interface PagePlan extends PagesSettings {
   list: PageCheck[];
   schemeSetup: Record<string, SchemeSetup>;

@@ -150,6 +150,17 @@ The other half of 35: wherever a value ended up, it doesn't reach the repository
 - **Where:** `lib/harness.ts` (the field, its validation, `narrowing`), `lib/commands/pages.ts` (`signIn` makes the
   refused states too; the refusal pass; the result and its printing), `lib/verify.ts` (the finding), the
   scaffolder's prompt.
+- **As built, beyond the above:** the proof of a sign-in is stronger than "a page seen as that state lands". A public
+  page lands with a dead session too, so the sign-in is shown live only when one of the state's own pages lands
+  signed in and the same page is refused signed out (up to three are tried, those that refuse `signed-out` first).
+  A state whose pages are all public can't be shown live, and its refusals read "not checked", with the page to add.
+  Each page is asked for once per state in a run, however many pages lean on the answer. Who a page is served to is
+  a finding of its own (`verify:access:<id>`), so one already open for how the page looks never hides it: a blocker
+  when the page is served, major when nothing could be told. A page seen as a state can't refuse that state, a
+  state named `signed-out` doesn't load, and an answer of 500 is neither the page nor a refusal, and fails.
+- **Another limit, stated:** being sent to another path is the refusal, wherever that path is. An app that sends a
+  member from `/admin` to another page inside the area reads as refusing them. The `@access` test is what holds
+  whose data an address gives.
 
 ### 30. Access tests are a gap the factory files
 
@@ -159,6 +170,8 @@ The other half of 35: wherever a value ended up, it doesn't reach the repository
   refused; one for each kind of record that belongs to somebody.
 - Rejected by the operator, it stays quiet (`fileOnce`).
 - **Where:** `fileGaps` in `lib/verify.ts`; the tester's and scaffolder's prompts name the tag.
+- **As built, beyond the above:** the gap closes on a test tagged `@access` that checks (not told to skip, not told
+  to fail), passing or not. One that fails is already the suite's finding, and a second task for it would be noise.
 
 ### 32. Vulnerable packages are a finding
 
@@ -296,7 +309,7 @@ Defaults are chosen; say if you'd choose otherwise.
 
 - [x] G1. Secrets through a manager (35)
 - [x] G2. Secrets don't merge (31)
-- [ ] G3. `refuses` and the `@access` gap (29, 30)
+- [x] G3. `refuses` and the `@access` gap (29, 30)
 - [ ] G4. The package audit (32)
 - [ ] G5. The security reviewer (33)
 - [ ] H. The quality numbers (34)

@@ -219,6 +219,9 @@ export function reachedTests(report: Report | null): boolean {
   return (report?.suites ?? []).some(any);
 }
 
+// The tag of a test of what one user may do to another's: signed in as one, refused the other's records.
+export const ACCESS_TAG = "@access";
+
 // A test's journeys, by tag: exactly @journey-<id> (so @journey-1 isn't @journey-12).
 export const journeysOf = (spec: Pick<SpecResult, "tags">): string[] => spec.tags.flatMap((tag) => /^@journey-(\d+)$/.exec(tag)?.[1] ?? []);
 

@@ -63,6 +63,64 @@ describe("the harness manifest", () => {
     assert.match(said({ pages: [], auth: manifest.auth }), /auth: sign-ins are made by a project in e2e\.config/);
   });
 
+  test("a page says who it refuses: states a page is seen as, and the signed-out; taking one out is checking less (29)", () => {
+    const states = { staff: "e2e/.auth/staff.json", member: "e2e/.auth/member.json" };
+    const withAccess = {
+      ...manifest,
+      auth: { project: "auth", states },
+      pages: [
+        { id: "home", path: "/" },
+        { id: "account", path: "/account", as: "member", refuses: ["signed-out"] },
+        { id: "admin", path: "/admin", as: "staff", refuses: ["member", "signed-out"] },
+        // A page for the signed-out that sends a member on.
+        { id: "join", path: "/join", refuses: ["member"] },
+      ],
+    };
+    const { harness, problems } = parseHarness(withAccess);
+    assert.deepEqual(problems, []);
+    assert.deepEqual(harness.pages[2], { id: "admin", path: "/admin", as: "staff", refuses: ["member", "signed-out"] });
+    assert.equal(harness.pages[0]?.refuses, undefined);
+    const { team } = normalize(baseTeam() as RawTeam, "");
+    assert.deepEqual(pagePlan(team, harness).list[2]?.refuses, ["member", "signed-out"], "the page checks get it");
+
+    const said = (page: Record<string, unknown>, auth: unknown = withAccess.auth) =>
+      parseHarness({ ...withAccess, auth, pages: [...withAccess.pages.slice(0, 2), page] }).problems.join("\n");
+    const admin = { id: "admin", path: "/admin", as: "staff" };
+    assert.match(said({ ...admin, refuses: "member" }), /pages\[2\]\.refuses: who the page must not be served to: a list/);
+    assert.match(said({ ...admin, refuses: [] }), /pages\[2\]\.refuses: who the page must not be served to/);
+    assert.match(
+      said({ ...admin, refuses: ["guest"] }),
+      /pages\[2\]\.refuses\[0\]: "signed-out", or a sign-in state auth\.states names \(staff, member\)/
+    );
+    assert.match(said({ ...admin, refuses: [7] }), /pages\[2\]\.refuses\[0\]: "signed-out", or a sign-in state/);
+    assert.match(
+      said({ ...admin, refuses: ["staff"] }),
+      /pages\[2\]\.refuses\[0\]: the page is seen as staff \("as"\), so it can't refuse that state too/
+    );
+    assert.match(said({ id: "admin", path: "/admin", refuses: ["signed-out"] }), /pages\[2\]\.refuses\[0\]: the page is seen signed out/);
+    assert.match(said({ ...admin, refuses: ["member", "member"] }), /pages\[2\]\.refuses\[1\]: member is listed twice/);
+    // A refusal counts only from a sign-in a page shows to be live: nothing is seen as staff here.
+    assert.match(
+      said({ id: "mine", path: "/mine", as: "member", refuses: ["staff"] }),
+      /pages\[2\]\.refuses\[0\]: no page is seen as staff \("as": "staff"\), and a refusal counts only from a sign-in a page shows to be live/
+    );
+    // A state named like the word for nobody would make the word mean two things.
+    assert.match(
+      said({ ...admin, refuses: ["signed-out"] }, { project: "auth", states: { ...states, "signed-out": "e2e/.auth/none.json" } }),
+      /pages\[2\]\.refuses\[0\]: "signed-out" means nobody signed in, and auth\.states names a sign-in signed-out/
+    );
+
+    const without = (id: string, refuses?: string[]) =>
+      parseHarness({
+        ...withAccess,
+        pages: withAccess.pages.map((page) => (page.id === id ? { id, path: page.path, as: page.as, ...(refuses ? { refuses } : {}) } : page)),
+      }).harness;
+    assert.deepEqual(narrowing(harness, without("admin", ["signed-out"])), ["page admin no longer refuses member"]);
+    assert.deepEqual(narrowing(harness, without("account")), ["page account no longer refuses signed-out"]);
+    assert.deepEqual(narrowing(without("admin", ["signed-out"]), harness), [], "refusing more only adds");
+    assert.deepEqual(narrowing(parseHarness(manifest).harness, harness), [], "so does saying it for the first time");
+  });
+
   test("a branch that checks less narrows the checks, page by page; one that adds doesn't", () => {
     const before = parseHarness(manifest).harness;
     assert.deepEqual(narrowing(before, parseHarness({ ...manifest, pages: [...manifest.pages, { id: "new", path: "/new" }] }).harness), []);

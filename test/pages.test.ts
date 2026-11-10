@@ -587,6 +587,129 @@ describe("page checks in the factory's own browser", { skip: noBrowser ?? false 
     assert.equal(problemsOf(unknown, "open"), "desktop/light: ended at /login instead of /account");
   });
 
+  test("a page is asked for as each of those it refuses, and a refusal counts only from a sign-in shown to be live (29)", async () => {
+    // Who the test app takes a session for, by its cookie: a member, the staff, or nobody.
+    const who = (request: IncomingMessage): string => /\bsid=(member|staff)\b/.exec(request.headers.cookie ?? "")?.[1] ?? "";
+    const toLogin = { status: 302, headers: { location: "/r/login" } };
+    const shown = (title: string) => ({ body: page(`<h1>${title}</h1><button>Go</button>`) });
+    site["/r/login"] = page("<h1>Sign in</h1><button>Sign in</button>");
+    site["/r/home"] = page("<h1>Welcome</h1><button>Go</button>");
+    site["/r/account"] = (request) => (who(request) ? shown("Your account") : toLogin);
+    // Staff only: a member is told so, the signed-out are sent to sign in.
+    site["/r/admin"] = (request) =>
+      who(request) === "staff" ? shown("Admin") : who(request) ? { status: 403, body: page("<h1>Not yours</h1>") } : toLogin;
+    // Meant to be staff only, and served to anyone.
+    site["/r/reports"] = () => shown("Reports");
+    // Breaks for a member instead of refusing them.
+    site["/r/audit"] = (request) => (who(request) === "member" ? { status: 500, body: page("<h1>Broken</h1>") } : who(request) ? shown("Audit") : toLogin);
+    const states = { member: "e2e/.auth/member.json", staff: "e2e/.auth/staff.json" };
+    const manifest = (pages: Record<string, unknown>[]) => ({
+      e2e: { config: "playwright.config.mjs", timeoutMin: 3 },
+      auth: { project: "setup", states },
+      pages,
+    });
+    const account = { id: "account", path: "/r/account", as: "member", refuses: ["signed-out"] };
+    const admin = { id: "admin", path: "/r/admin", as: "staff", refuses: ["member", "signed-out"] };
+    const home = makeRepo({ ...baseTeam(), pages: { appUrl: url, ...one } } as RawTeam, {
+      ".a6g/harness.json": manifest([account, admin]),
+      "playwright.config.mjs": "export default { testDir: 'e2e', projects: [{ name: 'setup', testMatch: /auth\\.setup\\.mjs/ }] };\n",
+      // The sign-ins, without a browser: the session the app gives each.
+      "e2e/auth.setup.mjs": [
+        'import { test } from "playwright/test";',
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'test("signs in as each", () => {',
+        '  mkdirSync("e2e/.auth", { recursive: true });',
+        '  for (const name of ["member", "staff"]) {',
+        '    const cookie = { name: "sid", value: name, domain: new URL(process.env.PLAYWRIGHT_BASE_URL).hostname, path: "/", expires: -1, httpOnly: false, secure: false, sameSite: "Lax" };',
+        "    writeFileSync(`e2e/.auth/${name}.json`, JSON.stringify({ cookies: [cookie], origins: [] }));",
+        "  }",
+        "});",
+        "",
+      ].join("\n"),
+      ".gitignore": "node_modules\ne2e/.auth\n",
+    });
+    mkdirSync(join(home, "node_modules"), { recursive: true });
+    for (const name of ["playwright", "playwright-core"]) symlinkSync(join(ROOT, "node_modules", name), join(home, "node_modules", name));
+    const rewrite = (pages: Record<string, unknown>[]) => {
+      writeFileSync(join(home, ".a6g", "harness.json"), JSON.stringify(manifest(pages)));
+      return loadTeam(home);
+    };
+    const asked = (path: string): number => hits.filter((hit) => hit === path).length;
+
+    // Each is refused its own way, and the member's sign-in is shown live by the member's own page.
+    hits.length = 0;
+    const refused = await recordPages(home, loadTeam(home));
+    assert.deepEqual(refused["admin"]?.refusals, [
+      { state: "member", how: "HTTP 403" },
+      { state: "signed-out", how: "ended at /r/login" },
+    ]);
+    assert.deepEqual(refused["account"]?.refusals, [{ state: "signed-out", how: "ended at /r/login" }]);
+    assert.equal(refused["admin"]?.passed && refused["account"]?.passed, true);
+    assert.deepEqual([asked("/r/account"), asked("/r/admin")], [2, 3], "each page is asked for once as each: its own state, and those it refuses");
+    const saved = JSON.parse(readFileSync(join(stateDir(home), "pages.json"), "utf8")) as { pages: Record<string, { refusals?: unknown[] }> };
+    assert.equal(saved.pages["admin"]?.refusals?.length, 2, "and it's recorded with the page");
+
+    // One page alone: the sign-in it refuses is still shown live first, by a page the run wasn't asked for.
+    hits.length = 0;
+    const alone = await recordPages(home, loadTeam(home), ["admin"]);
+    assert.deepEqual(alone["admin"]?.refusals?.[0], { state: "member", how: "HTTP 403" });
+    assert.equal(asked("/r/account"), 2, "as the member, and signed out");
+
+    // Served to those it refuses, and broken for one of them: each is said, and the page fails.
+    const served = await recordPages(
+      home,
+      rewrite([account, { ...admin, id: "reports", path: "/r/reports" }, { ...admin, id: "audit", path: "/r/audit" }]),
+      ["reports", "audit"]
+    );
+    assert.deepEqual(served["reports"]?.refusals, [
+      { state: "member", problem: "served to member" },
+      { state: "signed-out", problem: "served signed out" },
+    ]);
+    assert.equal(problemsOf(served, "reports"), "", "its own checks pass");
+    assert.equal(served["reports"]?.passed, false);
+    assert.deepEqual(served["audit"]?.refusals, [
+      { state: "member", problem: "answered HTTP 500, which is neither the page nor a refusal (another path, or 401, 403, 404)" },
+      { state: "signed-out", how: "ended at /r/login" },
+    ]);
+    const status = await a6g(["pages", "status"], { cwd: home, env: { A6G_HOME_DIR: home, A6G_TEAM: "fixture", A6G_ROLE: "planner" } });
+    assert.match(status.out, /reports\s+checks:fail/);
+    assert.match(status.out, /↳ refuses member: served to member\n\s+↳ refuses signed-out: served signed out/);
+
+    // A session the app has ended is sent to sign in everywhere, which would read as a refusal. It doesn't count:
+    // the member's own page no longer lands, so nothing shows the sign-in is live.
+    rewrite([account, admin]);
+    writeFileSync(join(home, states.member), JSON.stringify({ cookies: [], origins: [] }));
+    const ended = await recordPages(home, loadTeam(home));
+    assert.equal(problemsOf(ended, "account"), "desktop/light: ended at /r/login instead of /r/account (seen as member: the app didn't take the sign-in)");
+    assert.deepEqual(ended["admin"]?.refusals, [
+      {
+        state: "member",
+        problem:
+          'not checked: nothing showed the sign-in member is live: of the pages seen as member, none tried (account) lands signed in and is refused signed out; a page only member reaches, with "as": "member" and "refuses": ["signed-out"], shows it',
+      },
+      { state: "signed-out", how: "ended at /r/login" },
+    ]);
+    assert.equal(ended["admin"]?.passed, false);
+
+    // Nor does a sign-in whose only page is everyone's: it lands with any session, or none.
+    rmSync(join(home, states.member));
+    const open = await recordPages(home, rewrite([{ id: "home", path: "/r/home", as: "member" }, admin]), ["admin"]);
+    assert.match(
+      open["admin"]?.refusals?.[0]?.problem ?? "",
+      /^not checked: nothing showed the sign-in member is live: of the pages seen as member, none tried \(home\) lands/
+    );
+
+    // A sign-in that can't be made: the refusal says so, and the app isn't asked with an old session.
+    const yesterday = new Date(Date.now() - 13 * 3_600_000);
+    for (const state of Object.values(states)) utimesSync(join(home, state), yesterday, yesterday);
+    writeFileSync(join(home, "e2e/auth.setup.mjs"), 'import { test } from "playwright/test";\ntest("signs in", () => { throw new Error("no"); });\n');
+    hits.length = 0;
+    const unmade = await recordPages(home, rewrite([account, admin]), ["admin"]);
+    assert.match(unmade["admin"]?.refusals?.[0]?.problem ?? "", /^not checked: the sign-in member failed \(the sign-in project setup exited 1\)/);
+    assert.deepEqual(unmade["admin"]?.refusals?.[1], { state: "signed-out", how: "ended at /r/login" });
+    assert.deepEqual(hits, ["/r/admin", "/r/login"], "only the signed-out were shown the page");
+  });
+
   describe("one check, one fixture", () => {
     let browser: TestBrowser;
     before(async () => {

@@ -89,6 +89,18 @@ This is the first task on most teams, and what a `test-infra` task usually exten
 - **Pages.** List each page people reach in the manifest's `pages`: an id, its path, `as` for the sign-in it needs,
   and `mask` for regions that change on their own. The factory checks each at every viewport and colour scheme, and
   tells the UX specialist which ones look different after a merge.
+- **Who a page refuses.** On each page that isn't everyone's, say who must not be served it in `refuses`: other
+  sign-in states, and `signed-out`. The factory asks for the page as each of them, and it has to be refused: sent to
+  another path, or answered 401, 403 or 404. A page served to one of them is a blocker. A refusal counts only from a
+  sign-in the run shows to be live, so give each state a page of its own that refuses `signed-out`. An app that
+  refuses in place (the same address, a 200 and a "not allowed" message) can't be told from one that serves: leave
+  that page's `refuses` out and prove it with an `@access` test.
+- **Access.** Where the app has more than one kind of user, the suite needs a test tagged `@access`
+  (`test("…", { tag: "@access" }, …)`): signed in as one user, it opens another's record by its address, reads and
+  changes it through the API the page calls, and expects each to be refused, with the record unchanged. One for each
+  kind of record that belongs to somebody, and one for what only staff may do, tried as an ordinary user. The factory
+  files the gap while there's none; where the team has a tester, they write them on the fixtures you set up (two
+  users of the same kind, each with a record of their own).
 - **Colour schemes.** Many apps ignore the browser's dark setting. Say how the app switches in `schemes`: a class on
   `<html>` (`{"dark": {"htmlClass": "dark"}}`), a `localStorage` entry, or a cookie. A dark page that looks the same
   as the light one fails its check: the set-up didn't switch it.
@@ -98,8 +110,11 @@ This is the first task on most teams, and what a `test-infra` task usually exten
 ```json
 {
   "e2e": { "config": "playwright.config.ts", "timeoutMin": 20 },
-  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json" } },
-  "pages": [{ "id": "admin", "path": "/admin", "as": "staff", "mask": ["[data-live]"] }],
+  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json", "member": "e2e/.auth/member.json" } },
+  "pages": [
+    { "id": "account", "path": "/account", "as": "member", "refuses": ["signed-out"] },
+    { "id": "admin", "path": "/admin", "as": "staff", "refuses": ["member", "signed-out"], "mask": ["[data-live]"] }
+  ],
   "schemes": { "dark": { "htmlClass": "dark" } }
 }
 ```
@@ -111,8 +126,8 @@ This is the first task on most teams, and what a `test-infra` task usually exten
 - It only adds checks. Whatever could loosen one is the operator's, in `team.json pages`: the app's address, the
   console messages to ignore, the smallest touch target (from the rubric), the viewports and schemes. If one of those
   is wrong, say so in your report.
-- A branch that checks less (a page gone or seen differently, the suite or a sign-in gone, fewer tests, a test
-  skipped, filtered or retried) doesn't merge until the operator allows that exact commit. Don't; if a check is
+- A branch that checks less (a page gone, seen differently or refusing fewer, the suite or a sign-in gone, fewer
+  tests, a test skipped, filtered or retried) doesn't merge until the operator allows that exact commit. Don't; if a check is
   wrong, say why in your report and the planner asks.
 
 ## Starting a repository

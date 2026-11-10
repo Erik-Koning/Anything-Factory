@@ -11,9 +11,22 @@ import { loadTeam, type RawTeam } from "../lib/config.ts";
 import { acquire, startOf } from "../lib/lock.ts";
 import { stateDir } from "../lib/paths.ts";
 import { fileStore } from "../lib/tasks/files.ts";
+import type { PageResult } from "../lib/commands/pages.ts";
+import type { SpecResult, SuiteRecord } from "../lib/suite.ts";
 import { newTask, type Task } from "../lib/tasks/model.ts";
 import { update } from "../lib/tasks/store.ts";
-import { checkDue, checksLess, clearQueued, fileGaps, markQueued, othersQueued, pendingDir, verifyAfterMerge } from "../lib/verify.ts";
+import {
+  checkDue,
+  checksLess,
+  clearQueued,
+  fileFailures,
+  fileGaps,
+  markQueued,
+  type Memory,
+  othersQueued,
+  pendingDir,
+  verifyAfterMerge,
+} from "../lib/verify.ts";
 import { readJson, writeJson } from "../lib/util.ts";
 
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(userInfo().homedir, "Library", "Caches", "ms-playwright");
@@ -226,6 +239,126 @@ describe("the check after merges", () => {
     assert.equal((await store.tasks.get(first[0] ?? ""))?.status, "triage");
     assert.equal((await store.tasks.get(first[0] ?? ""))?.by, "merge-queue");
     assert.deepEqual(await fileGaps(store, team, home, null), [], "not again while it's open");
+  });
+
+  test("an app with two kinds of user and no test tagged @access is a gap, filed once (30)", async () => {
+    const states = { staff: "e2e/.auth/staff.json", member: "e2e/.auth/member.json" };
+    const manifest = (auth: Record<string, string>) => ({ e2e: { config: "playwright.config.ts" }, auth: { project: "setup", states: auth } });
+    const home = makeRepo(baseTeam({ board: "tasks", roles }), { ".a6g/harness.json": manifest(states) });
+    const team = loadTeam(home);
+    const spec = (id: string, outcome: SpecResult["outcome"], tags: string[] = []): SpecResult => ({
+      id,
+      file: "e2e/a.spec.ts",
+      title: id,
+      project: "",
+      tags,
+      outcome,
+    });
+    const ran = (specs: SpecResult[], more: Partial<SuiteRecord> = {}): SuiteRecord => ({
+      commit: git(home, "rev-parse", "HEAD"),
+      at: "2026-01-01T00:00:00.000Z",
+      ran: true,
+      timedOut: false,
+      status: 0,
+      specs,
+      errors: [],
+      ...more,
+    });
+    const titles = async (store: ReturnType<typeof fileStore>, ids: string[]) => Promise.all(ids.map(async (id) => (await store.tasks.get(id))?.title));
+    const gap = "No test shows one user is refused another's records";
+
+    // A run that didn't run proves nothing, so nothing is filed from it.
+    const store = fileStore(tmp("a6g-run-"), "fixture");
+    assert.deepEqual(await fileGaps(store, team, home, ran([spec("a", "passed")], { ran: false })), []);
+    // A test told to skip, or to fail, is no test.
+    const first = await fileGaps(store, team, home, ran([spec("a", "passed"), spec("b", "skipped", ["@access"]), spec("c", "excused", ["@access"])]));
+    assert.deepEqual(await titles(store, first), [gap]);
+    const task = await store.tasks.get(first[0] ?? "");
+    assert.equal(task?.kind, "test");
+    assert.equal(task?.severity, "major");
+    assert.match(task?.body ?? "", /2 kinds of user \(staff, member\)/);
+    assert.match(task?.body ?? "", /opens the other's record by its address/);
+    assert.match(task?.body ?? "", /\(a6g: gap:access\)$/);
+    assert.deepEqual(await fileGaps(store, team, home, ran([spec("a", "passed")])), [], "not again while it's open");
+    await reject(store, first[0] ?? "");
+    assert.deepEqual(await fileGaps(store, team, home, ran([spec("a", "passed")])), [], "nor once the planner said no");
+
+    // One that checks is enough: passing, or failing (which is the suite's finding, not a gap).
+    for (const outcome of ["passed", "failed", "flaky", "unreached"] as const) {
+      const fresh = fileStore(tmp("a6g-run-"), "fixture");
+      const filed = await fileGaps(fresh, team, home, ran([spec("a", "passed"), spec("b", outcome, ["@journey-1", "@access"])]));
+      assert.ok(!(await titles(fresh, filed)).includes(gap), outcome);
+    }
+
+    // One kind of user has nobody else's records to be refused.
+    const single = makeRepo(baseTeam({ board: "tasks", roles }), { ".a6g/harness.json": manifest({ member: states.member }) });
+    assert.deepEqual(await fileGaps(fileStore(tmp("a6g-run-"), "fixture"), loadTeam(single), single, ran([spec("a", "passed")])), []);
+  });
+
+  test("a page served to someone it refuses is a blocker of its own; one that couldn't be checked is major (29)", async () => {
+    const home = makeRepo(baseTeam({ board: "tasks", roles }));
+    const team = loadTeam(home);
+    const store = fileStore(tmp("a6g-run-"), "fixture");
+    const at = git(home, "rev-parse", "HEAD");
+    const memory: Memory = {};
+    const run = (problems: string[] = []) => ({ viewport: "desktop", scheme: "light", problems, status: 200 });
+    const file = (pages: Record<string, PageResult>) => fileFailures(store, team, home, memory, { pages, before: {}, suite: null, at });
+    const get = async (id: string | undefined) => (await store.tasks.get(id ?? "")) as Task;
+
+    // The page looks right and is served to a member: no finding about its checks, one about who it's served to.
+    const served: PageResult = {
+      passed: false,
+      runs: [run()],
+      refusals: [
+        { state: "member", problem: "served to member" },
+        { state: "signed-out", how: "ended at /login" },
+      ],
+    };
+    const first = await file({ admin: served });
+    assert.equal(first.length, 1);
+    const blocker = await get(first[0]);
+    assert.equal(blocker.title, "Page admin is served to member, who it refuses");
+    assert.equal(blocker.kind, "bug");
+    assert.equal(blocker.severity, "blocker");
+    assert.match(blocker.body, /- refuses member: served to member/);
+    assert.doesNotMatch(blocker.body, /signed-out/, "what was refused isn't a problem");
+    assert.match(blocker.body, /on the server, not by hiding a link/);
+    assert.match(blocker.body, /\(a6g: verify:access:admin\)$/);
+    assert.deepEqual(Object.keys(memory), ["verify:access:admin"]);
+    assert.deepEqual(await file({ admin: served }), [], "not again while it's open");
+
+    // A finding open for how the page looks doesn't hide it, and it doesn't hide that.
+    const both = await file({
+      reports: {
+        passed: false,
+        runs: [run(["overflow: 40px wider than the viewport"])],
+        refusals: [{ state: "signed-out", problem: "served signed out" }],
+      },
+    });
+    assert.deepEqual((await Promise.all(both.map(get))).map((task) => task.title).sort(), [
+      "Page reports fails its checks after merges",
+      "Page reports is served to signed-out, who it refuses",
+    ]);
+
+    // Nothing could be told: that fails too, as a major finding that says why.
+    const unchecked = await file({
+      audit: {
+        passed: false,
+        runs: [run()],
+        refusals: [{ state: "member", problem: "not checked: the sign-in member failed (the sign-in project setup exited 1)" }],
+      },
+    });
+    const major = await get(unchecked[0]);
+    assert.equal(major.title, "Page audit: who it's served to couldn't be checked");
+    assert.equal(major.severity, "major");
+    assert.match(major.body, /- refuses member: not checked: the sign-in member failed/);
+
+    // Refused again, it's remembered as passed; rejected and then served again after that pass, it's filed again.
+    await reject(store, first[0] ?? "");
+    assert.deepEqual(await file({ admin: served }), [], "a rejected finding quiets the same failure");
+    assert.deepEqual(await file({ admin: { passed: true, runs: [run()], refusals: [{ state: "member", how: "HTTP 403" }] } }), []);
+    assert.equal(memory["verify:access:admin"]?.passed, true);
+    assert.equal((await file({ admin: served })).length, 1);
   });
 });
 

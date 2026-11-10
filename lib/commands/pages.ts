@@ -6,6 +6,8 @@
 // off by the box that clips it, controls whose focus can't be seen (on the first viewport and scheme), and a
 // full-page screenshot with animations off and the manifest's masks painted over. The page is scrolled to its end and
 // back first, so what loads lazily is there; the operator's `ignore` selectors are left out of every check in the page.
+// A page that says who it `refuses` is then asked for as each of them, and has to be refused: sent to another path, or
+// answered 401, 403 or 404.
 // Results are keyed to the pages' source, so a change to it has to be checked again, and UX verdicts (a6g verdict ux
 // <page>) count only for the source they saw. When the UX specialist passes a page at a commit the factory checked,
 // its screenshots are kept, and later runs say which pages look different since: where an audit starts.
@@ -21,7 +23,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { join, resolve } from "node:path";
 import { browserProblem, factoryChromium } from "../browser.ts";
 import type { LoadedTeam, Viewport } from "../config.ts";
-import { type PageCheck, type PagePlan, pagePlan, readHarness } from "../harness.ts";
+import { type PageCheck, type PagePlan, pagePlan, readHarness, SIGNED_OUT } from "../harness.ts";
 import { acquire } from "../lock.ts";
 import { FACTORY_ROOT, stateDir, workDir } from "../paths.ts";
 import { teamSession } from "../session.ts";
@@ -91,9 +93,23 @@ export interface PageRun {
   // The focus walk: how many of the page's keyboard stops it walked.
   focus?: { walked: number; stops: number };
 }
+// One of those a page refuses: how the app refused them, or what's wrong (it served them the page, it answered
+// something else, or nothing could be told).
+export interface Refusal {
+  state: string;
+  how?: string;
+  problem?: string;
+}
 export interface PageResult {
   passed: boolean;
   runs: PageRun[];
+  refusals?: Refusal[];
+}
+// Where a page ended for one sign-in state, or signed out: its status, and the path it ended at when that's another.
+interface Landing {
+  status: number;
+  elsewhere: string | null;
+  error?: string;
 }
 interface SavedResult extends PageResult {
   hash: string;
@@ -126,6 +142,14 @@ const FOCUS_STOPS = 40;
 const FOCUS_PIXELS = 8;
 // Sign-in states older than this are made again before a page needs one.
 const STATE_HOURS = 12;
+// A refusal is the app's answer that the page isn't this visitor's: these, or sending them to another path.
+const REFUSED = [401, 403, 404];
+// How many of a state's pages are tried to show its sign-in is live.
+const PROOF_PAGES = 3;
+// What a refusal says when the app served the page: the worst a page check finds (lib/verify.ts files it a blocker).
+const SERVED_TO = "served to";
+const SERVED_OUT = "served signed out";
+export const servedIt = (refusal: Refusal): boolean => Boolean(refusal.problem?.startsWith("served "));
 
 // What a page's result depends on: the files under the pages' source paths at a commit, minus the paths that
 // belong only to other pages (a page's "exclude"), so a change to one page doesn't make another's verdict stale.
@@ -155,11 +179,11 @@ export function unknownSignIns(pages: PagePlan): string[] {
   return pages.list.flatMap((page) => (page.as && !states.includes(page.as) ? [`page ${page.id}: as "${page.as}" names no sign-in state (${has})`] : []));
 }
 
-// Makes the sign-in states the chosen pages need, with the repository's own Playwright (the manifest's auth project),
-// when one is missing or older than STATE_HOURS. Returns what went wrong, by state. A sign-in that fails fails its
+// Makes the sign-in states the chosen pages need (those they're seen as, and those they refuse), with the repository's
+// own Playwright (the manifest's auth project), when one is missing or older than STATE_HOURS. Returns what went wrong, by state. A sign-in that fails fails its
 // pages: the state an earlier run left may be a session the app has since ended, so it's never used in its place.
 async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<Record<string, string>> {
-  const needed = [...new Set(chosen.flatMap((page) => (page.as ? [page.as] : [])))];
+  const needed = [...new Set(chosen.flatMap((page) => [...(page.as ? [page.as] : []), ...(page.refuses ?? []).filter((state) => state !== SIGNED_OUT)]))];
   if (!needed.length) return {};
   const auth = plan.auth;
   const problems: Record<string, string> = {};
@@ -206,6 +230,12 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
   const axePath = join(FACTORY_ROOT, "node_modules/axe-core/axe.min.js");
   const axeSource = existsSync(axePath) ? readFileSync(axePath, "utf8") : null;
   const trim = (path: string): string => path.replace(/\/+$/, "");
+  // Where a tab ended, when that isn't the path it was asked for.
+  const elsewhereOf = (tab: Tab, asked: URL): string | null => {
+    const ended = new URL(tab.url());
+    if (ended.origin === asked.origin && trim(ended.pathname) === trim(asked.pathname)) return null;
+    return ended.origin === asked.origin ? ended.pathname : ended.origin + ended.pathname;
+  };
   const ignore = (plan.ignoreConsole ?? []).map((rule) => new RegExp(rule, "i"));
   const viewports: Viewport[] = plan.viewports ?? [
     { id: "desktop", width: 1440, height: 900 },
@@ -216,6 +246,9 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
   const signInProblems = await signIn(dir, base, chosen);
   const browser = await chromium.launch();
   const results: Record<string, PageResult> = {};
+  // Where each page ended for each state it was asked for as, at the first size and scheme: asked once a run.
+  const landings = new Map<string, Landing>();
+  const landingKey = (page: PageCheck, state: string): string => `${page.id}\0${state}`;
   // A blank page for comparing screenshots, where no page's own security policy can refuse an image.
   const blank = await browser.newContext({});
   const comparer = await blank.newPage();
@@ -280,12 +313,13 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
             await tab.waitForTimeout(plan.settleMs ?? 1500);
             // A page is checked where it was asked for. One that ends at another path (a session the app refused
             // lands on its sign-in page) is photographed, and none of its checks are taken for this page's.
-            const ended = new URL(tab.url());
-            const elsewhere = ended.origin !== asked.origin || trim(ended.pathname) !== trim(asked.pathname);
+            const where = elsewhereOf(tab, asked);
+            const elsewhere = where !== null;
             if (elsewhere)
               run.problems.push(
-                `ended at ${ended.origin === asked.origin ? ended.pathname : ended.origin + ended.pathname} instead of ${asked.pathname}${page.as ? ` (seen as ${page.as}: the app didn't take the sign-in)` : ""}`
+                `ended at ${where} instead of ${asked.pathname}${page.as ? ` (seen as ${page.as}: the app didn't take the sign-in)` : ""}`
               );
+            if (vi === 0 && si === 0) landings.set(landingKey(page, page.as ?? SIGNED_OUT), { status: run.status, elsewhere: where });
             // A framework may take the class off as it starts: put it back before looking.
             if (setup.htmlClass) await tab.evaluate((cls: string) => document.documentElement.classList.add(cls), setup.htmlClass);
             // The whole page before any of it is measured: what loads or shows only once it's scrolled to.
@@ -355,6 +389,93 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
           run.problems.push(`${run.scheme} looks the same as light: the harness manifest's set-up for ${run.scheme} doesn't switch this page`);
       }
       results[page.id] = { passed: runs.every((run) => !run.problems.length), runs };
+    }
+
+    // Who each page refuses. The page is asked for as each of them, once, at the first size and scheme.
+    const land = async (page: PageCheck, state: string): Promise<Landing> => {
+      const known = landings.get(landingKey(page, state));
+      if (known) return known;
+      const viewport = viewports[0] ?? { id: "desktop", width: 1440, height: 900 };
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.isMobile ?? false,
+        hasTouch: viewport.isMobile ?? false,
+        deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+        colorScheme: (page.schemes ?? schemes)[0] ?? "light",
+        ...(state !== SIGNED_OUT && plan.auth ? { storageState: join(dir, plan.auth.states[state] ?? "") } : {}),
+      });
+      let landing: Landing;
+      try {
+        const tab = await context.newPage();
+        const asked = new URL(page.path, base);
+        const response = await tab.goto(asked.href, { waitUntil: "load", timeout: 120_000 });
+        await tab.waitForTimeout(plan.settleMs ?? 1500);
+        landing = { status: response?.status() ?? 0, elsewhere: elsewhereOf(tab, asked) };
+      } catch (error) {
+        landing = { status: 0, elsewhere: null, error: String((error as Error).message).split("\n")[0] ?? "" };
+      } finally {
+        await context.close();
+      }
+      landings.set(landingKey(page, state), landing);
+      return landing;
+    };
+    const refusedBy = ({ status, elsewhere, error }: Landing): string | null =>
+      error !== undefined ? null : elsewhere !== null ? `ended at ${elsewhere}` : REFUSED.includes(status) ? `HTTP ${status}` : null;
+    // A session the app has ended is sent to sign in wherever it goes, which looks like a refusal. So a refusal counts
+    // only from a sign-in this run shows to be live: one of the state's own pages lands signed in, and the same page
+    // is refused signed out. Null, or why nothing showed it.
+    const proofs = new Map<string, string | null>();
+    const live = async (state: string): Promise<string | null> => {
+      const known = proofs.get(state);
+      if (known !== undefined) return known;
+      const own = list.filter((page) => page.as === state);
+      // Those that say they refuse the signed-out first: they're the ones that can show it.
+      const tried = [...own.filter((page) => page.refuses?.includes(SIGNED_OUT)), ...own.filter((page) => !page.refuses?.includes(SIGNED_OUT))].slice(
+        0,
+        PROOF_PAGES
+      );
+      let shown = false;
+      for (const page of tried) {
+        const signedIn = await land(page, state);
+        if (signedIn.error !== undefined || signedIn.elsewhere !== null || signedIn.status >= 400) continue;
+        if (refusedBy(await land(page, SIGNED_OUT))) {
+          shown = true;
+          break;
+        }
+      }
+      const why = shown
+        ? null
+        : `nothing showed the sign-in ${state} is live: ${
+            tried.length
+              ? `of the pages seen as ${state}, none tried (${tried.map((page) => page.id).join(", ")}) lands signed in and is refused signed out`
+              : `no page is seen as ${state}`
+          }; a page only ${state} reaches, with "as": "${state}" and "refuses": ["${SIGNED_OUT}"], shows it`;
+      proofs.set(state, why);
+      return why;
+    };
+    for (const page of chosen) {
+      const result = results[page.id];
+      if (!page.refuses?.length || !result) continue;
+      const refusals: Refusal[] = [];
+      for (const state of page.refuses) {
+        const unchecked = state === SIGNED_OUT ? null : (signInProblems[state] ?? (await live(state)));
+        if (unchecked) {
+          refusals.push({ state, problem: `not checked: ${unchecked}` });
+          continue;
+        }
+        const landing = await land(page, state);
+        const how = refusedBy(landing);
+        if (how) refusals.push({ state, how });
+        else if (landing.error !== undefined) refusals.push({ state, problem: `not checked: didn't load: ${landing.error}` });
+        else if (landing.status >= 400)
+          refusals.push({
+            state,
+            problem: `answered HTTP ${landing.status}, which is neither the page nor a refusal (another path, or ${REFUSED.join(", ")})`,
+          });
+        else refusals.push({ state, problem: state === SIGNED_OUT ? SERVED_OUT : `${SERVED_TO} ${state}` });
+      }
+      result.refusals = refusals;
+      result.passed &&= refusals.every((refusal) => !refusal.problem);
     }
   } finally {
     await blank.close();
@@ -786,8 +907,13 @@ function print(results: Record<string, PageResult>): void {
         `  ${run.viewport}/${run.scheme}: ${run.problems.length ? run.problems.join("; ") : "ok"}${focus}${run.shot ? `  ${run.shot}` : ""}${differs}`
       );
     }
+    for (const refusal of result.refusals ?? []) console.info(`  refuses ${refusal.state}: ${refusal.problem ?? refusal.how}`);
   }
 }
+
+// What's wrong with who a page is served to, one line each.
+export const refusalProblems = (result: Pick<PageResult, "refusals">): string[] =>
+  (result.refusals ?? []).flatMap((refusal) => (refusal.problem ? [`refuses ${refusal.state}: ${refusal.problem}`] : []));
 
 function uxFor(page: PageCheck, hash: string): string {
   const record = readJson<UxVerdict>(join(STATE, "ux", `${page.id}.json`));
@@ -819,7 +945,9 @@ function rows(): { id: string; path: string; checks: string; ux: string; looks: 
       checks: !result ? "not run" : !current ? "stale" : result.passed ? "pass" : "fail",
       ux: uxFor(page, hash),
       looks: !keptLooks(STATE, page.id) ? "-" : different[page.id] ? "different" : "same",
-      problems: current ? result.runs.flatMap((run) => run.problems.map((problem) => `${run.viewport}/${run.scheme}: ${problem}`)) : [],
+      problems: current
+        ? [...result.runs.flatMap((run) => run.problems.map((problem) => `${run.viewport}/${run.scheme}: ${problem}`)), ...refusalProblems(result)]
+        : [],
     };
   });
 }

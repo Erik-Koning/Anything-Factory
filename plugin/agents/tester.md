@@ -18,7 +18,10 @@ your report instead of starting it (the planner owns it).
 2. **One spec per journey or criterion the brief names,** named after it, walking its steps and asserting each
    of its criteria. Tag a journey's spec with its task (`test("…", { tag: "@journey-12" }, …)`): the factory re-runs
    the suite after merges, and a journey is done only while its specs pass. Write specs whether or not the feature
-   exists yet: a failing spec is the builders' acceptance test.
+   exists yet: a failing spec is the builders' acceptance test. Where the app has more than one kind of user, tag the
+   specs of who may reach what `@access`: signed in as one user, the spec opens another's record by its address,
+   reads and changes it through the API the page calls, and expects each to be refused, with the record unchanged.
+   One for each kind of record that belongs to somebody; the factory files the gap while the suite has none.
 3. **Use the project's test helpers,** and add one when two specs need it. Find elements the way a person would:
    by role, label and visible text. Use test ids only when there's no accessible name, and then the missing
    name is a UX finding.

@@ -217,8 +217,11 @@ the repository's own Playwright with the configuration it names.
 ```json
 {
   "e2e": { "config": "playwright.config.ts", "timeoutMin": 20 },
-  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json" } },
-  "pages": [{ "id": "admin", "path": "/admin", "as": "staff", "mask": ["[data-live]"] }],
+  "auth": { "project": "auth", "states": { "staff": "e2e/.auth/staff.json", "member": "e2e/.auth/member.json" } },
+  "pages": [
+    { "id": "account", "path": "/account", "as": "member", "refuses": ["signed-out"] },
+    { "id": "admin", "path": "/admin", "as": "staff", "refuses": ["member", "signed-out"], "mask": ["[data-live]"] }
+  ],
   "schemes": { "dark": { "htmlClass": "dark" } }
 }
 ```
@@ -231,12 +234,23 @@ the repository's own Playwright with the configuration it names.
 - **`auth`:** the Playwright project in that configuration that signs in and saves each state; pages and specs use
   them by name.
 - **`pages`:** pages to check beside the operator's (an id the operator listed stays theirs).
+- **`refuses`,** on a page: the sign-in states, and `signed-out`, that must not be served it. `a6g pages` asks for the
+  page as each of them, once, and it has to be refused: sent to another path, or answered 401, 403 or 404. A page
+  served to one of them fails, and the check after merges files it as a blocker. A session the app has ended is sent
+  to sign in wherever it goes, which looks like a refusal, so one counts only from a sign-in the same run showed to
+  be live: a page seen as that state lands signed in and is refused signed out (the manifest doesn't load unless
+  some page is seen as each state a page refuses). Where nothing shows that, the refusal is "not checked", which
+  fails. An app that refuses in place, with a 200 at the same address, can't be told from one that serves the page:
+  that's proved by a test.
+- **`@access`:** with two or more sign-in states and a suite that ran, a suite with no test tagged `@access` is a gap
+  the factory files once, like a journey with no spec: a test that signs in as one user and is refused another's
+  records, by their address and through the API. A page check sees where a page ends, not whose data an address gives.
 - **`schemes`:** how the app switches to a colour scheme when it doesn't follow the browser's setting: a class on
   `<html>`, `localStorage` entries, or a cookie. A page that looks the same in both fails its check.
 - **Checking less is the operator's call.** The merge queue lists the suite (`playwright test --list`) before a
   branch and with it merged, and refuses one that leaves fewer tests that run (in all, or for a journey), or a suite
-  that no longer lists. It also refuses a branch that removes a page, the suite or a sign-in from the manifest, or
-  changes the suite's configuration there, and one that adds a skip, `.only`, expected failure or filter to the
+  that no longer lists. It also refuses a branch that removes a page, the suite or a sign-in from the manifest, takes a
+  state out of a page's `refuses`, or changes the suite's configuration there, and one that adds a skip, `.only`, expected failure or filter to the
   suite's files (a listing can't see one inside a test). All unless the operator allowed that exact commit:
   `a6g harness allow <branch> --sha <commit> --why "…"`. Where the suite can't be listed in the merge's worktree,
   before the gate or after it, the merge says so and goes on. The check after merges measures the same from what ran:

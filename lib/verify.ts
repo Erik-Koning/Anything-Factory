@@ -15,12 +15,12 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSyn
 import { dirname, join } from "node:path";
 import { forgetRun, journeyProofFor, notRun, recordSuite, suiteHistory, tally } from "./commands/e2e.ts";
 import { fewerTests } from "./commands/harness.ts";
-import { differentLooks, recordPages, type PageResult } from "./commands/pages.ts";
+import { differentLooks, recordPages, refusalProblems, servedIt, type PageResult } from "./commands/pages.ts";
 import type { LoadedTeam, Team } from "./config.ts";
 import { HARNESS_FILE, pagePlan, readHarness } from "./harness.ts";
 import { acquire, sameProcess, startOf } from "./lock.ts";
 import { stateDir } from "./paths.ts";
-import { checks, journeysOf, passed, type SpecResult, type SuiteRecord } from "./suite.ts";
+import { ACCESS_TAG, checks, journeysOf, passed, type SpecResult, type SuiteRecord } from "./suite.ts";
 import { addTask } from "./tasks/add.ts";
 import { type Kind, MERGE, type Severity } from "./tasks/model.ts";
 import { openTeamStore, settleWaits } from "./tasks/ops.ts";
@@ -127,7 +127,7 @@ interface Filed {
   signature: string;
   passed: boolean;
 }
-type Memory = Record<string, Filed>;
+export type Memory = Record<string, Filed>;
 
 // Files a failure: nothing new while a finding for the same thing is open. A rejected finding quiets that failure, not
 // that thing: the same failure stays quiet, and a different one, or the same one after a pass, is filed again.
@@ -155,7 +155,8 @@ const pageSignature = (result: PageResult): string =>
     .join("\n");
 
 // The harness's gaps, filed once: a team with a scaffolder and no manifest; a journey with no tagged test in the
-// latest run; a test that passed only on its retry. `record` is a run that ran, or null.
+// latest run; an app with more than one kind of user and no test of what one may do to another's (@access); a test
+// that passed only on its retry. `record` is a run that ran, or null.
 export async function fileGaps(store: Store, team: Team, home: string, record: SuiteRecord | null): Promise<string[]> {
   const filed: string[] = [];
   const { harness } = readHarness(home);
@@ -180,6 +181,17 @@ export async function fileGaps(store: Store, team: Team, home: string, record: S
       });
       if (id) filed.push(id);
     }
+    // A failing @access test is the suite's failure, filed as one; one told to skip or to fail is no test.
+    const states = Object.keys(harness.auth?.states ?? {});
+    if (states.length >= 2 && !record.specs.some((spec) => spec.tags.includes(ACCESS_TAG) && checks(spec))) {
+      const id = await fileOnce(store, team, "gap:access", {
+        title: "No test shows one user is refused another's records",
+        kind: "test",
+        severity: "major",
+        body: `The app has ${states.length} kinds of user (${states.join(", ")}) and no test in the suite at ${record.commit.slice(0, 9)} is tagged ${ACCESS_TAG}. Such a test signs in as one user and goes after what belongs to another: it opens the other's record by its address, and reads and changes it through the API the page calls, and expects each to be refused (a redirect or 401, 403 or 404 for the page; an error and the record unchanged for the API). One for each kind of record that belongs to somebody, and one for what only staff may do, tried as an ordinary user. A page check can't show this: it sees where a page ends, not whose data an address gives. Written by a tester (or the scaffolder where the team has none), never by who built what it tests.`,
+      });
+      if (id) filed.push(id);
+    }
     for (const spec of record.specs.filter((s) => s.outcome === "flaky")) {
       const id = await fileOnce(store, team, `verify:flaky:${spec.id}`, {
         title: `Flaky test: ${spec.title}`.slice(0, 120),
@@ -193,8 +205,9 @@ export async function fileGaps(store: Store, team: Team, home: string, record: S
   return filed;
 }
 
-// The findings a run's failures make: one per page, one per spec file. What passed is remembered as passed.
-async function fileFailures(
+// The findings a run's failures make: one per page (and one more for who it's served to), one per spec file. What
+// passed is remembered as passed.
+export async function fileFailures(
   store: Store,
   team: Team,
   home: string,
@@ -208,13 +221,33 @@ async function fileFailures(
 ): Promise<string[]> {
   const filed: string[] = [];
   for (const [id, result] of Object.entries(pages ?? {})) {
+    const last = before[id]?.passed ? (before[id]?.commit ?? null) : null;
+    // Who a page is served to is a finding of its own, so one open for how the page looks never hides it. Served to
+    // someone it refuses, the page is open to them: a blocker.
+    const access = `verify:access:${id}`;
+    const open = refusalProblems(result);
+    if (!open.length) {
+      if (memory[access]) memory[access].passed = true;
+    } else {
+      const served = (result.refusals ?? []).filter(servedIt).map((refusal) => refusal.state);
+      const task = await fileFailure(store, team, memory, access, open.map(steady).sort().join("\n"), {
+        title: served.length ? `Page ${id} is served to ${served.join(" and ")}, who it refuses` : `Page ${id}: who it's served to couldn't be checked`,
+        kind: "bug",
+        severity: served.length ? "blocker" : "major",
+        body: `Checked at ${at.slice(0, 9)} after merges, page ${id} (${HARNESS_FILE} says who it refuses):\n${open.map((line) => `- ${line}`).join("\n")}\n\n${
+          served.length
+            ? "Refused is: sent to another path, or answered 401, 403 or 404. The page was asked for with that sign-in (or none) and came back at its own address. Fix it where the app decides who may see the page, on the server, not by hiding a link; a test tagged @access then holds it."
+            : "Nothing was told about who the page is served to, and that fails until it can be: see the reason on each line."
+        }\n\n${mergedSince(home, last, at)}`,
+      });
+      if (task) filed.push(task);
+    }
     const key = `verify:page:${id}`;
-    if (result.passed) {
+    const problems = result.runs.flatMap((run) => run.problems.map((problem) => `- ${run.viewport}/${run.scheme}: ${problem}`));
+    if (!problems.length) {
       if (memory[key]) memory[key].passed = true;
       continue;
     }
-    const problems = result.runs.flatMap((run) => run.problems.map((problem) => `- ${run.viewport}/${run.scheme}: ${problem}`));
-    const last = before[id]?.passed ? (before[id]?.commit ?? null) : null;
     const broken = problems.some((line) => /HTTP \d|didn't load|errors:|console:|sign-in/.test(line));
     const task = await fileFailure(store, team, memory, key, pageSignature(result), {
       title: `Page ${id} fails its checks after merges`,
