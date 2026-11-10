@@ -147,12 +147,12 @@ test("the board: a lane per step, journeys aside, each in its order, and rejecte
     lane("proposed")?.cards.map((c) => c.task.id),
     [escalated.id, proposed.id]
   );
-  // Blockers first, as members claim them; a journey is never a card.
+  // As members claim them: what the blocker waits on goes before it; a journey is never a card.
   assert.deepEqual(
     lane("approved")?.cards.map((c) => c.task.id),
-    [blocker.id, low.id]
+    [low.id, blocker.id]
   );
-  assert.deepEqual(lane("approved")?.cards[0]?.waits, [
+  assert.deepEqual(lane("approved")?.cards[1]?.waits, [
     { id: dep.id, status: "building" },
     { id: low.id, status: "approved" },
     { id: "999", status: "missing" },
