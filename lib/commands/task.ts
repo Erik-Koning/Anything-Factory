@@ -48,6 +48,7 @@ import {
 } from "../tasks/model.ts";
 import { asData, quoted } from "../untrusted.ts";
 import { blastRadius } from "../blast.ts";
+import { journeyProofFor } from "./e2e.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
 import { claimMark, importBoard, leaseMinutes, markClaim, openTeamStore } from "../tasks/ops.ts";
 import { addTask, proposes } from "../tasks/add.ts";
@@ -364,18 +365,20 @@ const score: Handler = async ({ team, store, who }, [id], options) => {
   return 0;
 };
 
-const setStatus: Handler = async ({ store, who }, [id, to], options) => {
+const setStatus: Handler = async ({ home, team, store, who }, [id, to], options) => {
   const target = oneOf(to, STATUSES, "the status");
   if (!target) throw new Refused(`which status? ${STATUSES.join(", ")}`);
   const task = await getTask(store, id);
   const all = await store.tasks.all();
+  // A journey is done only while its specs pass (the move rules ask; the operator's call is the operator's).
+  const journeyProof = journeyProofFor(home, team);
   // Blocked already: say again what it's blocked on (what it waits for, or raising it to the operator), in place.
   const again = task.status === "blocked" && target === "blocked";
   const refusal = again
     ? who === "planner" || who === OPERATOR
       ? null
       : `only the planner (or the operator) sets a task's status; the ${who} uses its own task commands`
-    : statusRefusal(task, target, who, all);
+    : (statusRefusal(task, target, who, all) ?? (target === "done" && task.kind === "journey" && who !== OPERATOR ? journeyProof(task, all) : null));
   if (refusal) throw new Refused(refusal);
   const reason = optionText(options["reason"]);
   const recommendation = optionText(options["recommend"]) ?? "";
@@ -418,7 +421,7 @@ const setStatus: Handler = async ({ store, who }, [id, to], options) => {
       target,
       "status",
       who,
-      { all },
+      { all, journeyProof },
       {
         fields: { ...notes, ...approval, ...raised, ...waiting },
         why: reason ?? (waitsOn.length ? `waits on ${waitsOn.map((id) => `#${id}`).join(", ")}` : undefined),

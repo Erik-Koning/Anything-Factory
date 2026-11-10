@@ -272,6 +272,9 @@ export interface MoveContext {
   tip?: string;
   // A merge of a rebase: the commit the review approved, which the task may still name.
   rebasedFrom?: string;
+  // Why a journey isn't proven done yet (its specs, lib/commands/e2e.ts journeyProofFor), or null when it is. Asked of
+  // every move of a journey to done but the operator's; a mover that can't ask (the watchdog) doesn't settle journeys.
+  journeyProof?: (journey: Task, all: Task[]) => string | null;
   now?: number;
 }
 type Check = (task: Task, to: Status, actor: Actor, ctx: MoveContext) => string | null;
@@ -484,7 +487,7 @@ export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx:
   let why: string | null = null;
   for (const rule of fits) {
     const refusal = rule.check?.(task, to, actor, ctx) ?? null;
-    if (refusal === null) return null;
+    if (refusal === null) return to === "done" && task.kind === "journey" && actor !== OPERATOR ? (ctx.journeyProof?.(task, ctx.all) ?? null) : null;
     why ??= refusal;
   }
   return why;

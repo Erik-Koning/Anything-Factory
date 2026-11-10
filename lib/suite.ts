@@ -2,7 +2,7 @@
 // factory runs it itself, never a command from the manifest: `playwright test --config <the manifest's config>`, with
 // the JSON report written to a file (so nothing the suite prints gets mixed into it), the base URL and a namespace for
 // the run's data in the environment, and its output folder outside the checkout, so a run never leaves it dirty.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { readJson } from "./util.ts";
@@ -53,11 +53,12 @@ export interface Report {
 }
 
 // Runs `playwright test --config <config> [args…]` in `dir`. `env` adds to the environment (the base URL, the
-// namespace); `work` is where the report and Playwright's output go, outside the checkout.
-export function runPlaywright(
+// namespace); `work` is where the report and Playwright's output go, outside the checkout. Asynchronous, so a process
+// that serves something itself (a test's own app) keeps answering while it runs.
+export async function runPlaywright(
   dir: string,
   { config, args = [], env = {}, timeoutMin, work }: { config: string; args?: string[]; env?: Record<string, string>; timeoutMin: number; work: string }
-): SuiteRun {
+): Promise<SuiteRun> {
   const cli = playwrightCli(dir);
   if (!cli)
     return {
@@ -69,20 +70,33 @@ export function runPlaywright(
   mkdirSync(work, { recursive: true });
   const reportFile = join(work, "report.json");
   rmSync(reportFile, { force: true });
-  const result = spawnSync(process.execPath, [cli, "test", "--config", config, "--reporter=json", "--output", join(work, "output"), ...args], {
+  const child = spawn(process.execPath, [cli, "test", "--config", config, "--reporter=json", "--output", join(work, "output"), ...args], {
     cwd: dir,
-    encoding: "utf8",
-    timeout: timeoutMin * 60_000,
-    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile, CI: "1", FORCE_COLOR: "0" },
   });
-  const timedOut = result.error !== undefined && (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+  let printed = "";
+  const keep = (chunk: Buffer) => {
+    printed = (printed + chunk.toString()).slice(-8000);
+  };
+  child.stdout?.on("data", keep);
+  child.stderr?.on("data", keep);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+    setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
+  }, timeoutMin * 60_000);
+  const status = await new Promise<number | null>((done) => {
+    child.on("error", () => done(1));
+    child.on("close", (code) => done(code));
+  });
+  clearTimeout(timer);
   let report: Report | null = null;
   try {
     report = existsSync(reportFile) ? (JSON.parse(readFileSync(reportFile, "utf8")) as Report) : null;
   } catch {}
-  const printed = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim().split("\n");
-  return { status: timedOut ? null : result.status, timedOut, report, tail: printed.slice(-12).join("\n") };
+  return { status: timedOut ? null : status, timedOut, report, tail: printed.trim().split("\n").slice(-12).join("\n") };
 }
 
 export type Outcome = "passed" | "failed" | "flaky" | "skipped" | "listed";

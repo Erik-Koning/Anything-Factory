@@ -50,7 +50,7 @@ Team members (the guard decides who may run which)
   a6g verdict review <branch> approve|changes --sha <commit> --note "…"   ·   a6g verdict ux <subject> pass|issues --ref <commit> --note "…"
   a6g log [--label …] "<entry>"   a6g lock <name> [--slots N] [--wait-min M] -- <cmd>   a6g drain <role…>|off
   a6g gate [--quick]   a6g env up|down|restart|reset|status   a6g finish   a6g progress
-  a6g pages run|shots|status|done
+  a6g pages run|shots|status|done   a6g e2e run|try|status|done   a6g complete
   a6g pr --title "…" --body-file <file>   the planner's pull request into the branch you promote (push.pullRequest)
 
 The task graph (a6g task help lists every form)
@@ -150,6 +150,8 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   gate: () => import("../lib/commands/tools.ts").then((m) => m.gate(args)),
   env: () => import("../lib/commands/tools.ts").then((m) => m.env(args)),
   finish: () => import("../lib/commands/tools.ts").then((m) => m.finish()),
+  complete: () => import("../lib/commands/tools.ts").then((m) => m.complete()),
+  e2e: () => import("../lib/commands/e2e.ts").then((m) => m.e2e(args)),
   progress: () => import("../lib/commands/tools.ts").then((m) => m.progress()),
   drain: () => import("../lib/commands/tools.ts").then((m) => m.drain(args)),
   pages: () => import("../lib/commands/pages.ts").then((m) => m.run(args)),

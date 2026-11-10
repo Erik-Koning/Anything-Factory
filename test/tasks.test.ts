@@ -661,6 +661,28 @@ describe("raising to the operator, and waiting on other tasks", () => {
     assert.match(moveRefusal(blockedAgain, "done", "settle", WATCHDOG, { all: await store.tasks.all() }) ?? "", /waits on no other task/);
     assert.match(moveRefusal(blockedAgain, "done", "settle", "planner", { all: [] }) ?? "", /doesn't settle tasks/);
   });
+
+  test("a journey folded into tasks closes only where its specs can be checked: the merge queue, with its proof", async () => {
+    const store = fileStore(tmp("a6g-run-"), "fixture");
+    const add = (fields: Partial<Task> & Pick<Task, "title" | "status">) =>
+      store.tasks.create(newTask({ team: "fixture", kind: "feature", by: "planner", ...fields }));
+    const fix = await add({ title: "Last fix", status: "approved", approval: { by: "approver", at: "x", note: "" } });
+    const journey = await add({
+      title: "Pay a need",
+      kind: "journey",
+      status: "blocked",
+      wait: { on: [fix.id], then: "close", by: "planner", at: nowIso() },
+    });
+    await update(store.tasks, fix.id, (t) => ({ ...t, status: "done" as const }));
+    // The watchdog can't read the suite's results: it leaves the journey for the merge queue.
+    assert.deepEqual(await settleWaits(store, WATCHDOG), []);
+    assert.deepEqual(await settleWaits(store, MERGE, () => "1 of journey 2's tests didn't pass"), []);
+    assert.equal((await store.tasks.get(journey.id))?.status, "blocked");
+    assert.deepEqual(
+      (await settleWaits(store, MERGE, () => null)).map((s) => [s.id, s.to]),
+      [[journey.id, "done"]]
+    );
+  });
 });
 
 describe("claims over time", () => {
@@ -942,8 +964,17 @@ describe("the audit's findings stay fixed", () => {
     assert.equal((await a6g(["task", "approve", "3"], as("approver"))).code, 0, "no journey approval first");
     assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /done once it's verified/);
     await update(store().tasks, "3", (t) => ({ ...t, status: "done" as const }));
-    assert.equal((await a6g(["task", "status", "2", "done"], as("planner"))).code, 0, "its task done, the planner closes it");
+    // This team has a tester, so its journeys are proven by their specs (harness.journeys "required"): with no suite
+    // yet, the journey isn't done. The operator's call is still theirs.
+    assert.match((await a6g(["task", "status", "2", "done"], as("planner"))).out, /the team's harness has no suite yet/);
     assert.match((await a6g(["task", "edit", "2", "--kind", "feature"], as("planner"))).out, /has tasks/);
+    assert.equal((await a6g(["task", "status", "2", "done"], as(null))).code, 0, "the operator closes it");
+    // Where journeys are optional, the planner closes one once its tasks are done, as before.
+    const optional = setup(team({ approval: { mode: "full" }, harness: { journeys: "optional" } }));
+    await a6g(["task", "add", "Checkout", "--kind", "journey"], optional.as("planner"));
+    await a6g(["task", "add", "Pay", "--parent", "1"], optional.as("planner"));
+    await update(optional.store().tasks, "2", (t) => ({ ...t, status: "done" as const }));
+    assert.equal((await a6g(["task", "status", "1", "done"], optional.as("planner"))).code, 0, "its task done, the planner closes it");
   });
 
   test("text that starts with -- is text; --help prints the usage; the rules name CLAUDE.md only when there is one", async () => {

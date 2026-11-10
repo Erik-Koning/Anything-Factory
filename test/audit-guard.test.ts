@@ -138,8 +138,11 @@ describe("the guard audit's findings stay fixed", { concurrency: true }, () => {
       bash(home, "builder", `rm -f ${run}/paused`, "refuse", options),
       bash(home, "builder", "echo '{}' > ~/.claude/settings.json", "refuse", options),
       bash(home, "builder", `echo '{}' > ${t3Home}/userdata/settings.json`, "refuse", options),
-      tool(home, "planner", "Write", { file_path: join(run, "complete") }, "allow", { run }),
-      bash(home, "planner", `touch ${run}/complete`, "allow", { run }),
+      // Done is computed, not claimed: a6g complete writes the marker once the finish line holds.
+      tool(home, "planner", "Write", { file_path: join(run, "complete") }, "refuse", { run }),
+      bash(home, "planner", `touch ${run}/complete`, "refuse", { run }),
+      bash(home, "planner", "a6g complete", "allow", { run }),
+      tool(home, "planner", "Write", { file_path: join(run, "idle") }, "allow", { run }),
     ]);
   });
 

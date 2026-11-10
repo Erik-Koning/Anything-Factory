@@ -16,6 +16,7 @@ import {
   type Kind,
   MERGE,
   move,
+  type MoveContext,
   moveRefusal,
   nowIso,
   newTask,
@@ -40,7 +41,13 @@ import { openStore, type Store, update } from "./store.ts";
 export async function closeMerged(
   store: Store,
   ids: string[],
-  { branch, sha, tip, rebasedFrom }: { branch: string; sha: string; tip?: string; rebasedFrom?: string | undefined }
+  {
+    branch,
+    sha,
+    tip,
+    rebasedFrom,
+    journeyProof,
+  }: { branch: string; sha: string; tip?: string; rebasedFrom?: string | undefined; journeyProof?: MoveContext["journeyProof"] }
 ): Promise<{ closed: string[]; skipped: string[] }> {
   const closed: string[] = [];
   const skipped: string[] = [];
@@ -58,25 +65,30 @@ export async function closeMerged(
     else closed.push(task.id);
   }
   // What waited on these closes with them, or goes back to work.
-  const settled = await settleWaits(store, MERGE);
+  const settled = await settleWaits(store, MERGE, journeyProof);
   closed.push(...settled.filter((s) => s.to === "done").map((s) => s.id));
   return { closed, skipped };
 }
 
 // The tasks waiting on others (Wait in model.ts) that can settle now, moved by `by`: the merge queue right after a
-// merge, the watchdog each run. Closing one can settle another that waited on it, so it looks again, a few times.
-export async function settleWaits(store: Store, by: Actor): Promise<{ id: string; to: Status; why: string }[]> {
+// merge, the watchdog each run. Closing one can settle another that waited on it, so it looks again, a few times. A
+// journey closes only where its specs can be checked (`journeyProof`, the merge queue's), never by the watchdog.
+export async function settleWaits(
+  store: Store,
+  by: Actor,
+  journeyProof?: MoveContext["journeyProof"]
+): Promise<{ id: string; to: Status; why: string }[]> {
   const settled: { id: string; to: Status; why: string }[] = [];
   for (let pass = 0; pass < 5; pass++) {
     const all = await store.tasks.all();
     const due = all.flatMap((t) => {
       const outcome = waitOutcome(t, all);
-      return outcome ? [{ t, ...outcome }] : [];
+      return outcome && !(t.kind === "journey" && outcome.to === "done" && !journeyProof) ? [{ t, ...outcome }] : [];
     });
     if (!due.length) break;
     for (const { t, to, why } of due) {
       try {
-        await update(store.tasks, t.id, (x) => move(x, to, "settle", by, { all }, { why }));
+        await update(store.tasks, t.id, (x) => move(x, to, "settle", by, { all, ...(journeyProof ? { journeyProof } : {}) }, { why }));
         settled.push({ id: t.id, to, why });
       } catch (error) {
         if (!(error instanceof Refused)) throw error;

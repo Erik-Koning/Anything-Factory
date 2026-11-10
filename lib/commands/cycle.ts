@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { asOperator, teamSession } from "../session.ts";
+import { suiteGaps } from "./e2e.ts";
 import { OPERATOR } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { parseArgs, text as optionText, writeFileAtomic } from "../util.ts";
@@ -55,9 +56,23 @@ export async function cycle(argv: string[]): Promise<number> {
         ?.replace(/^#+\s*/, "")
         .slice(0, 80) ?? "";
     const draft = join(run, "outbox", `${new Date().toISOString().slice(0, 10)}-cycle-${number}.md`);
+    // How the end-to-end suite stands, in the factory's words, so a cycle's report can't leave it out.
+    const suite =
+      team.harness.journeys === "required"
+        ? suiteGaps(
+            home,
+            (await store.tasks.all()).filter((t) => t.kind === "journey")
+          )
+        : null;
+    const standing =
+      suite === null
+        ? ""
+        : suite.length
+          ? `\nThe end-to-end suite isn't done:\n${suite.map((gap) => `- ${gap}`).join("\n")}\n`
+          : "\nThe end-to-end suite passed at the head, every journey with specs that passed.\n";
     writeFileAtomic(
       draft,
-      `Subject: Cycle ${number}: ${firstLine}\n\n${report}\n\nDone this cycle: ${done.map((id) => `#${id}`).join(" ") || "nothing merged"}.\n`
+      `Subject: Cycle ${number}: ${firstLine}\n\n${report}\n\nDone this cycle: ${done.map((id) => `#${id}`).join(" ") || "nothing merged"}.\n${standing}`
     );
     console.info(`cycle ${number} closed (${done.length} done); the report is in the outbox: ${draft}`);
     // The pull request says what it holds as of this cycle (plugin/agents/planner.md, Cycles).

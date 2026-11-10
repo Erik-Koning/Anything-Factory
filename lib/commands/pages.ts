@@ -135,7 +135,7 @@ const fileHash = (path: string): string => createHash("sha256").update(readFileS
 
 // Makes the sign-in states the chosen pages need, with the repository's own Playwright (the manifest's auth project),
 // when one is missing or older than STATE_HOURS. Returns what went wrong, by state.
-function signIn(dir: string, base: string, chosen: PageCheck[]): Record<string, string> {
+async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<Record<string, string>> {
   const needed = [...new Set(chosen.flatMap((page) => (page.as ? [page.as] : [])))];
   if (!needed.length) return {};
   const auth = plan.auth;
@@ -149,7 +149,7 @@ function signIn(dir: string, base: string, chosen: PageCheck[]): Record<string, 
     return !existsSync(path) || Date.now() - statSync(path).mtimeMs > STATE_HOURS * 3_600_000;
   });
   if (stale.length) {
-    const ran = runPlaywright(dir, {
+    const ran = await runPlaywright(dir, {
       config: plan.e2eConfig,
       args: ["--project", auth.project],
       env: { PLAYWRIGHT_BASE_URL: base, A6G_NAMESPACE: `pages-${Date.now().toString(36)}` },
@@ -176,7 +176,7 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
     { id: "phone", width: 390, height: 844, isMobile: true, deviceScaleFactor: 2 },
   ];
   const schemes = plan.schemes ?? ["light", "dark"];
-  const signInProblems = signIn(dir, base, chosen);
+  const signInProblems = await signIn(dir, base, chosen);
   const browser = await chromium.launch();
   const results: Record<string, PageResult> = {};
   // A blank page for comparing screenshots, where no page's own security policy can refuse an image.

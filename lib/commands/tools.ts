@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withLock } from "../lock.ts";
+import { e2eDone } from "./e2e.ts";
 import { keepLooks } from "./pages.ts";
 import { stateDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
@@ -269,14 +270,34 @@ export function env(argv: string[]): number {
   return runIn(home, team.environment.script, [sub, ...argv.slice(1)]);
 }
 
-// a6g finish / a6g progress: the team's finish line and its status, run from the team's checkout.
-export function finish(): number {
-  const { home, team } = teamSession();
+// a6g finish / a6g progress: the team's finish line and its status, run from the team's checkout. Where the team's
+// journeys are required (team.json harness.journeys), the finish line also needs the end-to-end suite done: passed at
+// the head, every journey with specs that passed (a6g e2e done).
+export async function finish(): Promise<number> {
+  const { home, team, run } = teamSession();
   if (!team.finish) {
     console.error("finish: the team has no finish command (team.json finish)");
     return 2;
   }
-  return runIn(home, team.finish);
+  const own = runIn(home, team.finish);
+  if (team.harness.journeys !== "required") return own;
+  const suite = await e2eDone(home, team, run);
+  return own !== 0 ? own : suite;
+}
+
+// a6g complete: the planner marks the work complete, only once the finish line holds (a6g finish); the guard keeps the
+// marker from being written any other way.
+export async function complete(): Promise<number> {
+  if (plannerOnly("complete")) return 2;
+  const { run } = teamSession();
+  const code = await finish();
+  if (code !== 0) {
+    console.error("complete: the finish line doesn't hold, so the work isn't complete (above: why)");
+    return 1;
+  }
+  writeFileSync(join(run, "complete"), `${new Date().toISOString()}\n`);
+  console.info("complete: the finish line holds; the work is marked complete, and the watchdog drops to a nightly tick");
+  return 0;
 }
 export function progress(): number {
   const { home, team } = teamSession();

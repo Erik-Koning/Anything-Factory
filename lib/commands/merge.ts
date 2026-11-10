@@ -31,6 +31,7 @@ import { ticketOf } from "../tasks/model.ts";
 import { closeMerged, openTeamStore, sendBackToRebase } from "../tasks/ops.ts";
 import { threadSend } from "../t3.ts";
 import { list, localTime, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
+import { journeyProofFor } from "./e2e.ts";
 import { pruneWorktrees } from "./watchdog.ts";
 
 // What a merge left in .a6g/run/state/merges/<branch>.json, and a reviewer's verdict in state/reviews/.
@@ -135,7 +136,7 @@ async function pushWaiting(): Promise<number> {
   if (waiting.length && team.board.type === "tasks") {
     const store = await openTeamStore(team, run, home);
     try {
-      for (const merge of waiting) closed.push(...(await closeMerged(store, merge.ids, merge)).closed);
+      for (const merge of waiting) closed.push(...(await closeMerged(store, merge.ids, { ...merge, journeyProof: journeyProofFor(home, team) })).closed);
     } finally {
       await store.close();
     }
@@ -564,6 +565,7 @@ async function mergeLocked({
             sha: earlier.sha,
             tip: earlier.tip,
             rebasedFrom: earlier.rebasedFrom,
+            journeyProof: journeyProofFor(home, team),
           });
           closed.push(...result.closed);
           skipped.push(...result.skipped);

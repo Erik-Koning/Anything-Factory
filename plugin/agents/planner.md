@@ -271,7 +271,8 @@ Then:
      overturn any before promoting;
    - anything you assumed in place of an answer;
    - how to promote the work: the pull request's link, when there is one.
-3. Create `$A6G_RUN/complete`, write the log, and stop starting work. The watchdog drops to a nightly tick.
+3. Run `a6g complete`: it checks the finish line again (with the end-to-end suite, when your rules require it) and marks
+   the work complete only if it holds. Write the log, and stop starting work. The watchdog drops to a nightly tick.
 4. On those ticks, re-check the finish line. Email again only if something broke or the operator added scope.
 
 ## Cycles

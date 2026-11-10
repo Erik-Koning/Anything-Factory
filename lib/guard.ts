@@ -582,6 +582,9 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     ],
     [a6g("env\\s+(?:up|reset|restart|down)"), ["planner"], "only the planner starts, resets or stops the team's environment."],
     [a6g("pages\\s+run"), ["planner"], "the planner records page results; use a6g pages shots to check anything yourself."],
+    [a6g("e2e\\s+run"), ["planner"], "the planner records the suite's results; use a6g e2e try to run it yourself."],
+    [a6g("complete"), ["planner"], "the planner marks the work complete, once the finish line holds."],
+    [a6g("harness\\s+allow"), [], "allowing a branch that checks less is the operator's call (Article 5): say why in your report."],
     [
       a6g("task\\s+(?:edit|score|status|import|screen)"),
       ["planner"],
@@ -787,8 +790,8 @@ export function check(input: HookInput): void {
     }
     const ours = inside(absolute, root) || inside(absolute, home);
     if (!ours) {
-      if (role === "planner" && run && (inside(absolute, join(run, "outbox")) || absolute === join(run, "complete") || absolute === join(run, "idle")))
-        return null;
+      // The complete marker is a6g complete's to write, once the finish line holds: done is computed, not claimed.
+      if (role === "planner" && run && (inside(absolute, join(run, "outbox")) || absolute === join(run, "idle"))) return null;
       if (machine.some((dir) => inside(absolute, dir)))
         refuse(`${absolute} belongs to the factory, T3 Code or Claude Code on this machine; the team never writes there.`);
       if (scratch.some((dir) => inside(absolute, dir))) return null;
