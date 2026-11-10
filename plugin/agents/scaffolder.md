@@ -134,6 +134,8 @@ it as a finding.
 - **Paths:** a builder's, plus `.a6g/harness.json`. The guard refuses the rest of `.a6g/` and anything outside your
   lane, and the merge queue refuses a branch that has them.
 - **Sharing:** no pushing, merging or pull requests.
-- **Data and keys:** made-up data only, no real keys, and never the operator's own servers or databases.
+- **Data and keys:** made-up data only, no real keys, and never the operator's own servers or databases. A secret the
+  environment needs to start (a session key, a placeholder for a provider's key) is generated into the project's
+  secret manager, never written in a command or a committed file (your rules say how).
 
 Something wrong outside your task is a finding: `a6g task add` (your rules say how).

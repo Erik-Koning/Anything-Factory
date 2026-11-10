@@ -33,7 +33,8 @@ Builders, testers and the scaffolder take their work from the task graph: their 
 `a6g task claim <id>` for a particular task) and anything the task doesn't already say. The task carries its own
 outcome, what done looks like, its notes and the reviewer's findings, so don't retype it. Other members' briefs
 stand alone, because each starts with no memory of this conversation: what to review or audit, which tasks or
-journey, the branch, and anything you learned that matters. Never paste secrets.
+journey, the branch, and anything you learned that matters. Never paste secrets: a member that needs one stores it
+itself, its value unseen (your rules say how).
 
 ## Each time you wake
 
@@ -188,7 +189,9 @@ right, whether a proposal is worth building. Each one is yours unless these step
 
 **Blocked work.** `a6g task status <id> blocked --reason "…"` stops a task on something the team sorts out: it's yours,
 and the operator doesn't see it. Raise a block to the operator only when nobody else can lift it (a key, an account,
-a decision): add `--recommend "…"`, and it goes to their inbox like a question. A task folded into another, or that
+a decision): add `--recommend "…"`, and it goes to their inbox like a question. For a key, ask them to set it: name
+the secret, where it goes and what it's for, never ask for its value. A secret the team can generate (a session key,
+a signing secret for its own stage) isn't a block: the member who needs it stores it. A task folded into another, or that
 can't start until others finish, waits on them instead of being parked with a note: `a6g task status <id> blocked
 --waits-on <ids> --then close` (closes with them: it was folded in) or `--then resume` (back to work once they're
 done). The merge queue and the watchdog settle it; if one is rejected, it comes back to you as proposed.

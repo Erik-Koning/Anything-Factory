@@ -23,7 +23,8 @@ your report instead of starting it (the planner owns it).
    by role, label and visible text. Use test ids only when there's no accessible name, and then the missing
    name is a UX finding.
 4. **Make each spec re-runnable** on the same data: create what it needs with the harness's fixtures, under the run's
-   `A6G_NAMESPACE`, and don't depend on another spec having run. Never change a record your run didn't make.
+   `A6G_NAMESPACE`, and don't depend on another spec having run. Never change a record your run didn't make. A
+   secret a spec needs is generated in the run: never read a stored one back, and never print one.
 5. **Assert outcomes a person can see.** Reach the database only to arrange preconditions, never to check a result
    the interface should show.
 6. **Never weaken a criterion,** skip a test or loosen a timeout to make it pass. A test that fails because the

@@ -21,7 +21,7 @@ const SHELLS = /^(ba|z|da|k)?sh$/;
 // Shells inside substitutions inside shells: an honest command never nests this deep, so deeper is refused.
 const MAX_DEPTH = 8;
 // What a word holds where a command substitution was: its output, which nobody can know beforehand.
-const SUBSTITUTED = "$(…)";
+export const SUBSTITUTED = "$(…)";
 
 // One simple command: its words with the quotes gone, the files its redirects write and read, and where it runs.
 // inCode: it was read from a string quoted in a program's code (node -e, python -c), so it's a command that code may

@@ -206,6 +206,22 @@ function pushText(team: Team): string {
   return board ? `Pushes: none, so the code stays on this machine.${board} Nothing else leaves it.` : "Pushes: none. Everything stays on this machine.";
 }
 
+// Secrets: stored through a manager with the value on standard input, never written where the conversation shows it.
+function secretsText(team: Team, role: string): string {
+  const stores = policyStates(team).find((policy) => policy.id === "secrets")?.state === "allow";
+  const how = team.roles[role]?.readOnly
+    ? "You store none: say which one is needed in your report."
+    : stores
+      ? `Store one through the project's secret manager with the value on standard input: generated in the pipe (${code("openssl rand -hex 32 | npx sst secret set AuthSecret")}), or from a variable or file that already holds it (${code('printf %s "$API_TOKEN" | gh secret set API_TOKEN')}). The guard passes that form for ${code("sst secret set")}, ${code("vercel env add <NAME> --environment <preview|development>")}, ${code("gh secret set")}, ${code("doppler secrets set <NAME> --silent")} and ${code("gcloud secrets versions add <NAME> --data-file=-")}, for your own stage or a preview; a store for production goes the way a deploy does.`
+      : "This team stores none: the operator sets them.";
+  return list([
+    "A secret's value never appears in a command, a message, a task, a commit or a file you write: not typed, not echoed, not printed back to check it.",
+    how,
+    `A value only a person has (a provider's API key, a live credential) is the operator's to set: say which name is needed, where, and what for${role === "planner" ? "" : " (the planner asks the operator)"}; never ask for the value itself.`,
+    "To check one, list names or run what uses it. Code reads a secret from the manager or the environment, never from a literal, and tests generate their own.",
+  ]);
+}
+
 export function compile(team: LoadedTeam, role: string): string {
   const sections = [
     `# ${team.title}: your team's rules`,
@@ -255,6 +271,7 @@ export function compile(team: LoadedTeam, role: string): string {
             .join("; ")}.`
         : ""
     }`,
+    `## Secrets\n\n${secretsText(team, role)}`,
     `## Read first\n\n${list([
       ...(existsSync(join(team.home, "CLAUDE.md")) ? ["`CLAUDE.md` (the repository's own rules; already in your context)"] : []),
       ...existingDocs(team).map(code),

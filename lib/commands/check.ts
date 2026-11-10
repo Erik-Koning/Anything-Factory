@@ -95,6 +95,11 @@ export function guardCases(team: Team): GuardCase[] {
     if (team.roles["builder"]) bash("builder", "a6g task claim", "allow", "a builder claiming a task");
   }
   bash(builder, "cat .env", "refuse", "reading an env file");
+  // A secret is stored without being seen, whatever the team unlocks.
+  bash(builder, "sst secret set AuthSecret a6g-check-value", "refuse", "a secret's value written in a command");
+  bash(builder, "npx sst secret list", "refuse", "printing stored secrets");
+  for (const role of roles.filter((r) => team.roles[r]?.readOnly))
+    bash(role, "openssl rand -hex 32 | doppler secrets set A6G_CHECK --silent", "refuse", "a read-only role storing a secret");
   bash(builder, `node -e "require('fs').writeFileSync('.a6g/run/state/e2e/history.json', '[]')"`, "refuse", "a program's code writing a record");
   bash(builder, "a6g register", "refuse", "an operator's command");
   if (team.environment.script && builder !== "planner") {
@@ -111,13 +116,15 @@ export function guardCases(team: Team): GuardCase[] {
     if (policyStates(team).find((policy) => policy.id === "github")?.state === "deny")
       bash("planner", "gh pr create --fill", "refuse", "a pull request opened with gh itself, which a6g pr does instead");
   }
-  for (const policy of policyStates(team))
-    for (const example of policy.examples)
-      bash(builder, example, policy.state === "deny" ? "refuse" : "allow", `policy ${policy.id} (${policy.state}): ${example}`);
-  // Ordinary work, unless the team's own rules keep this role from it (a team may narrow e2e runs to its testers).
+  // What the team's own rules keep this role from, whatever a policy allows (a team may narrow e2e runs to its testers,
+  // or name a stage no secret is stored for).
   const narrowed = (command: string) =>
     team.never.some(({ rule }) => new RegExp(rule).test(command)) ||
     team.commandOwners.some(({ rule, roles }) => new RegExp(rule).test(command) && !roles.includes(builder));
+  for (const policy of policyStates(team))
+    for (const example of policy.examples)
+      bash(builder, example, policy.state === "deny" || narrowed(example) ? "refuse" : "allow", `policy ${policy.id} (${policy.state}): ${example}`);
+  // Ordinary work, unless the team's own rules narrow it.
   for (const example of ALLOWED_EXAMPLES)
     if (narrowed(example)) bash(builder, example, "refuse", `ordinary work the team's own rules narrow: ${example}`);
     else bash(builder, example, "allow", `ordinary work: ${example}`);

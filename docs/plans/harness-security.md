@@ -58,7 +58,7 @@ chat instead.
 
 - **A new policy, `secrets`, allowed by default** (as `dependencies` is; `"secrets": "deny"` turns it off). Under
   it, one simple command that stores one secret, with its value on stdin, passes the rules that otherwise refuse the
-  tool (deploy, cloud, hosted-data, github):
+  tool (deploy, cloud, github):
 
   | Tool    | The form that passes                                                            |
   | ------- | ------------------------------------------------------------------------------- |
@@ -94,8 +94,14 @@ get` and `vault read`, `op read`, `kubectl get secret -o …`, `firebase functio
   they'd run; no value is ever written into a file, a message, a commit or a command.
 - **Where:** `lib/policies.ts` (the policy, the reading of a store, the core rules, the exemption in `brokenRule`),
   the guard's self-tests in `a6g check`, `lib/prompts.ts` and the role prompts.
-- **Limits, stated:** the guard reads the command as written. A script that prints a value, or `tee` in the pipe,
-  isn't read: this is the seatbelt the README describes, and decision 31 is the check that measures.
+- **As built, beyond the above:** a read-only role (reviewer, UX specialist, innovator, approver) stores none, and
+  says which is needed in its report; a target that's a variable (`--stage "$STAGE"`) counts as production, since
+  the guard can't read it; `gcloud auth print-access-token` and `op item get` joined the commands that print; a team
+  whose own `never` rule names a store keeps refusing it, and `a6g check` expects that. A refusal of an unread form
+  says which form passes.
+- **Limits, stated:** the guard reads the command as written. A script that prints a value, `tee` in the pipe, a
+  stage exported by an earlier command, or a value typed into a variable first isn't read: this is the seatbelt the
+  README describes, and decision 31 is the check that measures.
 
 ### 31. Secrets don't merge
 
@@ -281,7 +287,7 @@ Defaults are chosen; say if you'd choose otherwise.
 
 ## Checklist
 
-- [ ] G1. Secrets through a manager (35)
+- [x] G1. Secrets through a manager (35)
 - [ ] G2. Secrets don't merge (31)
 - [ ] G3. `refuses` and the `@access` gap (29, 30)
 - [ ] G4. The package audit (32)

@@ -433,6 +433,18 @@ describe("guard", () => {
     await holds([bash(pushing, "planner", "git push origin a6g/next", "refuse", { run })]);
   });
 
+  test("a secret is stored by the roles that build, its value never in the command", () =>
+    holds([
+      bash(home, "builder", "openssl rand -hex 32 | npx sst secret set AuthSecret", "allow"),
+      bash(home, "planner", 'printf %s "$API_TOKEN" | gh secret set API_TOKEN', "allow"),
+      bash(home, "builder", "openssl rand -hex 32 | npx sst secret set AuthSecret --stage production", "refuse"),
+      bash(home, "builder", "npx sst secret set AuthSecret hunter2", "refuse"),
+      bash(home, "builder", "npx sst secret list", "refuse"),
+      bash(home, "builder", "openssl rand -hex 32 | sst secret set AuthSecret < .env.local", "refuse"),
+      bash(home, "reviewer", "openssl rand -hex 32 | npx sst secret set AuthSecret", "refuse"),
+      bash(home, "reviewer", "openssl rand -base64 32 | doppler secrets set SESSION_KEY --silent", "refuse"),
+    ]));
+
   test("read-only roles and roles the team doesn't have", () =>
     holds([
       ...["git checkout -b x", "git stash", "git commit -am x", "git switch main", "git push origin x"].map((c) => bash(home, "reviewer", c, "refuse")),

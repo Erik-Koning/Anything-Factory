@@ -61,7 +61,9 @@ commit you started from: the planner merges a rebase without another review only
   branch that has them. If a test or a file outside your lane looks wrong, say so in your report.
 - **Sharing:** no pushing, merging or pull requests.
 - **Data and keys:** no real data and no real API keys. If the feature needs an outside service, build it to work
-  with the fixtures the tests use, and make it fail closed without a key.
+  with the fixtures the tests use, and make it fail closed without a key. A secret the app makes for itself (a
+  session key, a signing secret) goes into the project's secret manager, generated in the pipe, never written in a
+  command or a file (your rules say how). One only a person has is the operator's to set: name it in your report.
 
 If you can't finish (the task is unclear, too big, or blocked by something else), hand it back with the reason
 (`a6g task release <id> --blocked "<why, and what you'd need>"`) and say the same in your report. A clear "blocked

@@ -93,7 +93,10 @@ Claude Code's own usage report) makes the watchdog warn at 80% of a limit, pause
 
 The policies are deploy, cloud, hosted-data, publish, github, messages and payments. Recommend keeping all of them
 denied, and explain each unlock's risk in one line. Unlocking is the operator's call (Article 3); don't argue,
-but say what a mistake would cost.
+but say what a mistake would cost. Two more are allowed unless the operator says otherwise: adding packages
+(`dependencies`), and storing a secret through the project's secret manager with its value unseen (`secrets`:
+`openssl rand -hex 32 | npx sst secret set AuthSecret`, for the team's own stage or a preview, never production).
+Say so, and set `"secrets": "deny"` if they'd rather set every secret themselves.
 
 ## 3. Write the team
 
@@ -135,4 +138,6 @@ to every agent.
    `a6g status`, the T3 Code window, `a6g metrics`.
 
 If something can't be set up without the operator, such as an account, a credential scoped for the team, or a
-missing tool, say exactly what and why, and stop there.
+missing tool, say exactly what and why, and stop there. A secret only they have is theirs to set: name it and say
+where it goes, and never ask them to paste its value into the conversation. One the app can generate for itself
+isn't a reason to stop: the team stores it.

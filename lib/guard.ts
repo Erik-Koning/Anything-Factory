@@ -15,7 +15,7 @@ import { FACTORY_PATH, factoryWrite, instanceId, type Lane, laneAllows, normaliz
 import { messageKind, waitReason } from "./contact.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
-import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, webRefusal } from "./policies.ts";
+import { brokenRule, commandRules, END, isSecretFile, isSecretWord, OPERATOR_COMMANDS, START, storeOf, webRefusal } from "./policies.ts";
 import { type HookInput, inSetup, inTeam, setupRole, teamSession } from "./session.ts";
 import {
   expandPath,
@@ -1031,6 +1031,9 @@ export function check(input: HookInput): void {
     for (const command of commands) {
       const broken = brokenRule(rules, command);
       if (broken) refuse(broken.reason);
+      // Storing a secret changes something, which a read-only role doesn't.
+      if (readOnly && storeOf(command))
+        refuse("a read-only role stores no secrets: say which one is needed in your report, and the planner gives it to a member who builds.");
       for (const line of lines(command)) for (const [rule, roles, reason] of owned) if (rule.test(line) && !roles.includes(role)) refuse(reason);
       checkSecrets(command);
       checkProofs(command);
