@@ -201,6 +201,37 @@ describe("a6g serve", () => {
     }
   });
 
+  test("blocked work raised to the operator waits for them too, with an answer box; a block the team sorts doesn't", async () => {
+    const s = await served();
+    try {
+      assert.match(await (await fetch(s.url)).text(), /0 waiting for you[\s\S]*Nothing is waiting for you\./);
+      const at = new Date(Date.now() - 60_000).toISOString();
+      const blocked = (title: string) => ({
+        ...newTask({ team: "fixture", title, kind: "feature", status: "blocked", by: "planner", body: "Send the weekly digest by email." }),
+        history: [{ at, by: "planner", what: "building → blocked", from: "building", to: "blocked" }],
+      });
+      const raised = await s.store.tasks.create({
+        ...blocked("Weekly digest"),
+        ask: { by: "planner", at, reason: "It needs a sending domain only you can verify.", recommendation: "Verify mail.example.org" },
+      });
+      await s.store.tasks.create(blocked("Waits on another task"));
+      const html = await (await fetch(s.url)).text();
+      assert.match(html, /1 waiting for you/);
+      const cards = html.match(/<li class="proposal">[\s\S]*?<\/li>/g) ?? [];
+      assert.equal(cards.length, 1, "only the block raised to the operator");
+      assert.match(cards[0] ?? "", /Weekly digest[\s\S]*Why it's yours:<\/b> It needs a sending domain only you can verify\./);
+      assert.match(cards[0] ?? "", new RegExp(`action="/api/tasks/${raised.id}/answer"`));
+      assert.doesNotMatch(cards[0] ?? "", /Approve|Reject/, "the planner unblocks it once the operator has said how");
+
+      const answered = await post(`${s.url}/api/tasks/${raised.id}/answer`, { text: "Verified, go ahead" });
+      assert.equal(answered.status, 200);
+      const task = await s.store.tasks.get(raised.id);
+      assert.deepEqual([task?.status, task?.notes.at(-1)?.kind, task?.notes.at(-1)?.text], ["blocked", "answer", "Verified, go ahead"]);
+    } finally {
+      await s.close();
+    }
+  });
+
   test("with a token, every request needs it: ?token= once, then the cookie or the header", async () => {
     const s = await served({ token: "s3cret-token" });
     try {

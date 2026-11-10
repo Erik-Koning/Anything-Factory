@@ -370,13 +370,14 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
 - **Cycles.** With `"mode": "cycles"` a team has no finish line: it builds, verifies journeys, sweeps for regressions
   and closes each cycle with a report (`a6g cycle close`), and rests when nothing is left until new work arrives.
 
-`a6g serve` is your page for one team, on the machine it runs on: the request form, the proposals to approve or
-reject, the board and the graph. It listens on 127.0.0.1 and always asks for a token, so the team's own agents on
-this machine can't use it: one made at start and printed in the address to open, or yours in `A6G_SERVE_TOKEN`.
-That token is yours alone: it approves work and shows stakeholders' names. Give a stakeholder a link of their own
-with `a6g request stakeholders add --name "…" --email "…" --role "…"`: it opens only the request form and their own
-requests, and what they send is attributed to them; `a6g request stakeholders revoke <sN>` ends it. For people on
-other machines, serve on an address they can reach (`--host`).
+`a6g serve` is your page for one team, on the machine it runs on: the request form, what waits on you (proposals to
+approve or reject, and questions and blocked work raised to you, each with a box for your answer), the board and the
+graph. It listens on 127.0.0.1 and always asks for a token, so the team's own agents on this machine can't use it: one
+made at start and printed in the address to open, or yours in `A6G_SERVE_TOKEN`. That token is yours alone: it approves
+work and shows stakeholders' names. Give a stakeholder a link of their own with `a6g request stakeholders add --name "…"
+--email "…" --role "…"`: it opens only the request form and their own requests, and what they send is attributed to
+them; `a6g request stakeholders revoke <sN>` ends it. For people on other machines, serve on an address they can reach
+(`--host`).
 
 ### Across machines
 

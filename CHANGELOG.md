@@ -24,7 +24,13 @@ question to the operator, with no feature claimed before the answer.
   the line when a task waits on you. Only the operator answers; a member that tries is refused. `a6g serve` shows a
   question with what was asked, what the team recommends and a box for your answer. The design check-in takes an
   answer and nothing else: `a6g task approve` and `reject` refuse it from everyone (the page's Reject beside it would
-  have marked it as wanting no check-in, and started the features).
+  have marked it as wanting no check-in, and started the features). Blocked work raised to you is on the page's
+  Waiting for you too, with the same box: it was only in the web app's inbox.
+- **A check-in you can read at a glance.** The planner's question at the check-in ran to one paragraph of 1,300
+  characters in the trial. Its rules now ask for under 700, in short labelled sentences (where it runs and what that
+  costs, the data, how clients reach it, the stack, what's left out), the record's path for the rest, and the options
+  written so the web app's inbox offers them as choices. The check-in task's own text, which the inbox and its emails
+  show, says what the task is and how it ends; how the planner carries it is in the planner's rules.
 - **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
   agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
   role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time
@@ -36,9 +42,12 @@ question to the operator, with no feature claimed before the answer.
   (current stable versions, checked rather than remembered), keys, and how it ships (a staged image that runs as
   non-root, a health check, migrations on release, a CI workflow that runs the gate's scripts). The skeleton is a
   thin slice through every layer, so builders copy one way of validating a request, shaping an error, reaching the
-  data and drawing a page; hardware the team doesn't have gets a simulator. `docs/architecture.md` is the design
-  record: each choice, the need behind it, what else was weighed, what it costs to run, how it's changed later, and
-  which choices were the operator's.
+  data and drawing a page; hardware the team doesn't have gets a simulator, as part of the foundation and not as a
+  feature after it. `docs/architecture.md` is the design record: each choice, the need behind it, what else was
+  weighed, what it costs to run, how it's changed later, and which choices were the operator's. The trial's skeleton
+  had no backup, no word on HTTPS and no dependency updates, and its CI ran no browser test: the rules now name what
+  a project needs to keep running (a backup with a restore that was tried, how it's reached over HTTPS, readable
+  logs, updates proposed by Dependabot or Renovate), and the CI workflow runs the end-to-end suite too.
 - **Setup proposes, and says whose each choice is.** For an empty repository the setup agent asks what the operator
   has already fixed and proposes the rest; the brief keeps the two apart, and nothing setup chose goes in the
   direction's "Always ask me". The planner's founding task says what's needed, never which libraries or files.

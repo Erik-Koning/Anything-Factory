@@ -164,7 +164,12 @@ libraries is the planner's guess at the same proposal, not a specification: what
    project's secret manager and never in the repository; an example file with names and no values.
 7. **How it ships.** The image or the platform's configuration production would run (built in stages, production
    dependencies only, not as root, with a health check), migrations applied on release, and a CI workflow that runs
-   the scripts the gate runs. Write it though the team pushes nowhere: it works the day the operator does.
+   the scripts the gate runs and the end-to-end suite. Write it though the team pushes nowhere: it works the day the
+   operator does.
+8. **Keeping it running.** What its first week with real data needs, small and written down: a backup of the data
+   and the restore that proves it (a script, tried once); how it's reached over HTTPS (the platform's, or a reverse
+   proxy example beside the production configuration); logs a person can read and the health check; and dependency
+   updates proposed by the host's bot (Dependabot or Renovate, configured for the stack).
 
 Prefer the boring answer: the one most teams would pick, that runs on this machine without an account, has a free or
 capped tier, and can be left (standard SQL, an OCI image, an open protocol). Something newer needs a reason from the

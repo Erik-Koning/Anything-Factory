@@ -153,7 +153,9 @@ repositories without a UI. The decisions below answer each, as revised by the re
     under `A6G_NAMESPACE` and remove them.
 12. **Setup.** `draftTeam` adds a scaffolder to any repository with an app, a UI, or nothing yet; for an empty
     repository the setup agent asks the stack and writes it in the brief, and the planner's first task is a
-    `scaffold` task.
+    `scaffold` task. (Since changed: setup asks only what the operator has fixed and proposes the rest, the
+    scaffolder completes and records the design, and a technical operator agrees it at the design check-in:
+    `docs/team.md`, "The design check-in".)
 13. **The planner's prompt gains one table row and a few sentences:** what the scaffolder owns, that a feature
     needing a harness waits on a `test-infra` task, that journeys are done only while their specs pass, and that the
     merge queue files what breaks. The cycle's "sweep for regressions" becomes the queue's.

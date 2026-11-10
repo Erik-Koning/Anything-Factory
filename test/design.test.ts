@@ -186,7 +186,9 @@ describe("a6g task and the design check-in", () => {
     assert.equal(await fileDesignCheckIn(store, team), "1");
     const filed = await store.tasks.get("1");
     assert.deepEqual([filed?.kind, filed?.status, filed?.by], ["design", "triage", MERGE]);
-    assert.match(filed?.body ?? "", /raise it: a6g task status <this task> question/);
+    // Its text is read by the operator too (the web app's inbox, its emails): what it is, never the planner's commands.
+    assert.match(filed?.body ?? "", /The planner raises it as a question once the skeleton and the harness have merged/);
+    assert.doesNotMatch(filed?.body ?? "", /a6g task|Planner, this is yours/);
     assert.equal(await fileDesignCheckIn(store, team), null);
     await store.tasks.replace({ ...(filed as Task), status: "done" });
     assert.equal(await fileDesignCheckIn(store, team), null, "asked once");

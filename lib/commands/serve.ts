@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 import type { Team } from "../config.ts";
 import { entryOf, FACTORY_ROOT } from "../paths.ts";
 import { operatorOnly, teamSession } from "../session.ts";
+import { waitsOnOperator } from "../tasks/answer.ts";
 import { betterDiagram, layout } from "../tasks/graph.ts";
 import { answersOn, claimOrder, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
@@ -404,8 +405,9 @@ async function page(
   const [tasks, requests, stakeholders] = await Promise.all([store.tasks.all(), store.requests.all(), store.stakeholders.all()]);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const people = new Map(stakeholders.map((s) => [s.id, s]));
+  // What waits on the operator: proposals to decide, questions, and blocked work raised to them (answer.ts).
   const proposals = tasks
-    .filter((t) => PROPOSALS.includes(t.status) && t.kind !== "journey")
+    .filter((t) => (PROPOSALS.includes(t.status) || waitsOnOperator(t)) && t.kind !== "journey")
     .sort((a, b) => (b.priority ?? -1) - (a.priority ?? -1) || Number(a.id) - Number(b.id));
   const open = requests.filter((r) => isOpen(r, byId)).reverse();
   const inFlight = tasks.filter((t) => !["done", "rejected"].includes(t.status)).length;
@@ -444,8 +446,9 @@ function proposalsSection(proposals: Task[]): string {
       : `<p class="why muted">Not scored yet.</p>`;
     const gate = t.gate ? `<p class="why"><b>Asked:</b> ${esc(t.gate.asked)} · <b>Simplest:</b> ${esc(t.gate.simplest)}</p>` : "";
     const lastNote = t.notes.at(-1);
-    // A question put to the operator: what was asked and what the team would do, whole, and a box for the answer.
-    const asked = t.status === "question" && t.ask ? t.ask : null;
+    // A question put to the operator, or a block raised to them: what was asked and what the team would do, whole, and
+    // a box for the answer.
+    const asked = waitsOnOperator(t) && t.ask ? t.ask : null;
     const said = answersOn(t).at(-1);
     const question = asked
       ? `<p class="body"><b>Why it's yours:</b> ${esc(asked.reason)}</p>
@@ -459,12 +462,13 @@ function proposalsSection(proposals: Task[]): string {
       <output></output>
     </form>`
       : "";
-    // The design check-in is answered, never approved or rejected (model.ts): it gets the box alone, and its body, which
-    // tells the planner how to carry it, stays off the operator's page.
+    // The design check-in is answered, never approved or rejected (model.ts), and blocked work is the planner's to
+    // unblock once the operator has said how: each gets the box alone. The check-in's question says all its body does.
     const design = t.kind === "design";
-    const verdicts = design
-      ? ""
-      : `<form method="post" action="/api/tasks/${esc(t.id)}/approve" data-api>
+    const verdicts =
+      design || t.status === "blocked"
+        ? ""
+        : `<form method="post" action="/api/tasks/${esc(t.id)}/approve" data-api>
       <input name="note" placeholder="Note (optional)" maxlength="500" aria-label="Note for approving #${esc(t.id)}">
       <button class="approve">Approve</button>
       <output></output>
@@ -487,7 +491,7 @@ function proposalsSection(proposals: Task[]): string {
   };
   return `<section>
   <h2>Waiting for you</h2>
-  ${proposals.length ? `<ul class="plain">${proposals.map(item).join("\n")}</ul>` : `<p class="muted">No proposals are waiting for you.</p>`}
+  ${proposals.length ? `<ul class="plain">${proposals.map(item).join("\n")}</ul>` : `<p class="muted">Nothing is waiting for you.</p>`}
 </section>`;
 }
 

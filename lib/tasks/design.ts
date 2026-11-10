@@ -11,13 +11,11 @@ import type { Store } from "./store.ts";
 export const DESIGN_RECORD = "docs/architecture.md";
 
 const TITLE = "Design check-in: the operator agrees the foundation";
+// Read by the operator as much as by the planner (the web app's inbox and its emails show a task's text): what the
+// task is and how it ends. How the planner carries it is in its own rules (plugin/agents/planner.md).
 const BODY = `The operator asked to agree this project's foundation before features are built on it (team.json operator.designCheckIn). While this task is open, only scaffold and test-infra work is claimed.
 
-Planner, this is yours to carry:
-
-1. Leave it here until the skeleton and the harness have merged and the design record (${DESIGN_RECORD}, or where the repository keeps one) says what was chosen, why, what else was weighed, what it costs to run and how hard each choice is to change later.
-2. Then raise it: a6g task status <this task> question --reason "…" --recommend "…". In the reason, say in a few lines what now runs end to end, name each choice that would be costly to change (the stack, the architecture, the data store, how clients or devices reach it, where it's hosted and what that costs a month), give the record's path, and offer the options: (a) agreed as built (b) change something, saying what. Recommend one.
-3. When the answer agrees, close it (a6g task status <this task> done) and feature work starts. When it asks for a change, take it back (a6g task status <this task> triage), have the change made as scaffold work, and raise it again.`;
+The planner raises it as a question once the skeleton and the harness have merged and the design record (${DESIGN_RECORD}, or where the repository keeps one) says what was chosen, why, what else was weighed, what it costs to run and how hard each choice is to change later. The operator answers in words: agreed, and features start; or what to change, which the team makes as scaffold work before asking again.`;
 
 // Files the team's design check-in when its operator asked for one and the graph has none (open or settled: it's asked
 // once). Resolves to the new task's id, or null.

@@ -186,18 +186,22 @@ foundation is costly to move, so it's settled first.
 
 - **The founding task says what, not how.** Give it the outcome (the gate passes on a real app, the environment
   serves it, a slice runs through every layer), what the brief says the operator fixed, the contract the adapters
-  need (the script names and ports in the notes), and what the brief leaves open. Don't choose libraries, versions or
-  a file list for the scaffolder: completing the design from the brief's proposal, and recording it
-  (`docs/architecture.md`), is its task, and a choice you name from memory is older than what's current.
+  need (the script names and ports in the notes), and what the brief leaves open. Where the product talks to
+  hardware or clients the team doesn't have, a simulator that speaks the real protocol belongs to the foundation,
+  not to a feature: every feature is tested against it. Don't choose libraries, versions or a file list for the
+  scaffolder: completing the design from the brief's proposal, and recording it (`docs/architecture.md`), is its
+  task, and a choice you name from memory is older than what's current.
 - **Plan while it's built.** Shape, score and have the features approved meanwhile; they're claimed once the
   foundation allows.
 - **With a design check-in** (your rules say when the team holds one; register filed it as a `design` task):
   nothing but `scaffold` and `test-infra` work is claimed until the operator has agreed the design. Leave the task
   where it is until the skeleton and the harness have merged and the record is written. Then read the record, and
-  raise it: `a6g task status <id> question --reason "…" --recommend "…"`. The reason is the design in a few lines
-  (where it runs and what that costs, its shape, the data store, how clients reach it, the stack), where the record
-  is, what the scaffolder would change, and the options: "(a) agreed as built (b) change something: say what". It
-  blocks most of the team's work, so its message is urgent. When they answer:
+  raise it: `a6g task status <id> question --reason "…" --recommend "…"`. The reason is what they decide from, often
+  on a phone: under 700 characters, in short sentences that each start with what they're about ("Runs on: … Data: …
+  Clients reach it by: … Stack: … Left out: …"), with only the choices that would be costly to change and what it
+  costs a month. Then where the record is (it holds the rest: don't repeat it), and "Options: (a) agreed as built;
+  (b) change something: say what". The recommendation is one option and a sentence of why. It blocks most of the
+  team's work, so its message is urgent. When they answer:
   - agreed: `a6g task status <id> done`, and the features are claimed;
   - changes: `a6g task status <id> triage`, make each change a `scaffold` task, and raise the check-in again once
     they've merged, saying what changed.
