@@ -16,12 +16,13 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { instanceId, type Lane, type LoadedTeam, loadTeam, ROLES, type Team } from "../config.ts";
 import { contactRule } from "../contact.ts";
-import { HARNESS_FILE, readHarness } from "../harness.ts";
+import { HARNESS_FILE, pagePlan, readHarness } from "../harness.ts";
 import { FACTORY_ROOT, findHome, versionDir } from "../paths.ts";
 import { ALLOWED_EXAMPLES, policyStates } from "../policies.ts";
 import { compile } from "../prompts.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, which } from "../util.ts";
+import { unknownSignIns } from "./pages.ts";
 import { githubRepo, remoteUrl, shownUrl } from "./pr.ts";
 
 // One self-test case: a tool call as a role would make it, and what the guard must do with it. `says`: what the
@@ -258,6 +259,7 @@ export async function check(argv: string[]): Promise<number> {
   // The team's harness manifest, once its scaffolder has written one.
   const manifest = readHarness(home);
   for (const problem of manifest.problems) line("FAIL", problem);
+  for (const problem of unknownSignIns(pagePlan(team, manifest.harness))) line("FAIL", `team.json pages.list: ${problem}`);
   if (manifest.harness && !manifest.problems.length)
     line(
       "ok",

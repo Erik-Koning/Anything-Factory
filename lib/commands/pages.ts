@@ -1,9 +1,11 @@
 // a6g pages: each page the team checks, at each viewport and colour scheme, in the factory's own Chromium (lib/browser.ts),
 // so every team can check its pages from its first day. The pages are the operator's (team.json pages.list) and the
 // team's harness manifest's (lib/harness.ts), seen signed in where a page says `as`. For each it records the HTTP
-// status, uncaught errors, console errors, horizontal overflow, axe's WCAG A/AA violations (serious and critical),
-// touch targets under pages.minTarget on phones, text clipped by its box, controls with no visible focus (on the first
-// viewport and scheme), and a full-page screenshot with animations off and the manifest's masks painted over.
+// status, where the page ended when that isn't where it was asked for, uncaught errors, console errors, horizontal
+// overflow, axe's WCAG A/AA violations (serious and critical), touch targets under pages.minTarget on phones, text cut
+// off by the box that clips it, controls whose focus can't be seen (on the first viewport and scheme), and a
+// full-page screenshot with animations off and the manifest's masks painted over. The page is scrolled to its end and
+// back first, so what loads lazily is there; the operator's `ignore` selectors are left out of every check in the page.
 // Results are keyed to the pages' source, so a change to it has to be checked again, and UX verdicts (a6g verdict ux
 // <page>) count only for the source they saw. When the UX specialist passes a page at a commit the factory checked,
 // its screenshots are kept, and later runs say which pages look different since: where an audit starts.
@@ -36,20 +38,28 @@ interface Tab {
   on(event: "pageerror", listener: (error: Error) => void): void;
   on(event: "console", listener: (message: ConsoleMessage) => void): void;
   goto(url: string, options: { waitUntil: "load"; timeout: number }): Promise<{ status(): number } | null>;
+  url(): string;
   waitForTimeout(ms: number): Promise<void>;
+  // A script's source, run as the debugger runs it: the page's content security policy has no say over it.
+  evaluate(script: string): Promise<unknown>;
   evaluate<T, A = undefined>(fn: (arg: A) => T | Promise<T>, arg?: A): Promise<T>;
-  addScriptTag(options: { path: string }): Promise<unknown>;
   locator(selector: string): unknown;
   keyboard: { press(key: string): Promise<void> };
   screenshot(options: {
-    path: string;
+    path?: string;
     fullPage: boolean;
     scale?: "css";
-    clip?: { x: number; y: number; width: number; height: number };
+    clip?: Region;
     animations?: "disabled";
     caret?: "hide";
     mask?: unknown[];
-  }): Promise<unknown>;
+  }): Promise<Buffer>;
+}
+interface Region {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 interface Context {
   newPage(): Promise<Tab>;
@@ -78,6 +88,8 @@ export interface PageRun {
   // The screenshot's hash, and how much of it differs from the look the UX specialist passed (0 to 1).
   look?: string;
   differs?: number;
+  // The focus walk: how many of the page's keyboard stops it walked.
+  focus?: { walked: number; stops: number };
 }
 export interface PageResult {
   passed: boolean;
@@ -110,6 +122,8 @@ const pick = (ids: string[]): PageCheck[] => (ids.length ? list.filter((page) =>
 // A difference above this share of a screenshot's pixels is a different look, not rendering noise.
 export const DIFFERS = 0.001;
 const FOCUS_STOPS = 40;
+// Focus shows when at least this many pixels around a control change with it: a one-pixel underline under a word.
+const FOCUS_PIXELS = 8;
 // Sign-in states older than this are made again before a page needs one.
 const STATE_HOURS = 12;
 
@@ -133,8 +147,17 @@ const looksDir = (state: string, id: string): string => join(state, "looks", id)
 const keptLooks = (state: string, id: string): KeptLooks | null => readJson<KeptLooks | null>(join(looksDir(state, id), "looks.json"), null);
 const fileHash = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 16);
 
+// Pages that ask to be seen signed in as a state the manifest doesn't make (an operator's page, since the manifest's
+// own are checked as it's read). a6g check and the start of a run refuse them.
+export function unknownSignIns(pages: PagePlan): string[] {
+  const states = Object.keys(pages.auth?.states ?? {});
+  const has = states.length ? `the harness manifest's auth.states has ${states.join(", ")}` : "the harness manifest has no auth.states";
+  return pages.list.flatMap((page) => (page.as && !states.includes(page.as) ? [`page ${page.id}: as "${page.as}" names no sign-in state (${has})`] : []));
+}
+
 // Makes the sign-in states the chosen pages need, with the repository's own Playwright (the manifest's auth project),
-// when one is missing or older than STATE_HOURS. Returns what went wrong, by state.
+// when one is missing or older than STATE_HOURS. Returns what went wrong, by state. A sign-in that fails fails its
+// pages: the state an earlier run left may be a session the app has since ended, so it's never used in its place.
 async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<Record<string, string>> {
   const needed = [...new Set(chosen.flatMap((page) => (page.as ? [page.as] : [])))];
   if (!needed.length) return {};
@@ -144,22 +167,32 @@ async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<R
     for (const name of needed) problems[name] = `the sign-in ${name} needs the harness manifest's auth project`;
     return problems;
   }
-  const stale = needed.filter((name) => {
+  const made = (name: string): number => {
     const path = join(dir, auth.states[name] ?? "");
-    return !existsSync(path) || Date.now() - statSync(path).mtimeMs > STATE_HOURS * 3_600_000;
-  });
-  if (stale.length) {
-    const ran = await runPlaywright(dir, {
-      config: plan.e2eConfig,
-      args: ["--project", auth.project],
-      env: { PLAYWRIGHT_BASE_URL: base, A6G_NAMESPACE: `pages-${Date.now().toString(36)}` },
-      timeoutMin: 5,
-      work: join(workDir(home), "pages-auth"),
-    });
-    if (ran.status !== 0) console.error(`pages: the sign-in project ${auth.project} ${ran.timedOut ? "timed out" : `exited ${ran.status}`}\n${ran.tail}`);
+    return existsSync(path) ? statSync(path).mtimeMs : 0;
+  };
+  const stale: string[] = [];
+  for (const name of needed) {
+    if (!Object.hasOwn(auth.states, name))
+      problems[name] = `as "${name}" names no sign-in state (the harness manifest's auth.states has ${Object.keys(auth.states).join(", ")})`;
+    else if (Date.now() - made(name) > STATE_HOURS * 3_600_000) stale.push(name);
   }
-  for (const name of needed)
-    if (!existsSync(join(dir, auth.states[name] ?? ""))) problems[name] = `the sign-in ${name} wasn't made (${auth.states[name]})`;
+  if (!stale.length) return problems;
+  // A second's grace: some filesystems keep a file's time to the second.
+  const started = Date.now() - 1000;
+  const ran = await runPlaywright(dir, {
+    config: plan.e2eConfig,
+    args: ["--project", auth.project],
+    env: { PLAYWRIGHT_BASE_URL: base, A6G_NAMESPACE: `pages-${Date.now().toString(36)}` },
+    timeoutMin: 5,
+    work: join(workDir(home), "pages-auth"),
+  });
+  const failed = ran.status === 0 ? "" : `the sign-in project ${auth.project} ${ran.timedOut ? "timed out" : `exited ${ran.status}`}`;
+  if (failed) console.error(`pages: ${failed}\n${ran.tail}`);
+  for (const name of stale) {
+    if (failed) problems[name] = `the sign-in ${name} failed (${failed}), so the page wasn't checked`;
+    else if (made(name) < started) problems[name] = `the sign-in ${name} wasn't made (${auth.project} didn't write ${auth.states[name]})`;
+  }
   return problems;
 }
 
@@ -167,8 +200,11 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
   const missing = browserProblem();
   const chromium = factoryChromium() as unknown as { launch(): Promise<Browser> } | null;
   if (!chromium || missing) throw new Error(missing ?? "the factory's Playwright isn't installed");
+  // axe's source, run in each page by evaluation: a page's content security policy refuses a script tag, and the
+  // policy stays on, so what it breaks of the page's own still shows.
   const axePath = join(FACTORY_ROOT, "node_modules/axe-core/axe.min.js");
-  const hasAxe = existsSync(axePath);
+  const axeSource = existsSync(axePath) ? readFileSync(axePath, "utf8") : null;
+  const trim = (path: string): string => path.replace(/\/+$/, "");
   const ignore = (plan.ignoreConsole ?? []).map((rule) => new RegExp(rule, "i"));
   const viewports: Viewport[] = plan.viewports ?? [
     { id: "desktop", width: 1440, height: 900 },
@@ -187,7 +223,9 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
       const runs: PageRun[] = [];
       const kept = outDir ? keptLooks(STATE, page.id) : null;
       for (const [vi, viewport] of viewports.entries()) {
-        for (const [si, scheme] of schemes.entries()) {
+        // The page's own schemes when the operator says it hasn't them all: a page with no dark variant has no dark
+        // run, and nothing to differ from light.
+        for (const [si, scheme] of (page.schemes ?? schemes).entries()) {
           const run: PageRun = { viewport: viewport.id, scheme, problems: [] };
           const signInProblem = page.as ? signInProblems[page.as] : undefined;
           if (signInProblem) {
@@ -235,41 +273,64 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
               consoleErrors.push(`${(text.split("\n")[0] ?? "").slice(0, 160)}${url ? ` (${url.replace(base, "")})` : ""}`);
           });
           try {
-            const response = await tab.goto(new URL(page.path, base).href, { waitUntil: "load", timeout: 120_000 });
+            const asked = new URL(page.path, base);
+            const response = await tab.goto(asked.href, { waitUntil: "load", timeout: 120_000 });
             run.status = response?.status() ?? 0;
             await tab.waitForTimeout(plan.settleMs ?? 1500);
+            // A page is checked where it was asked for. One that ends at another path (a session the app refused
+            // lands on its sign-in page) is photographed, and none of its checks are taken for this page's.
+            const ended = new URL(tab.url());
+            const elsewhere = ended.origin !== asked.origin || trim(ended.pathname) !== trim(asked.pathname);
+            if (elsewhere)
+              run.problems.push(
+                `ended at ${ended.origin === asked.origin ? ended.pathname : ended.origin + ended.pathname} instead of ${asked.pathname}${page.as ? ` (seen as ${page.as}: the app didn't take the sign-in)` : ""}`
+              );
             // A framework may take the class off as it starts: put it back before looking.
             if (setup.htmlClass) await tab.evaluate((cls: string) => document.documentElement.classList.add(cls), setup.htmlClass);
-            run.overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-            if (hasAxe) {
-              await tab.addScriptTag({ path: axePath });
-              run.axe = await tab.evaluate(async () => {
-                const result = await (window as unknown as { axe: Axe }).axe.run(document, {
-                  runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
-                });
-                return result.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id} (${v.nodes.length})`);
-              });
-            }
-            if (viewport.isMobile) {
-              const small = await tab.evaluate(smallTargets, plan.minTarget);
-              if (small.count) run.problems.push(`${small.count} controls smaller than ${plan.minTarget}px: ${small.examples.join("; ")}`);
-            }
-            const clipped = await tab.evaluate(clippedText);
-            if (clipped.length) run.problems.push(`text clipped by its box: ${clipped.join("; ")}`);
-            if (vi === 0 && si === 0) {
-              const unseen = await focusRings(tab);
-              if (unseen.missing.length)
-                run.problems.push(`no visible focus on ${unseen.missing.length} of ${unseen.stops} stops: ${unseen.missing.slice(0, 4).join("; ")}`);
+            // The whole page before any of it is measured: what loads or shows only once it's scrolled to.
+            await tab.evaluate(scrollThrough);
+            // What the operator's rules leave out of every check below; one that isn't a selector is said, not obeyed.
+            const unreadable = await tab.evaluate(badSelectors, page.ignore ?? []);
+            if (unreadable.length) run.problems.push(`ignore: not a selector: ${unreadable.join(", ")}`);
+            const leaveOut = (page.ignore ?? []).filter((rule) => !unreadable.includes(rule));
+            if (!elsewhere) {
+              run.overflow = await tab.evaluate(overflowBy, leaveOut);
+              if (axeSource) {
+                await tab.evaluate(axeSource);
+                run.axe = await tab.evaluate(async (exclude: string[]) => {
+                  const result = await (window as unknown as { axe: Axe }).axe.run(
+                    exclude.length ? { exclude: exclude.map((rule) => [rule]) } : document,
+                    {
+                      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] },
+                    }
+                  );
+                  return result.violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id} (${v.nodes.length})`);
+                }, leaveOut);
+              }
+              if (viewport.isMobile) {
+                const small = await tab.evaluate(smallTargets, { min: plan.minTarget, ignore: leaveOut });
+                if (small.count) run.problems.push(`${small.count} controls smaller than ${plan.minTarget}px: ${small.examples.join("; ")}`);
+              }
+              const clipped = await tab.evaluate(clippedText, leaveOut);
+              if (clipped.length) run.problems.push(`text clipped by its box: ${clipped.join("; ")}`);
             }
             if (outDir) {
               mkdirSync(join(outDir, page.id), { recursive: true });
               run.shot = join(outDir, page.id, `${viewport.id}-${scheme}.png`);
-              // Back to the top: the focus check may have scrolled.
-              await tab.evaluate(() => window.scrollTo(0, 0));
               await shoot(tab, run, viewport, run.shot, page.mask ?? []);
-              run.look = fileHash(run.shot);
               const before = kept?.files[`${viewport.id}-${scheme}`];
-              if (before && existsSync(before) && !run.slices) run.differs = await difference(comparer, before, run.shot);
+              if (!elsewhere) run.look = fileHash(run.shot);
+              if (!elsewhere && before && existsSync(before) && !run.slices) run.differs = await difference(comparer, before, run.shot);
+            }
+            // Last, after the screenshot: walking a page's controls changes it (a form shows its errors as each
+            // field is left).
+            if (!elsewhere && vi === 0 && si === 0) {
+              const walk = await focusRings(tab, comparer, leaveOut);
+              run.focus = { walked: walk.walked, stops: walk.stops };
+              const more = walk.walked < walk.stops ? ` (the page has ${walk.stops})` : "";
+              if (walk.missing.length)
+                run.problems.push(`no visible focus on ${walk.missing.length} of ${walk.walked} stops${more}: ${walk.missing.slice(0, 4).join("; ")}`);
+              else if (!walk.walked && walk.stops) run.problems.push(`the keyboard reached none of the page's ${walk.stops} controls`);
             }
           } catch (error) {
             run.problems.push(`didn't load: ${String((error as Error).message).split("\n")[0]}`);
@@ -279,7 +340,7 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
           if (run.axe?.length) run.problems.push(`axe: ${run.axe.join(", ")}`);
           if (errors.length) run.problems.push(`errors: ${errors.slice(0, 3).join(" | ")}`);
           if (consoleErrors.length) run.problems.push(`console: ${consoleErrors.slice(0, 3).join(" | ")}`);
-          if (!hasAxe) run.problems.push("axe-core not found (reinstall Anything Factory: a6g self-install)");
+          if (!axeSource) run.problems.push("axe-core not found (reinstall Anything Factory: a6g self-install)");
           runs.push(run);
           await context.close();
         }
@@ -301,30 +362,133 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
   return results;
 }
 
-// Touch targets smaller than `min` CSS pixels, as WCAG 2.5.8 counts them: a link inside a sentence is excepted, and a
-// checkbox or radio button is measured with its label. Runs in the page.
-export function smallTargets(min: number): { count: number; examples: string[] } {
+// Scrolls to the bottom of the page and back, so what loads or shows itself only once it's scrolled to (a lazy image,
+// a section revealed on scroll) is there to be measured and photographed. Runs in the page.
+async function scrollThrough(): Promise<void> {
+  const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+  const page = document.scrollingElement ?? document.documentElement;
+  // A page that grows as it's scrolled is followed for a hundred screens, no further.
+  for (let step = 0; step < 100 && window.scrollY + window.innerHeight < page.scrollHeight - 1; step++) {
+    window.scrollBy({ top: window.innerHeight, behavior: "instant" });
+    await pause(50);
+  }
+  // Up to three seconds for the images that started on the way.
+  for (let waited = 0; waited < 3000 && Array.from(document.images).some((image) => !image.complete && image.checkVisibility()); waited += 100)
+    await pause(100);
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  await pause(50);
+}
+
+// The rules among these that aren't CSS selectors, which no check could read. Runs in the page.
+function badSelectors(rules: string[]): string[] {
+  return rules.filter((rule) => {
+    try {
+      document.querySelector(rule);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+}
+
+// How far the page scrolls sideways. When it does, what the operator's rules leave out is taken out of the layout
+// and the page measured again. Runs in the page.
+function overflowBy(ignore: string[]): number {
+  const measure = () => document.documentElement.scrollWidth - window.innerWidth;
+  const by = measure();
+  if (by <= 1 || !ignore.length) return by;
+  const taken = Array.from(document.querySelectorAll<HTMLElement>(ignore.join(","))).map((el) => ({
+    el,
+    value: el.style.getPropertyValue("display"),
+    priority: el.style.getPropertyPriority("display"),
+  }));
+  for (const { el } of taken) el.style.setProperty("display", "none", "important");
+  const without = measure();
+  for (const { el, value, priority } of taken) {
+    if (value) el.style.setProperty("display", value, priority);
+    else el.style.removeProperty("display");
+  }
+  return without;
+}
+
+// Touch targets smaller than `min` CSS pixels on a phone. Only what a finger can reach is measured: not what's
+// disabled, inert, hidden (from everyone, or from assistive technology), transparent, clipped to a pixel (text for
+// screen readers, a collapsed menu), off the page or in a closed <details>. A control hidden under its label (a
+// styled checkbox) is measured by the label, a checkbox or radio button with it, and a link in a sentence is
+// excepted, as WCAG 2.5.8 excepts it: an inline link whose nearest block has words of its own. Runs in the page.
+export function smallTargets({ min, ignore = [] }: { min: number; ignore?: string[] }): { count: number; examples: string[] } {
   const describe = (el: Element): string => {
     const label = (el.getAttribute("aria-label") ?? (el as HTMLElement).innerText ?? "").trim().replace(/\s+/g, " ").slice(0, 30);
     return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${label ? ` "${label}"` : ""}`;
   };
   const selector =
     'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=tab],[role=menuitem],[tabindex]:not([tabindex="-1"])';
+  const closed = (el: Element): Element | null => el.parentElement?.closest("details:not([open])") ?? null;
+  const unreachable = (el: Element): boolean => {
+    if (el.matches(":disabled") || el.closest('[inert],[aria-hidden="true"]')) return true;
+    for (let details = closed(el); details; details = closed(details)) if (!details.querySelector(":scope > summary")?.contains(el)) return true;
+    const style = getComputedStyle(el);
+    if (style.visibility !== "visible" || style.pointerEvents === "none") return true;
+    // A transparent native control laid over its styled stand-in is still what's hit; anything else transparent
+    // is a menu or a hint that isn't there yet.
+    const field = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    for (let e: Element | null = el; e; e = e.parentElement) if (Number(getComputedStyle(e).opacity) === 0 && !(e === el && field)) return true;
+    // What's left of its box inside each ancestor that clips; one that scrolls can bring any of it into view.
+    const box = el.getBoundingClientRect();
+    let [left, top, right, bottom] = [box.left, box.top, box.right, box.bottom];
+    if (right - left <= 1 || bottom - top <= 1) return true;
+    for (let e = el.parentElement; e; e = e.parentElement) {
+      const { overflowX, overflowY } = getComputedStyle(e);
+      if (overflowX === "visible" && overflowY === "visible") continue;
+      const clip = e.getBoundingClientRect();
+      const hides = (value: string) => value === "hidden" || value === "clip";
+      if (overflowX !== "visible") [left, right] = hides(overflowX) ? [Math.max(left, clip.left), Math.min(right, clip.right)] : [clip.left, clip.right];
+      if (overflowY !== "visible") [top, bottom] = hides(overflowY) ? [Math.max(top, clip.top), Math.min(bottom, clip.bottom)] : [clip.top, clip.bottom];
+      if (right - left <= 1 || bottom - top <= 1) return true;
+    }
+    // Left of the page or above it, where nothing scrolls to; or past its end.
+    const page = document.documentElement;
+    return (
+      box.right + scrollX <= 0 ||
+      box.bottom + scrollY <= 0 ||
+      box.left + scrollX >= Math.max(page.scrollWidth, innerWidth) ||
+      box.top + scrollY >= Math.max(page.scrollHeight, innerHeight)
+    );
+  };
+  // The nearest ancestor laid out as a block (the sentence's own box), and whether it has words outside its controls.
+  const blockOf = (el: Element | null): Element | null => {
+    for (let e = el; e; e = e.parentElement) if (!/^(inline|contents)$/.test(getComputedStyle(e).display)) return e;
+    return null;
+  };
+  const sentences = new Map<Element, boolean>();
+  const inSentence = (link: Element): boolean => {
+    const block = blockOf(link.parentElement);
+    if (!block) return false;
+    let words = sentences.get(block);
+    if (words === undefined) {
+      words = false;
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node && !words; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!parent || !/[\p{L}\p{N}]/u.test(node.textContent ?? "") || blockOf(parent) !== block) continue;
+        const control = parent.closest(selector);
+        words = !control || control === block || !block.contains(control);
+      }
+      sentences.set(block, words);
+    }
+    return words;
+  };
   let count = 0;
   const examples: string[] = [];
   for (const el of Array.from(document.querySelectorAll(selector))) {
-    const style = getComputedStyle(el);
-    if (style.visibility === "hidden" || style.display === "none") continue;
-    let box = el.getBoundingClientRect();
-    if (!box.width || !box.height) continue;
-    if (
-      el.tagName === "A" &&
-      style.display === "inline" &&
-      Array.from(el.parentElement?.childNodes ?? []).some((n) => n.nodeType === 3 && n.textContent?.trim())
-    )
-      continue;
+    if (ignore.some((rule) => el.closest(rule))) continue;
     const label = (el as HTMLInputElement).labels?.[0];
-    if (label) {
+    let box = el.getBoundingClientRect();
+    if (unreachable(el)) {
+      if (!label || el.matches(":disabled") || unreachable(label)) continue;
+      box = label.getBoundingClientRect();
+    } else if (el.tagName === "A" && getComputedStyle(el).display === "inline" && inSentence(el)) continue;
+    else if (label) {
       const around = label.getBoundingClientRect();
       box = new DOMRect(
         Math.min(box.left, around.left),
@@ -341,69 +505,217 @@ export function smallTargets(min: number): { count: number; examples: string[] }
   return { count, examples };
 }
 
-// Text cut off by its own box (overflow hidden or clip), where it doesn't say so with an ellipsis or a line clamp.
-// Boxes of a pixel or less are the visually hidden text screen readers read, not clipping. Runs in the page.
-export function clippedText(): string[] {
+// Text cut off by the box that clips it: each run of text is measured against its nearest ancestor with overflow
+// hidden or clip (a positioned run, against its containing block's; a page that hides what runs out sideways, against
+// the window). A run partly in and partly out is clipped; one wholly out is hidden on purpose (a carousel's next
+// slide, a closed accordion, text for screen readers). An ellipsis on text that can't wrap, or a line clamp, says so
+// itself and excuses both directions. Runs in the page.
+export function clippedText(ignore: string[] = []): string[] {
+  const hides = (value: string) => value === "hidden" || value === "clip";
+  const scrolls = (value: string) => value === "auto" || value === "scroll";
+  interface Clip {
+    box: Element;
+    x: boolean;
+    y: boolean;
+  }
+  const clips = new Map<Element, Clip | null>();
+  const clipOf = (start: Element): Clip | null => {
+    const known = clips.get(start);
+    if (known !== undefined) return known;
+    let found: Clip | null = null;
+    let out = "";
+    for (let e: Element | null = start; e; e = e.parentElement) {
+      const style = getComputedStyle(e);
+      // The page's own box is the window. What it hides sideways can't be scrolled to; downwards is the page's length.
+      if (e === document.body || e === document.documentElement) {
+        if (out !== "fixed" && hides(style.overflowX)) found = { box: document.documentElement, x: true, y: false };
+        if (found) break;
+        continue;
+      }
+      // An absolutely positioned box is clipped only from its containing block up; a fixed one, by the window.
+      if (out === "fixed" ? style.transform === "none" : out === "absolute" && style.position === "static" && style.transform === "none") continue;
+      out = "";
+      if (hides(style.overflowX) || hides(style.overflowY)) found = { box: e, x: hides(style.overflowX), y: hides(style.overflowY) };
+      if (found || (scrolls(style.overflowX) && scrolls(style.overflowY))) break;
+      if (style.position === "absolute" || style.position === "fixed") out = style.position;
+    }
+    clips.set(start, found);
+    return found;
+  };
   const found: string[] = [];
-  for (const el of Array.from(document.querySelectorAll("body *"))) {
-    if (!(el instanceof HTMLElement) || found.length >= 5) continue;
-    if (!Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent?.trim())) continue;
-    if (el.clientWidth <= 1 || el.clientHeight <= 1) continue;
-    const style = getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden") continue;
-    const hides = (value: string) => value === "hidden" || value === "clip";
-    const wide = hides(style.overflowX) && el.scrollWidth > el.clientWidth + 1 && style.textOverflow !== "ellipsis";
+  const reported = new Set<Element>();
+  const range = document.createRange();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node && found.length < 5; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    const text = (node.textContent ?? "").trim();
+    if (!(parent instanceof HTMLElement) || !text || parent.closest("select,textarea") || ignore.some((rule) => parent.closest(rule))) continue;
+    const clip = clipOf(parent);
+    if (!clip || reported.has(clip.box) || !parent.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+    const style = getComputedStyle(clip.box);
     const clamp = (style as CSSStyleDeclaration & { webkitLineClamp?: string }).webkitLineClamp;
-    const tall = hides(style.overflowY) && el.scrollHeight > el.clientHeight + 1 && (!clamp || clamp === "none");
-    if (wide || tall) found.push(`${el.tagName.toLowerCase()} "${(el.innerText || "").trim().replace(/\s+/g, " ").slice(0, 30)}"`);
+    const oneLine = /^(nowrap|pre)$/.test(getComputedStyle(parent).whiteSpace);
+    if ((style.textOverflow === "ellipsis" && oneLine) || (clamp && clamp !== "none")) continue;
+    // The clipping box's padding edge.
+    const outer = clip.box.getBoundingClientRect();
+    const [left, top] = [outer.left + clip.box.clientLeft, outer.top + clip.box.clientTop];
+    const [right, bottom] = [left + clip.box.clientWidth, top + clip.box.clientHeight];
+    let seen = false;
+    let cut = false;
+    range.selectNodeContents(node);
+    for (const line of Array.from(range.getClientRects())) {
+      if (line.width < 1 || line.height < 1) continue;
+      const wide = clip.x ? Math.min(line.right, right) - Math.max(line.left, left) : line.width;
+      const tall = clip.y ? Math.min(line.bottom, bottom) - Math.max(line.top, top) : line.height;
+      if (wide <= 1 || tall <= 1) cut = true;
+      else {
+        seen = true;
+        // A line's box is taller than its letters, and a tight line height trims it: a third may go unseen.
+        if (line.width - wide > 1.5 || line.height - tall > line.height / 3) cut = true;
+      }
+    }
+    if (!seen || !cut) continue;
+    reported.add(clip.box);
+    found.push(`${parent.tagName.toLowerCase()} "${text.replace(/\s+/g, " ").slice(0, 30)}"`);
   }
   return found;
 }
 
-// Tabs through the first FOCUS_STOPS controls and names those whose focus shows nowhere: nothing about the control
-// or its parent (outline, shadow, border, background, colour, underline) changes when it's focused.
-async function focusRings(tab: Tab): Promise<{ stops: number; missing: string[] }> {
-  const seen = new Set<string>();
-  const missing: string[] = [];
-  for (let i = 0; i < FOCUS_STOPS; i++) {
-    await tab.keyboard.press("Tab");
-    const stop = await tab.evaluate(() => {
-      // A framework's own development overlay isn't the page (Next.js's, Vite's, Astro's toolbar).
-      const tooling = /^(nextjs-portal|vite-error-overlay|astro-dev-toolbar|vercel-live-feedback)$/i;
-      let el = document.activeElement as HTMLElement | null;
-      if (el && tooling.test(el.tagName)) return { name: "", path: `tooling:${el.tagName}`, visible: true, skip: true };
-      // Focus inside a component's shadow root: the control itself, not its host.
-      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
-      if (!el || el === document.body || el === document.documentElement) return null;
-      const look = (e: Element | null) => {
-        if (!e) return "";
-        const s = getComputedStyle(e);
-        return [s.outlineStyle, s.outlineWidth, s.outlineColor, s.boxShadow, s.borderColor, s.backgroundColor, s.color, s.textDecorationLine].join("|");
-      };
-      const name = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""} "${(el.getAttribute("aria-label") ?? el.innerText ?? "").trim().replace(/\s+/g, " ").slice(0, 30)}"`;
-      const parts: string[] = [];
-      for (let e: Element | null = el; e && parts.length < 6; e = e.parentElement)
-        parts.push(`${e.tagName}${Array.from(e.parentElement?.children ?? []).indexOf(e)}`);
-      const focused = look(el) + look(el.parentElement);
-      el.blur();
-      const blurred = look(el) + look(el.parentElement);
-      el.focus();
-      return { name, path: parts.join("<"), visible: focused !== blurred, skip: false };
-    });
-    if (!stop || seen.has(stop.path)) break;
-    if (stop.skip) {
-      seen.add(stop.path);
-      continue;
-    }
-    seen.add(stop.path);
-    if (!stop.visible) missing.push(stop.name);
+// One stop of the focus walk: what the keyboard's focus is on after a Tab. The walk's memory is kept in the page, by
+// element, so a control in a shadow root, or the third of three cards alike, is a stop of its own. Runs in the page.
+interface FocusStop {
+  // none: nothing has the focus. seen: the walk has come round. skip: not this page's to answer for (a frame's own
+  // document, a framework's development overlay, what the operator's rules leave out).
+  kind: "none" | "seen" | "skip" | "stop";
+  name?: string;
+  // The control and its label with room around them, where its focus should show; null when none of it is in view.
+  region?: Region | null;
+}
+interface FocusWalk {
+  seen: WeakSet<Element>;
+  inside: Element | null;
+  current: HTMLElement | null;
+}
+function focusStop(ignore: string[]): FocusStop {
+  const page = window as unknown as { __a6gFocus?: FocusWalk };
+  const walk = (page.__a6gFocus ??= { seen: new WeakSet(), inside: null, current: null });
+  walk.current = null;
+  let el = document.activeElement as HTMLElement | null;
+  if (!el || el === document.body || el === document.documentElement) {
+    walk.inside = null;
+    return { kind: "none" };
   }
-  return { stops: [...seen].filter((path) => !path.startsWith("tooling:")).length, missing };
+  // A framework's own development overlay isn't the page (Next.js's, Vite's, Astro's toolbar).
+  const overlay = /^(nextjs-portal|vite-error-overlay|astro-dev-toolbar|vercel-live-feedback)$/i.test(el.tagName);
+  // Focus inside a component's shadow root: the control itself, not its host.
+  if (!overlay) while (el.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
+  // An overlay has stops of its own, and so has a frame's document: Tab walks through them while the focus here
+  // stays on the one element, which is stepped over until the keyboard is out of it.
+  if (overlay || /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(el.tagName)) {
+    if (walk.inside === el) return { kind: "skip" };
+    walk.inside = el;
+    if (walk.seen.has(el)) return { kind: "seen" };
+    walk.seen.add(el);
+    return { kind: "skip" };
+  }
+  walk.inside = null;
+  if (walk.seen.has(el)) return { kind: "seen" };
+  walk.seen.add(el);
+  // The operator's rules, looked for from the control out through the shadow roots it's in.
+  const ignored = (e: Element): boolean => {
+    const root = e.getRootNode();
+    return ignore.some((rule) => e.closest(rule)) || (root instanceof ShadowRoot && ignored(root.host));
+  };
+  if (ignored(el)) return { kind: "skip" };
+  walk.current = el;
+  const name = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""} "${(el.getAttribute("aria-label") ?? el.innerText ?? "").trim().replace(/\s+/g, " ").slice(0, 30)}"`;
+  // A ring is drawn on the control, on a wrapper a little way out, or on its label (a styled checkbox's).
+  const around = 24;
+  const boxes = [el, ...Array.from((el as HTMLInputElement).labels ?? [])]
+    .map((part) => part.getBoundingClientRect())
+    .filter((box) => box.width > 0 && box.height > 0);
+  const left = Math.max(0, Math.floor(Math.min(...boxes.map((box) => box.left)) - around));
+  const top = Math.max(0, Math.floor(Math.min(...boxes.map((box) => box.top)) - around));
+  const right = Math.min(window.innerWidth, Math.ceil(Math.max(...boxes.map((box) => box.right)) + around));
+  const bottom = Math.min(window.innerHeight, Math.ceil(Math.max(...boxes.map((box) => box.bottom)) + around));
+  const inView = boxes.length > 0 && right - left >= 1 && bottom - top >= 1;
+  return { kind: "stop", name, region: inView ? { x: left, y: top, width: right - left, height: bottom - top } : null };
+}
+
+// Takes the keyboard's focus off the walk's current stop, or puts it back where it was. Runs in the page.
+function setFocus(on: boolean): void {
+  const el = (window as unknown as { __a6gFocus?: FocusWalk }).__a6gFocus?.current;
+  if (on) el?.focus({ preventScroll: true });
+  else el?.blur();
+}
+
+// How many stops the keyboard has on the page: what Tab lands on, through open shadow roots, a group of radio
+// buttons once, without frames, overlays and what the operator's rules leave out. Runs in the page.
+function countStops(ignore: string[]): number {
+  const overlay = /^(nextjs-portal|vite-error-overlay|astro-dev-toolbar|vercel-live-feedback)$/i;
+  const groups = new Map<unknown, Set<string>>();
+  let count = 0;
+  const walk = (root: Document | ShadowRoot): void => {
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
+      if (overlay.test(el.tagName)) continue;
+      if (el.shadowRoot) walk(el.shadowRoot);
+      if (/^(IFRAME|FRAME|OBJECT|EMBED)$/.test(el.tagName)) continue;
+      // The keyboard stops at an editing host whatever its tabIndex says, and passes an anchor that isn't a link.
+      const editing = el.isContentEditable && !el.parentElement?.isContentEditable && !el.hasAttribute("tabindex");
+      if (el.tabIndex < 0 && !editing) continue;
+      if (el.matches("a:not([href]):not([tabindex]), area:not([href]):not([tabindex])")) continue;
+      if (el.matches(":disabled") || el.closest("[inert]") || ignore.some((rule) => el.closest(rule))) continue;
+      if (!el.checkVisibility({ visibilityProperty: true })) continue;
+      if (el instanceof HTMLInputElement && el.type === "radio" && el.name) {
+        const names = groups.get(el.form) ?? new Set<string>();
+        groups.set(el.form, names);
+        if (names.has(el.name)) continue;
+        names.add(el.name);
+      }
+      count++;
+    }
+  };
+  walk(document);
+  return count;
+}
+
+// Tabs through the page's first FOCUS_STOPS stops and names those whose focus can't be seen: the pixels around the
+// control and its label are the same with the focus on it and off it. An outline, a shadow, a ring on a sibling, a
+// wrapper or a pseudo-element all show; a transparent outline, or one the page's own colour, doesn't. Both pictures
+// are taken after the focus has left once, so what leaving a field changes (its error) isn't taken for a ring.
+// Returns how many stops it walked, of how many the page has.
+async function focusRings(tab: Tab, comparer: Tab, ignore: string[]): Promise<{ walked: number; stops: number; missing: string[] }> {
+  const stops = await tab.evaluate(countStops, ignore);
+  const missing: string[] = [];
+  const shot = (clip: Region) => tab.screenshot({ fullPage: false, clip, scale: "css", animations: "disabled", caret: "hide" });
+  let walked = 0;
+  let nowhere = 0;
+  // A frame's stops take presses of their own: three presses a stop, at most.
+  for (let press = 0; press < FOCUS_STOPS * 3 && walked < FOCUS_STOPS; press++) {
+    await tab.keyboard.press("Tab");
+    const stop = await tab.evaluate(focusStop, ignore);
+    // Past the last stop the focus may leave the page for a press before it comes round; twice is a page with none.
+    if (stop.kind === "none" ? ++nowhere > 1 : stop.kind === "seen") break;
+    if (stop.kind !== "none") nowhere = 0;
+    if (stop.kind !== "stop") continue;
+    walked++;
+    let shows = false;
+    if (stop.region) {
+      await tab.evaluate(setFocus, false);
+      const without = await shot(stop.region);
+      await tab.evaluate(setFocus, true);
+      const focused = await shot(stop.region);
+      const pixels = stop.region.width * stop.region.height;
+      shows = !without.equals(focused) && (await difference(comparer, without, focused)) * pixels >= FOCUS_PIXELS;
+    }
+    if (!shows) missing.push(stop.name ?? "");
+  }
+  return { walked, stops: Math.max(stops, walked), missing };
 }
 
 // The share of pixels that differ between two screenshots (1 when their sizes differ), compared in a blank page.
-async function difference(comparer: Tab, before: string, after: string): Promise<number> {
-  const asUrl = (path: string) => `data:image/png;base64,${readFileSync(path).toString("base64")}`;
+async function difference(comparer: Tab, before: string | Buffer, after: string | Buffer): Promise<number> {
+  const asUrl = (image: string | Buffer) => `data:image/png;base64,${(typeof image === "string" ? readFileSync(image) : image).toString("base64")}`;
   return comparer.evaluate(
     async ([a, b]: [string, string]) => {
       const load = (src: string) =>
@@ -468,7 +780,10 @@ function print(results: Record<string, PageResult>): void {
     for (const run of result.runs) {
       const differs =
         run.differs !== undefined && run.differs > DIFFERS ? `  (looks different since its UX pass: ${(run.differs * 100).toFixed(1)}%)` : "";
-      console.info(`  ${run.viewport}/${run.scheme}: ${run.problems.length ? run.problems.join("; ") : "ok"}${run.shot ? `  ${run.shot}` : ""}${differs}`);
+      const focus = run.focus ? `  (focus: walked ${run.focus.walked} of ${run.focus.stops} stops)` : "";
+      console.info(
+        `  ${run.viewport}/${run.scheme}: ${run.problems.length ? run.problems.join("; ") : "ok"}${focus}${run.shot ? `  ${run.shot}` : ""}${differs}`
+      );
     }
   }
 }
@@ -590,6 +905,12 @@ export async function run(argv: string[]): Promise<number> {
     const [value] = rest.splice(at, 2).slice(1);
     return value;
   };
+  // A page to be seen signed in as a state nothing makes is refused before a browser starts.
+  const refused = (): boolean => {
+    const unknown = unknownSignIns(plan);
+    for (const problem of unknown) console.error(`pages: ${problem}`);
+    return unknown.length > 0;
+  };
   // Nothing to check is never done: an empty list would pass every finish line.
   if (["run", "status", "done"].includes(command ?? "") && !list.length) {
     console.error('pages: neither team.json "pages.list" nor the harness manifest names a page, so there is nothing to check');
@@ -605,6 +926,7 @@ export async function run(argv: string[]): Promise<number> {
       console.error("pages: team.json pages.appUrl (or environment.health) says where the team's app runs");
       return 2;
     }
+    if (refused()) return 2;
     print(await recordPages(home, team, rest));
     const all = rows();
     console.info(
@@ -618,6 +940,7 @@ export async function run(argv: string[]): Promise<number> {
       console.error("usage: a6g pages shots --base <url> [--out dir] [--path /x] [ids…]");
       return 2;
     }
+    if (!path && refused()) return 2;
     const chosen = path ? [{ id: path.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "root", path }] : pick(rest);
     const shots = () => check(base, chosen, out, here);
     // The team's own app is shared: hold it so a merge doesn't restart it under the checks.

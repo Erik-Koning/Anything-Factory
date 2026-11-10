@@ -120,6 +120,21 @@
             "$ref": "#/$defs/text"
           },
           "description": "CSS selectors masked in its screenshots."
+        },
+        "ignore": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/text"
+          },
+          "description": "CSS selectors every in-page check leaves out (sideways scrolling, axe, touch targets, clipped text, focus): the operator's exemptions."
+        },
+        "schemes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["light", "dark", "no-preference"]
+          },
+          "description": "The colour schemes this page is checked in, in place of pages.schemes (a page with no dark variant: [\"light\"])."
         }
       }
     },

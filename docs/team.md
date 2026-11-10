@@ -165,10 +165,28 @@ that's a set of pages, `"finish": "a6g pages done"`.
 - **A page:** `id` (letters, digits, `_` and `-`: it names the page's results, screenshots and UX verdict), `path`
   (from `/`), an optional `title`, `exclude`, `as` (the harness's sign-in it's seen with) and `mask` (CSS selectors
   painted over in its screenshots).
-- **What's checked:** the HTTP status, uncaught and console errors, sideways scrolling, axe's WCAG A/AA violations,
-  touch targets under `minTarget` on phones (default 24, WCAG 2.2 AA; links in a sentence excepted), text clipped by
-  its box, and controls with no visible focus (on the first viewport and scheme), in the factory's own Chromium, with
-  screenshots taken with animations off.
+- **What a page is excused:** `ignore` (CSS selectors for what every check inside the page leaves out: sideways
+  scrolling, axe, touch targets, clipped text and focus) and `schemes` (the colour schemes this page has, in place of
+  `pages.schemes`: `["light"]` for a page with no dark variant, which then isn't checked dark, or held to looking
+  different there). Only the operator says either: the manifest can't, so to excuse one of the manifest's pages, list
+  it here under the same id (with its `path`, `as` and `mask`).
+
+  ```json
+  { "id": "orders", "path": "/orders", "as": "staff", "ignore": ["#chat-widget", ".legacy-table"], "schemes": ["light"] }
+  ```
+
+- **What's checked:** the HTTP status, that the page ended at the path it was asked for (one that lands on the sign-in
+  page says so, and isn't checked as if it were the page), uncaught and console errors, sideways scrolling, axe's
+  WCAG A/AA violations, touch targets under `minTarget` on phones (default 24, WCAG 2.2 AA; only what a finger can
+  reach, and links in a sentence excepted), text cut off by the box that clips it (text wholly outside it, or with an
+  ellipsis or a line clamp, is hidden on purpose), and controls whose focus can't be seen (on the first viewport and
+  scheme: each of the first 40 stops is compared, pixel by pixel, focused and not, and the run says how many it walked
+  of how many the page has). All in the factory's own Chromium, under the page's own content security policy, once
+  the page has been scrolled to the bottom and back so what loads late is there. Screenshots are taken with
+  animations off, before the focus walk.
+- **Signed in:** a page with `as` is seen with that sign-in, made again by the manifest's `auth` project when its
+  saved state is missing or more than 12 hours old. A sign-in that fails fails its pages (an old state is never used
+  in its place), and `a6g check` and `a6g pages run` refuse an `as` that names no state.
 - **`allowedChanges`:** where the branch may differ from `base` (`pages.base`, else the team's `base`). Anything
   else keeps the finish line from holding.
 - **Defaults:** viewports are 1440, 1024 and 390 (the phone at device scale 2); schemes are light and dark
