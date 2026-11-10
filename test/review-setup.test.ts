@@ -541,6 +541,6 @@ describe("the pages command (#10)", () => {
     const home = makeRepo(baseTeam({ finish: "true" }));
     const done = await a6g(["pages", "done"], { cwd: home, env: { A6G_HOME_DIR: home, A6G_TEAM: "fixture", A6G_ROLE: "planner" } });
     assert.equal(done.code, 2, done.out);
-    assert.match(done.out, /pages\.list" names no pages/);
+    assert.match(done.out, /neither team\.json "pages\.list" nor the harness manifest names a page/);
   });
 });

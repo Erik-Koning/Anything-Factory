@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withLock } from "../lock.ts";
+import { keepLooks } from "./pages.ts";
 import { stateDir } from "../paths.ts";
 import { inTeam, teamSession } from "../session.ts";
 import { blastRadius } from "../blast.ts";
@@ -137,6 +138,8 @@ export async function verdict(argv: string[]): Promise<number> {
   };
   writeJson(file(kind, name), record);
   console.info(`${kind} ${name}: ${value} at ${record.sha.slice(0, 9)}`);
+  // A page's pass keeps the screenshots the factory took at that commit: the look later checks compare against.
+  if (kind === "ux" && value === "pass") console.info(`ux ${name}: ${keepLooks(home, stateDir(home), name, sha)}`);
   // The branch's task: changes send it back for another round (blocked at the team's limit); an approval is noted.
   const id = kind === "review" && team.board.type === "tasks" ? ticketOf(name, team.branchPrefix) : undefined;
   if (id) {

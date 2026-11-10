@@ -5,14 +5,14 @@ Status: planned and reviewed (see Review); Phase 1 built. Built on `subscription
 
 ## Why
 
-GiveNet's team (1–3 Nov 2026, 216 tasks, $793 API-equivalent) built 10 features and fixed 161 defects: 122 UX and 39
+A web app's team, on its first run (three days, 216 tasks, about $800 API-equivalent), built 10 features and fixed 161 defects: 122 UX and 39
 bugs, 101 of them filed by the UX specialist looking at pages. About a third of those fixes (55) were kinds a browser
 check finds without judgment: contrast, clipped or overflowing text, missing labels, touch targets under 44 px, focus.
 Each one cost a whole task: a finding, an approval, a builder, a review and a merge.
 
 No end-to-end test ran. The factory has a tester (a spec per journey, a regression sweep) and `a6g pages` (axe, overflow,
 console errors and screenshots per page, viewport and colour scheme), but both need the repository's own Playwright,
-which GiveNet hadn't got: setup proposes a tester only when it finds one (`lib/detect.ts:246`), and nothing set
+which that repository hadn't got: setup proposes a tester only when it finds one (`lib/detect.ts:246`), and nothing set
 `pages` up. The team's one test-infrastructure finding (#162) had nobody to claim it, so it was folded into a builder's
 task; flaky tests (#165, #182) were fixed as builders' chores.
 
