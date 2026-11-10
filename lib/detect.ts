@@ -189,6 +189,14 @@ export function detect(root: string) {
   ].filter((dep) => dep in deps);
   // A page of its own, served without a framework (index.html, public/index.html, …), outside docs.
   const html = (git(root, "ls-files", "--", "*.html") ?? "").split("\n").some((file) => file !== "" && !/(^|\/)(docs?|node_modules)\//.test(file));
+  // Nothing built yet: every file is a document, a picture or a dot-file. There's no stack to detect, so the team
+  // proposes the foundation itself (the setup agent's "A new project's foundation").
+  const empty = (git(root, "ls-files", "-co", "--exclude-standard") ?? "?")
+    .split("\n")
+    .every(
+      (file) =>
+        file === "" || /^\.|(^|\/)docs?\/|\.(md|mdx|txt|rst|adoc|png|jpe?g|gif|svg|webp|pdf)$|^(LICEN[SC]E|NOTICE|COPYING|AUTHORS)[^/]*$/i.test(file)
+    );
   const e2e = ["@playwright/test", "playwright", "cypress", "@wdio/cli"].filter((dep) => dep in deps);
   const e2eDir = ["e2e", "tests/e2e", "test/e2e", "cypress", "playwright"].find((dir) => has(root, dir)) ?? null;
   // Where a mistake lets someone in, or moves money: what a security reviewer is for.
@@ -221,6 +229,7 @@ export function detect(root: string) {
     surfaces,
     ui,
     html,
+    empty,
     e2e,
     e2eDir,
     security,
@@ -249,9 +258,16 @@ export function detect(root: string) {
 export const hasApp = (found: Detected): boolean =>
   !found.library || found.ui.length > 0 || found.html || ["dev", "start", "serve", "preview"].some((script) => found.scripts[script]);
 
-export function draftTeam(found: Detected, { name, branch, owner }: { name: string; branch: string; owner?: string | null | undefined }): RawTeam {
+// Who the team works for, where the draft knows: an operator init was told isn't technical is never asked about the
+// platform or the stack; a technical one with nothing built yet agrees the foundation before features are built on it
+// (the design check-in). Any other draft says nothing, and the team reads as it always did.
+export function draftTeam(
+  found: Detected,
+  { name, branch, owner, technical }: { name: string; branch: string; owner?: string | null | undefined; technical?: boolean | undefined }
+): RawTeam {
   const policies: Record<string, string> = {};
   const app = hasApp(found);
+  const operator = technical === false ? { technical: false } : found.empty && app ? { designCheckIn: true } : null;
   const tests = found.e2eDir ? `^${found.e2eDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/` : null;
   const roles: Record<string, RoleSettings> = {
     planner: {},
@@ -273,6 +289,7 @@ export function draftTeam(found: Detected, { name, branch, owner }: { name: stri
     title: name,
     factory: PACKAGE.version,
     ...(owner ? { owner } : {}),
+    ...(operator ? { operator } : {}),
     branch,
     ...(found.git.defaultBranch ? { base: found.git.defaultBranch } : {}),
     push: null,

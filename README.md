@@ -36,6 +36,16 @@ a6g init ~/code/my-app                           # detect, make the team's check
 
 `a6g init --no-interview` writes the draft only, and prints the same steps for you to do by hand.
 
+**A new project.** Where nothing is built yet, say what you want made and `init` drafts a team that starts with the
+foundation. The setup agent asks what you've already fixed (a host, a database, a language) and proposes the rest
+from what the product needs; the scaffolder completes it, builds a skeleton that runs end to end with its checks,
+and writes the design down in `docs/architecture.md`: each choice, why, what else was weighed, what it costs to run
+and how it's changed later. Then the team **checks the design with you** and builds no feature until you've agreed
+it (`operator.designCheckIn`). If you're not technical, it doesn't ask: it takes the safer choice each time, records
+it, and comes to you only about the product, what it may cost and the accounts it needs (`operator.technical`,
+which the setup agent works out without asking; `a6g init --non-technical` says it outright). The interview runs on
+Fable; `--model` names another.
+
 To watch a team:
 
 ```bash
@@ -320,6 +330,9 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   of a stakeholder's words (a feature request, a suggestion from the web app) is yours to approve whatever the mode
   (`approval.stakeholders`, `"screened"` to let the approver approve what the planner screened clear, never what it
   screened risky). Every move of a task, by whom and from where, is one table in `lib/tasks/model.ts`.
+- **The design check-in.** A team with one (`operator.designCheckIn`) has a `design` task from its first
+  `a6g register`. Until you've agreed the design, only `scaffold` and `test-infra` tasks are claimed. The planner
+  raises it once the foundation has merged; only your answer closes it.
 - **Claims.** Builders and testers claim the next approved task their role builds (blockers, then majors, then
   priority), never two on the same files, under a lease their heartbeats renew; the watchdog returns a claim whose
   member went quiet. The Stop hook won't let a member finish holding one: it submits or releases it.

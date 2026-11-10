@@ -1,5 +1,5 @@
 // a6g init [<repo>] [--name <team>] [--branch <integration>] [--base <ref>] [--checkout <dir> | --in-place]
-//          [--owner <email>] [--no-interview]
+//          [--owner <email>] [--non-technical] [--model <name>] [--no-interview]
 //
 // Sets up a team in a repository:
 // 1. Detects what it can: git, package manager and scripts, what CI runs, how the repository reaches outside the
@@ -7,15 +7,20 @@
 // 2. Makes the team's checkout: by default a worktree beside the repository (<repo>-a6g) on a new integration
 //    branch, so the team never works in the operator's own checkout. --in-place uses the repository itself, switched
 //    to the integration branch (made from the base if it's new).
-// 3. Writes a draft .a6g/ from what it found (team.json, brief, notes, rubric, adapters).
+// 3. Writes a draft .a6g/ from what it found (team.json, brief, notes, rubric, adapters). Where nothing is built yet,
+//    the draft holds a design check-in: the team builds the foundation, then asks the operator to agree it before any
+//    feature. --non-technical says the operator has no view on the platform or the stack, so the team is never to
+//    ask them about either (and there's no check-in).
 // 4. Opens the setup agent (claude --agent a6g:setup) in the team's checkout to interview the operator, finish
 //    .a6g/, prove it with a6g check --run, and register and start the team if the operator says so. Its guard lets
-//    it write only .a6g/.
+//    it write only .a6g/. It runs on Fable unless --model names another (fable, opus, sonnet, haiku, or a model id):
+//    what it settles here, every task after is built on.
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { normalize, TEAM_NAME } from "../config.ts";
 import { detect, draftTeam, hasApp } from "../detect.ts";
+import { MODEL_ID, modelId } from "../models.ts";
 import { FACTORY_ROOT, PACKAGE, versionDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
@@ -42,7 +47,9 @@ const shellWord = (text: string): string => (/^[\w@%+=:,./-]+$/.test(text) ? tex
 
 export function init(argv: string[]): number {
   operatorOnly("init");
-  const { positional, options } = parseArgs(argv, { booleans: ["in-place", "no-interview"] });
+  const { positional, options } = parseArgs(argv, { booleans: ["in-place", "no-interview", "non-technical"] });
+  const model = modelId(optionText(options["model"]) ?? "fable");
+  if (!MODEL_ID.test(model)) die(`--model ${model}: a model's name (fable, opus, sonnet, haiku) or its id`);
   // Only the interview needs Claude Code; --no-interview writes the draft without it.
   if (!options["no-interview"] && !which("claude")) die("Claude Code (claude) isn't on PATH (or pass --no-interview to write the draft only)");
   const repo = (() => {
@@ -62,7 +69,7 @@ export function init(argv: string[]): number {
   const branch = optionText(options["branch"]) ?? "a6g/next";
   const base = optionText(options["base"]) ?? found.git.defaultBranch ?? "main";
   const port = 9300 + (Number.parseInt(hash(name), 16) % 90);
-  const draft = draftTeam(found, { name, branch, owner: optionText(options["owner"]) });
+  const draft = draftTeam(found, { name, branch, owner: optionText(options["owner"]), technical: !options["non-technical"] });
   draft.base = base;
   const app = hasApp(found);
   if (app) draft.environment = { ...draft.environment, health: [`http://localhost:${port}/`] };
@@ -177,6 +184,10 @@ export function init(argv: string[]): number {
     `\na6g: detected ${found.packageManager ?? "no package manager"}, ${found.ci.length} CI workflow(s), ${found.surfaces.length} way(s) out: ${found.surfaces.map((s) => s.id).join(", ") || "none"}`
   );
   if (found.security.length) console.info(`a6g: it has ${found.security.join(", ")}, so the draft team has a security reviewer`);
+  if (draft.operator?.designCheckIn)
+    console.info("a6g: nothing is built here yet, so the draft team builds the foundation, then checks its design with you before any feature");
+  if (draft.operator?.technical === false)
+    console.info("a6g: the draft team chooses the platform and the stack itself, the safer way each time, and asks you only about the product");
   if (!existsSync(versionDir(PACKAGE.version)))
     console.warn(`a6g: the draft pins Anything Factory ${PACKAGE.version}, which isn't installed yet; run a6g self-install before a6g register`);
   if (options["no-interview"]) {
@@ -196,12 +207,20 @@ export function init(argv: string[]): number {
     `Set up an Anything Factory team for the repository at ${repo}.`,
     `The team's checkout is ${checkout} on its integration branch ${branch} (from ${base}); the team is named ${name}.`,
     `The detection report is ${report}. The draft is in ${dir}. The reference for team.json is ${join(FACTORY_ROOT, "docs", "team.md")}.`,
+    ...(found.empty ? ["Nothing is built here yet: this is a new project, and its foundation is yours to propose."] : []),
+    ...(draft.operator?.technical === false
+      ? ["The draft says the operator isn't technical (operator.technical): whoever started this said so, so it stands."]
+      : []),
     "Read them and the repository first, then interview me.",
   ].join(" ");
-  const session = spawnSync("claude", ["--plugin-dir", join(FACTORY_ROOT, "plugin"), "--agent", "a6g:setup", "--setting-sources", "project", first], {
-    cwd: checkout,
-    stdio: "inherit",
-    env: { ...process.env, A6G_SETUP: "1", A6G_HOME_DIR: checkout, A6G_FACTORY: FACTORY_ROOT },
-  });
+  const session = spawnSync(
+    "claude",
+    ["--plugin-dir", join(FACTORY_ROOT, "plugin"), "--agent", "a6g:setup", "--model", model, "--setting-sources", "project", first],
+    {
+      cwd: checkout,
+      stdio: "inherit",
+      env: { ...process.env, A6G_SETUP: "1", A6G_HOME_DIR: checkout, A6G_FACTORY: FACTORY_ROOT },
+    }
+  );
   return session.status ?? 0;
 }

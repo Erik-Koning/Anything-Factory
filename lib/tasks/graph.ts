@@ -21,6 +21,7 @@ const ICON: Record<Kind, string> = {
   chore: "gear",
   research: "search",
   journey: "layers",
+  design: "eye",
 };
 
 export interface Placed {

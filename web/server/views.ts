@@ -70,7 +70,7 @@ export const rejectionOf = (request: FeatureRequest): string | null =>
 export const PROPOSALS: Status[] = ["question", "proposed", "researching"];
 export function proposals(tasks: Task[]): Task[] {
   return tasks
-    .filter((t) => PROPOSALS.includes(t.status) && t.kind !== "journey")
+    .filter((t) => PROPOSALS.includes(t.status) && t.kind !== "journey" && t.kind !== "design")
     .sort((a, b) => PROPOSALS.indexOf(a.status) - PROPOSALS.indexOf(b.status) || (b.priority ?? -1) - (a.priority ?? -1) || Number(a.id) - Number(b.id));
 }
 

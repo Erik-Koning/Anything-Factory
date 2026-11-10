@@ -3,7 +3,8 @@
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
 import { type Hold, holdRefusal } from "./controls.ts";
 
-export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "scaffold", "chore", "research", "journey"] as const;
+// "design" is the design check-in: a new project's foundation, put to the operator before features are built on it.
+export const KINDS = ["feature", "bug", "ux", "test", "test-infra", "scaffold", "chore", "research", "journey", "design"] as const;
 export type Kind = (typeof KINDS)[number];
 export const STATUSES = ["triage", "proposed", "researching", "approved", "building", "review", "done", "blocked", "question", "rejected"] as const;
 export type Status = (typeof STATUSES)[number];
@@ -325,8 +326,14 @@ const scored: Check = (t) =>
   t.kind !== "journey" && !t.score && (t.kind === "feature" || !t.severity)
     ? `task ${t.id} isn't scored yet; the planner scores it first (a6g task score)`
     : null;
-// A journey only groups tasks, each approved on its own: the approver has nothing to decide about it.
-const notJourney: Check = (t) => (t.kind === "journey" ? `#${t.id} is a journey: it only groups tasks, and each of them is decided on its own` : null);
+// A journey only groups tasks, each approved on its own: the approver has nothing to decide about it. Nor about the
+// design check-in, which is the operator's.
+const notJourney: Check = (t) =>
+  t.kind === "journey"
+    ? `#${t.id} is a journey: it only groups tasks, and each of them is decided on its own`
+    : t.kind === "design"
+      ? `#${t.id} is the design check-in: the operator settles it, once the planner has raised it`
+      : null;
 const approverActs: Check = (_t, _to, _actor, { approval }) =>
   approval?.mode === "operator"
     ? "this team's proposals are decided by the operator (team.json approval.mode); there's nothing for the approver to do"
@@ -387,10 +394,36 @@ const journeyKept: Check = (t, to, _actor, { all }) => {
     : null;
 };
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;
+// When `t` last came into the status it's in, or its creation.
+export const waitingSince = (t: Task): string => t.history.findLast((e) => e.to === t.status)?.at ?? t.createdAt;
+// The operator's answers on `t` since it last came to wait on them, oldest first.
+export const answersOn = (t: Task): Note[] => {
+  const since = waitingSince(t);
+  return t.notes.filter((n) => n.kind === "answer" && n.at >= since);
+};
+// The design check-in still open, if any: while there is one, the foundation is all that's built (claimRefusal).
+export const designOpen = (all: Task[]): Task | null => all.find((t) => t.kind === "design" && t.status !== "done" && t.status !== "rejected") ?? null;
+// The design check-in goes between the planner and the operator only: raised as a question once the foundation is
+// built, back to the planner (triage) while what the operator asked for is changed, and never proposed, approved or
+// rejected by the team.
+const designAsked: Check = (t, to) =>
+  t.kind === "design" && to !== "question"
+    ? `#${t.id} is the design check-in, which only the operator settles: raise it once the foundation is built and its record written (a6g task status ${t.id} question --reason "…" --recommend "…")`
+    : null;
+const designBack: Check = (t) =>
+  t.kind !== "design"
+    ? `task ${t.id} isn't the design check-in; a question goes on to proposed, approved, rejected or blocked`
+    : answersOn(t).length
+      ? null
+      : `the operator hasn't answered #${t.id} yet: it waits with them until they do`;
 // Code isn't done by anyone's say-so. Research is, when the planner says so; a journey, once its tasks are and the planner
-// has verified it.
+// has verified it; the design check-in, once the operator has answered it (agreed: the planner reads the answer).
 const plannerDone: Check = (t, _to, _actor, { all }) => {
   if (t.kind === "research") return null;
+  if (t.kind === "design")
+    return t.status === "question" && answersOn(t).length
+      ? null
+      : `the design check-in is done on the operator's word: raise it (a6g task status ${t.id} question …), and close it when their answer agrees`;
   if (t.kind !== "journey") return codeDone(t);
   return journeyDue(t, all) ? null : `journey ${t.id} is done once it's verified: its tasks done, then its audit, end-to-end spec and polish`;
 };
@@ -412,9 +445,11 @@ const sameBranch: Check = (t, _to, _actor, { branch }) =>
 const merged: Check = (t, _to, _actor, { branch, tip, rebasedFrom }) =>
   t.kind === "journey"
     ? `#${t.id} is a journey, done once the planner has verified it`
-    : tip && t.branch === branch && t.sha && t.sha !== tip && t.sha !== rebasedFrom
-      ? `#${t.id} was submitted at ${t.sha.slice(0, 9)}, and ${tip.slice(0, 9)} merged`
-      : null;
+    : t.kind === "design"
+      ? `#${t.id} is the design check-in, done on the operator's word`
+      : tip && t.branch === branch && t.sha && t.sha !== tip && t.sha !== rebasedFrom
+        ? `#${t.id} was submitted at ${t.sha.slice(0, 9)}, and ${tip.slice(0, 9)} merged`
+        : null;
 const leaseOut: Check = (t, _to, _actor, { now = Date.now() }) =>
   t.claim && Date.parse(t.claim.until) <= now ? null : `task ${t.id}'s claim hasn't run out`;
 
@@ -439,7 +474,8 @@ const EVERY: readonly Status[] = STATUSES;
 const OPERATOR_FROM: Status[] = ["proposed", "researching", "question", "triage"];
 
 const RULES: Rule[] = [
-  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(wasApproved, screened, journeyKept) })),
+  ...PLANNER_TO.map(([from, to]): Rule => ({ via: "status", by: ["planner"], from, to, check: first(designAsked, wasApproved, screened, journeyKept) })),
+  { via: "status", by: ["planner"], from: ["question"], to: ["triage"], check: designBack },
   { via: "status", by: ["planner"], from: ["triage", "approved", "researching", "proposed", "question", "blocked"], to: ["done"], check: plannerDone },
   // The operator makes any move but one: a task is building only when a member claims it, so it has a claim to expire.
   { via: "status", by: [OPERATOR], from: EVERY, to: EVERY.filter((s) => s !== "building") },
@@ -608,6 +644,9 @@ export const CLAIMS: Record<string, Kind[]> = {
   scaffolder: ["scaffold", "test-infra", "test"],
 };
 const OWN: Record<string, Kind[]> = { tester: ["test"], scaffolder: ["scaffold", "test-infra"] };
+// What's built while the design check-in is open: the foundation itself (the skeleton, the harness, and what the
+// operator asks to have changed in them).
+export const FOUNDATION: Kind[] = ["scaffold", "test-infra"];
 
 const SEVERITY_ORDER: Record<string, number> = { blocker: 0, major: 1, minor: 3 };
 // Claim order: blockers, then majors, then the rest by priority (unscored work after scored) with minor findings last
@@ -643,6 +682,9 @@ export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold |
   const byId = new Map(all.map((t) => [t.id, t]));
   const waiting = task.after.filter((id) => byId.get(id)?.status !== "done");
   if (waiting.length) return `task ${task.id} waits for ${waiting.map((id) => `${id} (${byId.get(id)?.status ?? "missing"})`).join(", ")}`;
+  const design = FOUNDATION.includes(task.kind) ? null : designOpen(all);
+  if (design)
+    return `task ${task.id} waits for the operator to agree the design (#${design.id}, ${design.status}): until then only ${FOUNDATION.join(" and ")} work is claimed`;
   const conflict = conflictOf(
     task,
     all.filter((t) => t.status === "building")

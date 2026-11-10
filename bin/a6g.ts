@@ -11,6 +11,8 @@ Set up and run a team (the operator)
   a6g doctor                          is this machine ready? (tools, T3 Code's version and contract, watchdog)
   a6g init [<repo>] [options]         detect, make the team's checkout and .a6g/, and interview you to finish it
                                       --name --branch --base --checkout <dir> | --in-place --owner --no-interview
+                                      --non-technical (the team never asks you about the platform or the stack)
+                                      --model <name> (the interview's; fable unless named)
   a6g check [<checkout>] [--run]      prove the setup: rules, adapters, a guard self-test, prompts; --run also
                                       starts the environment and runs the gate
   a6g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);

@@ -53,6 +53,7 @@ import {
   pauseControl,
   resumeControl,
 } from "../tasks/controls.ts";
+import { fileDesignCheckIn } from "../tasks/design.ts";
 import { nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
 import { settingsOf } from "../tasks/teams.ts";
@@ -96,7 +97,7 @@ export async function register(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["force", "worker"] });
   const home = homeFrom(positional[0]);
   const code = registerTeam(home, { force: Boolean(options["force"]), worker: Boolean(options["worker"]) });
-  if (code === 0 && !options["worker"]) await fileRegisterGaps(home);
+  if (code === 0 && !options["worker"]) await fileAtRegister(home);
   if (code === 0) await publishTeam(home);
   return code;
 }
@@ -121,22 +122,26 @@ async function publishTeam(home: string): Promise<void> {
   }
 }
 
-// The harness's gaps the factory can see without running anything, filed for the planner's triage: a team with a
-// scaffolder and no manifest yet (lib/verify.ts fileGaps; the merge queue files the rest after merges).
-async function fileRegisterGaps(home: string): Promise<void> {
+// What register files on the team's board without running anything, for the planner: the design check-in, where the
+// operator asked to agree the foundation (lib/tasks/design.ts), and the harness's gaps the factory can see: a team with
+// a scaffolder and no manifest yet (lib/verify.ts fileGaps; the merge queue files the rest after merges).
+async function fileAtRegister(home: string): Promise<void> {
   const team = loadTeam(home);
   const run = readRegistry(team.name)?.run;
-  if (team.board.type !== "tasks" || !team.roles["scaffolder"] || !run) return;
+  const gaps = Boolean(team.roles["scaffolder"]);
+  if (team.board.type !== "tasks" || !run || (!gaps && !team.operator.designCheckIn)) return;
   try {
     const store = await openTeamStore(team, run, home);
     try {
-      const filed = await fileGaps(store, team, home, null);
+      const design = await fileDesignCheckIn(store, team);
+      if (design) console.info(`  the design check-in is #${design}: the team builds the foundation, then asks you; features wait until you've agreed it`);
+      const filed = gaps ? await fileGaps(store, team, home, null) : [];
       if (filed.length) console.info(`  the harness's gaps, for the planner to triage: ${filed.map((id) => `#${id}`).join(", ")}`);
     } finally {
       await store.close();
     }
   } catch (error) {
-    console.warn(`  note: couldn't file the harness's gaps (${(error as Error).message.split("\n")[0]})`);
+    console.warn(`  note: couldn't file the design check-in or the harness's gaps (${(error as Error).message.split("\n")[0]})`);
   }
 }
 

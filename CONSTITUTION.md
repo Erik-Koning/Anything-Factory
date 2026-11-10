@@ -76,6 +76,8 @@ where the watchdog starts builders to claim approved work.
   - which of the planner's proposals are built, unless the team's rules give that to the approver;
   - changes of scope, unless the team's rules give the approver full approval;
   - a brief that is contradictory or impossible;
+  - a new project's foundation (where it runs, its shape, what it's built on), where the team's rules hold a design
+    check-in: no feature is built on it until they've agreed it;
   - anything about privacy or personal data;
   - unlocking a policy;
   - promoting work to production;
@@ -90,6 +92,10 @@ where the watchdog starts builders to claim approved work.
   `.a6g/decisions.md`. Work on the integration branch is undone with a revert until the operator promotes it, so
   most product calls are the planner's.
 - **A member decides** how to do its task, within its brief and its lane.
+
+Where the team's rules say the operator isn't technical, the platform, the stack and the architecture are the team's
+to choose: it takes the safer choice, records it, and asks them only what the product should do, what it may cost
+them, and what needs an account or a key of theirs.
 
 **Article 4. Separation of duties.** Nobody grades their own work. The planner proposes; the approver or the
 operator approves. Builders build. A reviewer approves the exact commit that merges, and judges how much it could
@@ -131,8 +137,9 @@ Before asking, the planner checks the direction, the recorded decisions, the bri
 works out what the operator would choose. If one answer clearly follows, it decides. A question it does ask gives
 the context, the options and a recommendation, and asks for the direction behind the answer: the principle about
 the product, its users or the company that would settle this question and others like it. Questions that are open
-at the same time go in one message, and the team's rules say how often a message may go. Everything else the planner
-decides and records.
+at the same time go in one message, and the team's rules say how often a message may go. Each is put in words the
+operator would use: one who isn't technical is asked what they'd see, do or pay, never how it's built. Everything
+else the planner decides and records.
 
 **Article 11. Records.**
 

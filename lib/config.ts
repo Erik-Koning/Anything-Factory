@@ -91,6 +91,7 @@ export interface RawTeam {
   tasks?: { store?: string; database?: string; lead?: string | null };
   priorities?: { weights?: Record<string, number> };
   approval?: { mode?: string; maxSize?: string; findings?: string; stakeholders?: string };
+  operator?: { technical?: boolean; designCheckIn?: boolean };
   critical?: string[];
   hosts?: string[];
   branchPrefix?: string;
@@ -162,6 +163,11 @@ export interface Team {
   priorities: { weights: Record<Dimension, number> };
   // Who approves the planner's proposals: the operator, the approver up to maxSize, or the approver alone ("full").
   approval: ApprovalRules;
+  // Who the team works for. `technical`: whether they weigh in on the platform, the stack and the architecture; one who
+  // doesn't is never asked about them, and the team picks what's safest for them to own. `designCheckIn`: a project's
+  // foundation (its skeleton and the choices under it) waits for their agreement before features are built on it
+  // (lib/tasks/design.ts); only ever with a technical operator.
+  operator: { technical: boolean; designCheckIn: boolean };
   // Paths (regexes) whose changes get the full review whatever their size.
   critical: string[];
   // Hosts beyond this machine the team may reach (policies.ts network): api.example.com, or *.example.com.
@@ -271,6 +277,7 @@ const KNOWN_KEYS = new Set([
   "tasks",
   "priorities",
   "approval",
+  "operator",
   "critical",
   "hosts",
   "model",
@@ -617,6 +624,13 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(
       'approval.stakeholders: "operator" (you approve work from a stakeholder\'s words) or "screened" (the approver too, when the planner screened it clear)'
     );
+  const operatorIn = object(input.operator, "operator", ["technical", "designCheckIn"]) ?? {};
+  const technical = flag(operatorIn.technical, "operator.technical") ?? true;
+  const designCheckIn = flag(operatorIn.designCheckIn, "operator.designCheckIn") ?? false;
+  if (designCheckIn && !technical)
+    warnings.push(
+      "operator.designCheckIn: a check-in on the platform and the stack is for a technical operator; with operator.technical false the team makes those choices, records them and goes on, so none is held"
+    );
 
   const review = object(input.review, "review", ["required", "removedPattern", "maxRounds"]) ?? {};
   // A tester's or scaffolder's branches get the assertion default; null turns it off.
@@ -792,6 +806,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       findings: findings === "approver" ? "approver" : "planner",
       stakeholders: stakeholders === "screened" ? "screened" : "operator",
     },
+    operator: { technical, designCheckIn: designCheckIn && technical },
     critical: list(input.critical, "critical", regex) ?? [],
     hosts:
       list(input.hosts, "hosts", (value, where) =>
@@ -856,6 +871,8 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(`push.branch: ${push.branch} is protected (protectedBranches); the planner pushes only the team's branch`);
   if (push?.pullRequest && push.pullRequest === push.branch)
     problems.push(`push.pullRequest: ${push.pullRequest} is the branch the planner pushes; name the branch you promote into, such as main`);
+  if (team.operator.designCheckIn && !roles["scaffolder"])
+    warnings.push("operator.designCheckIn: the foundation is the scaffolder's to build, and this team has none; add a scaffolder to roles");
   // A team without an approver: its proposals wait for the operator, whatever the mode (said only when it was asked for).
   if (team.approval.mode !== "operator" && !roles["approver"]) team.approval.mode = "operator";
   if (approvalIn.mode !== undefined && approvalIn.mode !== "operator" && !roles["approver"])

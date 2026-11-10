@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased: how a project starts
+
+Tried on a new project (a gateway for sensor boards and its dashboard, from an empty repository), the factory made a
+sound skeleton and a poor record of why. The setup agent had fixed the whole stack in the brief before anyone
+weighed it, the planner's first task listed libraries, versions and files from memory, the scaffolder carried the
+list out, and nobody wrote down an alternative, a running cost or what the operator had and hadn't chosen. Builders
+would have started on it the moment it merged.
+
+- **The design check-in.** `operator.designCheckIn` in `team.json` (drafted by `a6g init` where nothing is built yet)
+  makes `a6g register` file one `design` task. While it's open, only `scaffold` and `test-infra` tasks are claimed.
+  Once the skeleton and the harness have merged, the planner raises it as a question with the design in a few lines;
+  you agree it, or say what to change, and the scaffolder changes it before the planner asks again. Only the
+  operator's answer settles it: the approver and the merge queue can't, the planner can't close one that has no
+  answer since it was asked, and a member can't file one or turn another task into one.
+- **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
+  agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
+  role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time
+  (managed, mainstream, little to run, a cost with a ceiling), records each choice, and asks only what the product
+  should do, what it may cost and what needs an account or a key of theirs, in plain words. No check-in is held.
+  Articles 3 and 10 say the same.
+- **The scaffolder chooses, and writes it down.** Its rules for starting a repository now run from what the product
+  needs: where it runs and what that costs a month, its shape, its data, every edge and its protocol, then the stack
+  (current stable versions, checked rather than remembered), keys, and how it ships (a staged image that runs as
+  non-root, a health check, migrations on release, a CI workflow that runs the gate's scripts). The skeleton is a
+  thin slice through every layer, so builders copy one way of validating a request, shaping an error, reaching the
+  data and drawing a page; hardware the team doesn't have gets a simulator. `docs/architecture.md` is the design
+  record: each choice, the need behind it, what else was weighed, what it costs to run, how it's changed later, and
+  which choices were the operator's.
+- **Setup proposes, and says whose each choice is.** For an empty repository the setup agent asks what the operator
+  has already fixed and proposes the rest; the brief keeps the two apart, and nothing setup chose goes in the
+  direction's "Always ask me". The planner's founding task says what's needed, never which libraries or files.
+- **`a6g init --model`.** The setup interview runs on Fable unless another is named: what it settles, every task
+  after is built on.
+- **Upgrading.** Nothing changes for a team whose `team.json` has no `operator` key. To hold a check-in on a running
+  team, add `"operator": { "designCheckIn": true }` and run `a6g register`; `a6g task status <id> done` from you ends
+  it.
+
 ## Unreleased: a model for each role
 
 - **Each role runs on its own model.** `roles.<role>.model` in `team.json` sets one role's, and `model` every role's

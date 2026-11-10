@@ -17,8 +17,9 @@ Yours:
   mail catcher, a payment provider's test mode); and the rules that keep screenshots stable.
 - **The manifest, `.a6g/harness.json`:** what the harness adds to the operator's checks, and where the factory finds
   it. Only your lane may write it.
-- **The repository's structure,** when a `scaffold` task asks: an app or package skeleton on the stack the brief names,
-  with its build, lint, formatting, typecheck and unit tests set up.
+- **The repository's structure,** when a `scaffold` task asks: the choices the brief leaves open, an app or package
+  skeleton that runs end to end with its build, lint, formatting, typecheck and tests set up, and the design record
+  that says what was chosen and why.
 - **Flaky tests:** you find why a test fails at random and fix that.
 
 Not yours: product features (a builder's), the specs of journeys where the team has a tester (you set up their folder
@@ -132,10 +133,80 @@ This is the first task on most teams, and what a `test-infra` task usually exten
 
 ## Starting a repository
 
-For a `scaffold` task: use the stack the brief names. Generate it with the stack's own tool, without prompts, into the
-checkout, keeping the defaults the stack recommends. Set up linting, formatting, typechecking and unit tests, and the
-scripts CI will run, then the harness as above. If the team's gate can't run on the new app yet, say exactly what it
-should run in your report.
+A `scaffold` task on an empty repository lays the ground every later task builds on. Builders copy what they find,
+so a choice made carelessly here is made again in every feature. Three things are yours: the choices the brief leaves
+open, a skeleton that runs end to end, and the record of both.
+
+**What's fixed, and what's open.** The brief says what the operator fixed: that stands. What it marks as the team's
+proposal (and anything it doesn't mention) is yours to complete, and to put right where you'd choose otherwise. The
+team's adapters (`.a6g/adapters/`) were written to that proposal, and so were the script names and ports in the
+notes: keep that contract, and when a better choice would change it, build to the contract, write what you'd change
+and why in the record, and say exactly what the adapters would need in your report. A task that lists files and
+libraries is the planner's guess at the same proposal, not a specification: what binds you is its outcome.
+
+**Choose from what the product needs,** in this order, since each narrows the next:
+
+1. **Where it runs.** The operator's own machine or box, a platform that runs it for them, or a cloud account; what
+   that costs a month at the scale the brief names, and who keeps it running. Your rules stop the team deploying,
+   and the choice is still made now: it decides the rest.
+2. **Its shape.** One deployable and one database until the brief's own numbers say otherwise, with the seams
+   inside it (modules by what they do, not by layer). Every further process, queue or service is a cost somebody
+   runs: add one only for a need you can name.
+3. **The data.** The store that fits its shape and volume, with migrations from the first table. Tests run on the
+   engine production runs: a lighter stand-in is fine for speed, but it never decides what production may use.
+4. **Every edge.** How each client talks to it (a browser, a device, another service): the protocol, how each proves
+   who it is, and encryption in transit. For hardware, weigh what the field uses (MQTT against HTTP, say) against
+   what it costs to run.
+5. **The stack.** One language where one will do; a framework, a package manager and libraries that are widely used,
+   maintained and well documented. Take the current stable release of each and check it (`npm view <package> version`
+   or the stack's own): what you remember, and what the task names, is older than what's current.
+6. **Keys and settings.** Settings from the environment, validated at start; secrets in the platform's or the
+   project's secret manager and never in the repository; an example file with names and no values.
+7. **How it ships.** The image or the platform's configuration production would run (built in stages, production
+   dependencies only, not as root, with a health check), migrations applied on release, and a CI workflow that runs
+   the scripts the gate runs. Write it though the team pushes nowhere: it works the day the operator does.
+
+Prefer the boring answer: the one most teams would pick, that runs on this machine without an account, has a free or
+capped tier, and can be left (standard SQL, an OCI image, an open protocol). Something newer needs a reason from the
+brief.
+
+**Who it's for.** Your rules say when the operator isn't technical. Then take the safer choice each time, and never
+plan on asking them: a managed service over one they'd run, one provider over five, a cost with a ceiling, nothing
+that needs a terminal or a server of theirs to keep alive. Where the rules hold a design check-in, a technical
+operator reads your record and agrees it before features are built: write it to be decided from.
+
+**A skeleton that walks.** Generate the app with the stack's own tool, without prompts, into the checkout, keeping
+the defaults it recommends; commit the generator's output on its own. Then make the thinnest slice that passes
+through every layer the product will have, carrying no product decision (the server's version and the database's
+time, shown on a status page, will do):
+
+- a request validated at the edge, a query through the data layer with its migration, a response in the shape every
+  later one will use, errors included;
+- a page that fetches it and shows its loading, empty and failed states, on the tokens (colour, type, spacing) every
+  later page will use, in light and dark;
+- a test at each level the project will have: unit, database, API, component;
+- lint, formatting, typecheck and the scripts the gate runs, passing.
+
+It exists so that two builders working at once find one way to add a route, a table, a page and a test, instead of
+each inventing one; the first feature replaces it. Where the product talks to hardware or clients the team doesn't
+have, a simulator that speaks the real protocol is part of the skeleton, and so is a place for the device's or the
+client's own code when the product includes it. Then the harness as above.
+
+**The design record:** `docs/architecture.md`, or where the repository already keeps such things. One page a person
+can decide from:
+
+- the pieces and how data moves between them, in a few lines or a small diagram;
+- each choice above: what, the need it answers, what else you weighed and why not, what it costs to run, and how hard
+  it is to change later, with what would make you change it;
+- what's left out on purpose, and when it would be added;
+- which choices the operator fixed and which are the team's;
+- what you'd change in the brief's proposal, if anything;
+- the conventions the slice sets: where a route, its validation, its queries and its tests go.
+
+It's what the planner puts to the operator at a design check-in, and what every later member reads first. A later
+task that changes a choice changes its entry.
+
+If the team's gate can't run on the new app yet, say exactly what it should run in your report.
 
 ## Flaky tests
 

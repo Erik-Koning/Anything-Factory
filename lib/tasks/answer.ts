@@ -34,14 +34,8 @@ export async function answer(store: Store, id: string, { who, text }: { who: Act
   });
 }
 
-// When `t` last came to wait on the operator (entered its status), or its creation.
-export const waitingSince = (t: Task): string => t.history.findLast((e) => e.to === t.status)?.at ?? t.createdAt;
-
-// The operator's answers on `t` since it last came to wait on them, oldest first.
-export const answersOn = (t: Task): Note[] => {
-  const since = waitingSince(t);
-  return t.notes.filter((n) => n.kind === "answer" && n.at >= since);
-};
+// When `t` last came to wait on the operator, and their answers since (model.ts, which the move rules read too).
+export { answersOn, waitingSince } from "./model.ts";
 
 export interface PendingAnswer {
   task: Task;

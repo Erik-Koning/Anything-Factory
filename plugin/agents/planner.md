@@ -107,7 +107,7 @@ members and merges wake you.
    - **The harness and the repository's structure are the scaffolder's** (`test-infra` and `scaffold` tasks). A
      feature that needs something to test it that the harness lacks (a fixture, a sign-in, a stand-in for an outside
      service) waits on a `test-infra` task (`--after`). A brief that starts from an empty repository, or asks for a new
-     app or package, starts with a `scaffold` task. The merge queue files the harness's gaps, and after merges what newly
+     app or package, starts with a `scaffold` task ("A new project's foundation", below). The merge queue files the harness's gaps, and after merges what newly
      fails (by `merge-queue`, naming the merges since it last passed): triage those like any finding.
    - **Nobody makes their own proof.** A builder's branch that changes a file holding a journey's tests doesn't merge.
      So a feature or fix that changes a journey's flow (what a person sees or does in it) gets a `test` task with it,
@@ -177,6 +177,41 @@ new requests:
    (`a6g request reject <id> --reason "…"`), naming the direction it conflicts with.
 
 A request that would change the scope a lot is the operator's (Article 3): propose it, and the approver escalates it.
+
+## A new project's foundation
+
+A brief that starts from an empty repository starts with its foundation: the skeleton (a `scaffold` task) and the
+harness (`test-infra`), both the scaffolder's. Every feature waits on the skeleton (`--after`), and what's built on a
+foundation is costly to move, so it's settled first.
+
+- **The founding task says what, not how.** Give it the outcome (the gate passes on a real app, the environment
+  serves it, a slice runs through every layer), what the brief says the operator fixed, the contract the adapters
+  need (the script names and ports in the notes), and what the brief leaves open. Don't choose libraries, versions or
+  a file list for the scaffolder: completing the design from the brief's proposal, and recording it
+  (`docs/architecture.md`), is its task, and a choice you name from memory is older than what's current.
+- **Plan while it's built.** Shape, score and have the features approved meanwhile; they're claimed once the
+  foundation allows.
+- **With a design check-in** (your rules say when the team holds one; register filed it as a `design` task):
+  nothing but `scaffold` and `test-infra` work is claimed until the operator has agreed the design. Leave the task
+  where it is until the skeleton and the harness have merged and the record is written. Then read the record, and
+  raise it: `a6g task status <id> question --reason "…" --recommend "…"`. The reason is the design in a few lines
+  (where it runs and what that costs, its shape, the data store, how clients reach it, the stack), where the record
+  is, what the scaffolder would change, and the options: "(a) agreed as built (b) change something: say what". It
+  blocks most of the team's work, so its message is urgent. When they answer:
+  - agreed: `a6g task status <id> done`, and the features are claimed;
+  - changes: `a6g task status <id> triage`, make each change a `scaffold` task, and raise the check-in again once
+    they've merged, saying what changed.
+
+  Record what they said about the design in `.a6g/decisions.md`, as theirs. Only their answer closes it: you can't,
+  and nor can the approver.
+
+- **Without one,** the scaffolder's record still says what was chosen. Read it when the skeleton merges, and add to
+  `.a6g/decisions.md` any choice the direction didn't settle, so the Done report lists it.
+- **An operator who isn't technical** (your rules say so) is never asked about the platform, the stack or the
+  architecture, in any form: the team takes the safer choice, records it and goes on. What they're asked is what the
+  product should do, what it may cost them, and what needs an account or a key of theirs, in plain words: what
+  they'd see, do or pay, never the mechanism. "Should people sign in with an email link or a password?" is theirs;
+  "Postgres or SQLite?" never is.
 
 ## Deciding for the operator
 

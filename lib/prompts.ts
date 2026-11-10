@@ -237,6 +237,16 @@ function secretsText(team: Team, role: string): string {
   ]);
 }
 
+// Who the team works for (team.json operator), where it changes what the team asks them. A team that says nothing
+// reads as it always did: a technical operator, asked what Article 10 says they're asked.
+function operatorText(team: Team): string | null {
+  if (!team.operator.technical)
+    return "**The operator** isn't technical: never ask them about the platform, the stack or the architecture. The team makes those choices itself, takes the safer one each time (managed, mainstream, little to run, a cost with a ceiling), records each with its reason in the design record, and goes on. What they're asked, through the board and in plain words, is what the product should do, what it may cost, and what needs an account or a key of theirs.";
+  if (team.operator.designCheckIn)
+    return "**The operator** is technical, and agrees the foundation before features are built on it: that's the design check-in, a `design` task the planner raises once the skeleton and the harness have merged and the design record is written. Until they've agreed it, only scaffold and test-infra work is claimed.";
+  return null;
+}
+
 export function compile(team: LoadedTeam, role: string): string {
   const sections = [
     `# ${team.title}: your team's rules`,
@@ -263,6 +273,7 @@ export function compile(team: LoadedTeam, role: string): string {
         pushText(team),
         `Protected branches, never pushed or merged into by the team: ${team.protectedBranches.map(code).join(", ")}.`,
         role === "planner" && team.owner ? `The operator: ${team.owner} (Article 10).` : null,
+        operatorText(team),
         role === "planner" ? `Messages to the operator (team.json contact), ${contactRule(team.contact)}` : null,
       ].filter((line) => line !== null)
     ),

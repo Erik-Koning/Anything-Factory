@@ -63,6 +63,8 @@ import { git, gitOk, list, type Options, parseArgs, text as optionText } from ".
 export const USAGE = `usage: a6g task <command>
   add "<title>" [--kind k] [--sev s] [--body "…" | --body-file f] [--area a] [--files p,q] [--parent id] [--after id,id] [--request rN]
       (a member's finding goes to triage; the planner's work is proposed; yours may be --approved)
+      --kind design: the design check-in, which the planner raises to you once the foundation is built; until you've
+      agreed it (answer it, or a6g task status <id> done), only scaffold and test-infra work is claimed
   list [--status s,t] [--kind k] [--all] [--claimable] [--json]   ·   show <id> [--json]   ·   graph [--out <file>] [--all]
   note <id> "<text>"   ·   screen <id> clear|risky --note "…" (the planner: a stakeholder's words, before they're a proposal)
   edit <id> [--title …] [--body … | --body-file f] [--kind k] [--sev s] [--area a] [--files p,q] [--parent id|none] [--after id,id|none]
@@ -286,6 +288,13 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   if (body !== undefined) changes.body = body;
   const kind = oneOf(optionText(options["kind"]), KINDS, "--kind");
   if (kind) changes.kind = kind;
+  // The design check-in holds feature work until the operator settles it: it doesn't stop being one, or start as one, by an edit.
+  if (kind && kind !== task.kind && (kind === "design" || task.kind === "design") && who !== OPERATOR)
+    throw new Refused(
+      task.kind === "design"
+        ? `#${task.id} is the design check-in, which the operator settles: what kind it is, is their call`
+        : `the design check-in is a task of its own (a6g task add "…" --kind design), not another task's kind`
+    );
   const sev = optionText(options["sev"]);
   if (sev !== undefined) changes.severity = sev === "none" ? null : (oneOf(sev, SEVERITIES, "--sev") ?? null);
   const area = optionText(options["area"]);

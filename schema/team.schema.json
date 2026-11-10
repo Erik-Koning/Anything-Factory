@@ -364,6 +364,21 @@
         }
       }
     },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who the team works for, which decides what it asks them.",
+      "properties": {
+        "technical": {
+          "type": "boolean",
+          "description": "Whether you weigh in on the platform, the stack and the architecture (the default). false: the team never asks about them, picks what's safest for someone who won't maintain it by hand (managed, mainstream, little to operate, costs capped), records the choices, and asks you only about the product, in plain words."
+        },
+        "designCheckIn": {
+          "type": "boolean",
+          "description": "For a team that starts a repository: once the skeleton is built and its design record written, the planner puts the foundation's choices to you, and only scaffold and test-infra work is claimed until you've agreed (a6g init drafts true for an empty repository). Only with operator.technical."
+        }
+      }
+    },
     "hosts": {
       "type": "array",
       "items": {
