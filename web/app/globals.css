@@ -263,7 +263,7 @@ code:where(:not(.level-graph *)) {
 }
 
 /* --- The frame -------------------------------------------------------------------------------------------------- */
-.top {
+.top:where(:not(.level-graph *)) {
   position: sticky;
   top: 0;
   z-index: 20;
@@ -338,6 +338,11 @@ code:where(:not(.level-graph *)) {
 .top nav a:hover {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
   color: var(--ink);
+}
+/* Something waits on you there. */
+.top nav a.attention {
+  color: var(--ink);
+  font-weight: 600;
 }
 .top nav a[aria-current="page"] {
   background: var(--well);
@@ -984,6 +989,16 @@ button:where(:not(.level-graph *)):disabled {
   filter: none;
   transform: none;
   cursor: progress;
+}
+/* A key that's working stays put under the pointer: its hover (above) would otherwise outrank this. */
+button.primary:disabled,
+button.approve:disabled,
+button.reject:disabled,
+button.danger:disabled,
+button.quiet:disabled {
+  background: var(--ground);
+  border-color: var(--line);
+  box-shadow: none;
 }
 /* A text link that happens to be a button: no material at all. */
 .linkish {
@@ -1946,7 +1961,7 @@ details > * + * {
 @media (max-width: 720px) {
   /* The bar scrolls away with the page, and its links and a team's pages each stay on one row that scrolls
      sideways, fading out where there is more. */
-  .top {
+  .top:where(:not(.level-graph *)) {
     position: static;
   }
   .top-inner {
@@ -2054,10 +2069,16 @@ details > * + * {
   .button,
   input:where(:not(.level-graph *)):not([type="checkbox"], [type="radio"]),
   select:where(:not(.level-graph *)),
+  summary:where(:not(.level-graph *)),
+  .switcher > summary,
   .top nav a,
   .tabs a,
   .shortcuts a {
     min-height: 44px;
+  }
+  /* A link in a line of text keeps its line, and takes the touch above and below it. */
+  .linkish {
+    padding-block: 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

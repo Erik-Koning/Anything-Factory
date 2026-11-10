@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Sideways } from "../../../../components/sideways.tsx";
 import { TaskCard } from "../../../../components/task-card.tsx";
 import { Ago, Notice, param, type SearchParams } from "../../../../components/ui.tsx";
 import { can } from "../../../../server/access.ts";
@@ -46,7 +47,7 @@ export default async function BoardPage({ params, searchParams }: { params: Prom
           No tasks yet. The planner adds work as it plans{adds ? `, and you can ${adds === "Add a task" ? "add" : "suggest"} some now` : ""}.
         </p>
       ) : (
-        <div className="kanban" role="region" aria-label="The board (scrolls sideways)" tabIndex={0}>
+        <Sideways whole=".lane" className="kanban" role="region" aria-label="The board (scrolls sideways)" tabIndex={0}>
           {columns.map((c) => (
             <section key={c.lane} className={`lane lane-${c.lane}`} aria-label={c.label}>
               <header>
@@ -83,7 +84,7 @@ export default async function BoardPage({ params, searchParams }: { params: Prom
               ) : null}
             </section>
           ))}
-        </div>
+        </Sideways>
       )}
     </>
   );
