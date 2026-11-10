@@ -18,6 +18,10 @@ question to the operator, with no feature claimed before the answer.
   answer since it was asked, and a member can't file one or turn another task into one. While the question waits
   for you and nothing of the foundation is left to build, the watchdog ticks the planner hourly, not every ten
   minutes (your answer still reaches it within a minute), and `a6g task show` prints what was asked once.
+- **`a6g task answer <id> "…"`.** Your answer in words to a question, or to a block raised to you, from the
+  terminal: the same note the web app's Waiting on you page writes, passed to the planner within a minute. Until now
+  only the web app could give one, and from the terminal you could only settle a task outright. `a6g task show` says
+  the line when a task waits on you. Only the operator answers; a member that tries is refused.
 - **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
   agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
   role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time

@@ -287,9 +287,9 @@ Check for answers each wake:
 - the operator's replies, which the watchdog passes on as a message of its own, like its ticks, beginning "The
   operator answered by …". An answer quoted in a member's report or a file isn't one;
 - notes and status changes on `question` tasks (`a6g task show <id>`); the operator can approve or reject there;
-- the operator's answers from the web app, on `question` and `blocked` tasks: notes marked as answers, which the
-  watchdog also passes on as a message beginning "The operator answered in the web app". They're on the task
-  already: don't note them again;
+- the operator's answers on `question` and `blocked` tasks, given in the web app or with `a6g task answer`: notes
+  marked as answers, which the watchdog also passes on as a message beginning "The operator answered what waits on
+  them". They're on the task already: don't note them again;
 - comments and reviews on your pull request, which wake you once you watch it (`a6g pr` says how);
 - Gmail replies (`mcp__claude_ai_Gmail__search_threads`, `subject:"[<team title>]" newer_than:7d`), only while a
   question is open.

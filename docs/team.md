@@ -147,7 +147,7 @@ team that builds features before you've seen them has made them for you. With `o
 files one `design` task. While it's open, only `scaffold` and `test-infra` tasks are claimed: the scaffolder builds
 the skeleton and the harness and writes the design record, and the planner plans. Then the planner raises the task
 as a question, with the design in a few lines and what it recommends, and you answer in the web app or with
-`a6g task answer`: agreed, or what to change. Agreed, it's done and features start. Changes go back to the
+`a6g task answer <id> "…"`: agreed, or what to change. Agreed, it's done and features start. Changes go back to the
 scaffolder, and the planner asks again. Only your answer settles it: the approver doesn't decide it, and the planner
 can't close one you haven't answered. `a6g task status <id> done` (or `rejected`, for none) from you ends it at any
 time.

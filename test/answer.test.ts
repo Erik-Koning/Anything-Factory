@@ -97,7 +97,7 @@ describe("passing answers to the planner", () => {
       [b.id]
     );
     const message = answersMessage(pending);
-    assert.match(message, /^The operator answered in the web app:/);
+    assert.match(message, /^The operator answered what waits on them:/);
     assert.match(message, new RegExp(`1\\. #${b.id} "Second" \\(blocked\\): unblock with the staging key`));
     assert.match(message, /don't note it again/);
   });

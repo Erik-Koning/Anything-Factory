@@ -10,7 +10,7 @@ import { loadTeam, normalize, type RawTeam } from "../lib/config.ts";
 import { detect, draftTeam } from "../lib/detect.ts";
 import { compile } from "../lib/prompts.ts";
 import { addTask } from "../lib/tasks/add.ts";
-import { answer } from "../lib/tasks/answer.ts";
+import { answer, answersSince } from "../lib/tasks/answer.ts";
 import { fileDesignCheckIn } from "../lib/tasks/design.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 import { claimRefusal, designOpen, MERGE, moveRefusal, newTask, nextClaim, OPERATOR, statusRefusal, type Task } from "../lib/tasks/model.ts";
@@ -225,10 +225,28 @@ describe("a6g task and the design check-in", () => {
     assert.equal(shown.split("The skeleton runs end to end").length - 1, 1, shown);
     assert.match(shown, /raised to the operator by the planner: The skeleton runs end to end/);
     assert.match(shown, /planner: triage → question: \(as raised, above\)/);
+    assert.match(shown, /Yours to answer: a6g task answer 1 "<your answer>"/);
+    assert.doesNotMatch((await a6g(["task", "show", "1"], as("planner"))).out, /Yours to answer/);
+    assert.match((await a6g(["task", "status", "1", "done"], as("planner"))).out, /is done on the operator's word/);
+
+    // The answer is the operator's to give, in words, from the terminal as from the web app; no member gives it for them.
+    const posed = await a6g(["task", "answer", "1", "(a) agreed as built"], as("planner"));
+    assert.equal(posed.code, 2);
+    assert.match(posed.out, /only the operator answers what waits on them/);
+    assert.match((await a6g(["task", "answer", "1"], as(null))).out, /say what your answer is/);
+    assert.match((await a6g(["task", "answer", "3", "Go on"], as(null))).out, /#3 is approved now and doesn't wait on an answer/);
     assert.match((await a6g(["task", "status", "1", "done"], as("planner"))).out, /is done on the operator's word/);
 
     // Changes asked for: back to the planner, made as scaffold work, and asked again.
-    await answer(store, "1", { who: OPERATOR, text: "(b) Use the managed database instead of the container." });
+    const changes = await a6g(["task", "answer", "1", "(b) Use the managed database instead of the container."], as(null));
+    assert.equal(changes.code, 0, changes.out);
+    assert.match(changes.out, /task 1: answered\. The planner hears within a minute/);
+    const heard = answersSince(await store.tasks.all(), new Date(0).toISOString());
+    assert.deepEqual(
+      heard.map((a) => [a.task.id, a.note.by, a.note.text]),
+      [["1", OPERATOR, "(b) Use the managed database instead of the container."]],
+      "the watchdog passes it to the planner, as it does an answer from the web app"
+    );
     assert.equal((await a6g(["task", "status", "1", "triage"], as("planner"))).code, 0);
     assert.match((await a6g(["task", "claim", "3"], as("builder", tree))).out, /waits for the operator to agree the design \(#1, triage\)/);
     await a6g(

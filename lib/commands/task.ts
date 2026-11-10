@@ -56,6 +56,7 @@ import { journeyProofFor } from "./e2e.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
 import { claimMark, importBoard, leaseMinutes, markClaim, openTeamStore } from "../tasks/ops.ts";
 import { addTask, proposes } from "../tasks/add.ts";
+import { answer, waitsOnOperator } from "../tasks/answer.ts";
 import { type Decision, decide } from "../tasks/decide.ts";
 import { openStore, Refused, type Store, update } from "../tasks/store.ts";
 import { git, gitOk, list, type Options, parseArgs, text as optionText } from "../util.ts";
@@ -75,6 +76,7 @@ export const USAGE = `usage: a6g task <command>
       blocked: --reason "…" (the planner's to sort), with --recommend "…" to raise it to the operator,
                or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
   ask <id> --reason "…" --recommend "…"   a question or blocked task: why it's the operator's and what the team recommends
+  answer <id> "<your answer>"   yours: what you say to a question, or to a block raised to you (the planner hears within a minute)
   approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…" --recommend "…"
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
   migrate --to mongo|files [--dry-run]   (yours: the whole graph into the other store)`;
@@ -245,9 +247,19 @@ const listTasks: Handler = async ({ store, who }, _positional, options) => {
   return 0;
 };
 
-const show: Handler = async ({ store }, [id], options) => {
+const show: Handler = async ({ store, who }, [id], options) => {
   const task = await getTask(store, id);
   console.info(options["json"] ? JSON.stringify(asJson(task), null, 2) : detail(task));
+  if (!options["json"] && who === OPERATOR && waitsOnOperator(task)) console.info(`\nYours to answer: a6g task answer ${task.id} "<your answer>"`);
+  return 0;
+};
+
+// The operator's answer in words to what waits on them, as the web app gives it (lib/tasks/answer.ts): a note marked as
+// the answer, which leaves the task where it is. The watchdog passes it to the planner, which moves the task on.
+const answerTask: Handler = async ({ store, who }, [id, ...rest], options) => {
+  if (!id) throw new Refused('which task: a6g task answer <id> "<your answer>"');
+  const task = await answer(store, id, { who, text: optionText(options["text"]) ?? rest.join(" ") });
+  console.info(`task ${task.id}: answered. The planner hears within a minute and moves it on.`);
   return 0;
 };
 
@@ -824,6 +836,7 @@ const OPTIONS: Record<string, string[]> = {
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
   status: ["reason", "recommend", "waits-on", "then"],
   ask: ["reason", "recommend"],
+  answer: ["text"],
   approve: ["note"],
   reject: ["reason"],
   research: ["note"],
@@ -847,6 +860,7 @@ const COMMANDS: Record<string, Handler> = {
   score,
   status: setStatus,
   ask,
+  answer: answerTask,
   approve,
   reject: proposalVerdict("reject", "reason"),
   research: proposalVerdict("research", "note"),

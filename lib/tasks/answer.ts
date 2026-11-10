@@ -1,8 +1,8 @@
 // The operator's answers to what waits on them: a question the planner or the approver asked (status question), or
 // blocked work raised to them. An answer is a note by the operator, marked as one, that leaves the task where it is: the
 // planner reads it, records it in decisions.md and moves the task on (approving or rejecting it outright is
-// decide.ts). The web app answers through here. The lead's watchdog passes each new answer to the planner
-// (lib/answers.ts), so it acts on it within a minute instead of at its next wake.
+// decide.ts). The web app and a6g task answer both answer through here. The lead's watchdog passes each new answer to
+// the planner (lib/answers.ts), so it acts on it within a minute instead of at its next wake.
 import { type Actor, type Note, nowIso, OPERATOR, Refused, type Status, type Task } from "./model.ts";
 import { type Store, update } from "./store.ts";
 
@@ -59,7 +59,7 @@ export function answersSince(tasks: Task[], since: string): PendingAnswer[] {
 export function answersMessage(answers: PendingAnswer[]): string {
   const lines = answers.map(({ task, note }, i) => `${i + 1}. #${task.id} "${task.title}" (${task.status}): ${note.text}`);
   return [
-    `The operator answered in the web app:`,
+    `The operator answered what waits on them:`,
     "",
     ...lines,
     "",

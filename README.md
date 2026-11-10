@@ -353,8 +353,8 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   others: once they're done it closes (it was folded into them) or goes back to work, and once one is rejected it
   goes back to the planner. The merge queue settles it as it merges, and the watchdog every minute.
 - **Answers.** What waits on you (every `question`, and blocks raised to you) you answer on the web app's Waiting on
-  you page, with the options the question offers: a note by the operator marked as the answer
-  (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
+  you page, with the options the question offers, or with `a6g task answer <id> "…"`: a note by the operator marked
+  as the answer (`lib/tasks/answer.ts`), which the watchdog passes to the planner within a minute. The planner records it in
   `decisions.md` and moves the task on. People choose there what they're emailed about, at once or in a daily digest.
 - **Feature requests.** `a6g request add` takes a stakeholder's request; `a6g serve` gives each a form. Agents see a
   stakeholder's id and role, never a name or address. The planner researches each request and promotes it into tasks

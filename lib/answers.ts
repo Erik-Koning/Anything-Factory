@@ -1,7 +1,7 @@
-// The operator's answers from the web app (lib/tasks/answer.ts), passed to the team's planner once each, in one
-// message per watchdog run, so it acts on them within a minute instead of at its next wake. A marker in the run
-// folder's replies/ says which went, as for the operator's replies by email; answers older than a day aren't passed on
-// (the planner reads those notes on its own wakes).
+// The operator's answers from the web app or a6g task answer (lib/tasks/answer.ts), passed to the team's planner once
+// each, in one message per watchdog run, so it acts on them within a minute instead of at its next wake. A marker in the
+// run folder's replies/ says which went, as for the operator's replies by email; answers older than a day aren't passed
+// on (the planner reads those notes on its own wakes).
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RegistryEntry } from "./paths.ts";
