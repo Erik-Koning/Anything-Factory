@@ -39,7 +39,7 @@ export default async function TeamLayout({ children, params }: { children: React
   };
   return (
     <>
-      <div className="head">
+      <div className="head team-head">
         <h1>{team.title || team.name}</h1>
         <Chip>{team.status?.state ?? "no status yet"}</Chip>
         <span className="muted small">you: {role}</span>

@@ -47,7 +47,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
           </Link>
         </div>
       ) : null}
-      <div className="grid">
+      <div className="grid lead">
         <section className="panel" aria-labelledby="status">
           <h2 id="status">Status</h2>
           <dl className="facts">
@@ -90,44 +90,36 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
       ) : null}
 
-      <section className="panel" aria-labelledby="journeys">
-        <h2 id="journeys">Journeys</h2>
-        {shownJourneys.length ? (
-          <ul className="plain rows">
-            {shownJourneys.map((j) => (
-              <li key={j.id}>
-                <div className="head">
-                  <span className="id">#{j.id}</span>
-                  {details ? (
-                    <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
-                      {j.title}
-                    </Link>
-                  ) : (
-                    <span className="title">{j.title}</span>
-                  )}
-                  <Chip>{j.status}</Chip>
-                  {j.due ? <Chip tone="caution">due its verification</Chip> : null}
-                </div>
-                <p className="small muted">
-                  {j.done} of {j.total} task{j.total === 1 ? "" : "s"} done
-                </p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="empty">No journeys yet.</p>
-        )}
-      </section>
-
-      {details ? (
-        <>
-          <section className="panel" aria-labelledby="graph">
-            <h2 id="graph">Graph</h2>
-            <TaskGraph tasks={tasks} />
-            <p className="small">
-              <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
-            </p>
-          </section>
+      <div className="grid">
+        <section className="panel" aria-labelledby="journeys">
+          <h2 id="journeys">Journeys</h2>
+          {shownJourneys.length ? (
+            <ul className="plain rows">
+              {shownJourneys.map((j) => (
+                <li key={j.id}>
+                  <div className="head">
+                    <span className="id">#{j.id}</span>
+                    {details ? (
+                      <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
+                        {j.title}
+                      </Link>
+                    ) : (
+                      <span className="title">{j.title}</span>
+                    )}
+                    <Chip>{j.status}</Chip>
+                    {j.due ? <Chip tone="caution">due its verification</Chip> : null}
+                  </div>
+                  <p className="small muted">
+                    {j.done} of {j.total} task{j.total === 1 ? "" : "s"} done
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty">No journeys yet.</p>
+          )}
+        </section>
+        {details ? (
           <section className="panel" aria-labelledby="merges">
             <h2 id="merges">Recent merges</h2>
             {merges(tasks).length ? (
@@ -145,7 +137,16 @@ export default async function OverviewPage({ params, searchParams }: { params: P
               <p className="empty">Nothing merged yet.</p>
             )}
           </section>
-        </>
+        ) : null}
+      </div>
+      {details ? (
+        <section className="panel" aria-labelledby="graph">
+          <h2 id="graph">Graph</h2>
+          <TaskGraph tasks={tasks} />
+          <p className="small">
+            <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
+          </p>
+        </section>
       ) : null}
     </>
   );

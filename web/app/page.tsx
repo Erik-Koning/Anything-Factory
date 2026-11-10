@@ -89,26 +89,16 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                     <Ago at={status?.at} />
                   </dd>
                 </dl>
-                <p className="small">
+                {/* The team's pages this person may open, each a small key along the card's foot. */}
+                <p className="shortcuts">
                   <Link href={`/t/${team.name}`}>Overview</Link>
                   {can(viewer, "proposals:decide", team.name) ? (
-                    <>
-                      {" "}
-                      · <Link href={`/t/${team.name}/inbox`}>Waiting on you{teamAsks ? ` (${teamAsks})` : ""}</Link>
-                    </>
+                    <Link href={`/t/${team.name}/inbox`}>Waiting on you{teamAsks ? ` (${teamAsks})` : ""}</Link>
                   ) : null}
-                  {can(viewer, "team:board", team.name) ? (
-                    <>
-                      {" "}
-                      · <Link href={`/t/${team.name}/board`}>Board</Link>
-                    </>
-                  ) : null}{" "}
-                  · <Link href={`/t/${team.name}/requests`}>Requests</Link>
+                  {can(viewer, "team:board", team.name) ? <Link href={`/t/${team.name}/board`}>Board</Link> : null}
+                  <Link href={`/t/${team.name}/requests`}>Requests</Link>
                   {can(viewer, "proposals:decide", team.name) ? (
-                    <>
-                      {" "}
-                      · <Link href={`/t/${team.name}/proposals`}>Decisions{waiting ? ` (${waiting})` : ""}</Link>
-                    </>
+                    <Link href={`/t/${team.name}/proposals`}>Decisions{waiting ? ` (${waiting})` : ""}</Link>
                   ) : null}
                 </p>
               </li>

@@ -1,12 +1,25 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { MainNav } from "../components/main-nav.tsx";
 import { blocked, can } from "../server/access.ts";
 import { allTeams, storeFor } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { getViewer, type Person } from "../server/viewer.ts";
 import { SignOutButton } from "./sign-out-button.tsx";
 import "./globals.css";
+
+// Served from this app, never a font service: Geist for text, Martian Mono (its width axis too) for ids, figures and
+// part labels. Both are under the SIL Open Font License (fonts/LICENSE-*.txt).
+const sans = localFont({ src: "./fonts/geist.woff2", variable: "--font-sans", weight: "100 900", display: "swap" });
+const mono = localFont({
+  src: "./fonts/martian-mono.woff2",
+  variable: "--font-mono",
+  weight: "100 800",
+  display: "swap",
+  declarations: [{ prop: "font-stretch", value: "75% 112.5%" }],
+});
 
 // Every page is the signed-in person's own, from live data: never prerendered or cached.
 export const dynamic = "force-dynamic";
@@ -21,7 +34,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#1a1a1d" },
+    { media: "(prefers-color-scheme: dark)", color: "#171b20" },
   ],
 };
 
@@ -36,12 +49,22 @@ async function waitingFor(viewer: Person): Promise<number> {
   }
 }
 
+// A factory's sawtooth roof on a tile of the brand's solid. Decorative: the words beside it are the name.
+function Mark() {
+  return (
+    <svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true" focusable="false">
+      <rect className="tile" width="28" height="28" rx="7" />
+      <path className="roof" d="M6 20.5v-8.2l5 3.2v-3.2l5 3.2V7.5h6v13z" />
+    </svg>
+  );
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
   const signedIn = viewer !== null && !blocked(viewer);
   const waiting = signedIn && viewer.admin ? await waitingFor(viewer) : 0;
   return (
-    <html lang="en">
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <a className="skip" href="#main">
           Skip to the content
@@ -49,34 +72,32 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <header className="top">
           <div className="top-inner">
             <Link className="brand" href="/">
+              <Mark />
               Anything Factory
             </Link>
             {signedIn ? (
-              <nav aria-label="Main">
-                <Link href="/">Teams</Link>
-                {viewer.admin ? (
-                  <Link href="/inbox" className={waiting ? "attention" : undefined}>
-                    Waiting on you
-                    {waiting ? (
-                      <>
-                        {" "}
-                        <span className="badge">{waiting}</span>
-                      </>
-                    ) : null}
-                  </Link>
-                ) : null}
-                <Link href="/machines">Machines</Link>
-                {viewer.admin ? <Link href="/admin/people">People</Link> : null}
-                {viewer.admin ? <Link href="/admin/audit">Audit</Link> : null}
-                <Link href="/account">Account</Link>
-              </nav>
+              <MainNav
+                links={[
+                  { href: "/", label: "Teams" },
+                  ...(viewer.admin ? [{ href: "/inbox", label: "Waiting on you", count: waiting }] : []),
+                  { href: "/machines", label: "Machines" },
+                  ...(viewer.admin
+                    ? [
+                        { href: "/admin/people", label: "People" },
+                        { href: "/admin/audit", label: "Audit" },
+                      ]
+                    : []),
+                  { href: "/account", label: "Account" },
+                ]}
+              />
             ) : (
               <span className="spacer" />
             )}
             {viewer ? (
               <span className="who">
-                {viewer.name || viewer.email}
-                {viewer.admin ? " · admin" : ""} · <SignOutButton />
+                <span>{viewer.name || viewer.email}</span>
+                {viewer.admin ? <span className="chip">admin</span> : null}
+                <SignOutButton className="quiet s" />
               </span>
             ) : null}
           </div>

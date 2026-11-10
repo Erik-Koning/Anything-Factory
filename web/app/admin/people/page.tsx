@@ -95,22 +95,25 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
             const admin = isAdminRole(u.role);
             const theirs = byUser.get(u.id) ?? [];
             return (
-              <li key={u.id}>
-                <div className="head">
-                  <span className="title">{u.name}</span>
-                  <span className="muted">{u.email}</span>
-                  {admin ? <Chip tone="ok">admin</Chip> : null}
-                  {u.banned ? <Chip tone="warn">banned</Chip> : null}
+              <li key={u.id} className="person">
+                <div className="who-they-are">
+                  <div className="head">
+                    <span className="title">{u.name}</span>
+                    {admin ? <Chip tone="ok">admin</Chip> : null}
+                    {u.banned ? <Chip tone="warn">banned</Chip> : null}
+                  </div>
+                  <p className="small muted">{u.email}</p>
                 </div>
-                {theirs.length ? (
-                  <ul className="plain small">
-                    {theirs.map((m) => (
-                      <li key={m.team} className="inline">
-                        <form action={changeRoleAction} className="inline">
-                          <input type="hidden" name="userId" value={u.id} />
-                          <input type="hidden" name="team" value={m.team} />
-                          <div className="field">
-                            <label htmlFor={`role-${u.id}-${m.team}`}>{`${u.email}'s role on ${m.team}`}</label>
+                <div className="their-teams">
+                  {theirs.length ? (
+                    <ul className="plain memberships">
+                      {theirs.map((m) => (
+                        <li key={m.team}>
+                          <span className="on-team">{m.team}</span>
+                          <form action={changeRoleAction}>
+                            <input type="hidden" name="userId" value={u.id} />
+                            <input type="hidden" name="team" value={m.team} />
+                            <label className="sr" htmlFor={`role-${u.id}-${m.team}`}>{`${u.email}'s role on ${m.team}`}</label>
                             <select id={`role-${u.id}-${m.team}`} name="role" defaultValue={m.role}>
                               {TEAM_ROLES.map((r) => (
                                 <option key={r} value={r}>
@@ -118,37 +121,48 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                                 </option>
                               ))}
                             </select>
-                          </div>
-                          <SubmitButton>{`Save ${u.email}'s role on ${m.team}`}</SubmitButton>
-                        </form>
-                        <form action={removeAction}>
-                          <input type="hidden" name="userId" value={u.id} />
-                          <input type="hidden" name="team" value={m.team} />
-                          <SubmitButton className="danger">{`Remove ${u.email} from ${m.team}`}</SubmitButton>
-                        </form>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="small muted">{admin ? "Sees every team." : "On no team."}</p>
-                )}
-                {!admin && u.id !== viewer.userId ? (
-                  u.banned ? (
-                    <form action={unbanAction}>
-                      <input type="hidden" name="userId" value={u.id} />
-                      <SubmitButton>{`Unban ${u.email}`}</SubmitButton>
-                    </form>
+                            <SubmitButton className="s" label={`Save ${u.email}'s role on ${m.team}`}>
+                              Save
+                            </SubmitButton>
+                          </form>
+                          <form action={removeAction}>
+                            <input type="hidden" name="userId" value={u.id} />
+                            <input type="hidden" name="team" value={m.team} />
+                            <SubmitButton className="quiet danger s" label={`Remove ${u.email} from ${m.team}`}>
+                              Remove
+                            </SubmitButton>
+                          </form>
+                        </li>
+                      ))}
+                    </ul>
                   ) : (
-                    <form action={banAction} className="inline">
-                      <input type="hidden" name="userId" value={u.id} />
-                      <label>
-                        {`Why ban ${u.email} (optional)`}
-                        <input name="reason" maxLength={LIMITS.label} autoComplete="off" />
-                      </label>
-                      <SubmitButton className="danger">Ban and sign out</SubmitButton>
-                    </form>
-                  )
-                ) : null}
+                    <p className="small muted">{admin ? "Sees every team." : "On no team."}</p>
+                  )}
+                  {!admin && u.id !== viewer.userId ? (
+                    u.banned ? (
+                      <form action={unbanAction}>
+                        <input type="hidden" name="userId" value={u.id} />
+                        <SubmitButton className="s" label={`Unban ${u.email}`}>
+                          Unban
+                        </SubmitButton>
+                      </form>
+                    ) : (
+                      // Asked for first: a ban ends every session the person has. The row says whose it is; a screen reader
+                      // hears the address too.
+                      <details className="more">
+                        <summary aria-label={`Ban ${u.email}`}>Ban…</summary>
+                        <form action={banAction} className="inline">
+                          <input type="hidden" name="userId" value={u.id} />
+                          <label>
+                            {`Why ban ${u.email} (optional)`}
+                            <input name="reason" maxLength={LIMITS.label} autoComplete="off" />
+                          </label>
+                          <SubmitButton className="danger">Ban and sign out</SubmitButton>
+                        </form>
+                      </details>
+                    )
+                  ) : null}
+                </div>
               </li>
             );
           })}
