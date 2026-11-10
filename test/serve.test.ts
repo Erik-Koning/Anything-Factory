@@ -152,6 +152,55 @@ describe("a6g serve", () => {
     }
   });
 
+  test("a question shows what was asked and takes an answer; the design check-in takes nothing else", async () => {
+    const s = await served();
+    try {
+      const at = new Date(Date.now() - 60_000).toISOString();
+      const asked = {
+        by: "planner",
+        at,
+        reason: "The skeleton runs end to end. (a) agreed as built (b) change something",
+        recommendation: "(a) agreed as built",
+      };
+      const design = await s.store.tasks.create({
+        ...newTask({
+          team: "fixture",
+          title: "Design check-in",
+          kind: "design",
+          status: "question",
+          by: "merge-queue",
+          body: "Planner, this is yours to carry",
+        }),
+        ask: asked,
+        history: [{ at, by: "planner", what: "triage → question", from: "triage", to: "question" }],
+      });
+      const card = async () => /<li class="proposal">[\s\S]*?<\/li>/.exec(await (await fetch(s.url)).text())?.[0] ?? "";
+      const shown = await card();
+      assert.match(shown, /Why it's yours:<\/b> The skeleton runs end to end\. \(a\) agreed as built \(b\) change something/);
+      assert.match(shown, /The team recommends:<\/b> \(a\) agreed as built/);
+      assert.match(shown, new RegExp(`action="/api/tasks/${design.id}/answer"`));
+      assert.doesNotMatch(shown, /Approve|Reject|Not scored yet|yours to carry/, "answered, not approved or rejected");
+
+      const empty = await post(`${s.url}/api/tasks/${design.id}/answer`, { text: "  " });
+      assert.equal(empty.status, 400);
+      // Reject, posted by hand, would open the gate: a rejected check-in is one the operator wants none of.
+      const rejected = await post(`${s.url}/api/tasks/${design.id}/reject`, { reason: "I'd rather it were SQLite" });
+      assert.equal(rejected.status, 422);
+      assert.match(((await rejected.json()) as { output: string }).output, /which you answer rather than approve or reject/);
+      assert.equal((await s.store.tasks.get(design.id))?.status, "question");
+
+      const answered = await post(`${s.url}/api/tasks/${design.id}/answer`, { text: "--(b) SQLite instead of Postgres" });
+      const result = (await answered.json()) as { ok: boolean; output: string };
+      assert.deepEqual([answered.status, result.ok], [200, true], result.output);
+      const task = await s.store.tasks.get(design.id);
+      assert.deepEqual([task?.status, task?.notes.at(-1)?.by, task?.notes.at(-1)?.kind], ["question", "operator", "answer"]);
+      assert.equal(task?.notes.at(-1)?.text, "--(b) SQLite instead of Postgres", "an answer that starts with -- stays an answer");
+      assert.match(await card(), /You answered:<\/b> --\(b\) SQLite instead of Postgres/);
+    } finally {
+      await s.close();
+    }
+  });
+
   test("with a token, every request needs it: ?token= once, then the cookie or the header", async () => {
     const s = await served({ token: "s3cret-token" });
     try {

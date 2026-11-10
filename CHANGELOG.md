@@ -21,7 +21,10 @@ question to the operator, with no feature claimed before the answer.
 - **`a6g task answer <id> "…"`.** Your answer in words to a question, or to a block raised to you, from the
   terminal: the same note the web app's Waiting on you page writes, passed to the planner within a minute. Until now
   only the web app could give one, and from the terminal you could only settle a task outright. `a6g task show` says
-  the line when a task waits on you. Only the operator answers; a member that tries is refused.
+  the line when a task waits on you. Only the operator answers; a member that tries is refused. `a6g serve` shows a
+  question with what was asked, what the team recommends and a box for your answer. The design check-in takes an
+  answer and nothing else: `a6g task approve` and `reject` refuse it from everyone (the page's Reject beside it would
+  have marked it as wanting no check-in, and started the features).
 - **An operator who isn't technical is never asked how it's built.** `operator.technical: false` (set by the setup
   agent from how the operator writes and what they name, never by asking; or `a6g init --non-technical`) tells every
   role so in its rules: the team chooses the platform, the stack and the architecture itself, the safer way each time

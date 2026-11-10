@@ -146,6 +146,19 @@ describe("who settles the design check-in", () => {
       const to = { approve: "approved", reject: "rejected", research: "researching", escalate: "question" } as const;
       assert.match(moveRefusal(proposed, to[via], via, "approver", { all: [proposed] }) ?? "", /is the design check-in: the operator settles it/, via);
     }
+    // No verdict from anyone, the operator included: a Reject beside the question would read as "not this design", and
+    // a rejected check-in is one they want none of, which starts the features.
+    for (const [via, to] of [
+      ["approve", "approved"],
+      ["reject", "rejected"],
+      ["research", "researching"],
+    ] as const)
+      assert.match(
+        moveRefusal(asked(), to, via, OPERATOR, { all: [asked()] }) ?? "",
+        /which you answer rather than approve or reject: a6g task answer 1/,
+        via
+      );
+    assert.match(moveRefusal(design(), "approved", "approve", "planner", { all: [design()] }) ?? "", /the operator settles it/);
     assert.match(moveRefusal(asked(), "done", "merge", MERGE, { all: [asked()] }) ?? "", /is the design check-in, done on the operator's word/);
   });
 });
@@ -235,6 +248,10 @@ describe("a6g task and the design check-in", () => {
     assert.match(posed.out, /only the operator answers what waits on them/);
     assert.match((await a6g(["task", "answer", "1"], as(null))).out, /say what your answer is/);
     assert.match((await a6g(["task", "answer", "3", "Go on"], as(null))).out, /#3 is approved now and doesn't wait on an answer/);
+    const verdict = await a6g(["task", "reject", "1", "--reason", "I'd rather it were SQLite"], as(null));
+    assert.equal(verdict.code, 2);
+    assert.match(verdict.out, /which you answer rather than approve or reject/);
+    assert.equal((await store.tasks.get("1"))?.status, "question", "still asked, and the features still wait");
     assert.match((await a6g(["task", "status", "1", "done"], as("planner"))).out, /is done on the operator's word/);
 
     // Changes asked for: back to the planner, made as scaffold work, and asked again.

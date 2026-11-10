@@ -282,6 +282,8 @@ export const theirWords = (t: Task): boolean => t.by === "stakeholder" && !(plan
 
 export type Via =
   "status" | "approve" | "reject" | "research" | "escalate" | "claim" | "release" | "submit" | "changes" | "merge" | "conflict" | "expire" | "settle";
+// The decisions on a proposal (lib/tasks/decide.ts).
+const VERDICTS_VIA: readonly Via[] = ["approve", "reject", "research", "escalate"];
 export interface ApprovalRules {
   mode: "operator" | "thresholds" | "full";
   maxSize: Size;
@@ -326,14 +328,8 @@ const scored: Check = (t) =>
   t.kind !== "journey" && !t.score && (t.kind === "feature" || !t.severity)
     ? `task ${t.id} isn't scored yet; the planner scores it first (a6g task score)`
     : null;
-// A journey only groups tasks, each approved on its own: the approver has nothing to decide about it. Nor about the
-// design check-in, which is the operator's.
-const notJourney: Check = (t) =>
-  t.kind === "journey"
-    ? `#${t.id} is a journey: it only groups tasks, and each of them is decided on its own`
-    : t.kind === "design"
-      ? `#${t.id} is the design check-in: the operator settles it, once the planner has raised it`
-      : null;
+// A journey only groups tasks, each approved on its own: the approver has nothing to decide about it.
+const notJourney: Check = (t) => (t.kind === "journey" ? `#${t.id} is a journey: it only groups tasks, and each of them is decided on its own` : null);
 const approverActs: Check = (_t, _to, _actor, { approval }) =>
   approval?.mode === "operator"
     ? "this team's proposals are decided by the operator (team.json approval.mode); there's nothing for the approver to do"
@@ -559,6 +555,12 @@ function notFrom(t: Task, to: Status, via: Via): string {
 export function moveRefusal(task: Task, to: Status, via: Via, actor: Actor, ctx: MoveContext): string | null {
   if (task.status === to) return `task ${task.id} is already ${to}`;
   if (to === "building" && via !== "claim") return "a task is building only when a member claims it (a6g task claim)";
+  // The design check-in takes no verdict from anyone. The operator answers it in words: a Reject beside it would read
+  // as "not this design", and a rejected check-in is one the operator wants none of, so features would start.
+  if (task.kind === "design" && VERDICTS_VIA.includes(via))
+    return actor === OPERATOR
+      ? `#${task.id} is the design check-in, which you answer rather than approve or reject: a6g task answer ${task.id} "…" (agreed, or what to change). To end it yourself: a6g task status ${task.id} done (or rejected, to hold none)`
+      : `#${task.id} is the design check-in: the operator settles it, once the planner has raised it`;
   const theirs = RULES.filter((rule) => rule.via === via && rule.by.includes(actor));
   if (!theirs.length)
     return via === "status"

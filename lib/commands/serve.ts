@@ -1,7 +1,8 @@
 // a6g serve: the operator's page for one team, on the always-on machine. Stakeholders' feature requests come in through
 // its form; it shows the open requests (with who sent them, which only this page and the operator's own commands
-// show), the board by status, the proposals waiting for the operator with Approve and Reject, and the task graph.
-// Approving and rejecting run `a6g task` as the operator, so every rule there applies here too.
+// show), the board by status, what waits for the operator (proposals with Approve and Reject, questions with what was
+// asked and a box for the answer), and the task graph. Approving, rejecting and answering run `a6g task` as the
+// operator, so every rule there applies here too.
 //
 // It's node:http and nothing else: no dependencies, no external assets, the CSS and the little JS inline. It binds
 // 127.0.0.1 unless told otherwise, and always asks for a token: A6G_SERVE_TOKEN, or one made at start and printed in
@@ -15,7 +16,7 @@ import type { Team } from "../config.ts";
 import { entryOf, FACTORY_ROOT } from "../paths.ts";
 import { operatorOnly, teamSession } from "../session.ts";
 import { betterDiagram, layout } from "../tasks/graph.ts";
-import { claimOrder, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
+import { answersOn, claimOrder, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { Refused, type Store } from "../tasks/store.ts";
 import { parseArgs, text as optionText } from "../util.ts";
@@ -290,10 +291,16 @@ export async function startServer({ home, run, team, host, port, token }: ServeO
       return sendJson(res, 200, requests);
     }
     if (method === "GET" && path === "/api/graph") return sendJson(res, 200, betterDiagram(await store.tasks.all(), { title: team.title }));
-    const verdict = /^\/api\/tasks\/([^/]+)\/(approve|reject)$/.exec(path);
+    const verdict = /^\/api\/tasks\/([^/]+)\/(approve|reject|answer)$/.exec(path);
     if (method === "POST" && verdict && /^\d+$/.test(verdict[1] ?? "")) {
       const [, id = "", action = ""] = verdict;
       const fields = fieldsOf(req, await readBody(req));
+      if (action === "answer") {
+        const said = (fields["text"] ?? "").trim();
+        if (!said) return sendJson(res, 400, { ok: false, output: "say what your answer is" });
+        const result = await asOperator(home, run, ["task", "answer", id, `--text=${said}`]);
+        return sendJson(res, result.ok ? 200 : 422, result);
+      }
       const text = (action === "approve" ? (fields["note"] ?? "") : (fields["reason"] ?? "")).trim();
       if (action === "reject" && !text) return sendJson(res, 400, { ok: false, output: "say why it's rejected: a reason is needed" });
       const result = await asOperator(home, run, ["task", action, id, ...(text ? [`--${action === "approve" ? "note" : "reason"}=${text}`] : [])]);
@@ -437,13 +444,27 @@ function proposalsSection(proposals: Task[]): string {
       : `<p class="why muted">Not scored yet.</p>`;
     const gate = t.gate ? `<p class="why"><b>Asked:</b> ${esc(t.gate.asked)} · <b>Simplest:</b> ${esc(t.gate.simplest)}</p>` : "";
     const lastNote = t.notes.at(-1);
-    return `<li class="proposal">
-  <div class="head"><span class="id">#${esc(t.id)}</span> <span class="title">${esc(t.title)}</span> <span class="chip status-${esc(t.status)}">${esc(t.status)}</span>${meta(t)}</div>
-  ${score}${gate}
-  ${t.body ? `<p class="body">${esc(clip(t.body, 600))}</p>` : ""}
-  ${lastNote ? `<p class="why muted">${esc(lastNote.by)}: ${esc(clip(lastNote.text, 300))}</p>` : ""}
-  <div class="verdict">
-    <form method="post" action="/api/tasks/${esc(t.id)}/approve" data-api>
+    // A question put to the operator: what was asked and what the team would do, whole, and a box for the answer.
+    const asked = t.status === "question" && t.ask ? t.ask : null;
+    const said = answersOn(t).at(-1);
+    const question = asked
+      ? `<p class="body"><b>Why it's yours:</b> ${esc(asked.reason)}</p>
+  ${asked.recommendation ? `<p class="why"><b>The team recommends:</b> ${esc(asked.recommendation)}</p>` : ""}
+  ${said ? `<p class="why"><b>You answered:</b> ${esc(clip(said.text, 600))} <span class="muted">(the planner moves it on)</span></p>` : ""}`
+      : "";
+    const answer = asked
+      ? `<form class="answer" method="post" action="/api/tasks/${esc(t.id)}/answer" data-api>
+      <input name="text" class="wide" placeholder="Your answer" required maxlength="2000" aria-label="Your answer to #${esc(t.id)}">
+      <button class="approve">Answer</button>
+      <output></output>
+    </form>`
+      : "";
+    // The design check-in is answered, never approved or rejected (model.ts): it gets the box alone, and its body, which
+    // tells the planner how to carry it, stays off the operator's page.
+    const design = t.kind === "design";
+    const verdicts = design
+      ? ""
+      : `<form method="post" action="/api/tasks/${esc(t.id)}/approve" data-api>
       <input name="note" placeholder="Note (optional)" maxlength="500" aria-label="Note for approving #${esc(t.id)}">
       <button class="approve">Approve</button>
       <output></output>
@@ -452,7 +473,15 @@ function proposalsSection(proposals: Task[]): string {
       <input name="reason" placeholder="Reason (needed)" required maxlength="500" aria-label="Reason for rejecting #${esc(t.id)}">
       <button class="reject">Reject</button>
       <output></output>
-    </form>
+    </form>`;
+    return `<li class="proposal">
+  <div class="head"><span class="id">#${esc(t.id)}</span> <span class="title">${esc(t.title)}</span> <span class="chip status-${esc(t.status)}">${esc(t.status)}</span>${meta(t)}</div>
+  ${design ? "" : `${score}${gate}`}
+  ${t.body && !design ? `<p class="body">${esc(clip(t.body, 600))}</p>` : ""}
+  ${question || (lastNote ? `<p class="why muted">${esc(lastNote.by)}: ${esc(clip(lastNote.text, 300))}</p>` : "")}
+  <div class="verdict">
+    ${answer}
+    ${verdicts}
   </div>
 </li>`;
   };
@@ -652,6 +681,8 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 input, textarea, button { font: inherit; color: inherit; }
 input, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
 .verdict input { width: 220px; }
+.verdict form.answer { flex-basis: 100%; }
+.verdict input.wide { width: 520px; max-width: 100%; }
 button { background: var(--chip); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 button:hover { border-color: var(--muted); }
 button:disabled { opacity: .6; cursor: progress; }

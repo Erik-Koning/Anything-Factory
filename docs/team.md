@@ -150,7 +150,9 @@ as a question, with the design in a few lines and what it recommends, and you an
 `a6g task answer <id> "…"`: agreed, or what to change. Agreed, it's done and features start. Changes go back to the
 scaffolder, and the planner asks again. Only your answer settles it: the approver doesn't decide it, and the planner
 can't close one you haven't answered. `a6g task status <id> done` (or `rejected`, for none) from you ends it at any
-time.
+time. It's answered, never approved or rejected: `a6g task approve` and `a6g task reject` refuse it, from you too
+(a rejected check-in is one you want none of, so a Reject beside the question would have started the features), and
+`a6g serve` shows it with what was asked and a box for your answer.
 
 Waiting costs little: once the foundation is merged and the question is with you, the watchdog ticks the planner
 hourly rather than every `watchdog.tickEvery`, and your answer reaches it within a minute whenever it comes.
