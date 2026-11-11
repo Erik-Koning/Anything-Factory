@@ -18,6 +18,8 @@ const ALLOWED = new Set([
   "lib/tasks/teams.ts",
   "lib/tasks/graph.ts",
   "lib/tasks/controls.ts",
+  "lib/tasks/agreement.ts",
+  "lib/tasks/decisions.ts",
   "lib/tasks/spend.ts",
   "lib/fleet.ts",
 ]);

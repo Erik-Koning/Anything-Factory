@@ -1827,6 +1827,137 @@ details.settled > summary {
 .team-inbox > .head h2 {
   margin: 0;
 }
+/* Which rule of the working agreement made a question the operator's: a line of its own under who asked it. */
+.asked-because {
+  display: block;
+}
+
+/* --- Decided for you, and the agreement ------------------------------------------------------------------------- */
+/* A decision reads as a column, as a question does. */
+li.decided > * {
+  max-width: 56rem;
+}
+/* What the team chose, in the solid's hue, and what that follows from, in none. */
+dl.raised.ruling > div.chose {
+  --tone: var(--solid);
+}
+dl.raised.ruling > div.because {
+  --tone: var(--edge);
+}
+/* What was weighed: one line where it fits, a point between each. */
+.weighed {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.weighed li:not(:last-child)::after {
+  content: "·";
+  margin: 0 8px;
+  color: var(--ink-3);
+}
+/* The operator's review: agreeing reads as an answer does; an overturn takes the signal's hue. */
+.answered.overturned {
+  background: color-mix(in srgb, var(--signal) 6%, var(--surface));
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+/* What the planner noted since, set in from the review it follows. */
+.noted {
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+/* A level's table: a readout, sunk in. The level in force is ringed in the solid, as a chosen option is. */
+.matrices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 12px;
+}
+.matrix-box {
+  min-width: 0;
+  padding: 12px 14px 8px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--sink);
+}
+.matrix-box.in-force {
+  border-color: var(--solid);
+  box-shadow:
+    var(--sink),
+    0 0 0 1px var(--solid);
+}
+table.matrix {
+  width: 100%;
+  margin: 0;
+  table-layout: fixed;
+}
+table.matrix caption {
+  padding-bottom: 4px;
+  text-align: left;
+}
+table.matrix caption .title {
+  margin-right: 4px;
+  font-size: 14.5px;
+}
+table.matrix th,
+table.matrix td {
+  padding: 6px 6px 6px 0;
+}
+table.matrix tbody tr:last-child > * {
+  border-bottom: 0;
+}
+/* What happens, by its word first; the hue only says it again. */
+table.matrix td[data-route] {
+  font-weight: 600;
+}
+table.matrix td[data-route="ask"] {
+  color: var(--warn);
+}
+table.matrix td[data-route="tell"] {
+  color: var(--brand);
+}
+table.matrix td[data-route="decide"] {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+/* The standing instructions as the operator wrote them: a readout. */
+.instructions {
+  max-width: none;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
+  font-size: 14px;
+}
+/* The form that changes it: a column, like the other forms; each topic a row, what it covers beside how it's treated. */
+.agreement-form {
+  max-width: 56rem;
+}
+/* Six digits: a field as wide as what goes in it. */
+.agreement-form input[name="code"] {
+  max-width: 14rem;
+}
+fieldset.topics {
+  gap: 0;
+}
+fieldset.topics > .hint:first-of-type {
+  margin-bottom: 6px;
+}
+.topic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 210px);
+  gap: 6px 16px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.topic + .hint {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
 
 /* --- Notifications ---------------------------------------------------------------------------------------------- */
 fieldset.mode {
@@ -2024,6 +2155,10 @@ details > * + * {
   }
 }
 @media (max-width: 560px) {
+  /* A topic of the agreement: what it covers, then how it's treated under it. */
+  .topic {
+    grid-template-columns: minmax(0, 1fr);
+  }
   /* The board runs to both edges of the screen. A lane with nothing in it is only its name and count, so the first
      lane with work in it shows whole beside it. */
   .kanban {

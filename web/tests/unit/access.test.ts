@@ -65,6 +65,7 @@ const TEAM_ABILITIES: Ability[] = [
   "tasks:suggest",
   "senders:names",
   "proposals:decide",
+  "decisions:read",
   "machines:all",
   "people:manage",
   "audit:read",
@@ -95,7 +96,7 @@ describe("an admin", () => {
 
 describe("a member", () => {
   test("sees the board, what's in progress, journeys, the graph and every request, sends requests and suggests tasks", () => {
-    assert.deepEqual(allowedOn(member, "shop"), ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest"]);
+    assert.deepEqual(allowedOn(member, "shop"), ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest", "decisions:read"]);
   });
   test("never adds tasks as the operator, sees names, decides proposals, manages people, pauses the team or reads the audit log", () => {
     assert.equal(can(member, "audit:read"), false);
@@ -120,6 +121,7 @@ describe("a contributor", () => {
     assert.equal(can(contributor, "team:board", "shop"), false);
     assert.equal(can(contributor, "requests:all", "shop"), false);
     assert.equal(can(contributor, "proposals:decide", "shop"), false);
+    assert.equal(can(contributor, "decisions:read", "shop"), false);
     assert.equal(can(contributor, "tasks:suggest", "shop"), false);
     assert.equal(can(contributor, "tasks:add", "shop"), false);
   });

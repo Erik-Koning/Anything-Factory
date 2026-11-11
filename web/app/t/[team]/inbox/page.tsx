@@ -24,7 +24,7 @@ export default async function TeamInboxPage({ params, searchParams }: { params: 
         are on <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
         <Link href="/account/notifications">Notifications</Link>.
       </p>
-      <TeamInbox team={team.name} box={inbox(tasks)} back={`/t/${team.name}/inbox`} titles={titles} />
+      <TeamInbox team={team.name} box={inbox(tasks)} back={`/t/${team.name}/inbox`} titles={titles} agreement={can(viewer, "team:control", team.name)} />
     </>
   );
 }

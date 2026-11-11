@@ -1,8 +1,11 @@
 // The end-to-end tests' world, made with the factory's own functions over the test database: two teams' published
 // settings and status, a task graph with proposals, a question for the operator and blocked work, stakeholders'
 // requests (one promoted, one rejected), the first admin (by create-admin's own code), a member and a contributor whose
-// daily limit the tests reach, and three machines linked to them as a6g connect app links one, with their reports.
+// daily limit the tests reach, three machines linked to them as a6g connect app links one, with their reports, and
+// what Shop's planner decided in the operator's place (Blog is published as an older factory version would publish it:
+// it keeps no such log and reads no agreement).
 import type { MachineReport } from "../../../lib/fleet.ts";
+import { recordDecision } from "../../../lib/tasks/decisions.ts";
 import { newTask, nowIso, priorityOf, type Score, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { addRequest, stakeholderFor } from "../../../lib/tasks/requests.ts";
 import { update } from "../../../lib/tasks/store.ts";
@@ -21,6 +24,8 @@ export interface World {
   busy: string;
   proposals: { approve: string; reject: string; untouched: string };
   asks: { question: string; blocked: string };
+  // What the team decided for the operator: two flagged calls to review, one only on the record, one agreed with.
+  decisions: { agree: string; overturn: string; plain: string; agreed: string };
   requests: { promoted: string; rejected: string };
   // The member's machine's token, as its Keychain would hold it.
   studioToken: string;
@@ -41,7 +46,8 @@ const score = (size: Score["size"], why: string): Score => ({
 });
 const gate = (asked: string) => ({ asked, simplify: "nothing to delete: it's new", simplest: "one button" });
 
-function settings(name: string, title: string, mode: TeamSettings["mode"]): TeamSettings {
+// `operator`: who the team works for, which a factory version that reads the working agreement publishes.
+function settings(name: string, title: string, mode: TeamSettings["mode"], operator?: TeamSettings["operator"]): TeamSettings {
   return {
     name,
     title,
@@ -50,13 +56,14 @@ function settings(name: string, title: string, mode: TeamSettings["mode"]): Team
     roles: ["planner", "builder", "reviewer"],
     branch: "main",
     factory: "0.4.0",
+    ...(operator ? { operator } : {}),
     publishedAt: nowIso(),
   };
 }
 
 export async function seed(): Promise<World> {
   const shop = storeFor("shop");
-  await shop.publish(settings("shop", "Shop", "finish"));
+  await shop.publish(settings("shop", "Shop", "finish", { technical: true, designCheckIn: false }));
   await shop.report({ state: "active", planner: "running", members: { builder: 1 }, at: nowIso() });
   const blog = storeFor("blog");
   await blog.publish(settings("blog", "Blog", "cycles"));
@@ -120,6 +127,54 @@ export async function seed(): Promise<World> {
       "approved → blocked: needs the carrier's API key",
       { from: "approved", to: "blocked" }
     )
+  );
+
+  // What the planner decided in the operator's place, as a6g decision record writes it under the default agreement:
+  // two calls it flagged, one that only goes on the record, and one flagged that the operator agreed with already.
+  const decide = (input: Parameters<typeof recordDecision>[2], call: Parameters<typeof recordDecision>[3]) =>
+    recordDecision(shop, "shop", input, call, "planner");
+  const guests = await decide(
+    {
+      question: "Do guests check out without an account?",
+      decision: "Yes: guests check out, and are offered an account after they pay",
+      because: "the direction puts a first order ahead of a sign-up",
+      options: ["Require an account first", "Guest checkout, an account offered after"],
+      undo: "revert the guest checkout's merge; nothing is kept for a guest",
+      tasks: [merged.id],
+    },
+    { topic: "product", stakes: "high", confidence: "medium" }
+  );
+  const currencies = await decide(
+    {
+      question: "Which currencies at launch?",
+      decision: "Canadian and US dollars only",
+      because: "the brief names two markets to start with",
+      options: ["Dollars only", "Dollars and euros"],
+      undo: "add a currency to the price list; no order is priced yet",
+    },
+    // A product call: under the default agreement a change of scope would have been asked, not decided.
+    { topic: "product", stakes: "medium", confidence: "low" }
+  );
+  const cart = await decide(
+    {
+      question: "What does the empty cart say?",
+      decision: "“Your cart is empty”, and a link back to the shop",
+      because: "the style guide asks for plain words",
+    },
+    { topic: "design", stakes: "low", confidence: "high" }
+  );
+  const photos = await decide(
+    {
+      question: "Keep order photos at full size?",
+      decision: "No: each is resized to 1600 px as it's uploaded",
+      because: "the direction caps what the shop costs to run",
+      undo: "the originals aren't kept, so only new uploads change",
+    },
+    { topic: "cost", stakes: "high", confidence: "high" }
+  );
+  // Agreed with from the terminal, and written onto the record already (the control itself is long applied).
+  await update(shop.decisions, photos.id, (d) =>
+    withEvent({ ...d, review: { verdict: "agreed", note: "Good call.", by: "operator", at: nowIso(), control: "k0" } }, "operator", "agreed")
   );
 
   // Requests from a stakeholder the app has no account for (as a6g request add makes them).
@@ -199,6 +254,7 @@ export async function seed(): Promise<World> {
     busy: "busy@example.com",
     proposals: { approve: toApprove.id, reject: toReject.id, untouched: untouched.id },
     asks: { question: question.id, blocked: blocked.id },
+    decisions: { agree: guests.id, overturn: currencies.id, plain: cart.id, agreed: photos.id },
     requests: { promoted: promoted.id, rejected: rejected.id },
     studioToken,
   };

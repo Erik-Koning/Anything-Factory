@@ -4,7 +4,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { roleIn, TEAM_PARAM, type TeamRole } from "../../../server/access.ts";
-import { storeFor, type Task, teamDoc, type TeamDoc } from "../../../server/factory.ts";
+import { type Control, controlsOf, type DecisionRecord, decisionsOf, storeFor, type Task, teamDoc, type TeamDoc } from "../../../server/factory.ts";
 import { type Person, requireViewer } from "../../../server/viewer.ts";
 
 export const teamFor = cache(async (name: string): Promise<{ viewer: Person; team: TeamDoc; role: "admin" | TeamRole }> => {
@@ -19,3 +19,8 @@ export const teamFor = cache(async (name: string): Promise<{ viewer: Person; tea
 
 // A team's tasks, read once per request: the layout's tab counts and the page share them.
 export const tasksOf = cache((team: string): Promise<Task[]> => storeFor(team).tasks.all());
+
+// What the team decided for the operator, and the operator's controls (their reviews and agreements among them), read
+// once per request: the layout's count of what's left to review and the pages share them.
+export const decisionsFor = cache((team: string): Promise<DecisionRecord[]> => decisionsOf(team));
+export const controlsFor = cache((team: string): Promise<Control[]> => controlsOf(team));

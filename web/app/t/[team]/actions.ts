@@ -4,8 +4,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { clip, withNotice } from "../../../components/ui.tsx";
+import { agreementFrom, isReserved, sameAgreement, TOPICS } from "../../../../lib/tasks/agreement.ts";
 import {
   can,
+  DECISION_ID,
   decisionProblem,
   isDecision,
   isKind,
@@ -17,16 +19,22 @@ import {
   taskProblem,
   TEAM_PARAM,
 } from "../../../server/access.ts";
+import { readsAgreement } from "../../../server/decided.ts";
 import {
   addTaskFromWeb,
+  agreementFromWeb,
+  agreementOf,
   answerAsOperator,
   budgetFromWeb,
+  controlsOf,
   decideAsOperator,
+  decisionsOf,
   describeHold,
   isHoldScope,
   pauseFromWeb,
   Refused,
   resumeFromWeb,
+  reviewFromWeb,
   sendRequest,
   stakeholderOf,
   storeFor,
@@ -338,4 +346,95 @@ export async function budgetAction(form: FormData): Promise<void> {
     await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: notice.error });
   }
   redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=budget" : ""}`);
+}
+
+// An admin reviews what the team decided in the operator's place: agrees with it, or overturns it and says what to do
+// instead. A control, like a pause: the lead's watchdog writes it onto the record and passes an overturn to the planner
+// within a minute. It decides nothing new about how the team runs, so it takes no code, as an answer doesn't.
+export async function reviewAction(form: FormData): Promise<void> {
+  const team = text(form, "team");
+  const id = text(form, "id");
+  const verdict = text(form, "verdict");
+  const note = text(form, "note").trim();
+  if (!TEAM_PARAM.test(team)) redirect("/");
+  let notice: { ok?: string; error?: string };
+  let viewer = null;
+  try {
+    viewer = await allowed("proposals:decide", team);
+    if (!DECISION_ID.test(id) || (verdict !== "agreed" && verdict !== "overturned")) throw new Refused("That isn't a review of a decision.");
+    if (verdict === "overturned" && !note) throw new Refused("Say what to do instead: the planner acts on your words.");
+    if (note.length > LIMITS.note) throw new Refused(`Keep it to ${LIMITS.note.toLocaleString("en")} characters.`);
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const decision = (await decisionsOf(team)).find((d) => d.id === id);
+    if (!decision) throw new Refused(`There's no decision ${id} on this team.`);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    await reviewFromWeb(team, { id, verdict, note, from });
+    notice = {
+      ok: verdict === "agreed" ? `Agreed with ${id}.` : `Overturned ${id}. The planner gets what you wrote within a minute, and undoes it.`,
+    };
+    await record(viewer, {
+      action: "decision.reviewed",
+      outcome: "ok",
+      team,
+      target: `${id} ${clip(decision.question, 160)}`,
+      detail: `${verdict}${note ? `: ${clip(note, 300)}` : ""}`,
+    });
+  } catch (error) {
+    notice = { error: reasonOf(error) };
+    await record(viewer ?? (await getViewer()), {
+      action: "decision.reviewed",
+      outcome: "refused",
+      team,
+      target: DECISION_ID.test(id) ? id : null,
+      detail: `${verdict}: ${notice.error}`,
+    });
+  }
+  // What's left to review changed: the tab's count with it.
+  revalidatePath("/", "layout");
+  redirect(withNotice(`/t/${team}/decided`, notice));
+}
+
+export interface AgreementFormState {
+  error: string | null;
+  level: string;
+  // Each topic the agreement may set: "follow", "ask" or "decide".
+  topics: Record<string, string>;
+  notes: string;
+}
+
+// An admin changes the team's working agreement, as the operator, with a code from their authenticator: how readily
+// the team asks them changes only for someone holding their second factor at that moment. The commands that ask the
+// operator or decide for them read the newest agreement, and the lead's watchdog tells the planner within a minute.
+// What was chosen and typed comes back with a refusal, so a wrong code doesn't lose the instructions.
+export async function agreementAction(_previous: AgreementFormState, form: FormData): Promise<AgreementFormState> {
+  const team = text(form, "team");
+  const level = text(form, "level");
+  const topics = Object.fromEntries(TOPICS.filter((topic) => !isReserved(topic)).map((topic) => [topic, text(form, `topic-${topic}`) || "follow"]));
+  const notes = text(form, "notes");
+  const again = (error: string): AgreementFormState => ({ error, level, topics, notes });
+  if (!TEAM_PARAM.test(team)) return again("No such team.");
+  let viewer = null;
+  let said: string;
+  try {
+    viewer = await allowed("team:control", team);
+    const doc = await teamDoc(team);
+    if (!doc) throw new Refused("No such team.");
+    if (!readsAgreement(doc)) throw new Refused("This team's factory version doesn't read the agreement yet: upgrade it first (a6g upgrade).");
+    // Everything that could be wrong with it is said before the code is asked of the authenticator: a code works once.
+    const made = agreementFrom({ level, topics, notes });
+    if ("problem" in made) throw new Refused(made.problem);
+    if (sameAgreement(agreementOf(await controlsOf(team)).agreement, made)) throw new Refused("Nothing changed: the agreement says that already.");
+    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+    if (wrong) throw new Refused(wrong);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const { control, changes } = await agreementFromWeb(team, { level, topics, notes, from });
+    said = changes.join("; ");
+    await record(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
+  } catch (error) {
+    const reason = reasonOf(error);
+    await record(viewer ?? (await getViewer()), { action: "team.agreement", outcome: "refused", team, target: null, detail: reason });
+    return again(reason);
+  }
+  revalidatePath("/", "layout");
+  redirect(withNotice(`/t/${team}/agreement`, { ok: `The agreement changed: ${clip(said, 200)}. The team follows it from now on.` }));
 }

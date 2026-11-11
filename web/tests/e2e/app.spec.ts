@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { answersMessage, answersSince } from "../../../lib/tasks/answer.ts";
 import { type Control, holdOf, holdReport } from "../../../lib/tasks/controls.ts";
+import { applyReview, noteDecision } from "../../../lib/tasks/decisions.ts";
 import { newTask, type Task, withEvent } from "../../../lib/tasks/model.ts";
+import { type MongoClientLike, storeOver } from "../../../lib/tasks/mongo.ts";
 import { update } from "../../../lib/tasks/store.ts";
 import { DEFAULT_IP, ORIGIN_SECRET } from "../../playwright.config.ts";
 import { actionIdOn, closeDatabases, databases, errorOf, freshCode, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
@@ -1176,6 +1178,256 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
   await graph.collection("controls").deleteMany({ team: "shop", kind: "budget" });
 });
 
+// The operator's controls of one kind on Shop, oldest first, as the store keeps them.
+async function shopControls(kind: Control["kind"]): Promise<Control[]> {
+  const { graph } = await databases();
+  return (await graph.collection("controls").find({ team: "shop", kind }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+}
+
+test("a member reads what the team decided for the operator, and reviews none of it", async ({ browser }) => {
+  const { context, page } = await newPage(browser, { storageState: memberSession });
+  const { decisions } = state();
+  await page.goto("/t/shop");
+  const tabs = page.getByRole("navigation", { name: "Team" });
+  // The same log under a name that fits who reads it, with no count of what's to review, and no agreement.
+  await expect(tabs.getByRole("link", { name: /Decided for you/ })).toHaveCount(0);
+  await expect(tabs.getByRole("link", { name: "Agreement" })).toHaveCount(0);
+  await expect(tabs.getByRole("link", { name: "Decision log" })).toHaveText("Decision log");
+  await tabs.getByRole("link", { name: "Decision log" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/decided$/);
+
+  const flagged = page.getByRole("region", { name: /^To review/ });
+  const item = flagged.locator(`#${decisions.agree}`);
+  await expect(item.getByRole("heading", { name: "Do guests check out without an account?" })).toBeVisible();
+  await expect(item.getByText("Yes: guests check out, and are offered an account after they pay")).toBeVisible();
+  await expect(item.getByText("the direction puts a first order ahead of a sign-up")).toBeVisible();
+  await expect(item.getByText("flagged", { exact: true })).toBeVisible();
+  await expect(item.getByText("Require an account first")).toBeVisible();
+  await expect(item.getByRole("link", { name: /Pay by card$/ })).toBeVisible();
+  // Why the operator wasn't asked: the rule, and the agreement in force then (theirs to open, not a member's).
+  await expect(item.getByText("balanced: high stakes with medium confidence is decided and flagged, under the default agreement")).toBeVisible();
+  await expect(item.getByRole("link", { name: /agreement/ })).toHaveCount(0);
+  const standing = page.getByRole("region", { name: /^On the record/ });
+  await expect(standing.getByRole("heading", { name: "What does the empty cart say?" })).toBeVisible();
+  await expect(standing.locator(`#${decisions.agreed}`).getByText(/^The operator agreed/)).toBeVisible();
+  await expect(standing.locator(`#${decisions.agreed}`).getByText("Good call.")).toBeVisible();
+  // Nothing to review with, on the page or by calling the action.
+  await expect(page.getByRole("button", { name: /^(Agree with|Overturn) / })).toHaveCount(0);
+  await expect(page.getByText(/^Review d\d/)).toHaveCount(0);
+  const review = await actionIdOn(admin.page, "/t/shop/decided");
+  const refused = await page.request.post("/t/shop/decided", {
+    multipart: { [review]: "", team: "shop", id: decisions.agree, verdict: "agreed", note: "" },
+    headers: { origin: state().baseURL },
+    maxRedirects: 0,
+  });
+  expect(errorOf(refused)).toContain("You can't do that here.");
+  expect(await shopControls("review")).toEqual([]);
+  expect((await page.goto("/t/shop/agreement"))?.status()).toBe(404);
+  await context.close();
+});
+
+test("the admin reviews what the team decided for them: agrees with one call, and overturns another with what to do instead", async () => {
+  const { page } = admin;
+  const { decisions } = state();
+  const { graph, accounts } = await databases();
+  await page.goto("/t/shop");
+  const tab = page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Decided for you/ });
+  await expect(tab).toContainText("2");
+  await tab.click();
+  await expect(page).toHaveURL(/\/t\/shop\/decided$/);
+  await expect(tab).toHaveAttribute("aria-current", "page");
+  const toReview = page.getByRole("region", { name: /^To review/ });
+  const standing = page.getByRole("region", { name: /^On the record/ });
+  const first = toReview.locator(`#${decisions.agree}`);
+  await expect(first.getByText("Why you weren't asked")).toBeVisible();
+  await expect(first.getByRole("link", { name: "the default agreement" })).toHaveAttribute("href", "/t/shop/agreement");
+  // What was never flagged keeps its review behind a line to open.
+  await expect(standing.locator(`#${decisions.plain}`).getByRole("button", { name: `Agree with ${decisions.plain}` })).toBeHidden();
+
+  await first.getByRole("button", { name: `Agree with ${decisions.agree}` }).click();
+  await expect(page.getByRole("status")).toContainText(`Agreed with ${decisions.agree}.`);
+  // A control, as a pause is, by the admin's stakeholder id; the app writes nothing onto the record itself.
+  expect(await shopControls("review")).toMatchObject([
+    { kind: "review", by: expect.stringMatching(/^web:s\d+$/), review: { decision: decisions.agree, verdict: "agreed", note: "" } },
+  ]);
+  expect(await graph.collection("decisions").findOne({ _id: `shop:${decisions.agree}` as never })).toMatchObject({ review: null, version: 1 });
+  const agreed = standing.locator(`#${decisions.agree}`);
+  await expect(agreed.getByText(/^You agreed/)).toBeVisible();
+  await expect(agreed.getByText("waiting for the team's Mac")).toBeVisible();
+  await expect(agreed.getByText(`Overturn ${decisions.agree} after all`)).toBeVisible();
+  await expect(tab).toContainText("1");
+
+  // An overturn says what to do instead.
+  const second = toReview.locator(`#${decisions.overturn}`);
+  await expect(second.getByLabel("What to do instead")).toHaveAttribute("required", "");
+  await second.getByLabel("What to do instead").fill("Add euros too: the first customers are in Ireland.");
+  await second.getByRole("button", { name: `Overturn ${decisions.overturn}` }).click();
+  await expect(page.getByRole("status")).toContainText(`Overturned ${decisions.overturn}.`);
+  const overturned = page.getByRole("region", { name: /^Overturned/ }).locator(`#${decisions.overturn}`);
+  await expect(overturned.getByText("Add euros too: the first customers are in Ireland.")).toBeVisible();
+  await expect(overturned.getByText("waiting for the team's Mac")).toBeVisible();
+  await expect(overturned.getByRole("button")).toHaveCount(0);
+  await expect(toReview).toHaveCount(0);
+  await expect(tab).toHaveText("Decided for you");
+  const asked = await shopControls("review");
+  expect(asked.at(-1)).toMatchObject({
+    review: { decision: decisions.overturn, verdict: "overturned", note: "Add euros too: the first customers are in Ireland." },
+  });
+
+  // The lead's watchdog isn't running here: the test applies the reviews as it would, with the factory's own code.
+  const shop = storeOver({ db: () => graph, close: async () => {} } as unknown as MongoClientLike, {
+    name: "shop",
+    tasks: { store: "mongo", database: state().a6gDatabase, lead: null },
+  });
+  for (const control of asked) expect((await applyReview(shop, control))?.applied).toBe(true);
+  await page.reload();
+  await expect(agreed.getByText("waiting for the team's Mac")).toHaveCount(0);
+  await expect(overturned.getByText("waiting for the team's Mac")).toHaveCount(0);
+  // It's the planner's to undo, until it notes what it did.
+  await expect(overturned.getByText("with the planner")).toBeVisible();
+  await noteDecision(shop, decisions.overturn, { who: "planner", text: "The price list takes euros now; nothing was priced in dollars only." });
+  await page.reload();
+  await expect(overturned.getByText("with the planner")).toHaveCount(0);
+  await expect(overturned.getByText("The price list takes euros now; nothing was priced in dollars only.")).toBeVisible();
+
+  const audit = await accounts.collection("audit").find({ team: "shop", action: "decision.reviewed" }).sort({ at: 1 }).toArray();
+  expect(audit.map((e) => [e.outcome, e.target, e.detail])).toEqual([
+    ["refused", decisions.agree, "agreed: You can't do that here."],
+    ["ok", `${decisions.agree} Do guests check out without an account?`, "agreed"],
+    ["ok", `${decisions.overturn} Which currencies at launch?`, "overturned: Add euros too: the first customers are in Ireland."],
+  ]);
+});
+
+test("the admin changes the working agreement with a code: the level, a topic and standing instructions", async () => {
+  const { page } = admin;
+  const { accounts } = await databases();
+  await page.goto("/t/shop/decided");
+  await page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: "Agreement" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/agreement$/);
+  const inForce = page.getByRole("region", { name: "In force" });
+  await expect(inForce.getByText("balanced", { exact: true })).toBeVisible();
+  await expect(inForce.getByText("Nobody has changed it: this is the default, which asks about a change of scope.")).toBeVisible();
+  await expect(inForce.getByText("scope", { exact: true })).toBeVisible();
+  // Each level's table, the one in force marked: balanced asks in one case of nine, hands-off in none.
+  const levels = page.getByRole("region", { name: "What each level does with a question" });
+  await expect(levels.getByRole("table")).toHaveCount(3);
+  await expect(levels.getByRole("table", { name: /balanced/ }).getByText("in force")).toBeVisible();
+  await expect(levels.getByRole("table", { name: /balanced/ }).getByRole("cell", { name: "asks", exact: true })).toHaveCount(1);
+  await expect(levels.getByRole("table", { name: /hands-off/ }).getByRole("cell", { name: "asks", exact: true })).toHaveCount(0);
+  // How the check-ins went: what the last test reviewed.
+  const went = page.getByRole("region", { name: "The last 30 days" });
+  await expect(went.getByRole("listitem").filter({ hasText: "Decided for you" })).toContainText("4");
+  await expect(went.getByRole("listitem").filter({ hasText: "Overturned" })).toContainText("1");
+
+  const form = page.getByRole("region", { name: "Change it" });
+  await form.getByRole("radio", { name: /^Hands-on/ }).check();
+  // A change of scope is asked until the operator says otherwise: the form starts there.
+  await expect(form.getByLabel(/^Scope/)).toHaveValue("ask");
+  await form.getByLabel(/^Design/).selectOption("decide");
+  await form.getByLabel(/^Standing instructions/).fill("Away until Monday: batch what can wait.");
+  // What's always the operator's isn't offered.
+  await expect(form.getByLabel(/^Privacy/)).toHaveCount(0);
+  // A wrong code changes nothing, and what was chosen and typed is still there.
+  await form.getByLabel("Code from your authenticator").fill("000000");
+  await form.getByRole("button", { name: "Change the agreement" }).click();
+  await expect(form.getByRole("alert")).toContainText("That code isn't right");
+  expect(await shopControls("agreement")).toEqual([]);
+  await expect(form.getByRole("radio", { name: /^Hands-on/ })).toBeChecked();
+  await expect(form.getByLabel(/^Scope/)).toHaveValue("ask");
+  await expect(form.getByLabel(/^Design/)).toHaveValue("decide");
+  await expect(form.getByLabel(/^Standing instructions/)).toHaveValue("Away until Monday: batch what can wait.");
+
+  await form.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+  await form.getByRole("button", { name: "Change the agreement" }).click();
+  const changes = "level balanced → hands-on; design: never asked; standing instructions added";
+  await expect(page.getByRole("status")).toContainText(`The agreement changed: ${changes}.`);
+  const [made] = await shopControls("agreement");
+  expect(made).toMatchObject({
+    kind: "agreement",
+    by: expect.stringMatching(/^web:s\d+$/),
+    agreement: { level: "hands-on", topics: { scope: "ask", design: "decide" }, notes: "Away until Monday: batch what can wait." },
+  });
+  // In force from the moment it's recorded; the planner hears once the team's Mac has it.
+  await expect(inForce.getByText("hands-on", { exact: true })).toBeVisible();
+  await expect(inForce.getByText("scope", { exact: true })).toBeVisible();
+  await expect(inForce.getByText("design", { exact: true })).toBeVisible();
+  await expect(inForce.getByText("Away until Monday: batch what can wait.")).toBeVisible();
+  await expect(inForce.getByText("waiting for the team's Mac")).toBeVisible();
+  await expect(levels.getByRole("table", { name: /hands-on/ }).getByText("in force")).toBeVisible();
+  const versions = page.getByRole("region", { name: /^Every version/ });
+  await expect(versions.getByText(changes)).toBeVisible();
+  await expect(versions.getByText("an admin, here")).toBeVisible();
+  // The form starts from the agreement as it now is, and the same again is refused before a code is spent on it.
+  await expect(form.getByRole("radio", { name: /^Hands-on/ })).toBeChecked();
+  await expect(form.getByLabel(/^Scope/)).toHaveValue("ask");
+  await form.getByLabel("Code from your authenticator").fill("000000");
+  await form.getByRole("button", { name: "Change the agreement" }).click();
+  await expect(form.getByRole("alert")).toContainText("Nothing changed");
+
+  // The form's own fields, as a browser without scripts would post them: a contributor's change nothing.
+  await page.goto("/t/shop/agreement");
+  const hidden = await form
+    .locator("form input[type=hidden]")
+    .evaluateAll((inputs) => inputs.map((input) => [(input as HTMLInputElement).name, (input as HTMLInputElement).value]));
+  await contributor.page.request.post("/t/shop/agreement", {
+    multipart: { ...Object.fromEntries(hidden), team: "shop", level: "hands-off", notes: "Ask nothing.", code: "123456" },
+    headers: { origin: state().baseURL },
+  });
+  expect(await shopControls("agreement")).toHaveLength(1);
+  const audit = await accounts.collection("audit").find({ team: "shop", action: "team.agreement" }).sort({ at: 1 }).toArray();
+  expect(audit.map((e) => [e.outcome, e.target, e.detail])).toEqual([
+    ["refused", null, "That code isn't right. Check the app's clock, and use the code it shows now."],
+    ["ok", made?.id, changes],
+    ["refused", null, "Nothing changed: the agreement says that already."],
+    ["refused", null, "You can't do that here."],
+  ]);
+});
+
+test("a question says which rule of the agreement made it the operator's; a team on an older factory says it reads none", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const [agreement] = await shopControls("agreement");
+  // As the planner raises one now: judged, and routed by the agreement in force.
+  const at = new Date().toISOString();
+  const asked = newTask({
+    team: "shop",
+    title: "Q: sell outside the two launch markets?",
+    kind: "research",
+    status: "question",
+    by: "planner",
+    ask: {
+      reason: "it changes who the shop serves",
+      recommendation: "not yet: one more market at a time, once the first two pay their way",
+      by: "planner",
+      at,
+      topic: "scope",
+      stakes: "medium",
+      confidence: "low",
+      rule: "the agreement always asks about scope",
+      agreement: agreement?.id ?? null,
+    },
+  });
+  await graph.collection("tasks").insertOne({ _id: "shop:900" as never, ...asked, id: "900", version: 1 });
+  try {
+    await page.goto("/t/shop/inbox");
+    const item = page.locator("#task-900");
+    await expect(item.getByText("Asked because: the agreement always asks about scope (scope: medium stakes, low confidence).")).toBeVisible();
+    await expect(item.getByRole("link", { name: "Change what the team asks you" })).toHaveAttribute("href", "/t/shop/agreement");
+    // A question from before the agreement says nothing of the kind.
+    await expect(page.getByText(/^Asked because/)).toHaveCount(1);
+  } finally {
+    await graph.collection("tasks").deleteOne({ _id: "shop:900" as never });
+  }
+
+  // Blog was published by a factory version from before the agreement: nothing to set, and no log to read.
+  await page.goto("/t/blog/agreement");
+  await expect(page.getByText("This team's factory version doesn't read the agreement yet")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Change the agreement" })).toHaveCount(0);
+  await page.goto("/t/blog/decided");
+  await expect(page.getByText("This team's factory version doesn't keep a decision log yet.")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: "Decided for you" })).toHaveText("Decided for you");
+});
+
 test("the admin switches between teams, staying on the same page", async () => {
   const { page } = admin;
   await page.goto("/");
@@ -1237,7 +1489,7 @@ test("an admin session without its second factor is refused every admin page and
   await unverified.page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(unverified.page).toHaveURL(/\/second-factor$/);
   await expect(unverified.page.getByRole("heading", { name: "Enter your authenticator's code" })).toBeVisible();
-  for (const path of ["/", "/machines", "/machines/link", "/t/shop/proposals", "/admin/people", "/account"]) {
+  for (const path of ["/", "/machines", "/machines/link", "/t/shop/proposals", "/t/shop/decided", "/t/shop/agreement", "/admin/people", "/account"]) {
     await unverified.page.goto(path);
     await expect(unverified.page, path).toHaveURL(/\/second-factor$/);
   }
@@ -1317,6 +1569,8 @@ test("pages fit a phone's width without scrolling sideways", async ({ browser })
     "/t/shop/tasks/1",
     "/t/shop/requests",
     "/t/shop/proposals",
+    "/t/shop/decided",
+    "/t/shop/agreement",
     "/t/shop/inbox",
     "/inbox",
     "/admin/people",
