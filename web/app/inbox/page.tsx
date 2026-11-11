@@ -45,7 +45,13 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
             <Chip>{team.status?.state ?? "no status yet"}</Chip>
             <span className="muted small">{open ? `${open} waiting` : "all answered"}</span>
           </div>
-          <TeamInbox team={team.name} box={{ ...box, settled: [] }} back="/inbox" titles={new Map(tasks.map((t) => [t.id, t.title]))} />
+          <TeamInbox
+            team={team.name}
+            box={{ ...box, settled: [] }}
+            back="/inbox"
+            titles={new Map(tasks.map((t) => [t.id, t.title]))}
+            agreement={can(viewer, "team:control", team.name)}
+          />
         </section>
       ))}
       {quiet.length ? (

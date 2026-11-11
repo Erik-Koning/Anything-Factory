@@ -4,18 +4,9 @@
 import { controlAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
 import { type Control, describeHold, journeysUnderWay, type Task, type TeamDoc } from "../server/factory.ts";
-import { askedBy, controlsView } from "../server/views.ts";
+import { askedBy, controlSaid, controlsView } from "../server/views.ts";
 import { SubmitButton } from "./submit-button.tsx";
 import { Ago, Chip } from "./ui.tsx";
-
-const what = (c: Control): string =>
-  c.kind === "resume"
-    ? "resume"
-    : c.kind === "budget"
-      ? "set the budget"
-      : c.scope === "now"
-        ? "pause now"
-        : `pause after ${describeHold({ scope: c.scope ?? "now", tasks: c.tasks, journeys: c.journeys })}`;
 
 function CodeField({ id }: { id: string }) {
   return (
@@ -40,7 +31,7 @@ export function TeamControls({ team, controls, tasks, expanded = false }: { team
       <h2 id="controls">Pause and resume</h2>
       {pending ? (
         <p className="small">
-          <Chip tone="caution">waiting for the team's Mac</Chip> Asked to {what(pending)} <Ago at={pending.at} />; it applies within a minute.
+          <Chip tone="caution">waiting for the team's Mac</Chip> {controlSaid(pending)} <Ago at={pending.at} />; it applies within a minute.
         </p>
       ) : null}
 
@@ -165,7 +156,7 @@ export function TeamControls({ team, controls, tasks, expanded = false }: { team
           <ul className="plain rows small">
             {recent.map((c) => (
               <li key={c.id}>
-                Asked to {what(c)} · {askedBy(c.by)} · <Ago at={c.at} />
+                {controlSaid(c)} · {askedBy(c.by)} · <Ago at={c.at} />
                 {c.note ? <span className="muted"> · “{c.note}”</span> : null}
               </li>
             ))}

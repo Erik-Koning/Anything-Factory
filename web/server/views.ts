@@ -1,6 +1,6 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
 import { claimRank, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
-import type { Control } from "../../lib/tasks/controls.ts";
+import { type Control, describeHold } from "../../lib/tasks/controls.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
 
@@ -150,10 +150,29 @@ export function kanban(tasks: Task[], { now = Date.now(), doneLimit = 8, rejecte
 }
 
 // The pause and resume panel: the latest pause or resume asked for since the team's Mac last reported (it hasn't been
-// applied yet), and the latest controls, newest first.
+// applied yet), and the latest pauses, resumes and budgets, newest first. A change to the working agreement and a
+// review of a decision are controls too, with pages of their own (Agreement, Decided for you).
+const RUNS: readonly Control["kind"][] = ["pause", "resume", "budget"];
 export function controlsView(status: TeamState | null, controls: Control[], limit = 6): { pending: Control | null; recent: Control[] } {
   const last = controls.findLast((c) => c.kind === "pause" || c.kind === "resume") ?? null;
-  return { pending: last && (!status || last.at > status.at) ? last : null, recent: controls.slice(-limit).reverse() };
+  return {
+    pending: last && (!status || last.at > status.at) ? last : null,
+    recent: controls
+      .filter((c) => RUNS.includes(c.kind))
+      .slice(-limit)
+      .reverse(),
+  };
+}
+
+// What a control asked for or did, as a line of a list begins: every kind in its own words, never one as another.
+export function controlSaid(c: Control): string {
+  if (c.kind === "resume") return "Asked to resume";
+  if (c.kind === "budget") return "Asked to set the budget";
+  if (c.kind === "agreement") return "Changed the working agreement";
+  if (c.kind === "review") return `${c.review?.verdict === "overturned" ? "Overturned" : "Agreed with"} ${c.review?.decision ?? "a decision"}`;
+  return c.scope === "now" || !c.scope
+    ? "Asked to pause now"
+    : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}`;
 }
 
 // Who asked for a control, in words.

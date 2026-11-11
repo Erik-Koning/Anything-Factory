@@ -13,7 +13,20 @@ import { Verdict } from "./verdict.tsx";
 // research question has nothing to build.
 const approvable = (t: Task): boolean => t.kind !== "research" && Boolean(t.score || (t.kind !== "feature" && t.severity));
 
-export function TeamInbox({ team, box, back, titles }: { team: string; box: Inbox; back: string; titles: ReadonlyMap<string, string> }) {
+// `agreement`: the viewer may open the team's working agreement, so a question that says why it was asked links to it.
+export function TeamInbox({
+  team,
+  box,
+  back,
+  titles,
+  agreement = false,
+}: {
+  team: string;
+  box: Inbox;
+  back: string;
+  titles: ReadonlyMap<string, string>;
+  agreement?: boolean;
+}) {
   const base = `/t/${team}`;
   const open = box.questions.length + box.blocked.length;
   return (
@@ -35,7 +48,7 @@ export function TeamInbox({ team, box, back, titles }: { team: string; box: Inbo
           <p className="hint">The team keeps going on everything else, and settles these once you answer.</p>
           <ul className="plain rows">
             {box.questions.map((w) => (
-              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} />
+              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} />
             ))}
           </ul>
         </section>
@@ -48,7 +61,7 @@ export function TeamInbox({ team, box, back, titles }: { team: string; box: Inbo
           <p className="hint">Stopped until something changes: say what will, approve it again, or drop it.</p>
           <ul className="plain rows">
             {box.blocked.map((w) => (
-              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} />
+              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} />
             ))}
           </ul>
         </section>
@@ -99,7 +112,21 @@ function Heading({ base, task, journey }: { base: string; task: Task; journey: T
   );
 }
 
-function WaitingItem({ team, base, w, back, titles }: { team: string; base: string; w: Waiting; back: string; titles: ReadonlyMap<string, string> }) {
+function WaitingItem({
+  team,
+  base,
+  w,
+  back,
+  titles,
+  agreement,
+}: {
+  team: string;
+  base: string;
+  w: Waiting;
+  back: string;
+  titles: ReadonlyMap<string, string>;
+  agreement: boolean;
+}) {
   const t = w.task;
   const fromNote = w.question.by !== null;
   const others = t.notes.filter((n) => n.at !== w.question.at || n.by !== w.question.by);
@@ -113,6 +140,14 @@ function WaitingItem({ team, base, w, back, titles }: { team: string; base: stri
       <Heading base={base} task={t} journey={w.journey} />
       <p className="small muted">
         {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
+        {/* A question the planner raised says which rule of the working agreement made it the operator's. */}
+        {t.status === "question" && t.ask?.rule ? (
+          <span className="asked-because">
+            Asked because: {t.ask.rule}
+            {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
+            {agreement ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
+          </span>
+        ) : null}
       </p>
       <dl className="raised">
         <div className="why">

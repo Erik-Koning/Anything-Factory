@@ -82,6 +82,9 @@ export interface RegistryEntry {
   watchdog: Team["watchdog"];
   // Missing in entries registered before the setting existed: priority (registeredContact).
   contact?: Team["contact"];
+  // Who the team works for (team.json operator), for the watchdog's message about a new working agreement. Missing in
+  // entries registered before it was kept: a technical operator, as team.json's default.
+  operator?: Team["operator"];
   // The task graph (0.4.0 on): where it lives and how the team works, for the watchdog, which can't read team.json.
   tasks?: Team["tasks"];
   mode?: Team["mode"];

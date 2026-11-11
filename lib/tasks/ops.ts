@@ -39,7 +39,9 @@ import { machineName } from "../machine.ts";
 import { type Pace, pace } from "../pace.ts";
 import { boardDir } from "../paths.ts";
 import { runningByInstance, startedByInstance } from "../t3.ts";
-import { holdOf } from "./controls.ts";
+import { agreementLines } from "./agreement.ts";
+import { agreementOf, type Control, holdOf } from "./controls.ts";
+import { type DecisionRecord, overturnedOpen } from "./decisions.ts";
 import type { Spend } from "./spend.ts";
 import { openStore, type Store, update } from "./store.ts";
 
@@ -431,6 +433,39 @@ export function summary(
       );
     else parts.push(`${head}${under}: start the innovator.`);
   }
+  return parts.join("\n");
+}
+
+// The working agreement in force, for the planner's context every wake (plugin/hooks/context.ts): its version, who set
+// it and when, what it says, the operator's standing instructions (cut to `notesMax`: a6g decision agreement shows
+// them whole), and the decisions they overturned that the planner hasn't noted yet. How the planner hears of a change
+// the moment it's made is the watchdog's message (lib/holds.ts); this is how it never works from an old one.
+export function agreementContext(
+  controls: Control[],
+  decisions: DecisionRecord[],
+  operator: { technical: boolean } = { technical: true },
+  { notesMax = 1200 }: { notesMax?: number } = {}
+): string {
+  const { agreement, control } = agreementOf(controls);
+  const who = control ? (control.by.startsWith("web:") ? "the operator, on the web app" : "the operator") : "";
+  const head = control
+    ? `Working agreement (${control.id}, set by ${who} at ${localTime(new Date(control.at))})`
+    : "Working agreement (the default: the operator hasn't changed it)";
+  const parts = [`${head}. ${agreementLines(agreement, operator).join(" ")}`];
+  if (agreement.notes)
+    parts.push(
+      `The operator's standing instructions: ${
+        agreement.notes.length > notesMax ? `${agreement.notes.slice(0, notesMax)}… (cut: a6g decision agreement shows them whole)` : agreement.notes
+      }`
+    );
+  const open = overturnedOpen(decisions);
+  if (open.length)
+    parts.push(
+      `Overturned by the operator, for you to act on and note (a6g decision show <id>, then a6g decision note <id> "…"): ${open
+        .slice(0, 6)
+        .map((d) => `${d.id} "${d.question.slice(0, 60)}"`)
+        .join("; ")}${open.length > 6 ? ` and ${open.length - 6} more` : ""}.`
+    );
   return parts.join("\n");
 }
 

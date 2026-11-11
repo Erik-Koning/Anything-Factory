@@ -774,7 +774,7 @@ export function webRefusal(team: Pick<Team, "policies" | "hosts">, tool: string,
 
 // The factory's own commands, which only a person (or the setup agent, for check, register and start) runs.
 export const OPERATOR_COMMANDS = new RegExp(
-  `${START}a6g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|subscriptions|rotate|stop|unregister|connect|disconnect|serve)${END}`
+  `${START}a6g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|agreement|subscriptions|rotate|stop|unregister|connect|disconnect|serve)${END}`
 );
 
 // An env file named in a command it reads or writes. Not in what only lists names (ls -la .env*), and not in what
@@ -824,7 +824,7 @@ export const CORE: [Matcher, string][] = [
   ],
   [
     OPERATOR_COMMANDS,
-    "the operator runs the factory's own commands; the team uses merge, verdict, log, lock, gate, env, finish, pages, pr, task, request, cycle and blast.",
+    "the operator runs the factory's own commands; the team uses merge, verdict, log, lock, gate, env, finish, pages, pr, task, decision, request, cycle and blast.",
   ],
   // Who a member is comes from its instance's A6G_ variables (the commands take a caller with none of them for the
   // operator): nothing sets, unsets or clears them, by an assignment, env, exec -c or cross-env.

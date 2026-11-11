@@ -5,8 +5,9 @@
 //   they've turned one on), then confirming, from their email, an IP address they haven't used before (admins always,
 //   others unless they've turned the check off), then, for someone who chose two-factor authentication as they signed
 //   up, setting up their authenticator or putting it off;
-// - member: the board, what's in progress, journeys, the graph, every request (senders by role), sending requests and
-//   suggesting tasks for the planner to triage;
+// - member: the board, what's in progress, journeys, the graph, every request (senders by role), what the team
+//   decided in the operator's place (reading it, never reviewing it), sending requests and suggesting tasks for the
+//   planner to triage;
 // - contributor: the team's overview (status, journeys, progress counts), their own requests, and sending requests;
 // - admins and members: the machines they've linked to their account (a6g connect app, server/machines.ts) and the
 //   teams each runs; an admin sees every machine. A team's card names only the machines of its members and admins.
@@ -51,19 +52,23 @@ export type Ability =
   | "tasks:suggest"
   // Who sent a request, by name and email (otherwise by role).
   | "senders:names"
-  // Approve, reject, research and escalate proposals.
+  // Approve, reject, research and escalate proposals; answer what waits on the operator; and review what the team
+  // decided in their place (agree, or overturn it).
   | "proposals:decide"
+  // Read the decision log: what the team decided in the operator's place, and why each wasn't asked.
+  | "decisions:read"
   // Every machine, whose it is, and the teams each runs (otherwise only one's own).
   | "machines:all"
   // Read the audit log: everyone's sign-ins and changes.
   | "audit:read"
   // Invite people, set their roles, remove and ban them.
   | "people:manage"
-  // Pause and resume a team, and set its budget: how it runs, the operator's alone, each time with an authenticator code.
+  // Pause and resume a team, set its budget, and see and change its working agreement (how readily it asks the
+  // operator): how it runs, the operator's alone, each change with an authenticator code.
   | "team:control";
 
 const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
-  member: ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest"],
+  member: ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest", "decisions:read"],
   contributor: ["team:overview", "requests:send"],
 };
 
@@ -154,6 +159,7 @@ export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // The shapes of ids in a URL or a form, checked before any lookup.
 export const TEAM_PARAM = /^[a-z][a-z0-9-]{0,62}$/;
 export const TASK_ID = /^[1-9]\d{0,8}$/;
+export const DECISION_ID = /^d[1-9]\d{0,8}$/;
 export const REQUEST_ID = /^r[1-9]\d{0,8}$/;
 
 export function requestProblem(title: string, body: string): string | null {

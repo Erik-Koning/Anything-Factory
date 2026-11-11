@@ -155,6 +155,56 @@ team page does the same for admins, each time with an authenticator code; the wa
 
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
+### What it asks you, and what it decides for you
+
+How readily a team checks in with you is its **working agreement**, which is yours to set and to change while the
+team runs:
+
+```bash
+a6g agreement my-app                                   # the one in force, how it has gone, and every earlier version
+a6g agreement my-app --level hands-on                  # or balanced (the default), or hands-off
+a6g agreement my-app --ask scope,cost --never design   # topics always asked, and never asked
+a6g agreement my-app --notes "I'm away until Monday: batch everything. Never add a dependency without asking."
+```
+
+The planner judges every question it can't settle by looking it up three ways: its topic, what a wrong call would
+cost (low: a revert undoes it; high: it reaches users, data or money before you'd see it), and how sure it is of
+what you'd choose. The agreement turns those into what happens:
+
+| `balanced`  | sure   | derived | unsure |     | `hands-on` | sure   | derived | unsure |     | `hands-off` | sure   | derived | unsure |
+| ----------- | ------ | ------- | ------ | --- | ---------- | ------ | ------- | ------ | --- | ----------- | ------ | ------- | ------ |
+| low stakes  | decide | decide  | decide |     | low        | decide | decide  | tell   |     | low         | decide | decide  | decide |
+| medium      | decide | decide  | tell   |     | medium     | decide | tell    | ask    |     | medium      | decide | decide  | decide |
+| high stakes | tell   | tell    | ask    |     | high       | tell   | ask     | ask    |     | high        | decide | tell    | tell   |
+
+- **ask:** it's a question on your Waiting on you page, which says which rule asked.
+- **tell:** the team decides, builds on it, and flags the decision for you to review.
+- **decide:** the team decides and records it.
+
+A topic you set to `--ask` is always asked; one you set to `--never` is decided, and flagged where it would have been
+asked; `--follow` gives it back to the level. A change of scope starts out always asked, as Article 3 makes it yours:
+`--follow scope` gives it to the level, `--never scope` to the team. The topics are `product`, `scope`, `design`, `technical`, `cost` and
+`security`. Two more, `privacy` and `rules` (unlocking a policy, promoting to production, checking less), are always
+asked and can't be set. A team whose operator isn't technical (`operator.technical`) is never asked `technical`
+questions, whatever the agreement says. Your standing instructions go to the planner in your own words, up to 2,000
+characters; they're direction on how to work with you, and change no lane, policy or article.
+
+The agreement routes judgments, so it leaves three things as they were. What only you know or hold (a key, an
+account, a fact about your business) still comes to you at every level, as blocked work raised to you. Who approves
+the planner's proposals is `approval` in `team.json`. How often a message may reach you is `contact`.
+
+A change holds from the moment it's recorded: the commands read the agreement in force, the planner is told at once
+with what to re-check, and it's in the planner's context at every wake. Every version is kept, with who set it and
+when.
+
+What the team decides in your place goes in its **decision log**: the question, what was weighed, what was chosen
+and why, how it's undone, the tasks it concerns, and why you weren't asked (the rule, and which agreement was in
+force). `a6g decision list` shows it from the team's checkout (`--to-review` for the flagged ones), `a6g decision show
+d7` one record, and the web app's **Decided for you** page all of it. Review a decision there or with
+`a6g decision review d7 agree`, or `a6g decision review d7 overturn --note "<what to do instead>"`: the planner hears
+within a minute, undoes it as you say, and notes what it did. When a decision should have been a question, or a
+question a decision, change the agreement: the next one goes the other way.
+
 To get a team's work as a pull request, give `push` in `team.json` a `pullRequest`:
 `{"remote": "origin", "branch": "a6g/next", "every": "6h", "pullRequest": true}`. At the finish line and when a
 cycle closes, the planner pushes and runs `a6g pr`, which opens a pull request into `base` or updates the open one,
@@ -364,8 +414,10 @@ journey, columns by dependency) to open with `npx @mosphere/better-diagrams`.
   which is more tasks in it. The planner marks it done.
 - **Raising to you.** A task reaches you only with why it's yours and what the team recommends: `a6g task status
 <id> question --reason "…" --recommend "…"` and the approver's `escalate` refuse without both (the operator raising
-  one to themselves gives the reason), and `a6g task ask` gives them to one raised before. A block is the planner's
-  to sort (`--reason`) unless it's raised to you with `--recommend`.
+  one to themselves gives the reason), and `a6g task ask` gives them to one raised before. The planner's own
+  question also says how it judged it (`--topic`, `--stakes`, `--confidence`), and is refused when the working
+  agreement leaves such a question to the team: that one is decided and recorded instead (`a6g decision record`). A
+  block is the planner's to sort (`--reason`) unless it's raised to you with `--recommend`.
 - **Waiting on other tasks.** `a6g task status <id> blocked --waits-on <ids> --then close|resume` parks a task on
   others: once they're done it closes (it was folded into them) or goes back to work, and once one is rejected it
   goes back to the planner. The merge queue settles it as it merges, and the watchdog every minute.
@@ -485,10 +537,10 @@ factory's own files. A team adds its own rules in `never`, each with an example 
 
 `a6g help` lists them all.
 
-| For                                                    | Commands                                                                                                                                                                                                                                               |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions`, `harness allow` |
-| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `request`, `cycle`, `blast`                                                                                |
+| For                                                    | Commands                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `budget`, `agreement`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions`, `harness allow`, `decision review` |
+| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `decision`, `request`, `cycle`, `blast`                                                                                                              |
 
 ## T3 Code and Claude Code
 

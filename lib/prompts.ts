@@ -12,6 +12,7 @@ import { FACTORY_ROOT, PACKAGE } from "./paths.ts";
 import { contactRule } from "./contact.ts";
 import { PLANNER_LABEL } from "./labels.ts";
 import { policyStates } from "./policies.ts";
+import { CONFIDENCE_MEANS, GRADES, RESERVED, STAKES_MEAN, TOPIC_MEANS, TOPICS } from "./tasks/agreement.ts";
 import { multiMachine } from "./tasks/machines.ts";
 import { CLAIMANTS, CONFIDENCE, DIMENSIONS, SCORE_ANCHORS, SCREEN_RISKS, SIZES } from "./tasks/model.ts";
 import { hash, localTime, writeFileAtomic } from "./util.ts";
@@ -119,7 +120,8 @@ function commandsFor(team: Team, role: string): string {
       lines.push('`a6g task claim [<id>]`, `a6g task submit <id>`, `a6g task release <id> [--blocked "…"]`: take, hand in or hand back your task.');
     if (role === "planner")
       lines.push(
-        "`a6g task pace`: the pace again, as your context gives it every wake: what the budget can finish, so how many builders and testers to start now. Run it after you approve or reshape work in the middle of a turn; the guard holds your starts to it."
+        "`a6g task pace`: the pace again, as your context gives it every wake: what the budget can finish, so how many builders and testers to start now. Run it after you approve or reshape work in the middle of a turn; the guard holds your starts to it.",
+        '`a6g decision route --topic … --stakes … --confidence …`, `a6g decision record "<question>" --decided "…" --because "…" --topic … --stakes … --confidence … [--options "a | b"] [--task n] [--undo "…"]`, `a6g decision list|show|note|agreement`: what you decide in the operator\'s place, routed by the working agreement and kept in the decision log (see The working agreement).'
       );
     if (role === "innovator")
       lines.push(
@@ -223,6 +225,33 @@ function proposalsText(team: Team): string {
   return `The approver approves proposals up to size ${team.approval.maxSize}; anything larger, or a change of scope, is escalated to the operator (team.json approval). A journey only groups tasks: nobody approves it, only its tasks.`;
 }
 
+// The working agreement, for the planner: what it judges about a question, rendered from the constants the route
+// reads (lib/tasks/agreement.ts), so the prose can't disagree with what the commands enforce. What the agreement says
+// now isn't here: the operator changes it while the planner runs, so it's in the planner's context every wake.
+function agreementText(team: Team): string {
+  // A GitHub board keeps no store, so no agreement to route by and no log: the planner applies the default by hand.
+  if (team.board.type !== "tasks")
+    return `This team keeps its work on GitHub issues, which hold neither a working agreement nor a decision log, so what your instructions route by command you do by hand, at the default. Ask only when two options still fit the direction and a wrong call would be costly: it would reach users, real data or money before the operator could see it, or be costly to undo. Always ask about a change of scope, privacy and personal data, and the team's own rules (unlocking a policy, promoting to production, checking less). A question is an issue labelled ${code(`${team.board.label}:question`)}, with why it's the operator's and what you recommend. Everything else you decide, and write in ${code(".a6g/decisions.md")} yourself, one line each: ${code("- <the question, in a few words> → <the decision>. Because <the direction or earlier decision it follows>. (planner, issue <n>)")}.`;
+  const graded = (means: Record<(typeof GRADES)[number], string>, order: readonly (typeof GRADES)[number][]): string =>
+    order.map((grade) => `${code(grade)} (${means[grade]})`).join("; ");
+  return [
+    "How readily you bring a question to the operator is theirs to set, and they change it whenever the check-ins are too many, too few or about the wrong things (`a6g agreement`, or the web app). Your context has the agreement as it stands at every wake, with their standing instructions; `a6g decision agreement` shows it whole. A question you can't settle by looking it up gets three judgments from you:",
+    "",
+    list([
+      `**Topic** (\`--topic\`): ${TOPICS.map((topic) => `${code(topic)} (${TOPIC_MEANS[topic]})`).join("; ")}.`,
+      `**Stakes** (\`--stakes\`), what a wrong call costs: ${graded(STAKES_MEAN, GRADES)}.`,
+      `**Confidence** (\`--confidence\`), how sure you are of what the operator would choose: ${graded(CONFIDENCE_MEANS, [...GRADES].reverse())}.`,
+    ]),
+    "",
+    "The agreement turns the three into what happens: the question is **asked** (`a6g task status <id> question`, with the three), **decided and flagged** for the operator to review, or **decided** (both recorded with `a6g decision record`, with the three). `a6g decision route --topic … --stakes … --confidence …` says which before you act, and each command refuses what belongs to the other. It routes judgments only: what only the operator knows or holds (a fact about their business, an account, a key) is raised as a block, whatever the agreement.",
+    `${RESERVED.map(code).join(" and ")} are always asked, whatever the agreement says (Article 3), and ${code("scope")} is asked until the operator's agreement says otherwise.${
+      team.operator.technical
+        ? ""
+        : ` ${code("technical")} is never asked on this team, whose operator isn't technical: take the safer choice, and record it.`
+    }`,
+  ].join("\n");
+}
+
 // Builders, testers and the scaffolder get their own worktree from delegate_task; everyone else shares the team's checkout, which
 // is T3's default.
 const isolationOf = (lane: Lane): string => (lane.worktree ? "worktree" : "shared");
@@ -321,6 +350,7 @@ export function compile(team: LoadedTeam, role: string): string {
     `## Commands\n\n${commandsFor(team, role)}`,
     `## The board\n\n${boardText(team, role)}`,
     team.board.type === "tasks" && (role === "planner" || role === "approver" || role === "innovator") ? `## Scoring\n\n${scoringText(team)}` : null,
+    role === "planner" ? `## The working agreement\n\n${agreementText(team)}` : null,
     `## What this team never does\n\n${list([
       ...policyStates(team)
         .filter((policy) => policy.state === "deny")

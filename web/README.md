@@ -17,11 +17,11 @@ role to anyone else.
 
 ## Who sees what
 
-| Role                        | Sees and does                                                                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **admin** (the operator)    | everything, on every team; adds tasks; decides proposals; invites, changes and removes people; sees senders' names and emails                          |
-| **member** (of a team)      | the board, journeys, the graph, recent merges, each task and every request (senders by role, never by name); sends requests; suggests tasks for triage |
-| **contributor** (to a team) | the team's overview (status, journeys, progress counts) and their own requests; sends requests                                                         |
+| Role                        | Sees and does                                                                                                                                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **admin** (the operator)    | everything, on every team; adds tasks; decides proposals; reviews what the team decided for them and sets its working agreement; invites, changes and removes people; sees senders' names and emails |
+| **member** (of a team)      | the board, journeys, the graph, recent merges, each task and every request (senders by role, never by name); reads what the team decided for the operator; sends requests; suggests tasks for triage |
+| **contributor** (to a team) | the team's overview (status, journeys, progress counts) and their own requests; sends requests                                                                                                       |
 
 Admins and members also see the machines they've linked to their account (`a6g connect app`) and the teams each runs,
 and may unlink them; an admin sees and may unlink every machine, and sees whose it is. A team's card names only the
@@ -106,6 +106,23 @@ request (Article 8).
   it became and theirs, notes and the reason when it's turned down. Contributors see their own.
 - `/t/<team>/proposals` (admins): proposals with who they came from, their gate and score; approve with a note, reject
   with a reason, send back for research, escalate. Tasks in triage come last, for when one can't wait for the planner.
+- `/t/<team>/decided` (members and admins; the tab reads **Decided for you** to an admin, **Decision log** to a
+  member): the decision log, every question the team answered in the operator's place (`a6g decision record`). What's
+  flagged and not reviewed comes first, then what stands, then what was overturned. Each says what was chosen, what
+  that follows from, what was weighed, how it's undone, its tasks, and why the operator wasn't asked: the rule of the
+  working agreement, and the version in force then. An admin agrees with one or overturns it and says what to do
+  instead; a review the team's Mac hasn't written onto the record yet says so, and an overturned one shows what the
+  planner noted it did. The tab counts what an admin has left to review. The app only reads decisions: a review is a
+  control, as a pause is, which the lead's watchdog writes onto the record and, for an overturn, passes to the planner.
+- `/t/<team>/agreement` (admins): the working agreement, how readily the team brings a question to the operator.
+  What's in force and who set it; how the last 30 days went (asked, decided, flagged, overturned); each level's table
+  of what happens to a question, by what a wrong call costs and how sure the team is; the form that changes it (the
+  level, each topic as follows the level, always ask or never ask, and standing instructions in the operator's words),
+  with a code from the authenticator, like a pause; and every version, with what it changed and who made it. Privacy
+  and the team's own rules are always the operator's and aren't offered; nor are the platform and the stack on a team
+  whose operator isn't technical. A team published by a factory version from before the agreement (its settings name
+  no `operator`) says so on both pages and offers no form. Under a question on **Waiting on you** that the planner
+  raised: which rule of the agreement made it the operator's, and a link here.
 - `/admin/people` (admins): invite by email with a role on a team (an address that signed up joins the team with the
   account it has), change a role, remove from a team, ban and unban; everyone with an account, on a team or on none.
 - `/admin/audit` (admins): the audit log, newest first, filtered by what, how it went, who and IP address.
@@ -227,7 +244,8 @@ emails a sign-in link. An invited account has no password; one that signed up is
 - **The audit log** keeps every sign-up, sign-in (by method, or why it failed), sign-out and ended session, second
   factor, new address (asked, confirmed, denied, forgotten), the check of new addresses turned off or on, passkey and
   authenticator change (and one put off at sign-up), invitation, role change, removal,
-  ban, request, task and decision: who, when, from which address and device, and how it went. It's in the accounts
+  ban, request, task and decision, pause, resume and budget, change to a team's working agreement (`team.agreement`)
+  and review of what a team decided (`decision.reviewed`): who, when, from which address and device, and how it went. It's in the accounts
   database (`audit`), written once and never changed, kept `AUDIT_RETENTION_DAYS` (400). Admins read and filter it at
   `/admin/audit`; each person sees their own recent activity on their account page. The team's agents never see it.
 - Pages and server actions check all of this on the server (`server/viewer.ts`, `server/access.ts`): a session that
@@ -312,7 +330,9 @@ machine (`MONGOMS_SYSTEM_BINARY`, by default `~/.cache/mongodb-binaries/mongod-a
 downloaded), seed it with the factory's own functions (`tests/e2e/seed.ts`), run `next start` against it with
 `MAIL_LOG=1`, and read sign-in links from its log. They cover an admin's sign-in with the authenticator and with a
 backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board,
-graph by level and requests (senders by role); approving and rejecting (checked in the task documents); a contributor and an admin
+graph by level and requests (senders by role); approving and rejecting (checked in the task documents); the decision
+log as a member reads it and as an admin reviews it (the review a control, applied with the factory's own code), the
+working agreement changed with a code (and a wrong one refused), and a question that says why it was asked; a contributor and an admin
 session without its second factor calling admin server actions directly (refused, nothing changes); passkeys with and
 without user verification; the daily limit; phone width; and the sign-in rate limit. Its browsers send a viewer IP
 address and the origin secret as CloudFront does (`playwright.config.ts`), and `security.spec.ts` covers the rest of
@@ -437,8 +457,12 @@ Things to know:
      decisions; the app's code changes only a task's status, approval and notes, through the factory's move table).
      MongoDB can't scope a role to fields, so whoever holds this user's password can add and rewrite any team's tasks,
      which agents then act on: keep it only in the deployment's environment, and rotate it if it leaks;
-   - `insert` on `controls` (an admin's pause, resume or budget: the app only adds them, never changes one, so they're
-     also the record; the watchdog applies them);
+   - `insert` on `controls` (an admin's pause, resume or budget, a change to the working agreement, and a review of
+     what the team decided: the app only adds them, never changes one, so they're also the record; the watchdog
+     applies them). An agreement's standing instructions reach the planner as the operator's words, so, as with
+     tasks, whoever holds this user's password could write some: the same care. The decision log needs no grant of
+     its own: the app reads `decisions` under the database's `find`, and never writes there (the planner records a
+     decision, and the watchdog writes a review onto it);
    - `createIndex` on `tasks`, `requests`, `stakeholders`, `cycles` and `controls` (the store asks for its index;
      refused, it carries on).
 
@@ -469,6 +493,10 @@ changing the domain means adding passkeys again.
   merges, proposals, the board's lanes).
 - `server/inbox.ts`: what waits on the operator, from a team's graph: the questions and blocked work, the options and
   recommendation read out of each, what's answered and what was settled (pure).
+- `server/decided.ts`: what the Decided for you and Agreement pages show, from a team's decision log and the
+  operator's controls: what's to review, what stands, what was overturned, each topic as the agreement has it, and
+  the agreement's versions (pure). The rules themselves (the levels' tables, what a review may follow) are the
+  factory's, in `../lib/tasks/agreement.ts` and `decisions.ts`.
 - `server/events.ts`, `server/notifications.ts`, `server/notifier.ts`, `instrumentation.ts`: notifications. The events
   are worked out from each team's history, never stored (pure); a person's settings and the emails' words; and the
   notifier, which the server starts (`instrumentation.ts`) and which runs every `NOTIFY_EVERY_SECONDS` under a lease in

@@ -162,6 +162,16 @@ hourly rather than every `watchdog.tickEvery`, and your answer reaches it within
 `a6g init` drafts the check-in where nothing is built yet (only documents, pictures and dot-files). It's never held
 with an operator who isn't technical: that team makes the same record, and goes on.
 
+### The working agreement
+
+How readily the team asks you isn't in `team.json`: it's the working agreement, which you set with `a6g agreement
+<team>` or on the web app and change while the team runs (the
+[README](../README.md#what-it-asks-you-and-what-it-decides-for-you) has the levels and the topics). It's kept in the
+team's store, every version of it, and holds from the moment it's recorded. Two settings here bear on it: with
+`operator.technical` false, `technical` questions are never asked whatever the agreement says; and `contact` still
+sets how often a message may reach you, whatever it asks. The design check-in is its own gate: the agreement doesn't
+route it.
+
 ### Models
 
 Each role runs on one model. Left out, the roles that decide what gets built and on what run on Fable, and the roles
@@ -392,7 +402,7 @@ the repository's own Playwright with the configuration it names.
 | `notes.md`              | the operator           | What any member needs to know: the environment, commands, conventions, traps                                                                                                                       |
 | `rubric.md`, `style.md` | the operator           | Taste: the UX rubric and style guide (listed in `docs`)                                                                                                                                            |
 | `roles/<role>.md`       | the operator           | Additions to one role's prompt                                                                                                                                                                     |
-| `decisions.md`          | the planner            | The product calls it made from the direction, and the operator's answers with the principle behind each. Compiled into every member's prompt                                                       |
+| `decisions.md`          | the planner            | The product calls it made from the direction (`a6g decision record` writes each line), and the operator's answers with the principle behind each. Compiled into every member's prompt              |
 | `lessons.md`            | the planner            | Durable lessons, compiled into every member's prompt                                                                                                                                               |
 | `adapters/`             | the operator           | `env.sh`, `gate.sh`, `after-merge.sh`, and the team's own finish checker if it has one. `a6g check` parses its shell scripts and checks they're committed, and skips dotfiles and editors' backups |
 | `.gitignore`            | the factory            | Ignores `run/`                                                                                                                                                                                     |
@@ -401,7 +411,8 @@ the repository's own Playwright with the configuration it names.
 ## The task graph's files
 
 With `tasks.store` `"files"`, the run folder (`~/.a6g/runs/<team>/`, outside the checkout, where the watchdog can read
-it) holds `tasks/<n>.json`, `requests/r<n>.json` and `cycles/c<n>.json`: one document each,
+it) holds `tasks/<n>.json`, `requests/r<n>.json`, `cycles/c<n>.json`, `controls/k<n>.json` (your pauses, resumes,
+budgets, working agreements and reviews of decisions) and `decisions/d<n>.json` (the decision log): one document each,
 written only by the factory's commands (the guard refuses agents the run folder). `a6g task graph` writes
 `task-graph.json` there, a BetterDiagrams document to open with `npx @mosphere/better-diagrams`. Stakeholders' names
 and addresses are kept beside it, in `~/.a6g/runs/<team>.private/stakeholders/`, which the guard refuses every agent. The plan behind it

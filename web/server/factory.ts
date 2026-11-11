@@ -2,11 +2,24 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts and spend.ts. Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never
-// openStore (the Keychain, the run folder and child processes are the CLI's).
+// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts, agreement.ts, decisions.ts and spend.ts. Never
+// files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never openStore (the Keychain, the run folder and child
+// processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
+import { agreementChanges, agreementFrom, sameAgreement } from "../../lib/tasks/agreement.ts";
 import { answer } from "../../lib/tasks/answer.ts";
-import { budgetControl, type Control, type HoldScope, type Limits, limitsOf, pauseControl, resumeControl } from "../../lib/tasks/controls.ts";
+import {
+  agreementControl,
+  agreementOf,
+  budgetControl,
+  type Control,
+  type HoldScope,
+  type Limits,
+  limitsOf,
+  pauseControl,
+  resumeControl,
+} from "../../lib/tasks/controls.ts";
+import { type DecisionRecord, requestReview } from "../../lib/tasks/decisions.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
 import { type FeatureRequest, OPERATOR, Refused, type Stakeholder, type Task } from "../../lib/tasks/model.ts";
@@ -21,7 +34,9 @@ export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc } from "../../lib/tasks/teams.ts";
 export type { Control, HoldScope, HoldState, Limits } from "../../lib/tasks/controls.ts";
-export { describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
+export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
+export type { Agreement } from "../../lib/tasks/agreement.ts";
+export type { DecisionRecord } from "../../lib/tasks/decisions.ts";
 export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
 
 const stores = new Map<string, Store>();
@@ -146,4 +161,28 @@ export async function budgetFromWeb(
           ...(kept ? { accounts: kept } : {}),
         };
   return store.controls.create(budgetControl(team, `web:${ask.from}`, limits));
+}
+
+// What the team decided in the operator's place, oldest first (lib/tasks/decisions.ts). The app only reads these: the
+// planner records them with a6g decision record, and the lead's watchdog writes each review onto its record.
+export const decisionsOf = (team: string): Promise<DecisionRecord[]> => storeFor(team).decisions.all();
+
+// An admin's review of one of them, as the operator, by their stakeholder id: a control, like a pause, which the lead's
+// watchdog writes onto the record, passing an overturn to the planner within a minute.
+export const reviewFromWeb = (team: string, ask: { id: string; verdict: string; note: string; from: string }): Promise<Control> =>
+  requestReview(storeFor(team), team, { id: ask.id, verdict: ask.verdict, note: ask.note, by: `web:${ask.from}` });
+
+// A new working agreement from the web, whole, by an admin's stakeholder id: the one in force from the moment it's
+// recorded (the commands that ask the operator or decide for them read the newest), told to the planner within a
+// minute. Resolves to the control and what changed, in words; one that changes nothing is refused.
+export async function agreementFromWeb(
+  team: string,
+  ask: { level: unknown; topics: unknown; notes: unknown; from: string }
+): Promise<{ control: Control; changes: string[] }> {
+  const store = storeFor(team);
+  const made = agreementFrom(ask);
+  if ("problem" in made) throw new Refused(made.problem);
+  const { agreement: current } = agreementOf(await store.controls.all());
+  if (sameAgreement(current, made)) throw new Refused("Nothing changed: the agreement says that already.");
+  return { control: await store.controls.create(agreementControl(team, `web:${ask.from}`, made)), changes: agreementChanges(current, made) };
 }

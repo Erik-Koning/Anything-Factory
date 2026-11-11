@@ -5,7 +5,8 @@ import { Chip } from "../../../components/ui.tsx";
 import { can, roleIn, type Viewer } from "../../../server/access.ts";
 import { allTeams } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
-import { tasksOf, teamFor } from "./team.ts";
+import { toReview } from "../../../../lib/tasks/decisions.ts";
+import { controlsFor, decisionsFor, tasksOf, teamFor } from "./team.ts";
 
 // A team's pages, by what the person may do there: the first part of the path after /t/<team>, and what opens it.
 // Adding a task has no tab: the board's button opens it.
@@ -17,6 +18,8 @@ const SECTIONS: [string, (viewer: Viewer, team: string) => boolean][] = [
   ["requests", () => true],
   ["add", (v, t) => can(v, "tasks:add", t) || can(v, "tasks:suggest", t)],
   ["proposals", (v, t) => can(v, "proposals:decide", t)],
+  ["decided", (v, t) => can(v, "decisions:read", t)],
+  ["agreement", (v, t) => can(v, "team:control", t)],
 ];
 const sectionsFor = (viewer: Viewer, team: string): string[] => SECTIONS.filter(([, open]) => open(viewer, team)).map(([s]) => s);
 
@@ -26,6 +29,9 @@ export default async function TeamLayout({ children, params }: { children: React
   const base = `/t/${team.name}`;
   const open = sectionsFor(viewer, team.name);
   const waiting = open.includes("inbox") ? waitingCount(await tasksOf(team.name)) : 0;
+  // What the team decided and flagged, for those who review it: how many they haven't yet.
+  const reviews = can(viewer, "proposals:decide", team.name);
+  const unreviewed = reviews && open.includes("decided") ? toReview(...(await Promise.all([decisionsFor(team.name), controlsFor(team.name)]))).length : 0;
   const switchTo: SwitchTo[] = (await allTeams())
     .filter((t) => roleIn(viewer, t.name) !== null)
     .map((t) => ({ name: t.name, title: t.title, state: t.status?.state ?? "no status yet", sections: sectionsFor(viewer, t.name) }));
@@ -36,6 +42,9 @@ export default async function TeamLayout({ children, params }: { children: React
     graph: "Graph",
     requests: "Requests",
     proposals: "Decisions",
+    // Decided for the operator: whoever reviews it reads "for you"; a member reads the same log.
+    decided: reviews ? "Decided for you" : "Decision log",
+    agreement: "Agreement",
   };
   return (
     <>
@@ -52,7 +61,7 @@ export default async function TeamLayout({ children, params }: { children: React
             href: s ? `${base}/${s}` : base,
             label: LABELS[s] ?? s,
             exact: s === "",
-            count: s === "inbox" ? waiting : 0,
+            count: s === "inbox" ? waiting : s === "decided" ? unreviewed : 0,
             // A task's page and adding one are the board's.
             also: s === "board" ? [`${base}/tasks`, `${base}/add`] : [],
           }))}
