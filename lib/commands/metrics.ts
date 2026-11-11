@@ -71,7 +71,10 @@ async function qualityOf(option: (flag: string) => string | undefined, given: (f
   const store = await openTeamStore(team, runDir, home);
   let numbers;
   try {
-    numbers = quality(await store.tasks.all(), isLead(team) ? suiteHistory(home) : null, await store.usage.since("0000-00-00"), bounds);
+    numbers = quality(await store.tasks.all(), isLead(team) ? suiteHistory(home) : null, await store.usage.since("0000-00-00"), bounds, {
+      decisions: await store.decisions.all(),
+      controls: await store.controls.all(),
+    });
   } finally {
     await store.close();
   }

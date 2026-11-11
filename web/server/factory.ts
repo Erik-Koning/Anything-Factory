@@ -99,7 +99,10 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
 
 // An admin's answer to what waits on them (a question, or blocked work), as the operator: a note marked as the answer,
 // which the lead's watchdog passes to the planner within a minute.
-export const answerAsOperator = (team: string, id: string, text: string): Promise<Task> => answer(storeFor(team), id, { who: OPERATOR, text });
+// `recommended`: the answer is the team's recommendation as it stood, with no words of the operator's (`text` empty):
+// the factory writes the recommendation's and marks the note so (the hints on the working agreement count those).
+export const answerAsOperator = (team: string, id: string, text: string, recommended = false): Promise<Task> =>
+  answer(storeFor(team), id, { who: OPERATOR, text, recommended });
 
 // A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
 // added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,
@@ -177,7 +180,7 @@ export const reviewFromWeb = (team: string, ask: { id: string; verdict: string; 
 // minute. Resolves to the control and what changed, in words; one that changes nothing is refused.
 export async function agreementFromWeb(
   team: string,
-  ask: { level: unknown; topics: unknown; notes: unknown; from: string }
+  ask: { level: unknown; topics: unknown; notes: unknown; contact?: unknown; from: string }
 ): Promise<{ control: Control; changes: string[] }> {
   const store = storeFor(team);
   const made = agreementFrom(ask);

@@ -1,4 +1,5 @@
-// How often the planner's messages reach the operator (team.json "contact"). In digest mode, everything waits for
+// How often the planner's messages reach the operator (team.json "contact", or the working agreement when the operator
+// set it there: contactInForce). In digest mode, everything waits for
 // the next window and goes together; a message marked "Urgent:" goes at once, one per window; "Done" always goes.
 // In priority mode, each goes as soon as the planner sends it. The guard holds the planner's own Gmail to it, the
 // watchdog its outbox, and both read one record in the team's run folder of when each kind last went.
@@ -11,6 +12,20 @@ export interface Contact {
   everyMin: number;
 }
 export const DEFAULT_CONTACT: Contact = { mode: "digest", everyMin: 240 };
+
+// The rule in force: the working agreement's, when the operator set one there (a6g agreement --messages, or the web
+// app), otherwise the team's own (`base`: team.json contact). Read from the run folder's copy of the agreement, which
+// the watchdog keeps (lib/holds.ts keepAgreement): the guard, the planner's context and the outbox all ask here.
+export function contactInForce(run: string | null, base: Contact): Contact {
+  if (!run) return base;
+  try {
+    const kept = JSON.parse(readFileSync(join(run, "agreement.json"), "utf8")) as { agreement?: { contact?: Partial<Contact> } };
+    const contact = kept.agreement?.contact;
+    if (contact?.mode === "priority") return { mode: "priority", everyMin: 0 };
+    if (contact?.mode === "digest" && typeof contact.everyMin === "number" && contact.everyMin > 0) return { mode: "digest", everyMin: contact.everyMin };
+  } catch {}
+  return base;
+}
 
 // What a registry entry asks of the watchdog, which runs from the current version for every team. An entry
 // registered before the setting existed belongs to a version whose planner writes whenever it needs to, so its
@@ -51,7 +66,14 @@ export function nextAllowed(contact: Contact, run: string | null, kind: MessageK
 }
 
 const hours = (minutes: number): string => `${Number((minutes / 60).toFixed(1))} h`;
-const clock = (ms: number): string => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+// The time today; with the day, when it isn't today (a window may be days long).
+const clock = (ms: number, now = Date.now()): string => {
+  const at = new Date(ms);
+  const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return at.toDateString() === new Date(now).toDateString()
+    ? time
+    : `${time} on ${at.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`;
+};
 
 // The rule in one line, for the planner's prompt and a6g check.
 export function contactRule(contact: Contact): string {
@@ -65,7 +87,9 @@ export function contactStatus(contact: Contact, run: string | null, now = Date.n
   if (contact.mode === "priority" || !contact.everyMin) return null;
   const next = nextAllowed(contact, run, "normal", now);
   return `Messages to the operator (digest, every ${hours(contact.everyMin)}): ${
-    next <= now ? "the next can go now, with every question open." : `the next can go from ${clock(next)}; keep questions as question tickets until then.`
+    next <= now
+      ? "the next can go now, with every question open."
+      : `the next can go from ${clock(next, now)}; keep questions as question tickets until then.`
   }`;
 }
 
@@ -76,11 +100,11 @@ export function waitReason(contact: Contact, kind: MessageKind, run: string | nu
   const every = hours(contact.everyMin);
   if (kind === "urgent") {
     const normal = nextAllowed(contact, run, "normal", now);
-    return `one urgent message per ${every} (team.json contact), and one has gone. ${
+    return `one urgent message per ${every} (the contact rule in force), and one has gone. ${
       normal <= now
         ? 'Send this without "Urgent:", with every other open question in it: that can go now.'
-        : `It goes in the next message, from ${clock(normal)}; keep it as a question ticket until then.`
+        : `It goes in the next message, from ${clock(normal, now)}; keep it as a question ticket until then.`
     }`;
   }
-  return `the operator gets one message every ${every} (team.json contact, digest), and the next can go from ${clock(from)}. Keep this as a question ticket and send everything open together then. Only a question that blocks most of the team's work can go now, as "Urgent: …" (one per ${every}).`;
+  return `the operator gets one message every ${every} (the contact rule in force, a digest), and the next can go from ${clock(from, now)}. Keep this as a question ticket and send everything open together then. Only a question that blocks most of the team's work can go now, as "Urgent: …" (one per ${every}).`;
 }

@@ -1,6 +1,6 @@
 // A code from the person's authenticator for one action, on top of their session's second factor: for turning an
-// authenticator on or off, and for what changes how a team runs (pausing, resuming, its budget, its working agreement). Each try counts
-// against the person's five (code-attempts.ts), whichever page it comes from.
+// authenticator on or off, and for what changes how a team runs (pausing, resuming, its budget, its working
+// agreement). Each try counts against the person's five (code-attempts.ts), whichever page it comes from.
 import { auth } from "./auth.ts";
 import { CODE_TRIES, clearCodeAttempts, takeCodeAttempt } from "./code-attempts.ts";
 

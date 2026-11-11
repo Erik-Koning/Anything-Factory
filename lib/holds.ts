@@ -2,9 +2,10 @@
 // read them: `paused` (nothing starts or merges, as a6g pause always did), hold.json (a pause and how far it has got),
 // budget.json (the limits in force), controls-applied (the ids applied, so each applies once, whatever order they
 // reach the store in) and planner-notes.json (what the planner should hear and couldn't yet). The watchdog applies new
-// ones on every run, and a6g pause, resume, budget and agreement at once. A new working agreement changes no file
-// here (the commands that ask or decide read the one in force from the store): the planner is told of it, once. A
-// review of a decision is written onto its record, which needs the store (lib/reviews.ts).
+// ones on every run, and a6g pause, resume, budget and agreement at once. A new working agreement is told to the
+// planner, once, and kept in agreement.json for how often a message may go (the commands that ask or decide read the
+// one in force from the store). A review of a decision is written onto its record, which needs the store
+// (lib/reviews.ts).
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resumesWhen } from "./budget.ts";
@@ -19,6 +20,21 @@ const budgetFile = (run: string): string => join(run, "budget.json");
 const pausedFile = (run: string): string => join(run, "paused");
 const appliedFile = (run: string): string => join(run, "controls-applied");
 const notesFile = (run: string): string => join(run, "planner-notes.json");
+const agreementFile = (run: string): string => join(run, "agreement.json");
+
+// The working agreement in force, kept in the run folder for what can't open the store on every call (the guard, the
+// planner's context, the watchdog's outbox: how often a message may go, lib/contact.ts contactInForce). The commands
+// that route a question read the store itself. Written only when it differs; gone when nobody has set one.
+export function keepAgreement(run: string, controls: Control[]): void {
+  const { agreement, control } = agreementOf(controls);
+  if (!control) return rmSync(agreementFile(run), { force: true });
+  const next = { control: control.id, at: control.at, agreement };
+  let kept: unknown = null;
+  try {
+    kept = readJson<unknown>(agreementFile(run), null);
+  } catch {}
+  if (JSON.stringify(kept) !== JSON.stringify(next)) writeJson(agreementFile(run), next);
+}
 
 // The controls applied: a list of ids, or (written by an earlier version) the newest id, every one up to it applied.
 export function applied(run: string): (id: string) => boolean {
@@ -168,6 +184,7 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     }
   }
   if (now.length) markApplied(run, now);
+  if (controls.some((c) => c.kind === "agreement")) keepAgreement(run, controls);
   return { log, tell };
 }
 

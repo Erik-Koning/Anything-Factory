@@ -165,6 +165,7 @@ a6g agreement my-app                                   # the one in force, how i
 a6g agreement my-app --level hands-on                  # or balanced (the default), or hands-off
 a6g agreement my-app --ask scope,cost --never design   # topics always asked, and never asked
 a6g agreement my-app --notes "I'm away until Monday: batch everything. Never add a dependency without asking."
+a6g agreement my-app --messages digest --every 2h      # how often a message may reach you (or priority, or team)
 ```
 
 The planner judges every question it can't settle by looking it up three ways: its topic, what a wrong call would
@@ -189,9 +190,20 @@ asked and can't be set. A team whose operator isn't technical (`operator.technic
 questions, whatever the agreement says. Your standing instructions go to the planner in your own words, up to 2,000
 characters; they're direction on how to work with you, and change no lane, policy or article.
 
-The agreement routes judgments, so it leaves three things as they were. What only you know or hold (a key, an
+The agreement routes judgments, so it leaves two things as they were. What only you know or hold (a key, an
 account, a fact about your business) still comes to you at every level, as blocked work raised to you. Who approves
-the planner's proposals is `approval` in `team.json`. How often a message may reach you is `contact`.
+the planner's proposals is `approval` in `team.json`; what the approver escalates says which of those rules sent it
+up.
+
+How often a message may reach you starts as `contact` in `team.json`, and the agreement can set it in its place:
+`--messages digest --every 2h` (everything open together, at most once per window), `--messages priority` (each as
+soon as it's needed), or `--messages team` to give it back. The guard holds the planner's own email to whichever is in
+force, the watchdog its outbox, and the planner's context says when the next may go.
+
+Shown alone, `a6g agreement my-app` also says what your own reviews and answers of the last 30 days suggest, each with
+the command that would do it: a topic whose decisions you keep overturning is one to be asked about, and one where you
+take the team's recommendation every time is one it could decide (`a6g task answer <id> --recommended` takes it in one
+word, and is how that's counted). They're suggestions: nothing changes until you change it.
 
 A change holds from the moment it's recorded: the commands read the agreement in force, the planner is told at once
 with what to re-check, and it's in the planner's context at every wake. Every version is kept, with who set it and
@@ -203,7 +215,9 @@ force). `a6g decision list` shows it from the team's checkout (`--to-review` for
 d7` one record, and the web app's **Decided for you** page all of it. Review a decision there or with
 `a6g decision review d7 agree`, or `a6g decision review d7 overturn --note "<what to do instead>"`: the planner hears
 within a minute, undoes it as you say, and notes what it did. When a decision should have been a question, or a
-question a decision, change the agreement: the next one goes the other way.
+question a decision, change the agreement: the next one goes the other way. `a6g serve`'s page lists what's flagged
+with Agree and Overturn beside each, and `a6g metrics --quality` counts the period's check-ins: what was raised to you,
+what was decided for you and flagged, and what you agreed with or overturned.
 
 To get a team's work as a pull request, give `push` in `team.json` a `pullRequest`:
 `{"remote": "origin", "branch": "a6g/next", "every": "6h", "pullRequest": true}`. At the finish line and when a

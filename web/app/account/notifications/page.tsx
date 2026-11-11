@@ -124,7 +124,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
             {decides ? (
               <label className="check">
                 <input type="checkbox" name="reminder" defaultChecked={prefs.reminder} />
-                <span>Also list what still waits on you, each day until it&apos;s answered</span>
+                <span>Also list what still waits on you, and the team&apos;s calls you haven&apos;t reviewed, each day until they&apos;re settled</span>
               </label>
             ) : null}
             <p className="hint">The next one: {nextText}, if there&apos;s anything to say.</p>

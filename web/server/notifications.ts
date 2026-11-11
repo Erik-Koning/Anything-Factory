@@ -14,6 +14,7 @@ export const MODE_LABEL: Record<Mode, string> = { now: "At once", digest: "In th
 
 export const KIND_TEXT: Record<EventKind, { label: string; hint: string }> = {
   question: { label: "Questions for you", hint: "The team raised something to you: a decision, or work only you can unblock." },
+  decided: { label: "Decided for you", hint: "The team made a call in your place and flagged it for you to review." },
   blocked: { label: "Blocked work", hint: "A task stopped on something the team sorts out itself." },
   journey: { label: "Journeys done", hint: "A journey's tasks are built and verified." },
   team: { label: "A team pauses or finishes", hint: "It stopped, or reached its finish line." },
@@ -24,9 +25,9 @@ export const KIND_TEXT: Record<EventKind, { label: string; hint: string }> = {
 // What each role hears of until they choose: admins what needs them at once and the rest in the digest; members and
 // contributors what they'd follow on the overview.
 const DEFAULTS: Record<"admin" | TeamRole, Record<EventKind, Mode>> = {
-  admin: { question: "now", blocked: "digest", journey: "now", team: "now", merged: "digest", request: "now" },
-  member: { question: "off", blocked: "digest", journey: "now", team: "now", merged: "off", request: "now" },
-  contributor: { question: "off", blocked: "off", journey: "digest", team: "off", merged: "off", request: "now" },
+  admin: { question: "now", decided: "digest", blocked: "digest", journey: "now", team: "now", merged: "digest", request: "now" },
+  member: { question: "off", decided: "off", blocked: "digest", journey: "now", team: "now", merged: "off", request: "now" },
+  contributor: { question: "off", decided: "off", blocked: "off", journey: "digest", team: "off", merged: "off", request: "now" },
 };
 
 export interface Prefs {
@@ -41,9 +42,11 @@ export interface Prefs {
   updatedAt: Date;
 }
 
-// A person's settings: theirs, or the defaults for `role` (their role where it's widest).
+// A person's settings: theirs, or the defaults for `role` (their role where it's widest). A kind of event that came
+// after they saved theirs has the role's default until they choose.
 export function prefsOr(saved: Prefs | null, userId: string, role: "admin" | TeamRole, timeZone: string): Prefs {
-  return saved ?? { _id: userId, modes: { ...DEFAULTS[role] }, reminder: role === "admin", digestHour: 8, timeZone, muted: [], updatedAt: new Date(0) };
+  if (saved) return { ...saved, modes: { ...DEFAULTS[role], ...saved.modes } };
+  return { _id: userId, modes: { ...DEFAULTS[role] }, reminder: role === "admin", digestHour: 8, timeZone, muted: [], updatedAt: new Date(0) };
 }
 // The mode for `kind` on a team where they're `role`: their choice once they've saved one, the role's default before.
 export const modeFor = (saved: Prefs | null, kind: EventKind, role: "admin" | TeamRole): Mode => saved?.modes[kind] ?? DEFAULTS[role][kind];
@@ -91,6 +94,7 @@ type Titles = ReadonlyMap<string, string>;
 
 const SUBJECT: Record<EventKind, (e: TeamEvent) => string> = {
   question: (e) => `Question for you: ${e.title}`,
+  decided: (e) => `Decided for you: ${e.title}`,
   blocked: (e) => `Blocked: ${e.title}`,
   journey: (e) => e.title,
   team: (e) => e.title,
@@ -118,7 +122,7 @@ export function nowMail(events: TeamEvent[], titles: Titles, base: string): Mail
   const where = [...new Set(events.map((e) => teamOf(titles, e.team)))];
   if (events.length === 1) {
     const link = `${base}${first.path}`;
-    const action = first.kind === "question" ? "Answer it" : "See it";
+    const action = first.kind === "question" ? "Answer it" : first.kind === "decided" ? "Agree with it, or overturn it" : "See it";
     return {
       subject: `[${where[0]}] ${SUBJECT[first.kind](first)}`,
       text: [SUBJECT[first.kind](first), first.detail, `${action}: ${link}`, footer(base)].filter(Boolean).join("\n\n"),
@@ -146,11 +150,20 @@ export interface StillWaiting {
   team: string;
   items: { id: string; title: string; status: string; since: string }[];
 }
+// The calls a team made for them and flagged that they haven't reviewed yet.
+export interface ToReview {
+  team: string;
+  count: number;
+}
 
-// The daily digest: what still waits on them (when they asked for that), then what happened since the last one.
-export function digestMail(events: TeamEvent[], waiting: StillWaiting[], titles: Titles, base: string, day: string): Mail {
+// The daily digest: what still waits on them and what's still theirs to review (when they asked for that), then what
+// happened since the last one.
+export function digestMail(events: TeamEvent[], waiting: StillWaiting[], titles: Titles, base: string, day: string, reviews: ToReview[] = []): Mail {
   const open = waiting.reduce((n, w) => n + w.items.length, 0);
-  const subject = [open ? `${open} waiting on you` : "", events.length ? plural(events.length, "update") : ""].filter(Boolean).join(", ");
+  const unreviewed = reviews.reduce((n, r) => n + r.count, 0);
+  const subject = [open ? `${open} waiting on you` : "", unreviewed ? `${unreviewed} to review` : "", events.length ? plural(events.length, "update") : ""]
+    .filter(Boolean)
+    .join(", ");
   const parts: string[] = [`Your Anything Factory digest for ${day}.`];
   if (open) {
     parts.push(
@@ -164,9 +177,23 @@ export function digestMail(events: TeamEvent[], waiting: StillWaiting[], titles:
       ].join("\n")
     );
   }
+  if (unreviewed)
+    parts.push(
+      [
+        "Decided for you, and not reviewed yet:",
+        ...reviews
+          .filter((r) => r.count)
+          .map((r) => `- ${teamOf(titles, r.team)}: ${plural(r.count, "call")} the team flagged\n  ${base}/t/${r.team}/decided`),
+      ].join("\n")
+    );
   if (events.length) parts.push(["Since your last digest:", ...grouped(events, titles, base)].join("\n").trim());
   parts.push(footer(base));
-  return { subject: `[Anything Factory] ${subject || "Your digest"}`, text: parts.join("\n\n"), link: open ? `${base}/inbox` : `${base}/` };
+  const first = reviews.find((r) => r.count);
+  return {
+    subject: `[Anything Factory] ${subject || "Your digest"}`,
+    text: parts.join("\n\n"),
+    link: open ? `${base}/inbox` : first ? `${base}/t/${first.team}/decided` : `${base}/`,
+  };
 }
 
 // The test email from the settings page: what they'll get, to the address they'll get it at.

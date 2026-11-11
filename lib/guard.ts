@@ -22,7 +22,7 @@ import {
   roleForInstance,
   type Team,
 } from "./config.ts";
-import { messageKind, waitReason } from "./contact.ts";
+import { contactInForce, messageKind, waitReason } from "./contact.ts";
 import { paceAllowance } from "./pace.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
@@ -1121,8 +1121,8 @@ export function check(input: HookInput): void {
       // A new message's subject carries the planner's label, so the operator can filter on it (a reply keeps its thread's).
       if (/__(send_message|create_draft|send_email|send)$/.test(tool) && !String(args.subject ?? "").startsWith(PLANNER_TAG))
         refuse(`the planner's email subjects start with ${PLANNER_TAG}: "${PLANNER_TAG} [${team.title}] <short subject>".`);
-      // How often (team.json contact): the sent hook records each message that went.
-      const wait = waitReason(team.contact, messageKind(String(args.subject ?? "")), run);
+      // How often (team.json contact, or the working agreement's): the sent hook records each message that went.
+      const wait = waitReason(contactInForce(run, team.contact), messageKind(String(args.subject ?? "")), run);
       if (wait) refuse(wait);
     }
   }

@@ -6,6 +6,7 @@ import { AgreementForm } from "../../../../components/agreement-form.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../components/ui.tsx";
 import {
   CONFIDENCE_MEANS,
+  contactWords,
   GRADES,
   type Grade,
   isReserved,
@@ -17,9 +18,9 @@ import {
   STAKES_MEAN,
   tableOf,
 } from "../../../../../lib/tasks/agreement.ts";
-import { checkIns } from "../../../../../lib/tasks/decisions.ts";
+import { calibrationHints, checkIns } from "../../../../../lib/tasks/decisions.ts";
 import { can } from "../../../../server/access.ts";
-import { agreementHistory, agreementPending, readsAgreement, topicRows, toYou } from "../../../../server/decided.ts";
+import { agreementHistory, agreementPending, hintSays, messagesFields, readsAgreement, topicRows, toYou } from "../../../../server/decided.ts";
 import { agreementOf } from "../../../../server/factory.ts";
 import { askedBy } from "../../../../server/views.ts";
 import { controlsFor, decisionsFor, tasksOf, teamFor } from "../team.ts";
@@ -84,7 +85,11 @@ export default async function AgreementPage({ params, searchParams }: { params: 
   const asked = rows.filter((row) => !row.locked && row.setting === "ask").map((row) => row.topic);
   const never = rows.filter((row) => row.locked === "never" || (!row.locked && row.setting === "decide")).map((row) => row.topic);
   const history = agreementHistory(controls);
-  const stats = checkIns(decisions, tasks, controls, new Date(Date.now() - DAYS * 86_400_000).toISOString());
+  const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
+  const stats = checkIns(decisions, tasks, controls, since);
+  // What the operator's own reviews and answers under the agreement in force suggest about it (since it was last
+  // changed, within that time); nothing is changed for them.
+  const hints = reads ? calibrationHints(decisions, tasks, controls, agreement, since, operator) : [];
   const base = `/t/${team.name}`;
   return (
     <>
@@ -94,9 +99,9 @@ export default async function AgreementPage({ params, searchParams }: { params: 
         and flags the call for your review, or decides and records it. Change it whenever the check-ins are too many, too few or about the wrong things.
       </p>
       <p className="lede small">
-        It routes judgments, so three things stay as they are at every level. What only you know or hold (a key, an account, a fact about your business)
-        still comes to you, as blocked work in Waiting on you. Who approves the planner&apos;s proposals, and how often a message may reach you, are the
-        team&apos;s own settings (<code>approval</code> and <code>contact</code> in its <code>team.json</code>).
+        It routes judgments, so two things stay as they are at every level. What only you know or hold (a key, an account, a fact about your business)
+        still comes to you, as blocked work in Waiting on you. Who approves the planner&apos;s proposals is the team&apos;s own setting (
+        <code>approval</code> in its <code>team.json</code>). How often a message may reach you can be set here too, in place of the team&apos;s own.
       </p>
       {reads ? null : (
         <p className="notice">
@@ -118,6 +123,8 @@ export default async function AgreementPage({ params, searchParams }: { params: 
             <dd>{never.length ? never.join(", ") : <span className="muted">nothing</span>}</dd>
             <dt>Always yours</dt>
             <dd>{RESERVED.join(", ")}</dd>
+            <dt>Messages</dt>
+            <dd>{agreement.contact ? contactWords(agreement.contact) : <span className="muted">as the team&apos;s own settings say</span>}</dd>
             <dt>Set</dt>
             <dd>
               {control ? (
@@ -164,6 +171,35 @@ export default async function AgreementPage({ params, searchParams }: { params: 
         </section>
       </div>
 
+      {hints.length ? (
+        <section className="panel" aria-labelledby="hints">
+          <h2 id="hints">
+            What your reviews and answers suggest <span className="muted">{hints.length}</span>
+          </h2>
+          <p className="hint">
+            From what you reviewed and answered under the agreement in force: since it was last changed, and at most the last {DAYS} days. Nothing changes
+            until you change it <a href="#change">below</a>.
+          </p>
+          <ul className="plain rows hints">
+            {hints.map((hint) => (
+              <li key={`${hint.topic ?? "level"}-${hint.set}`}>
+                <p>{hint.why}</p>
+                <p className="suggests">
+                  <b>{hintSays(hint)}</b>
+                  <span className="muted small">
+                    {" "}
+                    · in the terminal:{" "}
+                    <code>
+                      a6g agreement {team.name} {hint.flag}
+                    </code>
+                  </span>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel" aria-labelledby="levels">
         <h2 id="levels">What each level does with a question</h2>
         <p className="hint">
@@ -206,6 +242,7 @@ export default async function AgreementPage({ params, searchParams }: { params: 
               level: agreement.level,
               topics: Object.fromEntries(rows.filter((row) => !isReserved(row.topic)).map((row) => [row.topic, row.setting])),
               notes: agreement.notes,
+              ...messagesFields(agreement.contact),
             }}
             never={rows.filter((row) => row.locked === "never").map((row) => row.topic)}
           />

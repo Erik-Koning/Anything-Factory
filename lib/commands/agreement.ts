@@ -9,6 +9,7 @@ import type { RegistryEntry } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import {
   type Agreement,
+  type AgreementContact,
   agreementChanges,
   agreementFrom,
   agreementLines,
@@ -21,10 +22,10 @@ import {
   type TopicRule,
 } from "../tasks/agreement.ts";
 import { agreementControl, agreementOf, type Control } from "../tasks/controls.ts";
-import { checkIns } from "../tasks/decisions.ts";
+import { calibrationHints, checkIns, type Hint } from "../tasks/decisions.ts";
 import { OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore } from "../tasks/store.ts";
-import { die, localTime, parseArgs, text as optionText } from "../util.ts";
+import { die, localTime, minutes, parseArgs, text as optionText } from "../util.ts";
 import { entryFor, recordControl } from "./team.ts";
 
 const SETTABLE = TOPICS.filter((topic) => !isReserved(topic));
@@ -32,6 +33,10 @@ const USAGE = `usage: a6g agreement <team>                      the working agre
        a6g agreement <team> [--level ${LEVELS.join("|")}]
                             [--ask <topics>] [--never <topics>] [--follow <topics>]   (${SETTABLE.join(", ")})
                             [--notes "<your standing instructions>" | --notes-file <file> | --clear-notes]
+                            [--messages digest --every <2h|30m|1d> | --messages priority | --messages team]
+                                                   how often a message may reach you: everything open together at
+                                                   most once per window, each as soon as it's needed, or as the
+                                                   team's own settings say (team.json contact)
                             [--reset]              back to the default: balanced, scope always asked, no instructions`;
 
 // Whether the team's operator is technical (team.json), for how the agreement reads; a checkout that can't be read
@@ -64,7 +69,7 @@ export async function agreement(argv: string[]): Promise<number> {
     console.info(USAGE);
     return 0;
   }
-  const known = ["level", "ask", "never", "follow", "notes", "notes-file", "clear-notes", "reset"];
+  const known = ["level", "ask", "never", "follow", "notes", "notes-file", "clear-notes", "messages", "every", "reset"];
   const unknown = Object.keys(options).filter((key) => key !== "--" && !known.includes(key));
   if (unknown.length) die(`${USAGE}\n(not ${unknown.map((k) => `--${k}`).join(", ")})`);
   const entry = entryFor(positional[0] ?? die(USAGE));
@@ -73,9 +78,13 @@ export async function agreement(argv: string[]): Promise<number> {
   const store = await openStore({ name: entry.name, tasks }, entry.run);
   let controls: Control[];
   let stats: ReturnType<typeof checkIns>;
+  let hints: Hint[];
   try {
     controls = await store.controls.all();
-    stats = checkIns(await store.decisions.all(), await store.tasks.all(), controls, new Date(Date.now() - 30 * 86_400_000).toISOString());
+    const [decisions, all] = [await store.decisions.all(), await store.tasks.all()];
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    stats = checkIns(decisions, all, controls, since);
+    hints = calibrationHints(decisions, all, controls, agreementOf(controls).agreement, since, operator);
   } finally {
     await store.close();
   }
@@ -98,9 +107,16 @@ export async function agreement(argv: string[]): Promise<number> {
         current.agreement.notes ? `\nYour standing instructions:\n\n${current.agreement.notes}` : "No standing instructions.",
         "",
         `The last 30 days: ${stats.asked} asked of you, ${stats.decided} decided for you (${stats.flagged} flagged, ${stats.overturned} overturned); ${stats.toReview} to review now (a6g decision list --to-review, in the team's checkout).`,
+        ...(hints.length
+          ? [
+              "",
+              "What your reviews and answers suggest (yours to take or leave):",
+              ...hints.map((h) => `  ${h.why} a6g agreement ${entry.name} ${h.flag}`),
+            ]
+          : []),
         ...(history.length ? ["", "History:", ...history] : []),
         "",
-        `Change it: a6g agreement ${entry.name} --level ${LEVELS.join("|")} [--ask scope,cost] [--never design] [--notes "…"]`,
+        `Change it: a6g agreement ${entry.name} --level ${LEVELS.join("|")} [--ask scope,cost] [--never design] [--notes "…"] [--messages digest --every 4h]`,
       ].join("\n")
     );
     return 0;
@@ -133,11 +149,28 @@ export async function agreement(argv: string[]): Promise<number> {
     }
   } else if (options["notes"] !== undefined) notes = optionText(options["notes"]) ?? die('--notes "<your standing instructions>" (or --clear-notes)');
   const level = options["level"] === undefined ? null : (optionText(options["level"]) ?? die(`--level ${LEVELS.join("|")}`));
+  // How often a message may go: a digest with its window, each as it's needed, or the team's own setting again.
+  const MESSAGES = "--messages digest --every <2h|30m|1d>, --messages priority, or --messages team (as team.json contact says)";
+  const messages = options["messages"] === undefined ? undefined : (optionText(options["messages"]) ?? die(MESSAGES));
+  if (messages !== undefined && !["digest", "priority", "team"].includes(messages)) die(MESSAGES);
+  if (options["every"] !== undefined && messages !== "digest") die(`--every is a digest's window: ${MESSAGES}`);
+  let contact: AgreementContact | "team" | undefined;
+  if (messages === "team") contact = "team";
+  else if (messages === "priority") contact = { mode: "priority", everyMin: 0 };
+  else if (messages === "digest") {
+    let every: number;
+    try {
+      every = minutes(optionText(options["every"]) ?? die(`a digest goes at most once per window: ${MESSAGES}`), 0);
+    } catch (error) {
+      die(`--every: ${(error as Error).message}`);
+    }
+    contact = { mode: "digest", everyMin: Math.round(every) };
+  }
   const build = (inForce: Agreement): Agreement => {
     const base = options["reset"] ? DEFAULT_AGREEMENT : inForce;
     const topics: Record<string, TopicRule | "follow"> = { ...base.topics };
     for (const [topic, [, rule]] of named) topics[topic] = rule;
-    const made = agreementFrom({ level: level ?? base.level, topics, notes: notes ?? base.notes });
+    const made = agreementFrom({ level: level ?? base.level, topics, notes: notes ?? base.notes, contact: contact ?? base.contact });
     return "problem" in made ? die(made.problem) : made;
   };
   if (sameAgreement(build(current.agreement), current.agreement)) {

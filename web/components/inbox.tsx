@@ -140,12 +140,14 @@ function WaitingItem({
       <Heading base={base} task={t} journey={w.journey} />
       <p className="small muted">
         {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
-        {/* A question the planner raised says which rule of the working agreement made it the operator's. */}
+        {/* A question the planner raised says which rule of the working agreement made it the operator's, and how it
+            judged it; one the approver escalated says the approval rule, which is the team's own setting and not the
+            agreement's to change. */}
         {t.status === "question" && t.ask?.rule ? (
           <span className="asked-because">
             Asked because: {t.ask.rule}
             {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
-            {agreement ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
+            {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
           </span>
         ) : null}
       </p>

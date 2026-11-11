@@ -1,8 +1,9 @@
 // a6g serve: the operator's page for one team, on the always-on machine. Stakeholders' feature requests come in through
 // its form; it shows the open requests (with who sent them, which only this page and the operator's own commands
 // show), the board by status, what waits for the operator (proposals with Approve and Reject, questions with what was
-// asked and a box for the answer), and the task graph. Approving, rejecting and answering run `a6g task` as the
-// operator, so every rule there applies here too.
+// asked, why, and a box for the answer), what the team decided in their place (the decision log, with Agree and
+// Overturn, under the working agreement in force), and the task graph. Approving, rejecting, answering and reviewing
+// run `a6g task` and `a6g decision` as the operator, so every rule there applies here too.
 //
 // It's node:http and nothing else: no dependencies, no external assets, the CSS and the little JS inline. It binds
 // 127.0.0.1 unless told otherwise, and always asks for a token: A6G_SERVE_TOKEN, or one made at start and printed in
@@ -15,7 +16,10 @@ import type { AddressInfo } from "node:net";
 import type { Team } from "../config.ts";
 import { entryOf, FACTORY_ROOT } from "../paths.ts";
 import { operatorOnly, teamSession } from "../session.ts";
+import { agreementLines } from "../tasks/agreement.ts";
 import { waitsOnOperator } from "../tasks/answer.ts";
+import { agreementOf, type Control } from "../tasks/controls.ts";
+import { type DecisionRecord, flagged, reviewOf, toReview } from "../tasks/decisions.ts";
 import { betterDiagram, layout } from "../tasks/graph.ts";
 import { answersOn, claimRank, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
@@ -307,6 +311,16 @@ export async function startServer({ home, run, team, host, port, token }: ServeO
       const result = await asOperator(home, run, ["task", action, id, ...(text ? [`--${action === "approve" ? "note" : "reason"}=${text}`] : [])]);
       return sendJson(res, result.ok ? 200 : 422, result);
     }
+    // The operator's review of a decision the team made for them (a6g decision review): agree, or overturn it and say
+    // what to do instead.
+    const review = /^\/api\/decisions\/(d[1-9]\d*)\/(agree|overturn)$/.exec(path);
+    if (method === "POST" && review) {
+      const [, id = "", action = ""] = review;
+      const note = (fieldsOf(req, await readBody(req))["note"] ?? "").trim();
+      if (action === "overturn" && !note) return sendJson(res, 400, { ok: false, output: "say what to do instead: the planner acts on your words" });
+      const result = await asOperator(home, run, ["decision", "review", id, action, ...(note ? [`--note=${note}`] : [])]);
+      return sendJson(res, result.ok ? 200 : 422, result);
+    }
     return refuse(404, `no ${method} ${path} here`);
   };
 
@@ -402,7 +416,14 @@ async function page(
   team: Team,
   { nonce, form = {}, problem = null }: { nonce: string; form?: Record<string, string>; problem?: string | null }
 ): Promise<string> {
-  const [tasks, requests, stakeholders] = await Promise.all([store.tasks.all(), store.requests.all(), store.stakeholders.all()]);
+  const [tasks, requests, stakeholders, decisions, controls] = await Promise.all([
+    store.tasks.all(),
+    store.requests.all(),
+    store.stakeholders.all(),
+    store.decisions.all(),
+    store.controls.all(),
+  ]);
+  const reviewing = toReview(decisions, controls).length;
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const people = new Map(stakeholders.map((s) => [s.id, s]));
   // What waits on the operator: proposals to decide, questions, and blocked work raised to them (answer.ts).
@@ -423,9 +444,10 @@ async function page(
 <main>
 <header>
   <h1>${esc(team.title)}</h1>
-  <p class="muted">${proposals.length} waiting for you · ${open.length} open request${open.length === 1 ? "" : "s"} · ${inFlight} task${inFlight === 1 ? "" : "s"} in flight · ${tasks.filter((t) => t.status === "done").length} done</p>
+  <p class="muted">${proposals.length} waiting for you · ${reviewing ? `${reviewing} decided for you to review · ` : ""}${open.length} open request${open.length === 1 ? "" : "s"} · ${inFlight} task${inFlight === 1 ? "" : "s"} in flight · ${tasks.filter((t) => t.status === "done").length} done</p>
 </header>
 ${proposalsSection(proposals)}
+${decidedSection(team, decisions, controls)}
 <div class="two">
 ${formSection(form, problem)}
 ${requestsSection(open, people, byId)}
@@ -453,6 +475,7 @@ function proposalsSection(proposals: Task[]): string {
     const question = asked
       ? `<p class="body"><b>Why it's yours:</b> ${esc(asked.reason)}</p>
   ${asked.recommendation ? `<p class="why"><b>The team recommends:</b> ${esc(asked.recommendation)}</p>` : ""}
+  ${asked.rule ? `<p class="why muted small">Asked because: ${esc(asked.rule)}</p>` : ""}
   ${said ? `<p class="why"><b>You answered:</b> ${esc(clip(said.text, 600))} <span class="muted">(the planner moves it on)</span></p>` : ""}`
       : "";
     const answer = asked
@@ -492,6 +515,65 @@ function proposalsSection(proposals: Task[]): string {
   return `<section>
   <h2>Waiting for you</h2>
   ${proposals.length ? `<ul class="plain">${proposals.map(item).join("\n")}</ul>` : `<p class="muted">Nothing is waiting for you.</p>`}
+</section>`;
+}
+
+// What the team decided in the operator's place (lib/tasks/decisions.ts), under the working agreement in force: what's
+// flagged and not reviewed, each with Agree and Overturn, then the rest of the record, folded.
+function decidedSection(team: Team, decisions: DecisionRecord[], controls: Control[]): string {
+  const { agreement, control } = agreementOf(controls);
+  const item = (d: DecisionRecord): string => {
+    const review = reviewOf(d, controls);
+    const said = review
+      ? `<p class="why"><b>You ${review.verdict === "agreed" ? "agreed" : "overturned it"}${review.pending ? " (the team's machine applies it within a minute)" : ""}.</b> ${esc(clip(review.note, 600))}</p>`
+      : "";
+    // Agreed may still be overturned; overturned stands.
+    const forms =
+      review?.verdict === "overturned"
+        ? ""
+        : `<div class="verdict">
+    ${
+      review
+        ? ""
+        : `<form method="post" action="/api/decisions/${esc(d.id)}/agree" data-api>
+      <input name="note" placeholder="Note (optional)" maxlength="500" aria-label="Note for agreeing with ${esc(d.id)}">
+      <button class="approve">Agree</button>
+      <output></output>
+    </form>`
+    }
+    <form method="post" action="/api/decisions/${esc(d.id)}/overturn" data-api>
+      <input name="note" placeholder="What to do instead (needed)" required maxlength="2000" aria-label="What to do instead of ${esc(d.id)}">
+      <button class="reject">Overturn</button>
+      <output></output>
+    </form>
+  </div>`;
+    const notes = d.notes.map((n) => `<p class="why muted">${esc(n.by)}: ${esc(clip(n.text, 300))}</p>`).join("\n  ");
+    return `<li class="proposal" id="${esc(d.id)}">
+  <div class="head"><span class="id">${esc(d.id)}</span> <span class="title">${esc(d.question)}</span> <span class="chip">${esc(d.topic)}</span>${flagged(d) ? '<span class="chip status-question">flagged</span>' : ""}</div>
+  <p class="body"><b>The team decided:</b> ${esc(d.decision)}</p>
+  <p class="why"><b>Because:</b> ${esc(d.because)}</p>
+  ${d.options.length ? `<p class="why"><b>Weighed:</b> ${esc(d.options.join(" · "))}</p>` : ""}
+  ${d.undo ? `<p class="why"><b>To undo:</b> ${esc(d.undo)}</p>` : ""}
+  <p class="why muted small">Why you weren't asked: ${esc(d.rule)} (${d.agreement ? `agreement ${esc(d.agreement)}` : "the default agreement"}; ${esc(d.stakes)} stakes, ${esc(d.confidence)} confidence)${d.tasks.length ? ` · ${esc(d.tasks.map((id) => `#${id}`).join(", "))}` : ""}</p>
+  ${said}
+  ${notes}
+  ${forms}
+</li>`;
+  };
+  const waiting = toReview(decisions, controls);
+  const rest = decisions.filter((d) => !waiting.includes(d)).reverse();
+  const inForce = [...agreementLines(agreement, team.operator), agreement.notes ? `Your standing instructions: ${clip(agreement.notes, 400)}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  return `<section>
+  <h2>Decided for you</h2>
+  <p class="muted small">The working agreement${control ? ` (${esc(control.id)})` : ", as it starts out"}: ${esc(inForce)} Change it with <code>a6g agreement ${esc(team.name)}</code>.</p>
+  ${
+    waiting.length
+      ? `<ul class="plain">${waiting.map(item).join("\n")}</ul>`
+      : `<p class="muted">${decisions.length ? "Nothing the team flagged waits for your review." : "The team has decided nothing in your place yet."}</p>`
+  }
+  ${rest.length ? `<details><summary>On the record (${rest.length})</summary><ul class="plain">${rest.map(item).join("\n")}</ul></details>` : ""}
 </section>`;
 }
 

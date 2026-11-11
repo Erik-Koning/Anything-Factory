@@ -4,6 +4,7 @@
 // each person's daily digest once its hour has come. A queued email's id is the person and the event, so each goes
 // once however often the graph is read; a team it sees for the first time has no news yet.
 import { randomUUID } from "node:crypto";
+import { toReview } from "../../lib/tasks/decisions.ts";
 import type { Task } from "../../lib/tasks/model.ts";
 import { can, type TeamRole, type Viewer } from "./access.ts";
 import { isAdminRole } from "./auth.ts";
@@ -23,6 +24,7 @@ import {
   type Prefs,
   prefsOr,
   type StillWaiting,
+  type ToReview,
   widestRole,
 } from "./notifications.ts";
 import { type Membership, memberships } from "./people.ts";
@@ -127,11 +129,20 @@ export async function notifyOnce(now = new Date()): Promise<Run> {
   const titles = new Map(teams.map((t) => [t.name, t.title || t.name]));
   const viewers = new Map(everyone.map((p) => [p.userId, viewerOf(p, rows)]));
   const graphs = new Map<string, Task[]>();
+  // How many of each team's flagged calls nobody has reviewed yet, for the digest's reminder.
+  const unreviewed = new Map<string, number>();
   let queued = 0;
   for (const team of teams) {
     const store = storeFor(team.name);
-    const [tasks, requests, stakeholders] = await Promise.all([store.tasks.all(), store.requests.all(), store.stakeholders.all()]);
+    const [tasks, requests, stakeholders, decisions, controls] = await Promise.all([
+      store.tasks.all(),
+      store.requests.all(),
+      store.stakeholders.all(),
+      store.decisions.all(),
+      store.controls.all(),
+    ]);
     graphs.set(team.name, tasks);
+    unreviewed.set(team.name, toReview(decisions, controls).length);
     const cursorId = `team:${team.name}`;
     const state = team.status?.state ?? null;
     const cursor = await marks().findOne({ _id: cursorId });
@@ -141,7 +152,7 @@ export async function notifyOnce(now = new Date()): Promise<Run> {
     }
     const since = [new Date(Date.parse(cursor.through) - OVERLAP_MS).toISOString(), cursor.from ?? ""].sort().at(-1) ?? cursor.through;
     const changed = stateEvent(team.name, titles.get(team.name) ?? team.name, team.status, cursor.state ?? null);
-    const events = [...eventsOf(team.name, tasks, requests, since), ...(changed ? [changed] : [])];
+    const events = [...eventsOf(team.name, tasks, requests, since, decisions), ...(changed ? [changed] : [])];
     const owners = new Map(stakeholders.map((s) => [s.id, s.userId ?? null]));
     const docs: Queued[] = [];
     for (const person of everyone) {
@@ -172,7 +183,7 @@ export async function notifyOnce(now = new Date()): Promise<Run> {
     await marks().updateOne({ _id: cursorId }, { $set: { through: now.toISOString(), state } });
   }
   const sent = await sendNow(now, everyone, titles, settings.baseURL);
-  const digests = await sendDigests(now, everyone, viewers, saved, graphs, titles, settings);
+  const digests = await sendDigests(now, everyone, viewers, saved, graphs, unreviewed, titles, settings);
   return { skipped: false, queued, sent, digests };
 }
 
@@ -229,6 +240,7 @@ async function sendDigests(
   viewers: ReadonlyMap<string, Viewer>,
   saved: ReadonlyMap<string, Prefs>,
   graphs: ReadonlyMap<string, Task[]>,
+  unreviewed: ReadonlyMap<string, number>,
   titles: ReadonlyMap<string, string>,
   settings: { baseURL: string; notifyTimeZone: string }
 ): Promise<number> {
@@ -258,11 +270,17 @@ async function sendDigests(
           })
           .filter((w) => w.items.length)
       : [];
-    if (items.length || waiting.length) {
+    // And the calls the team made for them that they haven't reviewed, on the teams where they review.
+    const reviews: ToReview[] = prefs.reminder
+      ? [...unreviewed]
+          .filter(([team, count]) => count > 0 && can(viewer, "proposals:decide", team) && !prefs.muted.includes(team))
+          .map(([team, count]) => ({ team, count }))
+      : [];
+    if (items.length || waiting.length || reviews.length) {
       const day = new Intl.DateTimeFormat("en-CA", { timeZone: prefs.timeZone, weekday: "long", month: "long", day: "numeric" }).format(now);
       const ids = items.map((q) => q._id);
       try {
-        await sendMail({ to: person.email, ...digestMail(items.map(eventOf), waiting, titles, settings.baseURL, day) });
+        await sendMail({ to: person.email, ...digestMail(items.map(eventOf), waiting, titles, settings.baseURL, day, reviews) });
         if (ids.length) await queue().updateMany({ _id: { $in: ids } }, { $set: { sentAt: now, error: null } });
         sent++;
       } catch (error) {

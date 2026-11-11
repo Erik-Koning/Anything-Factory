@@ -19,7 +19,7 @@ import {
   taskProblem,
   TEAM_PARAM,
 } from "../../../server/access.ts";
-import { readsAgreement } from "../../../server/decided.ts";
+import { contactOfForm, readsAgreement } from "../../../server/decided.ts";
 import {
   addTaskFromWeb,
   agreementFromWeb,
@@ -40,7 +40,7 @@ import {
   storeFor,
   teamDoc,
 } from "../../../server/factory.ts";
-import { answerText, waitingOf } from "../../../server/inbox.ts";
+import { answerText, asRecommended, waitingOf } from "../../../server/inbox.ts";
 import { memberships, takeRequestAllowance } from "../../../server/people.ts";
 import { checkCode } from "../../../server/step-up.ts";
 import { allowed, authHeaders, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
@@ -242,10 +242,21 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     if (extra.length > LIMITS.note) return again(`Keep it to ${LIMITS.note.toLocaleString("en")} characters.`);
     const task = await storeFor(team).tasks.get(id);
     if (!task) return again(`There's no task #${id} on this team.`);
-    const said = answerText(pick, extra, waitingOf(task, [task]));
+    const waiting = waitingOf(task, [task]);
+    const said = answerText(pick, extra, waiting);
     if ("problem" in said) return again(said.problem);
-    await answerAsOperator(team, id, said.text);
-    await record(viewer, { action: "task.answered", outcome: "ok", team, target: `#${id} ${task.title}`, detail: clip(said.text, 300) });
+    // The team's recommendation as it stood (the one it gave when it raised the task, not one read out of the task's
+    // words; the recommendation, or the option it names, with nothing added) is answered as that: the factory writes
+    // its words and marks the answer so. Anything else is the operator's own answer, in the form's words.
+    const recommended = waiting.recommendationFrom === "asked" && asRecommended(pick, extra, waiting);
+    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended);
+    await record(viewer, {
+      action: "task.answered",
+      outcome: "ok",
+      team,
+      target: `#${id} ${task.title}`,
+      detail: clip(answered.notes.at(-1)?.text ?? said.text, 300),
+    });
   } catch (error) {
     const reason = reasonOf(error);
     await record(viewer ?? (await getViewer()), {
@@ -400,6 +411,10 @@ export interface AgreementFormState {
   // Each topic the agreement may set: "follow", "ask" or "decide".
   topics: Record<string, string>;
   notes: string;
+  // How often a message may reach the operator: "team" (the team's own settings), "digest" or "priority"; and a
+  // digest's window, in hours.
+  messages: string;
+  every: string;
 }
 
 // An admin changes the team's working agreement, as the operator, with a code from their authenticator: how readily
@@ -411,7 +426,9 @@ export async function agreementAction(_previous: AgreementFormState, form: FormD
   const level = text(form, "level");
   const topics = Object.fromEntries(TOPICS.filter((topic) => !isReserved(topic)).map((topic) => [topic, text(form, `topic-${topic}`) || "follow"]));
   const notes = text(form, "notes");
-  const again = (error: string): AgreementFormState => ({ error, level, topics, notes });
+  const messages = text(form, "messages") || "team";
+  const every = text(form, "every");
+  const again = (error: string): AgreementFormState => ({ error, level, topics, notes, messages, every });
   if (!TEAM_PARAM.test(team)) return again("No such team.");
   let viewer = null;
   let said: string;
@@ -421,13 +438,15 @@ export async function agreementAction(_previous: AgreementFormState, form: FormD
     if (!doc) throw new Refused("No such team.");
     if (!readsAgreement(doc)) throw new Refused("This team's factory version doesn't read the agreement yet: upgrade it first (a6g upgrade).");
     // Everything that could be wrong with it is said before the code is asked of the authenticator: a code works once.
-    const made = agreementFrom({ level, topics, notes });
+    const often = contactOfForm(messages, every);
+    if ("problem" in often) throw new Refused(often.problem);
+    const made = agreementFrom({ level, topics, notes, contact: often.contact });
     if ("problem" in made) throw new Refused(made.problem);
     if (sameAgreement(agreementOf(await controlsOf(team)).agreement, made)) throw new Refused("Nothing changed: the agreement says that already.");
     const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
     if (wrong) throw new Refused(wrong);
     const from = (await stakeholderOf(team, viewer, "operator")).id;
-    const { control, changes } = await agreementFromWeb(team, { level, topics, notes, from });
+    const { control, changes } = await agreementFromWeb(team, { level, topics, notes, contact: often.contact, from });
     said = changes.join("; ");
     await record(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {

@@ -13,7 +13,7 @@ import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { reachSummary } from "../../lib/channels.ts";
 import { DEFAULT_MIN_QUEUE, instancesOf } from "../../lib/config.ts";
-import { contactStatus } from "../../lib/contact.ts";
+import { contactInForce, contactStatus } from "../../lib/contact.ts";
 import { stateDir } from "../../lib/paths.ts";
 import { promptFile, promptStale, writePrompt } from "../../lib/prompts.ts";
 import { type HookInput, inTeam, teamSession } from "../../lib/session.ts";
@@ -117,7 +117,7 @@ if (event === "UserPromptSubmit") {
     slots(),
     finished.length ? `Merge queue results:\n${finished.join("\n")}` : null,
     existsSync(drain) ? `Draining for an environment reset: no new ${readFileSync(drain, "utf8").trim()} until a6g drain off.` : null,
-    contactStatus(team.contact, run),
+    contactStatus(contactInForce(run, team.contact), run),
     await graph(),
     paused,
   ]
@@ -142,7 +142,7 @@ if (event === "UserPromptSubmit") {
       parts.push(
         `Not reaching the operator now: ${failing.join("; ")}. The watchdog has told them on their Mac.${working.length ? "" : " Until it works, use Gmail if you have it."}`
       );
-    const contact = contactStatus(team.contact, run);
+    const contact = contactStatus(contactInForce(run, team.contact), run);
     if (contact) parts.push(contact);
     parts.push(slots());
     const tasks = await graph();

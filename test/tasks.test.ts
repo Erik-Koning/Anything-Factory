@@ -487,6 +487,8 @@ describe("a6g task, from proposal to merge", () => {
       recommendation: "approve it: it's the launch",
       by: "approver",
       at: (await store().tasks.get("2"))?.ask?.at,
+      // Which approval rule sent it up: the operator's inbox says so.
+      rule: "the approval rules: size L is over this team's M (team.json approval)",
     });
     assert.equal((await store().tasks.get("2"))?.status, "question");
     assert.equal((await a6g(["task", "approve", "2"], as(null))).code, 0, "the operator answers it");

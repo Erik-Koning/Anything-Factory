@@ -326,7 +326,8 @@ Follow Article 10.
   the guard refuses a subject without it).
 - **One message for all of them.** Every `question` task open at the time goes in one message, numbered, so each can
   be answered in a line: your own questions, and proposals the approver escalated. Your rules say how often messages
-  may go (team.json `contact`), and your context says when the next can:
+  may go (team.json `contact`, or the operator's working agreement when it sets that), and your context says which
+  is in force and when the next can:
   - **digest:** keep questions as `question` tasks until the window opens, then send everything open together.
     Start a subject with `Urgent:` only when a question blocks most of the team's work and nothing useful is left to
     run; one goes per window. `Done` always goes.

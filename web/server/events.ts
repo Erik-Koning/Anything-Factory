@@ -1,17 +1,21 @@
 // What happened on a team that someone may want to hear about, worked out from its graph's history (never stored):
-// a question for the operator, work that's blocked, a merge, a journey done, a request taken up or turned down, the
-// team stopping or finishing. Pure: the notifier (notifier.ts) reads it, and the unit tests prove it. Each event has
-// an id of its own, made from what it is and when, so it's emailed to a person once however often it's read.
+// a question for the operator, a call the team made in their place and flagged, work that's blocked, a merge, a
+// journey done, a request taken up or turned down, the team stopping or finishing. Pure: the notifier (notifier.ts)
+// reads it, and the unit tests prove it. Each event has an id of its own, made from what it is and when, so it's
+// emailed to a person once however often it's read.
+import { type DecisionRecord, flagged } from "../../lib/tasks/decisions.ts";
 import { MERGE, OPERATOR, type FeatureRequest, type Task } from "../../lib/tasks/model.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
 import type { Ability } from "./access.ts";
 
-export const EVENT_KINDS = ["question", "blocked", "journey", "team", "merged", "request"] as const;
+export const EVENT_KINDS = ["question", "decided", "blocked", "journey", "team", "merged", "request"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
 // Who may hear of each kind: what they'd need to see it in the app.
 export const AUDIENCE: Record<EventKind, Ability> = {
   question: "proposals:decide",
+  // A call the team made in the operator's place and flagged: for those who review it.
+  decided: "proposals:decide",
   blocked: "team:board",
   journey: "team:overview",
   team: "team:overview",
@@ -49,10 +53,30 @@ function raisedDetail(t: Task, moved: string): string {
   return [reason ? `Why it's yours: ${reason}` : "", recommendation ? `The team recommends: ${recommendation}` : "", t.body].filter(Boolean).join("\n\n");
 }
 
-// The events in `tasks` and `requests` from `since` (ISO) on, oldest first.
-export function eventsOf(team: string, tasks: Task[], requests: FeatureRequest[], since: string): TeamEvent[] {
+// What an email says of a call the team made for the operator: what it chose, what that follows from, and how it's
+// undone, a paragraph each, as its record on the Decided for you page has them.
+const decidedDetail = (d: DecisionRecord): string =>
+  [`The team decided: ${clip(d.decision, 320)}`, `Because: ${clip(d.because, 240)}`, d.undo ? `To undo it: ${clip(d.undo, 140)}` : ""]
+    .filter(Boolean)
+    .join("\n\n");
+
+// The events in `tasks`, `requests` and `decisions` from `since` (ISO) on, oldest first.
+export function eventsOf(team: string, tasks: Task[], requests: FeatureRequest[], since: string, decisions: DecisionRecord[] = []): TeamEvent[] {
   const base = `/t/${team}`;
   const events: TeamEvent[] = [];
+  // Decided in the operator's place, and flagged for them: once, when it's recorded.
+  for (const d of decisions) {
+    if (d.at < since || !flagged(d)) continue;
+    events.push({
+      id: `decided:${d.id}:${Date.parse(d.at)}`,
+      kind: "decided",
+      team,
+      at: d.at,
+      title: clip(d.question, 160),
+      detail: decidedDetail(d),
+      path: `${base}/decided#${d.id}`,
+    });
+  }
   for (const t of tasks) {
     for (const e of t.history) {
       if (e.at < since || (!e.to && !e.what.startsWith("raised to the operator:"))) continue;
