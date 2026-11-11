@@ -204,6 +204,9 @@ emails a sign-in link. An invited account has no password; one that signed up is
   - An admin signs in with **password + authenticator code** (or a backup code), or with a **passkey whose
     authenticator verified them** (PIN or biometrics: the UV flag of the signed assertion, checked on the server).
   - **No magic link for admins**: none is sent to an admin's address, and a session from one is refused for an admin.
+    An admin who asks for one is emailed a note in its place (once a minute): how admins sign in, and that whoever
+    runs the site starts a locked-out admin afresh with `npm run create-admin`. The page answers the same as for
+    anyone, so without the note nothing would say why no link came.
 - **Anyone else may turn on an authenticator**, as they sign up or from their account page (a QR code, a code to
   prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on every sign-in, by passkey,
   link or password, also asks for its code. Turning it off takes a current code. An account with a password gives it
@@ -480,6 +483,10 @@ changing the domain means adding passkeys again.
   checked; `scripts/create-indexes.ts`: the app's indexes, made by an operator.
 - `server/audit.ts`: the audit log; `server/known-ips.ts`: confirmed addresses and the emails that confirm new ones;
   `server/origin-check.ts`: the CDN's secret; `server/device.ts`: a browser's name from its user agent.
+- `server/mail.ts`: sending, and how an email looks. The text part is whole. The HTML part is a heading, a line or
+  two, one button on the email's link and a line of small print where the sender gives them (sign-up, sign-in,
+  invitations, new addresses); no address is spelled out, so nobody is shown a link hundreds of characters long.
+  Other emails show their text, each address a link under a short name.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
 - `server/account-choices.ts`: the two choices made at sign-up, and whether an account has a password.
 - `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and

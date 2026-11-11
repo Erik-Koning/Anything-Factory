@@ -127,6 +127,10 @@ export async function challenge({
       "If it wasn't you, open the link and choose “It wasn't me”: every session on your account ends at once. Then tell the operator.",
     ].join("\n\n"),
     link,
+    heading: "Is this you signing in?",
+    lines: [`A sign-in to your account from ${where}, on ${deviceOf(userAgent)}, at ${now.toUTCString()}.`],
+    button: "Review this sign-in",
+    foot: `The link works for ${LINK_MINUTES} minutes. If it wasn't you, open it and choose “It wasn't me”: every session on your account ends at once.`,
   });
   await audit({ action: "ip.challenged", outcome: "ok", userId, email, ip: address, userAgent, sessionId: sessionId ?? null });
   return "sent";

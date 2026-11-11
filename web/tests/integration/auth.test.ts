@@ -680,7 +680,13 @@ test("no link for an admin, and a link from before someone became an admin gives
   const browser = new Browser();
   const seen = mails.length;
   assert.equal(await statusOf(browser.fetch("/sign-in/magic-link", { body: { email: admin.email, callbackURL: "/" } })), 200);
-  assert.equal(mails.length, seen, "nothing sent to an admin");
+  // No link: a note saying how an admin signs in, which opens nothing but the sign-in page. One a minute.
+  assert.deepEqual(
+    mails.slice(seen).map((m) => [m.to, m.subject, m.link]),
+    [[admin.email, "No sign-in link for admins on Anything Factory", `${BASE}/sign-in`]]
+  );
+  assert.equal(await statusOf(new Browser().fetch("/sign-in/magic-link", { body: { email: admin.email, callbackURL: "/" } })), 200);
+  assert.equal(mails.length, seen + 1, "one note a minute, and never a link");
 
   const email = await aPerson("promoted");
   assert.equal(await statusOf(browser.fetch("/sign-in/magic-link", { body: { email, callbackURL: "/" } })), 200);
