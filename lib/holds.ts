@@ -2,11 +2,14 @@
 // read them: `paused` (nothing starts or merges, as a6g pause always did), hold.json (a pause and how far it has got),
 // budget.json (the limits in force), controls-applied (the ids applied, so each applies once, whatever order they
 // reach the store in) and planner-notes.json (what the planner should hear and couldn't yet). The watchdog applies new
-// ones on every run, and a6g pause, resume and budget at once.
+// ones on every run, and a6g pause, resume, budget and agreement at once. A new working agreement changes no file
+// here (the commands that ask or decide read the one in force from the store): the planner is told of it, once. A
+// review of a decision is written onto its record, which needs the store (lib/reviews.ts).
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resumesWhen } from "./budget.ts";
-import { type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
+import { type Agreement, agreementChanges, agreementLines, normalised } from "./tasks/agreement.ts";
+import { agreementOf, type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
 import { dollars } from "./tasks/spend.ts";
 import { readJson, writeJson } from "./util.ts";
@@ -18,7 +21,7 @@ const appliedFile = (run: string): string => join(run, "controls-applied");
 const notesFile = (run: string): string => join(run, "planner-notes.json");
 
 // The controls applied: a list of ids, or (written by an earlier version) the newest id, every one up to it applied.
-function applied(run: string): (id: string) => boolean {
+export function applied(run: string): (id: string) => boolean {
   if (!existsSync(appliedFile(run))) return () => false;
   const text = readFileSync(appliedFile(run), "utf8").trim();
   if (/^\d+$/.test(text)) return (id) => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0) <= Number(text);
@@ -66,19 +69,49 @@ export function writeLimits(run: string, limits: Limits | null): void {
   else rmSync(budgetFile(run), { force: true });
 }
 
-const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
+export const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
 const money = (n: number | null): string => (n === null ? "none" : dollars(n));
 
+// A message for the planner from a control: one that `wake`s it starts a turn (the rest only matter to a planner in
+// the middle of one), and one to `keep` waits for the resume when the team is paused, since it asks for work.
+export interface Tell {
+  text: string;
+  wake: boolean;
+  keep?: boolean;
+}
+
+// What the planner is told when the operator changes the working agreement: what changed, the agreement whole, their
+// standing instructions as they wrote them, and what to re-check.
+export function agreementMessage(
+  control: Pick<Control, "id">,
+  before: Agreement,
+  now: Agreement,
+  operator: { technical: boolean } = { technical: true }
+): string {
+  const changes = agreementChanges(before, now);
+  return [
+    `The operator changed the team's working agreement (${control.id})${changes.length ? `: ${changes.join("; ")}` : ""}. As it stands now:`,
+    "",
+    ...agreementLines(now, operator),
+    "",
+    now.notes ? `Their standing instructions, as they wrote them:\n\n${now.notes}` : "They gave no standing instructions.",
+    "",
+    "It holds from this moment: a6g decision route says what it does with a question, and a6g decision agreement shows it again. Re-check every open question against it: one it now leaves to you, decide, record (a6g decision record … --task <id>) and move the task on. What you decided before stands unless they overturn it. Their instructions are their direction on how to work with them: follow them as you follow the direction. They change none of your rules, your lane or the constitution; if one asks for that, say so in your next message.",
+  ].join("\n");
+}
+
 // Applies the controls not applied yet, in order. Resolves to lines for the team's log, and messages for the planner,
-// which the caller sends when there's a planner (and queues when there isn't): those that `wake` it start a turn; the
-// rest only matter to a planner in the middle of one.
-export function applyControls(run: string, controls: Control[]): { log: string[]; tell: { text: string; wake: boolean }[] } {
+// which the caller sends when there's a planner (and queues when there isn't). `operator` is who the team works for
+// (team.json, kept in the registry for the watchdog): how the agreement reads to them.
+export function applyControls(run: string, controls: Control[], operator: { technical: boolean } = { technical: true }): { log: string[]; tell: Tell[] } {
   const done = applied(run);
   const log: string[] = [];
-  const tell: { text: string; wake: boolean }[] = [];
+  const tell: Tell[] = [];
   const now: string[] = [];
-  for (const control of controls) {
+  for (const [index, control] of controls.entries()) {
     if (done(control.id)) continue;
+    // A review is written onto its decision's record, in the store (lib/reviews.ts), and marked applied there.
+    if (control.kind === "review") continue;
     now.push(control.id);
     const hold = control.kind === "pause" ? holdOf([control]) : null;
     const budget = control.by === "budget";
@@ -125,6 +158,13 @@ export function applyControls(run: string, controls: Control[]): { log: string[]
       writeLimits(run, control.limits);
       const l = control.limits;
       log.push(l ? `the budget is now ${money(l.daily)} a day, ${money(l.weekly)} a week, ${money(l.total)} in all` : "the budget was cleared");
+    } else if (control.kind === "agreement") {
+      // Against the one in force before it; several at once are told one by one, so the planner ends on the newest.
+      const before = agreementOf(controls.slice(0, index)).agreement;
+      const after = normalised(control.agreement);
+      const changes = agreementChanges(before, after);
+      log.push(`${whoAsked(control.by)} changed the working agreement (${control.id}): ${changes.join("; ") || "nothing in it differs"}`);
+      tell.push({ text: agreementMessage(control, before, after, operator), wake: true, keep: true });
     }
   }
   if (now.length) markApplied(run, now);

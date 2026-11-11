@@ -1,6 +1,7 @@
 // The task graph's model: what a task and a feature request are, which statuses a task moves between and who may move
 // it, how a task is scored, and which task a member claims. Pure: the stores (files.ts, mongo.ts) keep the documents
 // and the commands (lib/commands/task.ts, request.ts) change them, each through these rules.
+import type { Grade, Topic } from "./agreement.ts";
 import { type Hold, holdRefusal, journeysUnderWay } from "./controls.ts";
 
 // "design" is the design check-in: a new project's foundation, put to the operator before features are built on it.
@@ -71,12 +72,19 @@ export interface Event {
 }
 
 // A task raised to the operator (a question, or blocked work only they can unblock): why it's theirs, and what the
-// team recommends. The operator's inbox shows both; a6g task status/escalate/ask require them.
+// team recommends. The operator's inbox shows both; a6g task status/escalate/ask require them. A question the planner
+// raises also carries how it judged it and the rule of the working agreement that made it the operator's
+// (agreement.ts): the agreement in force by its control, or null for the default.
 export interface Ask {
   reason: string;
   recommendation: string;
   by: string;
   at: string;
+  topic?: Topic;
+  stakes?: Grade;
+  confidence?: Grade;
+  rule?: string;
+  agreement?: string | null;
 }
 // A blocked task waiting on other tasks: once they're all done it closes ("close": it was folded into them) or goes
 // back to work ("resume"); if one is rejected or gone, it goes back to the planner. The merge queue and the watchdog
@@ -398,7 +406,7 @@ const journeyKept: Check = (t, to, _actor, { all }) => {
         .map((c) => `#${c.id}`)
         .join(
           ", "
-        )}), so its tests are still owed, and rejecting it is the operator's call: raise it (a6g task status ${t.id} question --reason "…" --recommend "…")`
+        )}), so its tests are still owed, and rejecting it is the operator's call: raise it, as a matter of checking less (a6g task status ${t.id} question --topic rules --stakes … --confidence … --reason "…" --recommend "…")`
     : null;
 };
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;

@@ -177,6 +177,33 @@ function fakeMongo(): MongoClientLike {
   };
 }
 
+describe("the decision log in Mongo", () => {
+  test("a decision is recorded, reviewed by a control and written onto its record, each team's apart; migrate takes it along", async () => {
+    const { recordDecision, requestReview, applyReview, reviewOf } = await import("../lib/tasks/decisions.ts");
+    const { agreementControl, agreementOf } = await import("../lib/tasks/controls.ts");
+    const client = fakeMongo();
+    const mongo = storeOver(client, { name: "fixture", tasks: { store: "mongo", database: "a6g", lead: null } });
+    const other = storeOver(client, { name: "other", tasks: { store: "mongo", database: "a6g", lead: null } });
+    const set = await mongo.controls.create(agreementControl("fixture", "web:s1", { level: "hands-on", topics: {}, notes: "Batch it." }));
+    const call = { topic: "design", stakes: "medium", confidence: "medium" } as const;
+    const d = await recordDecision(mongo, "fixture", { question: "Empty state?", decision: "A line", because: "the direction" }, call, "planner");
+    assert.deepEqual([d.id, d.route, d.agreement], ["d1", "tell", set.id]);
+    // The other team, on the default agreement, decides the same call without flagging it, under its own numbering.
+    const theirs = await recordDecision(other, "other", { question: "Empty state?", decision: "Nothing", because: "the brief" }, call, "planner");
+    assert.deepEqual([theirs.id, theirs.route, theirs.agreement], ["d1", "decide", null]);
+    assert.deepEqual(agreementOf(await other.controls.all()).control, null);
+    const asked = await requestReview(mongo, "fixture", { id: d.id, verdict: "overturned", note: "Show samples.", by: "web:s1" });
+    assert.equal(reviewOf((await mongo.decisions.get(d.id)) as typeof d, await mongo.controls.all())?.pending, true);
+    assert.equal((await applyReview(mongo, asked))?.applied, true);
+    assert.equal((await mongo.decisions.get(d.id))?.review?.note, "Show samples.");
+    assert.equal((await other.decisions.get("d1"))?.review, null);
+    // Back to files, with its controls: the record keeps its id, its review and the agreement it was made under.
+    const files = fileStore(tmp("a6g-run-"), "fixture");
+    assert.deepEqual(await migrate(mongo, files), { tasks: 0, requests: 0, stakeholders: 0, cycles: 0, controls: 2, decisions: 1 });
+    assert.deepEqual({ ...(await files.decisions.get("d1")), version: 0 }, { ...(await mongo.decisions.get("d1")), version: 0 });
+  });
+});
+
 describe("usage in Mongo", () => {
   test("a document per team, day and machine, replaced whole; read back from a day on, every machine's", async () => {
     const client = fakeMongo();
@@ -228,7 +255,7 @@ describe("moving a task graph to Mongo", () => {
     });
     await files.stakeholders.create({ team: "fixture", name: "Dana", email: "d@example.com", role: "customer", createdAt: "x" });
     const mongo = storeOver(fakeMongo(), { name: "fixture", tasks: { store: "mongo", database: "a6g", lead: null } });
-    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0, controls: 0 });
+    assert.deepEqual(await migrate(files, mongo), { tasks: 2, requests: 1, stakeholders: 1, cycles: 0, controls: 0, decisions: 0 });
     assert.deepEqual(
       (await mongo.tasks.all()).map((t) => [t.id, t.title]),
       [

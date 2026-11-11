@@ -16,6 +16,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { answerCheckInByReply, relayAnswers } from "../answers.ts";
+import { applyReviews } from "../reviews.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
 import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
@@ -785,10 +786,18 @@ function trimLog(run: string): void {
 export async function applyTeamControls(entry: RegistryEntry, log: (text: string) => void, problem: (text: string) => void): Promise<boolean> {
   if (!entry.tasks || entry.worker) return false;
   let controls: Control[];
+  // The operator's reviews of decisions are written onto their records while the store is open (lib/reviews.ts); one
+  // that can't be written now waits for the next run, and never keeps a pause from applying.
+  let reviews: Awaited<ReturnType<typeof applyReviews>> = { log: [], tell: [] };
   try {
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
       controls = await store.controls.all();
+      try {
+        reviews = await applyReviews(entry.run, store, controls);
+      } catch (error) {
+        problem(`couldn't write the operator's reviews onto the decisions: ${(error as Error).message.split("\n")[0]}`);
+      }
     } finally {
       await store.close();
     }
@@ -796,14 +805,32 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
     problem(`couldn't read the operator's controls: ${(error as Error).message.split("\n")[0]}`);
     return false;
   }
-  const applied = applyControls(entry.run, controls);
-  for (const line of applied.log) log(line);
+  const applied = applyControls(entry.run, controls, entry.operator);
+  for (const line of [...applied.log, ...reviews.log]) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
   // A planner that waits for a subscription gets them once it can work (lib/steer.ts), unless it's mid-turn anyway.
   const waits = Boolean(readSteering(entry.run)?.waiting["planner"]);
-  for (const { text, wake } of applied.tell) {
+  // Paused, as these controls leave it: what asks for work (a new agreement, an overturned decision) waits for the resume.
+  const paused = existsSync(join(entry.run, "paused"));
+  // What was kept for the planner goes first, in the order it was kept, so nothing older arrives after what's told now
+  // (an agreement kept through a pause, then changed again once the team was resumed).
+  if (!paused && planner && !waits) {
+    const held = pendingNotes(entry.run);
+    let sent = 0;
+    while (sent < held.length && t3.threadSend(planner, held[sent] ?? "")) sent++;
+    if (sent) {
+      clearNotes(entry.run, sent);
+      log(`passed ${sent} held message${sent === 1 ? "" : "s"} on to the planner`);
+    }
+  }
+  for (const { text, wake, keep } of [...applied.tell, ...reviews.tell]) {
+    if (keep && paused && !busy) {
+      queueNote(entry.run, text);
+      log("the team is paused: the planner hears of it once it's resumed");
+      continue;
+    }
     if (!wake && !busy) continue;
     if (planner && (busy || !waits) && t3.threadSend(planner, text)) continue;
     // Kept for when there's a planner to take it (the watchdog passes it on); a pause now matters only mid-turn.
@@ -816,7 +843,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
           : "no planner yet: the control waits for one"
     );
   }
-  return applied.log.length > 0;
+  return applied.log.length + reviews.log.length > 0;
 }
 
 // Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from

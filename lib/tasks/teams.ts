@@ -13,6 +13,9 @@ export interface TeamSettings {
   roles: string[];
   branch: string;
   factory: string;
+  // Who the team works for (team.json operator), which the working agreement reads: a team published by a factory
+  // version from before the agreement has none, and the app says its agreement isn't read yet.
+  operator?: Team["operator"];
   publishedAt: string;
 }
 export interface TeamState {
@@ -41,5 +44,6 @@ export const settingsOf = (team: Team, factory: string): TeamSettings => ({
   roles: Object.keys(team.roles),
   branch: team.branch,
   factory,
+  operator: team.operator,
   publishedAt: new Date().toISOString(),
 });

@@ -604,6 +604,12 @@ function ownedCommands(team: Team): [RegExp, string[], string][] {
     ],
     [a6g("task\\s+ask"), ["planner", "approver"], "the planner and the approver raise tasks to the operator, with why and what they recommend."],
     [
+      a6g("decision\\s+(?:record|note)"),
+      ["planner"],
+      "the planner records what the team decides for the operator; say what you'd decide in your report, or note it on the task (a6g task note).",
+    ],
+    [a6g("decision\\s+review"), [], "reviewing what was decided for them is the operator's."],
+    [
       a6g("task\\s+(?:reject|research|escalate)"),
       ["approver"],
       "the approver (or the operator) decides on proposals, and nobody approves their own (Article 4).",

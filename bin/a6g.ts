@@ -31,6 +31,10 @@ Set up and run a team (the operator)
                                       what the team (or one role) runs on here, in order: the next when one closes
   a6g subscriptions limit <sub|all> [--weekly <n>%] [--session <n>%]
                                       how much of a subscription the teams may use (all: their weeks added up)
+  a6g agreement <team> [--level hands-on|balanced|hands-off] [--ask <topics>] [--never <topics>] [--follow <topics>]
+                                      [--notes "…" | --notes-file <f> | --clear-notes] [--reset]
+                                      the working agreement: how readily the team asks you, what's always or never
+                                      asked, and your standing instructions; it holds at once. Alone, it shows it
   a6g rotate <team>                   a fresh planner thread (refused while members run)
   a6g status [<team>]  ·  a6g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   a6g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role
@@ -63,6 +67,9 @@ The task graph (a6g task help lists every form)
   a6g task edit|score|status|import   the planner: shape, score (the gate and the matrix) and move tasks
   a6g task approve|reject|research|escalate <id>   the approver (or you), within team.json approval
   a6g task claim [<id>]  ·  release <id>  ·  submit <id>   builders, testers and the scaffolder take the next task
+  a6g decision record|route|agreement|list|show|note   what the team decided in your place, and why it didn't ask:
+                                      the planner records each (a6g decision help); the working agreement routes it
+  a6g decision review <id> agree|overturn [--note "…"]   yours: agree, or overturn it and say what to do instead
   a6g request add|list|show|note|reject   stakeholders' feature requests (you add them; the planner promotes them)
   a6g cycle close --report-file <f> | list   a cycles team's cycles (team.json mode "cycles")
   a6g blast [<ref>] [--base <branch>] [--json]   what a change touches: importers, related files, tests, UI, critical paths
@@ -117,6 +124,14 @@ function handOver(): void {
   }
   if (!pin || !VERSION_NAME.test(pin)) return;
   if (pin === PACKAGE.version || !existsSync(versionDir(pin)) || realpathSync(versionDir(pin)) === realpathSync(FACTORY_ROOT)) return;
+  // A command the team's version doesn't have yet says so, rather than that version's "no command".
+  const since: Record<string, string> = { agreement: "lib/commands/agreement.ts", decision: "lib/commands/decision.ts" };
+  if (since[command] && !existsSync(resolve(versionDir(pin), since[command]))) {
+    console.error(
+      `a6g ${command}: this team runs factory ${pin}, which keeps no decision log or working agreement; a6g upgrade <team> moves it to ${PACKAGE.version}`
+    );
+    process.exit(2);
+  }
   const result = spawnSync(process.execPath, [entryOf(versionDir(pin)), command, ...args], {
     stdio: "inherit",
     env: { ...process.env, A6G_HANDED_OVER: "1" },
@@ -136,6 +151,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   pause: () => import("../lib/commands/team.ts").then((m) => m.pause(args)),
   resume: () => import("../lib/commands/team.ts").then((m) => m.resume(args)),
   budget: () => import("../lib/commands/team.ts").then((m) => m.budget(args)),
+  agreement: () => import("../lib/commands/agreement.ts").then((m) => m.agreement(args)),
   subscriptions: () => import("../lib/commands/subscriptions.ts").then((m) => m.subscriptions(args)),
   rotate: () => import("../lib/commands/team.ts").then((m) => m.rotate(args)),
   status: () => import("../lib/commands/team.ts").then((m) => m.status(args)),
@@ -163,6 +179,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   pages: () => import("../lib/commands/pages.ts").then((m) => m.run(args)),
   pr: () => import("../lib/commands/pr.ts").then((m) => m.pr(args)),
   task: () => import("../lib/commands/task.ts").then((m) => m.task(args)),
+  decision: () => import("../lib/commands/decision.ts").then((m) => m.decision(args)),
   request: () => import("../lib/commands/request.ts").then((m) => m.request(args)),
   cycle: () => import("../lib/commands/cycle.ts").then((m) => m.cycle(args)),
   blast: () => import("../lib/commands/blast.ts").then((m) => m.blast(args)),

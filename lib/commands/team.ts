@@ -240,6 +240,7 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     worktreesDir: t3.worktreesDir(home),
     watchdog: team.watchdog,
     contact: team.contact,
+    operator: team.operator,
     ...(team.board.type === "tasks" ? { tasks: team.tasks } : {}),
     mode: team.mode,
     ...(worker ? { worker: true, branch: team.branch, limits: Object.fromEntries(roles.map((role) => [role, team.roles[role]?.limit ?? 0])) } : {}),
@@ -299,7 +300,8 @@ export function unregister(argv: string[]): number {
   return 0;
 }
 
-const entryFor = (name: string): RegistryEntry => readRegistry(name) ?? die(`no team named ${name} (registered: ${teamNames().join(", ") || "none"})`);
+export const entryFor = (name: string): RegistryEntry =>
+  readRegistry(name) ?? die(`no team named ${name} (registered: ${teamNames().join(", ") || "none"})`);
 export const teamNames = (): string[] =>
   existsSync(teamsDir)
     ? readdirSync(teamsDir)
@@ -349,7 +351,7 @@ const PAUSE_USAGE = 'usage: a6g pause <team> [--after tasks | --after journeys [
 
 // The operator's control, recorded in the team's store and applied in its run folder at once (the web app's wait for
 // the watchdog's next minute). On a worker machine it's recorded only: the lead applies it.
-async function recordControl(entry: RegistryEntry, make: (store: Store) => Promise<Omit<Control, "id" | "version">>): Promise<Control> {
+export async function recordControl(entry: RegistryEntry, make: (store: Store) => Promise<Omit<Control, "id" | "version">>): Promise<Control> {
   const tasks = entry.tasks ?? die(`${entry.name} keeps its tickets on a GitHub board, which has no controls`);
   const store = await openStore({ name: entry.name, tasks }, entry.run);
   let control: Control;

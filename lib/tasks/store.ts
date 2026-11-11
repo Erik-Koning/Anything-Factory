@@ -1,4 +1,4 @@
-// Where a team's task graph lives: one document per task, request, stakeholder and closed cycle. The file store
+// Where a team's task graph lives: one document per task, request, stakeholder, closed cycle, control and decision. The file store
 // (files.ts) keeps them in the team's run folder; the Mongo store (mongo.ts) in a database several machines share.
 // Both replace a document only if it's still at the version the writer read, so two members claiming at once can't
 // both win.
@@ -6,6 +6,7 @@ import type { Team } from "../config.ts";
 import { type Cycle, type Doc, type FeatureRequest, Refused, type Stakeholder, type Task } from "./model.ts";
 import type { UsageDay } from "./spend.ts";
 import type { Control } from "./controls.ts";
+import type { DecisionRecord } from "./decisions.ts";
 import type { TeamDoc, TeamSettings, TeamState } from "./teams.ts";
 
 export interface Collection<T extends Doc> {
@@ -27,8 +28,11 @@ export interface Store {
   requests: Collection<FeatureRequest>;
   stakeholders: Collection<Stakeholder>;
   cycles: Collection<Cycle>;
-  // The operator's pauses, resumes and budgets, oldest first (controls.ts); only ever created, never replaced.
+  // The operator's pauses, resumes, budgets, agreements and reviews, oldest first (controls.ts); only ever created,
+  // never replaced.
   controls: Collection<Control>;
+  // What the team decided in the operator's place, oldest first (decisions.ts): d1, d2, …
+  decisions: Collection<DecisionRecord>;
   // What the team used, by day and machine (lib/usage.ts): each machine replaces its own documents; readers add them up.
   usage: { publish(days: UsageDay[]): Promise<void>; since(day: string): Promise<UsageDay[]> };
   // The team's settings and state for the web app (teams.ts); a file store has no web app, so it keeps neither.

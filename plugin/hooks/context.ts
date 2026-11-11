@@ -6,7 +6,8 @@
 //   against the limits, the team's context commands (team.json "context") and its latest log entries.
 // - UserPromptSubmit, planner only (every wake): the real time, members running, merge results it hasn't seen,
 //   whether the environment is draining, when it may next write to the operator (team.json contact), the task graph
-//   with the ideas queue and the pace (whose caps it saves for the guard), and whether the operator paused the team.
+//   with the ideas queue and the pace (whose caps it saves for the guard), the working agreement in force with the
+//   operator's standing instructions and what they overturned, and whether the operator paused the team.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
@@ -68,7 +69,7 @@ function merges() {
 async function graph(): Promise<string | null> {
   if (team.board.type !== "tasks") return null;
   try {
-    const { measurePace, openTeamStore, summary } = await import("../../lib/tasks/ops.ts");
+    const { agreementContext, measurePace, openTeamStore, summary } = await import("../../lib/tasks/ops.ts");
     const { clearPace, writePace } = await import("../../lib/pace.ts");
     const store = await openTeamStore(team, run, home);
     try {
@@ -92,7 +93,13 @@ async function graph(): Promise<string | null> {
             lastPass: lastFinished(instancesOf(team, "innovator")),
           }
         : undefined;
-      return [clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas }), 2500), paceText].join("\n");
+      // How readily to ask the operator, as it stands now (the working agreement), and what they overturned.
+      const checkIns = agreementContext(await store.controls.all(), await store.decisions.all(), team.operator);
+      return [
+        clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas }), 2500),
+        paceText,
+        clip(checkIns, 2200),
+      ].join("\n");
     } finally {
       await store.close();
     }

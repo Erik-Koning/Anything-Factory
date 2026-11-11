@@ -9,9 +9,12 @@ import { machineName } from "../machine.ts";
 import { boardDir, readRegistry } from "../paths.ts";
 import { leakRefusal, leaksInWorktree } from "../secrets.ts";
 import { asOperator, teamSession } from "../session.ts";
-import { describeHold, holdOf } from "../tasks/controls.ts";
+import { route } from "../tasks/agreement.ts";
+import { agreementOf, describeHold, holdOf } from "../tasks/controls.ts";
+import { judgedFrom } from "../tasks/decisions.ts";
 import { betterDiagram } from "../tasks/graph.ts";
 import {
+  type Ask,
   askRefusal,
   blockRefusal,
   branchFor,
@@ -76,10 +79,14 @@ export const USAGE = `usage: a6g task <command>
   score <id> --pain N --reach N --revenue N --wow N --distribution N --leverage N --urgency N --risk N
              --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…"]
   status <id> <status> [--reason "…"]   ·   import   ·   pace (the planner: what the budget can finish, so how many to start)
-      question: --reason "why it's the operator's" --recommend "what the team would do" (both required)
+      question: --reason "why it's the operator's" --recommend "what the team would do" (both required), and from the
+                planner --topic t --stakes low|medium|high --confidence low|medium|high: the working agreement says
+                whether such a question is asked (a6g decision route); one it leaves to the team is decided and
+                recorded instead (a6g decision record)
       blocked: --reason "…" (the planner's to sort), with --recommend "…" to raise it to the operator,
                or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
-  ask <id> --reason "…" --recommend "…"   a question or blocked task: why it's the operator's and what the team recommends
+  ask <id> --reason "…" --recommend "…" [--topic t --stakes s --confidence c]
+      a question or blocked task: why it's the operator's and what the team recommends
   answer <id> "<your answer>"   yours: what you say to a question, or to a block raised to you (the planner hears within a minute)
   approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…" --recommend "…"
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
@@ -187,7 +194,12 @@ export function detail(t: Task): string {
   if (t.ask)
     out.push(
       `raised to the operator by the ${t.ask.by}: ${t.ask.reason}`,
-      `the team recommends: ${t.ask.recommendation || "(none: the operator raised it)"}`
+      `the team recommends: ${t.ask.recommendation || "(none: the operator raised it)"}`,
+      ...(t.ask.rule
+        ? [
+            `asked because: ${t.ask.rule} (${t.ask.topic}, stakes ${t.ask.stakes}, confidence ${t.ask.confidence}; ${t.ask.agreement ? `agreement ${t.ask.agreement}` : "the default agreement"})`,
+          ]
+        : [])
     );
   if (t.wait)
     out.push(
@@ -419,6 +431,29 @@ const score: Handler = async ({ team, store, who }, [id], options) => {
   return 0;
 };
 
+// A question the planner raises goes by the working agreement (lib/tasks/agreement.ts): how it judged the question,
+// and the rule that makes it the operator's. One the agreement leaves to the team is refused, with the command that
+// records the decision instead. Null when none of the three judgments was given and `required` is false.
+async function judgedAsk(
+  { team, store }: Pick<Context, "team" | "store">,
+  task: Task,
+  options: Options,
+  required: boolean
+): Promise<Pick<Ask, "topic" | "stakes" | "confidence" | "rule" | "agreement"> | null> {
+  const given = { topic: optionText(options["topic"]), stakes: optionText(options["stakes"]), confidence: optionText(options["confidence"]) };
+  if (!required && Object.values(given).every((value) => value === undefined)) return null;
+  const call = judgedFrom(given);
+  if ("problem" in call)
+    throw new Refused(`${call.problem} (with --topic, --stakes and --confidence, the working agreement says whether it's asked: a6g decision route)`);
+  const { agreement, control } = agreementOf(await store.controls.all());
+  const routed = route(agreement, call, team.operator);
+  if (routed.route !== "ask")
+    throw new Refused(
+      `under the working agreement this one is yours to decide (${routed.rule}): decide it, and record it: a6g decision record "<the question>" --decided "…" --because "…" --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence} --task ${task.id}. (What only the operator knows or holds, a fact about their business, an account, a key, isn't a judgment to route: raise that as a block, a6g task status ${task.id} blocked --reason "…" --recommend "…".)`
+    );
+  return { ...call, rule: routed.rule, agreement: control?.id ?? null };
+}
+
 const setStatus: Handler = async ({ home, team, store, who }, [id, to], options) => {
   const target = oneOf(to, STATUSES, "the status");
   if (!target) throw new Refused(`which status? ${STATUSES.join(", ")}`);
@@ -452,6 +487,11 @@ const setStatus: Handler = async ({ home, team, store, who }, [id, to], options)
     const asked = askRefusal({ reason: reason ?? "", recommendation }, who);
     if (asked) throw new Refused(asked);
   }
+  const judging = ["topic", "stakes", "confidence"].some((key) => options[key] !== undefined);
+  if (judging && target !== "question")
+    throw new Refused("--topic, --stakes and --confidence are for raising a question: a6g task status <id> question …");
+  // Not the design check-in (its own gate) or the operator raising one to themselves: only the planner's own questions.
+  const judged = target === "question" && who !== OPERATOR && task.kind !== "design" ? await judgedAsk({ team, store }, task, options, true) : null;
   await update(store.tasks, task.id, (t) => {
     const at = nowIso();
     const notes = reason ? { notes: [...t.notes, { at, by: who, text: `${t.status} → ${target}: ${reason}` }] } : {};
@@ -459,7 +499,7 @@ const setStatus: Handler = async ({ home, team, store, who }, [id, to], options)
     const approval = target === "approved" && who === OPERATOR && !t.approval ? { approval: { by: OPERATOR, at, note: reason ?? "" } } : {};
     const raised =
       target === "question" || (target === "blocked" && recommendation)
-        ? { ask: { reason: reason ?? "", recommendation, by: who, at } }
+        ? { ask: { reason: reason ?? "", recommendation, by: who, at, ...(judged ?? {}) } }
         : target === "blocked"
           ? { ask: null }
           : {};
@@ -511,7 +551,7 @@ function waitIds(option: string | true | string[] | undefined, self: string, all
 // a6g task ask: why a question or a blocked task is the operator's, and what the team recommends, set again (a
 // question raised before they were required, a recommendation that changed, or a blocked task only the operator can
 // unblock). The operator's inbox shows both.
-const ask: Handler = async ({ store, who }, [id], options) => {
+const ask: Handler = async ({ team, store, who }, [id], options) => {
   if (who !== "planner" && who !== "approver" && who !== OPERATOR)
     throw new Refused("the planner and the approver raise tasks to the operator; add a note (a6g task note) instead");
   const reason = optionText(options["reason"]) ?? "";
@@ -523,9 +563,19 @@ const ask: Handler = async ({ store, who }, [id], options) => {
     );
   const refusal = askRefusal({ reason, recommendation }, who);
   if (refusal) throw new Refused(refusal);
-  await update(store.tasks, task.id, (t) =>
-    withEvent({ ...t, ask: { reason, recommendation, by: who, at: nowIso() } }, who, `raised to the operator: ${reason}`)
-  );
+  // Judged again when the planner says how (a question only): otherwise it keeps how it was judged when it was raised.
+  // One that was never judged (raised before the agreement, or imported as a question from an old board) is judged
+  // now, unless the approver or the operator raised it: theirs go by the approval rules, not the agreement.
+  const unjudged = !task.ask?.rule && task.ask?.by !== "approver" && task.ask?.by !== OPERATOR;
+  const judged =
+    task.status === "question" && task.kind !== "design" && who === "planner" ? await judgedAsk({ team, store }, task, options, unjudged) : null;
+  if (!judged && ["topic", "stakes", "confidence"].some((key) => options[key] !== undefined))
+    throw new Refused("--topic, --stakes and --confidence are the planner's judgment of a question it raised");
+  await update(store.tasks, task.id, (t) => {
+    const kept = { topic: t.ask?.topic, stakes: t.ask?.stakes, confidence: t.ask?.confidence, rule: t.ask?.rule, agreement: t.ask?.agreement };
+    const how = Object.fromEntries(Object.entries(judged ?? kept).filter(([, value]) => value !== undefined));
+    return withEvent({ ...t, ask: { reason, recommendation, by: who, at: nowIso(), ...how } }, who, `raised to the operator: ${reason}`);
+  });
   console.info(`task ${task.id}: raised to the operator, with the team's recommendation`);
   return 0;
 };
@@ -863,8 +913,8 @@ const OPTIONS: Record<string, string[]> = {
   screen: ["note"],
   edit: ["title", "body", "body-file", "kind", "sev", "area", "files", "parent", "after"],
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
-  status: ["reason", "recommend", "waits-on", "then"],
-  ask: ["reason", "recommend"],
+  status: ["reason", "recommend", "waits-on", "then", "topic", "stakes", "confidence"],
+  ask: ["reason", "recommend", "topic", "stakes", "confidence"],
   answer: ["text"],
   approve: ["note"],
   reject: ["reason"],

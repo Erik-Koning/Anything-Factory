@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased: the decision log and the working agreement
+
+A team already decided most product questions itself and asked only what its operator's direction left open. What it
+decided was a line in a file, seen in the Done report, and how readily it asked was fixed by its prompt. Now both are
+the operator's to see and to set, while the team runs. The plan is `docs/plans/decision-log.md`.
+
+- **The working agreement.** `a6g agreement <team>` sets how readily a team asks: a level (`hands-on`, `balanced`,
+  `hands-off`), topics that are always asked (`--ask scope,cost`) or never (`--never design`), and standing
+  instructions in the operator's words (`--notes`). It's a control in the team's store, like a pause: it holds from
+  the moment it's recorded, the planner is told at once with what to re-check, every version is kept with who set it,
+  and it's in the planner's context at every wake. The default asks what teams asked before: `balanced`, with a
+  change of scope always asked until the operator gives it to the level (`--follow scope`) or to the team.
+- **Questions are routed by it.** The planner judges a question's topic, what a wrong call costs and how sure it is;
+  one table (`lib/tasks/agreement.ts`) says whether it's asked, decided and flagged, or decided. `a6g task status <id>
+question` takes `--topic`, `--stakes` and `--confidence` from the planner and refuses a question the agreement
+  leaves to the team; `a6g decision record` refuses one it makes the operator's. `privacy` and `rules` are always
+  asked, and a non-technical operator is never asked `technical` questions. A raised question carries the rule that
+  asked. It routes judgments only: what only the operator knows or holds (a key, an account, a fact about their
+  business) is still raised to them as blocked work, at every level.
+- **The decision log.** `a6g decision record` keeps each decision made in the operator's place: the question, what
+  was weighed, the choice, why, how it's undone, its tasks, and why the operator wasn't asked (the rule, and the
+  agreement in force). It also writes the decision's line in `.a6g/decisions.md`, which stays the team's memory of
+  rulings. `a6g decision list|show|route|agreement` read it; a team's graph moved with `a6g task migrate` takes it
+  along.
+- **Reviews.** The operator agrees with a decision or overturns it (`a6g decision review <id> agree|overturn --note
+"…"`, or the web app). An overturn reaches the planner within a minute, with what to do instead, and stays in its
+  context until it notes what it did (`a6g decision note`). A paused team's planner hears once it's resumed.
+- **The web app** gains **Decided for you** (the log: what's to review first, each with why it wasn't asked; members
+  read, admins review) and **Agreement** (the level with its table, the topics, the standing instructions, the last
+  30 days' numbers and every version; changed with an authenticator code). Waiting on you says why each question was
+  asked. No new permission for the app's database user: an agreement and a review are inserts into `controls`.
+- **The constitution:** Article 3 names the working agreement among what the operator directs, and says what it may
+  leave to the team (changes of scope, and product questions costly to get wrong) and that nothing else of theirs
+  moves; Article 10 says it sets how readily the planner asks; Article 11 lists the decision log among the records.
+- **A team on a GitHub board** has no store, so neither: its planner's rules say to apply the default by hand and to
+  write its decisions in `.a6g/decisions.md` itself.
+- **For a running team:** nothing changes until it's upgraded and its planner rotated. An older planner neither reads
+  the agreement nor writes the log; a newer one that raises a question without the three judgments is told what to
+  add.
+
 ## Unreleased: emails that read at a glance
 
 The web app's emails were paragraphs with a link hundreds of characters long spelled out in them, and an admin who

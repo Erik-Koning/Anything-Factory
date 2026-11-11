@@ -1,6 +1,7 @@
-// What the operator asks of a team, from the CLI (a6g pause, resume, budget) or the web app: an append-only log in the
-// team's store, beside its task graph (k1, k2, …). The watchdog applies each new one in the run folder (lib/holds.ts);
-// claims read the latest pause from the store itself, so a hold stops new work the moment it's asked for.
+// What the operator asks of a team, from the CLI (a6g pause, resume, budget, agreement, decision review) or the web
+// app: an append-only log in the team's store, beside its task graph (k1, k2, …). The watchdog applies each new one in
+// the run folder (lib/holds.ts); claims read the latest pause from the store itself, so a hold stops new work the
+// moment it's asked for, and the commands that ask the operator or decide for them read the latest agreement there.
 //
 // A pause has a scope:
 //   now        what pausing always did: nothing starts or merges; running members finish their turn.
@@ -8,6 +9,7 @@
 //   journeys   the journeys under way (or those chosen) finish, verification and polish included; nothing else starts.
 // Either graceful scope ends in the same pause as "now" once nothing in it can move (it has settled), with a report of
 // where the team stands; work stays stopped until the operator resumes it.
+import { type Agreement, DEFAULT_AGREEMENT, normalised } from "./agreement.ts";
 import { designOpen, FOUNDATION, journeyDue, nowIso, Refused, type Doc, type Task } from "./model.ts";
 
 export const HOLD_SCOPES = ["now", "tasks", "journeys"] as const;
@@ -36,9 +38,19 @@ export interface AccountLimits {
   total: number | null;
 }
 
+// The operator's review of a decision the team made for them (lib/tasks/decisions.ts): agreed, or overturned with what
+// to do instead.
+export const REVIEW_VERDICTS = ["agreed", "overturned"] as const;
+export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
+export interface ReviewAsk {
+  decision: string;
+  verdict: ReviewVerdict;
+  note: string;
+}
+
 export interface Control extends Doc {
   team: string;
-  kind: "pause" | "resume" | "budget";
+  kind: "pause" | "resume" | "budget" | "agreement" | "review";
   // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), or "budget" (the watchdog, at a limit).
   by: string;
   at: string;
@@ -53,6 +65,10 @@ export interface Control extends Doc {
   // A pause or resume the budget made: which limit, for which period ("daily:2026-11-04", "weekly:2026-11-02",
   // "total:2026-10-02"), and ":hard" for the pause past the limit's last tenth. Null for the operator's.
   trigger?: string | null;
+  // An agreement: the working agreement from now on, whole (lib/tasks/agreement.ts).
+  agreement?: Agreement | null;
+  // A review: the operator's verdict on one decision.
+  review?: ReviewAsk | null;
 }
 
 // The pause in force, from the latest pause or resume.
@@ -151,6 +167,33 @@ export const settledControl = (team: string, hold: Hold, at = nowIso()): Omit<Co
 
 // The limits in force: the latest budget's.
 export const limitsOf = (controls: Control[]): Limits | null => controls.findLast((c) => c.kind === "budget")?.limits ?? null;
+
+// A new working agreement, whole: the one in force from the moment it's recorded.
+export const agreementControl = (team: string, by: string, agreement: Agreement, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "agreement",
+  by,
+  at,
+  agreement,
+});
+
+// The working agreement in force, and the control that set it (null: nobody has, so it's the default).
+export function agreementOf(controls: Control[]): { agreement: Agreement; control: Control | null } {
+  const control = controls.findLast((c) => c.kind === "agreement" && c.agreement) ?? null;
+  return { agreement: control ? normalised(control.agreement) : DEFAULT_AGREEMENT, control };
+}
+
+// The operator's review of a decision (lib/tasks/decisions.ts checks it against the record first).
+export const reviewControl = (team: string, by: string, review: ReviewAsk, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "review",
+  by,
+  at,
+  note: review.note,
+  review,
+});
 
 const ids = (list: string[]): string => list.map((id) => `#${id}`).join(", ");
 export function describeHold(hold: Pick<Hold, "scope" | "tasks" | "journeys">): string {
