@@ -115,23 +115,35 @@ request (Article 8).
   planner noted it did. The tab counts what an admin has left to review. The app only reads decisions: a review is a
   control, as a pause is, which the lead's watchdog writes onto the record and, for an overturn, passes to the planner.
 - `/t/<team>/agreement` (admins): the working agreement, how readily the team brings a question to the operator.
-  What's in force and who set it; how the last 30 days went (asked, decided, flagged, overturned); each level's table
-  of what happens to a question, by what a wrong call costs and how sure the team is; the form that changes it (the
-  level, each topic as follows the level, always ask or never ask, and standing instructions in the operator's words),
-  with a code from the authenticator, like a pause; and every version, with what it changed and who made it. Privacy
-  and the team's own rules are always the operator's and aren't offered; nor are the platform and the stack on a team
-  whose operator isn't technical. A team published by a factory version from before the agreement (its settings name
-  no `operator`) says so on both pages and offers no form. Under a question on **Waiting on you** that the planner
-  raised: which rule of the agreement made it the operator's, and a link here.
+  What's in force and who set it; how the last 30 days went (asked, decided, flagged, overturned); what the
+  operator's reviews and answers under the agreement in force suggest (since it was last changed, and at most those
+  30 days), when they suggest anything: a topic they keep overturning is one to be asked about, and one where they
+  take the team's recommendation as it stood every time is one the team could decide. Each hint says what was seen
+  and the change it points to, and nothing is changed for them; each level's table of what happens to a question, by
+  what a wrong call costs and how sure the team is; the form that changes it (the level, each topic as follows the
+  level, always ask or never ask, how often a message may reach them, and standing instructions in the operator's
+  words), with a code from the authenticator, like a pause; and every version, with what it changed and who made it.
+  How often a message may reach the operator is the team's own setting (`contact` in its `team.json`) until the
+  agreement sets it: a digest with its window in hours, or each message as soon as it's needed. Privacy and the
+  team's own rules are always the operator's and aren't offered; nor are the platform and the stack on a team whose
+  operator isn't technical. A team published by a factory version from before the agreement (its settings name no
+  `operator`) says so on both pages and offers no form. Under a question on **Waiting on you**: why it was asked. One
+  the planner raised says which rule of the agreement made it the operator's and how it was judged, with a link here;
+  one the approver escalated says the approval rule that sent it up, which is the team's own setting, so it has no
+  link. An answer that takes the team's recommendation as it stood (the recommendation, or the option it names, with
+  nothing added) is recorded in the recommendation's own words and marked so on the task: those are what the hints
+  count, one answer a question.
 - `/admin/people` (admins): invite by email with a role on a team (an address that signed up joins the team with the
   account it has), change a role, remove from a team, ban and unban; everyone with an account, on a team or on none.
 - `/admin/audit` (admins): the audit log, newest first, filtered by what, how it went, who and IP address.
 - `/account/notifications`: what the person is emailed about, for each kind of event they could see in the app
-  (questions for them, blocked work, journeys done, a team pausing or finishing, work merged, their requests): at
-  once, in a daily digest at the hour and time zone they choose (the browser's until they save one), or not at all;
-  the teams they hear about; for admins, whether the digest also lists what still waits on them. Until they save,
-  their role's defaults apply (an admin hears of questions and blocked work at once). It shows the last email sent and
-  what's waiting to go, and sends a test email (three an hour).
+  (questions for them, what the team decided for them and flagged, blocked work, journeys done, a team pausing or
+  finishing, work merged, their requests): at once, in a daily digest at the hour and time zone they choose (the
+  browser's until they save one), or not at all; the teams they hear about; for admins, whether the digest also
+  lists what still waits on them and how many of the team's flagged calls they haven't reviewed. Until they save,
+  their role's defaults apply (an admin hears of questions at once, and of blocked work and flagged calls in the
+  digest); a kind of event added after they saved has their role's default until they choose. It shows the last
+  email sent and what's waiting to go, and sends a test email (three an hour).
 - `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
   you're signed in, with each session's address; the IP addresses you've confirmed, and whether new ones are checked
   (always, for an admin); your recent activity; sign out.
@@ -332,7 +344,9 @@ downloaded), seed it with the factory's own functions (`tests/e2e/seed.ts`), run
 backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board,
 graph by level and requests (senders by role); approving and rejecting (checked in the task documents); the decision
 log as a member reads it and as an admin reviews it (the review a control, applied with the factory's own code), the
-working agreement changed with a code (and a wrong one refused), and a question that says why it was asked; a contributor and an admin
+working agreement changed with a code (and a wrong one refused), a digest's window set in it, a question and an
+escalation that each say why they were asked, an answer that takes the recommendation marked so, and the hint that
+follows from three of them; a contributor and an admin
 session without its second factor calling admin server actions directly (refused, nothing changes); passkeys with and
 without user verification; the daily limit; phone width; and the sign-in rate limit. Its browsers send a viewer IP
 address and the origin secret as CloudFront does (`playwright.config.ts`), and `security.spec.ts` covers the rest of
@@ -494,11 +508,12 @@ changing the domain means adding passkeys again.
 - `server/inbox.ts`: what waits on the operator, from a team's graph: the questions and blocked work, the options and
   recommendation read out of each, what's answered and what was settled (pure).
 - `server/decided.ts`: what the Decided for you and Agreement pages show, from a team's decision log and the
-  operator's controls: what's to review, what stands, what was overturned, each topic as the agreement has it, and
-  the agreement's versions (pure). The rules themselves (the levels' tables, what a review may follow) are the
-  factory's, in `../lib/tasks/agreement.ts` and `decisions.ts`.
+  operator's controls: what's to review, what stands, what was overturned, each topic as the agreement has it, the
+  agreement's versions, a hint in the form's words, and the form's fields for how often a message may go (pure). The
+  rules themselves (the levels' tables, what a review may follow, what makes a hint) are the factory's, in
+  `../lib/tasks/agreement.ts` and `decisions.ts`.
 - `server/events.ts`, `server/notifications.ts`, `server/notifier.ts`, `instrumentation.ts`: notifications. The events
-  are worked out from each team's history, never stored (pure); a person's settings and the emails' words; and the
+  are worked out from each team's history and its decision log, never stored (pure); a person's settings and the emails' words; and the
   notifier, which the server starts (`instrumentation.ts`) and which runs every `NOTIFY_EVERY_SECONDS` under a lease in
   the accounts database, so one container sends. It queues an email per person and event (`notification_queue`, its id
   the person and the event, so each goes once, kept 30 days), sends what goes at once in one email per person a run,

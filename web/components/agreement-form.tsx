@@ -1,14 +1,15 @@
 "use client";
 import { useActionState, useEffect, useRef, useState } from "react";
-import { isReserved, LEVEL_MEANS, LEVELS, type Level, NOTES_MAX, type Topic, TOPIC_MEANS, TOPICS } from "../../lib/tasks/agreement.ts";
+import { CONTACT_EVERY, isReserved, LEVEL_MEANS, LEVELS, type Level, NOTES_MAX, type Topic, TOPIC_MEANS, TOPICS } from "../../lib/tasks/agreement.ts";
 import { type AgreementFormState, agreementAction } from "../app/t/[team]/actions.ts";
 
 const LEVEL_NAME: Record<Level, string> = { "hands-on": "Hands-on", balanced: "Balanced", "hands-off": "Hands-off" };
 const named = (topic: Topic): string => `${topic.charAt(0).toUpperCase()}${topic.slice(1)}`;
 
-// The working agreement, to change: the level, each topic the agreement may set, the operator's standing instructions,
-// and a code from their authenticator. `never` are topics this team never asks its operator about whatever the
-// agreement says (the platform and the stack, of one who isn't technical): said, not offered.
+// The working agreement, to change: the level, each topic the agreement may set, how often a message may reach the
+// operator, their standing instructions, and a code from their authenticator. `never` are topics this team never
+// asks its operator about whatever the agreement says (the platform and the stack, of one who isn't technical): said,
+// not offered.
 export function AgreementForm({ team, initial, never }: { team: string; initial: Omit<AgreementFormState, "error">; never: Topic[] }) {
   const [state, action, pending] = useActionState(agreementAction, { error: null, ...initial });
   const [length, setLength] = useState(state.notes.length);
@@ -62,6 +63,49 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
           less).
           {never.includes("technical") ? " Never asked of you: the platform and the stack, since this team's operator isn't technical (team.json)." : ""}
         </p>
+      </fieldset>
+      <fieldset className="choices messages">
+        <legend>How often a message may reach you</legend>
+        <p className="hint">
+          The planner&apos;s questions and reports by email. What waits on you is in the app the moment it&apos;s raised, whatever this says.
+        </p>
+        <label className="check choice">
+          <input type="radio" name="messages" value="team" defaultChecked={state.messages === "team"} />
+          <span>
+            <b>As the team&apos;s own settings say</b>
+            <span className="hint">
+              What its <code>team.json</code> sets under <code>contact</code>: a digest every four hours, unless it says otherwise.
+            </span>
+          </span>
+        </label>
+        <label className="check choice">
+          <input type="radio" name="messages" value="digest" defaultChecked={state.messages === "digest"} />
+          <span>
+            <b>A digest</b>
+            <span className="hint">Everything open together, at most once per window. One urgent message may still go in between.</span>
+          </span>
+        </label>
+        <div className="every">
+          <label htmlFor="agreement-every">A digest&apos;s window, in hours</label>
+          <input
+            id="agreement-every"
+            name="every"
+            type="number"
+            inputMode="decimal"
+            min={CONTACT_EVERY.min / 60}
+            max={CONTACT_EVERY.max / 60}
+            step="0.25"
+            defaultValue={state.every}
+          />
+          <span className="hint">At most one message every so many hours, from a quarter of an hour to a week.</span>
+        </div>
+        <label className="check choice">
+          <input type="radio" name="messages" value="priority" defaultChecked={state.messages === "priority"} />
+          <span>
+            <b>Each as soon as it&apos;s needed</b>
+            <span className="hint">A message goes when the planner sends it.</span>
+          </span>
+        </label>
       </fieldset>
       <label htmlFor="agreement-notes">
         Standing instructions (optional)

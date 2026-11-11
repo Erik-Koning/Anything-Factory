@@ -1958,6 +1958,33 @@ fieldset.topics > .hint:first-of-type {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+/* A digest's window, set in under the choice it belongs to: a field as wide as a number of hours, and quieter while
+   another choice is made (it's kept, for when the digest is chosen). */
+.every {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: center;
+  margin: 0 0 4px 34px;
+  transition: opacity 120ms ease;
+}
+.every > label {
+  grid-column: 1 / -1;
+}
+.every > .hint {
+  margin: 0;
+}
+fieldset.messages:has(input[value="digest"]:not(:checked)) .every {
+  opacity: 0.6;
+}
+/* What the operator's own reviews and answers suggest: what was seen, then what it points to. */
+.hints > li > p {
+  max-width: 56rem;
+  margin: 0;
+}
+.hints > li > .suggests {
+  margin-top: 4px;
+}
 
 /* --- Notifications ---------------------------------------------------------------------------------------------- */
 fieldset.mode {
@@ -2158,6 +2185,14 @@ details > * + * {
   /* A topic of the agreement: what it covers, then how it's treated under it. */
   .topic {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* The window under its name, the field still as wide as a number, and what it means below. */
+  .every {
+    grid-template-columns: minmax(0, 1fr);
+    margin-left: 0;
+  }
+  .every > input {
+    max-width: 7rem;
   }
   /* The board runs to both edges of the screen. A lane with nothing in it is only its name and count, so the first
      lane with work in it shows whole beside it. */

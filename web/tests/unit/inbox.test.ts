@@ -3,7 +3,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { newTask, OPERATOR, type Status, type Task, withEvent } from "../../../lib/tasks/model.ts";
-import { answerText, choicesIn, inbox, mentions, recommendationIn, recommendedKey, waitingCount, waitingOf, withoutChoices } from "../../server/inbox.ts";
+import {
+  answerText,
+  asRecommended,
+  choicesIn,
+  inbox,
+  mentions,
+  recommendationIn,
+  recommendedKey,
+  waitingCount,
+  waitingOf,
+  withoutChoices,
+} from "../../server/inbox.ts";
 
 let next = 1;
 const task = (status: Status, fields: Partial<Task> = {}): Task => ({
@@ -208,4 +219,26 @@ test("answerText: an option, the recommendation, or the operator's own words, wi
   assert.deepEqual(answerText("recommended", "", { choices: [], recommendation: null }), {
     problem: "Choose one of the options, or write your own answer.",
   });
+});
+
+test("asRecommended: the recommendation as it stood, or the option it names, with nothing added", () => {
+  const offered = {
+    choices: [
+      { key: "a", text: "keep them hidden" },
+      { key: "b", text: "open them" },
+    ],
+    recommendation: "(b) behind the same sign-in.",
+  };
+  assert.equal(asRecommended("recommended", "", offered), true);
+  assert.equal(asRecommended("b", "  ", offered), true);
+  // Another option, their own words, or the recommendation with a condition, is the operator's own answer.
+  assert.equal(asRecommended("a", "", offered), false);
+  assert.equal(asRecommended("other", "Open /orders only.", offered), false);
+  assert.equal(asRecommended("b", "But tell me first.", offered), false);
+  assert.equal(asRecommended("recommended", "But tell me first.", offered), false);
+  // A recommendation that names no option is taken only as itself; with none, nothing is.
+  assert.equal(asRecommended("a", "", { choices: offered.choices, recommendation: "wait a week" }), false);
+  assert.equal(asRecommended("recommended", "", { choices: [], recommendation: "wait a week" }), true);
+  assert.equal(asRecommended("recommended", "", { choices: [], recommendation: null }), false);
+  assert.equal(asRecommended("z", "", offered), false);
 });

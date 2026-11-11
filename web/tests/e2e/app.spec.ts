@@ -702,6 +702,8 @@ test("the admin sees what waits on them and answers a question with one of its o
   const task = (await graph.collection("tasks").findOne({ _id: `shop:${question}` as never })) as unknown as Task;
   expect(task).toMatchObject({ status: "question" });
   expect(task.notes.at(-1)).toMatchObject({ by: "operator", kind: "answer", text: "(b) open them to signed-in customers.\n\nShow the totals too." });
+  // The recommended option with a condition added is the operator's own answer, not the recommendation as it stood.
+  expect(task.notes.at(-1)).not.toHaveProperty("took");
   expect(task.history.at(-1)).toMatchObject({ by: "operator", what: "answered: (b) open them to signed-in customers. Show the totals too." });
   // What the lead's watchdog passes to the planner.
   expect(answersMessage(answersSince([task], "2000-01-01T00:00:00.000Z"))).toContain(
@@ -755,6 +757,8 @@ test("the admin chooses what they're emailed, and a test email shows it reaches 
   await expect(page.getByText("These are the defaults for an admin")).toBeVisible();
   await expect(page.getByRole("group", { name: /^Questions for you/ }).getByRole("radio", { name: "At once" })).toBeChecked();
   await expect(page.getByRole("group", { name: /^Work merged/ }).getByRole("radio", { name: "In the daily digest" })).toBeChecked();
+  // What the team decided in their place and flagged: in the digest, until they say otherwise.
+  await expect(page.getByRole("group", { name: /^Decided for you/ }).getByRole("radio", { name: "In the daily digest" })).toBeChecked();
   // This admin wants no email about merges, and their digest at 7 in Toronto.
   await page
     .getByRole("group", { name: /^Work merged/ })
@@ -774,6 +778,7 @@ test("the admin chooses what they're emailed, and a test email shows it reaches 
     muted: [],
     modes: { question: "now", blocked: "digest", merged: "off" },
   });
+  expect((await accounts.collection("notification_prefs").findOne({ _id: String(user?._id) as never }))?.modes).toMatchObject({ decided: "digest" });
 
   const seen = mailsTo(state().admin.email).length;
   await page.getByRole("button", { name: "Send me a test email" }).click();
@@ -1426,6 +1431,121 @@ test("a question says which rule of the agreement made it the operator's; a team
   await page.goto("/t/blog/decided");
   await expect(page.getByText("This team's factory version doesn't keep a decision log yet.")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: "Decided for you" })).toHaveText("Decided for you");
+});
+
+test("the admin sets how often a message may reach them; answers that take the recommendation say so, and the hints come from those", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  await page.goto("/t/shop/agreement");
+  const inForce = page.getByRole("region", { name: "In force" });
+  await expect(inForce.getByText("as the team's own settings say")).toBeVisible();
+  // Nothing points anywhere yet: one overturned call isn't a pattern.
+  const hints = page.getByRole("region", { name: /^What your reviews and answers suggest/ });
+  await expect(hints).toHaveCount(0);
+
+  // A digest, at most once every two hours, in place of the team's own setting.
+  const form = page.getByRole("region", { name: "Change it" });
+  await expect(form.getByRole("radio", { name: /^As the team's own settings say/ })).toBeChecked();
+  await form.getByRole("radio", { name: /^A digest/ }).check();
+  const every = form.getByLabel("A digest's window, in hours");
+  await expect(every).toHaveAttribute("min", "0.25");
+  await expect(every).toHaveAttribute("max", "168");
+  await every.fill("2");
+  await form.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+  await form.getByRole("button", { name: "Change the agreement" }).click();
+  await expect(page.getByRole("status")).toContainText("The agreement changed: messages: a digest, at most one every 2 h.");
+  const made = (await shopControls("agreement")).at(-1);
+  // The rest of the agreement is as it was.
+  expect(made).toMatchObject({
+    kind: "agreement",
+    by: expect.stringMatching(/^web:s\d+$/),
+    agreement: {
+      level: "hands-on",
+      topics: { scope: "ask", design: "decide" },
+      notes: "Away until Monday: batch what can wait.",
+      contact: { mode: "digest", everyMin: 120 },
+    },
+  });
+  await expect(inForce.getByText("a digest, at most one every 2 h")).toBeVisible();
+  await expect(form.getByRole("radio", { name: /^A digest/ })).toBeChecked();
+  await expect(every).toHaveValue("2");
+
+  // Three questions about cost, as the planner raises them under that agreement (the hints count only what happened
+  // since it was set). The operator took the team's recommendation on two already; an approver's escalation waits
+  // beside them.
+  const at = new Date().toISOString();
+  const question = (id: string, title: string, fields: Partial<Task>) => ({
+    _id: `shop:${id}` as never,
+    ...newTask({ team: "shop", title, kind: "research", status: "question", by: "planner", ...fields }),
+    id,
+    version: 1,
+  });
+  const cost = (plan: string) => ({
+    reason: `what the ${plan} costs each month is the operator's`,
+    recommendation: "(a) the smaller plan, until the shop outgrows it",
+    by: "planner",
+    at,
+    topic: "cost" as const,
+    stakes: "high" as const,
+    confidence: "low" as const,
+    rule: "hands-on: high stakes with low confidence is asked",
+    agreement: made?.id ?? null,
+  });
+  const took = { at, by: "operator", text: "Go with your recommendation: (a) the smaller plan, until the shop outgrows it", kind: "answer" as const };
+  await graph.collection("tasks").insertMany([
+    question("901", "Q: which search plan?", { ask: cost("search plan"), notes: [{ ...took, took: "recommendation", topic: "cost" }] }),
+    question("902", "Q: which email plan?", { ask: cost("email plan"), notes: [{ ...took, took: "recommendation", topic: "cost" }] }),
+    question("903", "Q: which image plan?", {
+      ask: cost("image plan"),
+      body: "Images are resized by a service. Options: (a) the smaller plan, 20 dollars a month; (b) the larger one, 80 dollars a month.",
+    }),
+    question("904", "A loyalty scheme", {
+      kind: "feature",
+      ask: {
+        reason: "larger than the approver may approve",
+        recommendation: "build it after checkout is done",
+        by: "approver",
+        at,
+        rule: "the approval rules: size L is over this team's M (team.json approval)",
+      },
+    }),
+  ]);
+  try {
+    await page.goto("/t/shop/inbox");
+    // An escalation says the approval rule that sent it up: the team's own setting, so nothing here changes it.
+    const escalated = page.locator("#task-904");
+    await expect(escalated.getByText("Asked because: the approval rules: size L is over this team's M (team.json approval).")).toBeVisible();
+    await expect(escalated.getByRole("link", { name: "Change what the team asks you" })).toHaveCount(0);
+    // The third: the option the recommendation names, with nothing added, is the recommendation as it stood, and is
+    // recorded in the recommendation's own words.
+    const item = page.locator("#task-903");
+    await expect(item.getByRole("link", { name: "Change what the team asks you" })).toBeVisible();
+    await item.getByRole("radio", { name: /^\(a\) the smaller plan, 20 dollars a month/ }).check();
+    await item.getByRole("button", { name: "Send the answer on #903" }).click();
+    await expect(page.getByRole("status")).toContainText("Answer sent on #903.");
+    const answered = (await graph.collection("tasks").findOne({ _id: "shop:903" as never })) as unknown as Task;
+    expect(answered.notes.at(-1)).toMatchObject({
+      by: "operator",
+      kind: "answer",
+      text: "Go with your recommendation: (a) the smaller plan, until the shop outgrows it",
+      took: "recommendation",
+      topic: "cost",
+    });
+
+    // Three of three: the agreement's page says what that suggests, and changes nothing itself.
+    await page.goto("/t/shop/agreement");
+    await expect(hints.getByText("since it was last changed, and at most the last 30 days")).toBeVisible();
+    await expect(hints.getByText("You took the team's recommendation, as it stood, on all 3 cost questions it asked.")).toBeVisible();
+    await expect(hints.getByText("Never ask about Cost")).toBeVisible();
+    await expect(hints.getByText("a6g agreement shop --never cost")).toBeVisible();
+    await expect(hints.getByRole("link", { name: "below" })).toHaveAttribute("href", "#change");
+    await expect(form.getByLabel(/^Cost/)).toHaveValue("follow");
+    expect(await shopControls("agreement")).toHaveLength(2);
+  } finally {
+    await graph.collection("tasks").deleteMany({ _id: { $in: ["shop:901", "shop:902", "shop:903", "shop:904"] as never[] } });
+  }
+  await page.goto("/t/shop/agreement");
+  await expect(hints).toHaveCount(0);
 });
 
 test("the admin switches between teams, staying on the same page", async () => {

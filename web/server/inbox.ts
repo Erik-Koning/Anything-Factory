@@ -191,6 +191,19 @@ export function inbox(tasks: Task[], { now = Date.now(), settledDays = 7 } = {})
 // How many things wait on the operator now (answered ones are the planner's).
 export const waitingCount = (tasks: Task[]): number => tasks.filter((t) => waitsOnOperator(t) && !answersOn(t).length).length;
 
+// Whether an answer from the form is the team's recommendation as it stood: the recommendation itself, or the option it
+// names, with nothing added. The hints on the working agreement count these (lib/tasks/decisions.ts): a condition or a
+// change added to it is the operator's own answer.
+export function asRecommended(
+  pick: string,
+  extra: string,
+  { choices, recommendation }: { choices: { key: string }[]; recommendation: string | null }
+): boolean {
+  if (!recommendation || extra.trim()) return false;
+  if (pick === "recommended") return true;
+  return choices.some((c) => c.key === pick) && recommendedKey(recommendation) === pick;
+}
+
 // The answer as the planner reads it, from the form: the option chosen (or the recommendation) and what was added.
 export function answerText(
   pick: string,

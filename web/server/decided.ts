@@ -4,8 +4,11 @@
 // prove it.
 import {
   type Agreement,
+  type AgreementContact,
   agreementChanges,
+  CONTACT_EVERY,
   DEFAULT_AGREEMENT,
+  isLevel,
   isReserved,
   normalised,
   type Topic,
@@ -14,7 +17,7 @@ import {
   TOPICS,
 } from "../../lib/tasks/agreement.ts";
 import type { Control } from "../../lib/tasks/controls.ts";
-import { type DecisionRecord, flagged, overturnedSince, type Review, reviewOf } from "../../lib/tasks/decisions.ts";
+import { type DecisionRecord, flagged, type Hint, overturnedSince, type Review, reviewOf } from "../../lib/tasks/decisions.ts";
 import type { TeamSettings, TeamState } from "../../lib/tasks/teams.ts";
 
 export interface Decided {
@@ -118,3 +121,44 @@ export function agreementHistory(controls: Control[]): AgreementVersion[] {
 // Whether the agreement in force was set since the team's machine last reported: the commands follow it already (they
 // read the newest), but the planner may not have been told yet.
 export const agreementPending = (status: TeamState | null, control: Control | null): boolean => control !== null && (!status || control.at > status.at);
+
+// A topic as a page names it.
+export const topicName = (topic: Topic): string => `${topic.charAt(0).toUpperCase()}${topic.slice(1)}`;
+
+// What a hint suggests (lib/tasks/decisions.ts calibrationHints), in the words of the form that would make the change:
+// a topic always asked, never asked or given back to the level, or the level moved.
+export function hintSays(hint: Pick<Hint, "topic" | "set">): string {
+  if (hint.topic === null) return isLevel(hint.set) ? `Move the level to ${hint.set}` : "Change the level";
+  const name = topicName(hint.topic);
+  if (hint.set === "ask") return `Set ${name} to Always ask me`;
+  if (hint.set === "decide") return `Never ask about ${name}`;
+  return `Give ${name} back to the level`;
+}
+
+// How often a message may reach the operator, as the agreement's form has it: the team's own settings, a digest with
+// its window in hours, or each as soon as it's needed.
+export const MESSAGES = ["team", "digest", "priority"] as const;
+export type Messages = (typeof MESSAGES)[number];
+export const DIGEST_HOURS = { min: CONTACT_EVERY.min / 60, max: CONTACT_EVERY.max / 60, usual: 4 } as const;
+
+// The form's fields for the agreement's contact: what's chosen, and the digest's window in hours (the usual one until
+// a digest is set, so choosing it starts from something).
+export function messagesFields(contact: AgreementContact | undefined): { messages: Messages; every: string } {
+  if (!contact) return { messages: "team", every: String(DIGEST_HOURS.usual) };
+  if (contact.mode === "priority") return { messages: "priority", every: String(DIGEST_HOURS.usual) };
+  return { messages: "digest", every: String(Number((contact.everyMin / 60).toFixed(2))) };
+}
+
+// The agreement's contact from the form's fields: none (the team's own settings hold), or what's wrong with them. The
+// window is hours on the page and minutes in the agreement, which checks its range again.
+export function contactOfForm(messages: string, every: string): { contact: AgreementContact | undefined } | { problem: string } {
+  if (messages === "" || messages === "team") return { contact: undefined };
+  if (messages === "priority") return { contact: { mode: "priority", everyMin: 0 } };
+  if (messages !== "digest") return { problem: "Choose how often a message may reach you." };
+  const hours = Number(every.trim().replace(",", "."));
+  if (!every.trim() || !Number.isFinite(hours) || hours < DIGEST_HOURS.min || hours > DIGEST_HOURS.max)
+    return {
+      problem: `A digest goes at most once every so many hours, from ${DIGEST_HOURS.min} (a quarter of an hour) to ${DIGEST_HOURS.max} (a week): say how many.`,
+    };
+  return { contact: { mode: "digest", everyMin: Math.round(hours * 60) } };
+}

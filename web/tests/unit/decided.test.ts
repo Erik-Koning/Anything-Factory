@@ -6,7 +6,19 @@ import { type Agreement, CONFIDENCE_MEANS, DEFAULT_AGREEMENT, STAKES_MEAN } from
 import { agreementControl, budgetControl, type Control, pauseControl, resumeControl, reviewControl } from "../../../lib/tasks/controls.ts";
 import { type DecisionRecord, toReview } from "../../../lib/tasks/decisions.ts";
 import type { TeamState } from "../../../lib/tasks/teams.ts";
-import { agreementHistory, agreementPending, decided, decidedLog, readsAgreement, topicRows, toYou, underAgreement } from "../../server/decided.ts";
+import {
+  agreementHistory,
+  agreementPending,
+  contactOfForm,
+  decided,
+  decidedLog,
+  hintSays,
+  messagesFields,
+  readsAgreement,
+  topicRows,
+  toYou,
+  underAgreement,
+} from "../../server/decided.ts";
 import { controlSaid, controlsView } from "../../server/views.ts";
 
 let k = 0;
@@ -186,4 +198,32 @@ test("an overturn is with the planner from when the team's machine wrote it, wha
   // Noted between the operator's click and the machine's write: not about the overturn.
   assert.equal(decided(overturned([{ at: "2026-11-02T10:00:30.000Z", by: "planner", text: "A config key." }]), []).withPlanner, true);
   assert.equal(decided(overturned([{ at: "2026-11-02T10:02:00.000Z", by: "planner", text: "Undone in #7." }]), []).withPlanner, false);
+});
+
+test("a hint says what it suggests in the words of the form that would make the change", () => {
+  assert.equal(hintSays({ topic: "design", set: "ask" }), "Set Design to Always ask me");
+  assert.equal(hintSays({ topic: "scope", set: "follow" }), "Give Scope back to the level");
+  assert.equal(hintSays({ topic: "cost", set: "decide" }), "Never ask about Cost");
+  assert.equal(hintSays({ topic: null, set: "hands-on" }), "Move the level to hands-on");
+  assert.equal(hintSays({ topic: null, set: "balanced" }), "Move the level to balanced");
+});
+
+test("how often a message may reach the operator: the form's fields to the agreement's contact, and back", () => {
+  // Nothing set: the team's own settings hold, and a digest would start from the usual window.
+  assert.deepEqual(messagesFields(undefined), { messages: "team", every: "4" });
+  assert.deepEqual(messagesFields({ mode: "digest", everyMin: 90 }), { messages: "digest", every: "1.5" });
+  assert.deepEqual(messagesFields({ mode: "digest", everyMin: 1440 }), { messages: "digest", every: "24" });
+  assert.deepEqual(messagesFields({ mode: "priority", everyMin: 0 }), { messages: "priority", every: "4" });
+  assert.deepEqual(contactOfForm("team", "4"), { contact: undefined });
+  assert.deepEqual(contactOfForm("", ""), { contact: undefined });
+  assert.deepEqual(contactOfForm("priority", "nonsense"), { contact: { mode: "priority", everyMin: 0 } });
+  assert.deepEqual(contactOfForm("digest", "2"), { contact: { mode: "digest", everyMin: 120 } });
+  assert.deepEqual(contactOfForm("digest", " 0,5 "), { contact: { mode: "digest", everyMin: 30 } });
+  assert.deepEqual(contactOfForm("digest", "168"), { contact: { mode: "digest", everyMin: 10_080 } });
+  // A window that isn't one says so, and what it may be.
+  for (const every of ["", "soon", "0", "0.1", "169", "-2"]) {
+    const result = contactOfForm("digest", every);
+    assert.match("problem" in result ? result.problem : "", /from 0\.25 \(a quarter of an hour\) to 168 \(a week\)/, every);
+  }
+  assert.deepEqual(contactOfForm("hourly", "1"), { problem: "Choose how often a message may reach you." });
 });
