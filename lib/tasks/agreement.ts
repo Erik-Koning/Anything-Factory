@@ -60,7 +60,19 @@ export interface Agreement {
   topics: Partial<Record<Topic, TopicRule>>;
   // The operator's standing instructions to the planner, in their words.
   notes: string;
+  // How often the planner's messages may reach the operator, in place of the team's own setting (team.json contact,
+  // lib/contact.ts): absent, the team's own holds.
+  contact?: AgreementContact;
 }
+// As team.json's contact: everything open together at most once per `everyMin` ("digest"), or each message as soon as
+// it's needed ("priority", whose everyMin is 0).
+export interface AgreementContact {
+  mode: "digest" | "priority";
+  everyMin: number;
+}
+export const CONTACT_MODES = ["digest", "priority"] as const;
+// A digest's window: from a quarter of an hour to a week.
+export const CONTACT_EVERY = { min: 15, max: 7 * 24 * 60 } as const;
 // What a team works under until its operator says otherwise: what its rules always said. A change of scope is the
 // operator's (Article 3) until they leave it to the level or to the team, so the default asks about it.
 export const DEFAULT_AGREEMENT: Agreement = { level: "balanced", topics: { scope: "ask" }, notes: "" };
@@ -140,8 +152,36 @@ export const cleanNotes = (text: string): string =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+// How often messages may go, from what a form or a command gave: nothing (the team's own setting), or a mode and, for a
+// digest, its window in minutes.
+function contactFrom(input: unknown): AgreementContact | null | { problem: string } {
+  if (input === undefined || input === null || input === "" || input === "team") return null;
+  const given = input as { mode?: unknown; everyMin?: unknown };
+  if (typeof input !== "object" || !isOneOf(given.mode, CONTACT_MODES))
+    return {
+      problem: "Messages: a digest (everything open together, at most once per window), as soon as they're needed, or as the team's own settings say.",
+    };
+  if (given.mode === "priority") return { mode: "priority", everyMin: 0 };
+  const every = Number(given.everyMin);
+  if (!Number.isInteger(every) || every < CONTACT_EVERY.min || every > CONTACT_EVERY.max)
+    return { problem: `A digest goes at most once per window, from ${CONTACT_EVERY.min} minutes to a week: say how long.` };
+  return { mode: "digest", everyMin: every };
+}
+
+// A window in words: "4 h", "30 min", "2 d".
+export const everyWords = (minutes: number): string =>
+  minutes % 1440 === 0
+    ? `${minutes / 1440} d`
+    : minutes % 60 === 0
+      ? `${minutes / 60} h`
+      : minutes > 60
+        ? `${Number((minutes / 60).toFixed(1))} h`
+        : `${minutes} min`;
+export const contactWords = (contact: AgreementContact): string =>
+  contact.mode === "priority" ? "each as soon as it's needed" : `a digest, at most one every ${everyWords(contact.everyMin)}`;
+
 // An agreement from what a form or a command gave, or what's wrong with it.
-export function agreementFrom(input: { level?: unknown; topics?: unknown; notes?: unknown }): Agreement | { problem: string } {
+export function agreementFrom(input: { level?: unknown; topics?: unknown; notes?: unknown; contact?: unknown }): Agreement | { problem: string } {
   if (!isLevel(input.level)) return { problem: `Choose a level: ${LEVELS.join(", ")}.` };
   const topics: Agreement["topics"] = {};
   for (const [topic, rule] of Object.entries((input.topics ?? {}) as Record<string, unknown>)) {
@@ -153,13 +193,16 @@ export function agreementFrom(input: { level?: unknown; topics?: unknown; notes?
   }
   const notes = cleanNotes(typeof input.notes === "string" ? input.notes : "");
   if (notes.length > NOTES_MAX) return { problem: `Keep the standing instructions to ${NOTES_MAX.toLocaleString("en")} characters.` };
-  return { level: input.level, topics, notes };
+  const contact = contactFrom(input.contact);
+  if (contact && "problem" in contact) return contact;
+  return { level: input.level, topics, notes, ...(contact ? { contact } : {}) };
 }
 
 // An agreement as stored, read back whatever wrote it: an unknown level or topic falls back rather than throwing.
 export function normalised(agreement: Partial<Agreement> | null | undefined): Agreement {
-  const made = agreementFrom({ level: agreement?.level, topics: agreement?.topics, notes: agreement?.notes });
+  const made = agreementFrom({ level: agreement?.level, topics: agreement?.topics, notes: agreement?.notes, contact: agreement?.contact });
   if (!("problem" in made)) return made;
+  const contact = contactFrom(agreement?.contact);
   const topics = Object.fromEntries(
     Object.entries(agreement?.topics ?? {}).filter(([topic, rule]) => isTopic(topic) && !isReserved(topic) && isTopicRule(rule))
   ) as Agreement["topics"];
@@ -167,11 +210,17 @@ export function normalised(agreement: Partial<Agreement> | null | undefined): Ag
     level: isLevel(agreement?.level) ? agreement.level : DEFAULT_AGREEMENT.level,
     topics,
     notes: cleanNotes(String(agreement?.notes ?? "")).slice(0, NOTES_MAX),
+    ...(contact && !("problem" in contact) ? { contact } : {}),
   };
 }
 
+const sameContact = (a: AgreementContact | undefined, b: AgreementContact | undefined): boolean =>
+  (a?.mode ?? null) === (b?.mode ?? null) && (a?.everyMin ?? null) === (b?.everyMin ?? null);
 export const sameAgreement = (a: Agreement, b: Agreement): boolean =>
-  a.level === b.level && a.notes === b.notes && TOPICS.every((topic) => (a.topics[topic] ?? null) === (b.topics[topic] ?? null));
+  a.level === b.level &&
+  a.notes === b.notes &&
+  sameContact(a.contact, b.contact) &&
+  TOPICS.every((topic) => (a.topics[topic] ?? null) === (b.topics[topic] ?? null));
 
 const topicsSet = (agreement: Agreement, rule: TopicRule): Topic[] => TOPICS.filter((topic) => agreement.topics[topic] === rule);
 
@@ -192,6 +241,7 @@ export function agreementLines(agreement: Agreement, operator: { technical: bool
     ]
       .filter(Boolean)
       .join(" "),
+    ...(agreement.contact ? [`Messages to the operator, by the agreement: ${contactWords(agreement.contact)}.`] : []),
   ];
 }
 
@@ -206,5 +256,7 @@ export function agreementChanges(before: Agreement, after: Agreement): string[] 
   }
   if (before.notes !== after.notes)
     changes.push(after.notes ? (before.notes ? "standing instructions changed" : "standing instructions added") : "standing instructions removed");
+  if (!sameContact(before.contact, after.contact))
+    changes.push(after.contact ? `messages: ${contactWords(after.contact)}` : "messages: as the team's own settings say again");
   return changes;
 }

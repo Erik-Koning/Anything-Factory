@@ -1,7 +1,8 @@
 # Plan: the decision log and the working agreement
 
-Status: phases 1 to 3 built, tested and reviewed (see Checklist and Review), and merged into `main` on 2026-11-10 at
-the operator's word; phase 4 is planned, not started. No factory release has been made.
+Status: built, tested and reviewed (see Checklist and Review). Phases 1 to 3 were merged into `main`, pushed and
+deployed to the web app's dev stage on 2026-11-10 at the operator's word, and phase 4 (branch `closing-the-loop`)
+the same way after it. No factory release has been made: a team runs it once it's upgraded and its planner rotated.
 
 ## Why
 
@@ -169,13 +170,24 @@ and its history), or on the web app's **Agreement** tab with an authenticator co
    watchdog's delivery, the guard's ownership, the compiled rules, the planner's prompt, the constitution, the tests.
 3. **The web app:** the two pages, the tab counts, why a question was asked, the audit actions, unit and browser
    tests.
-4. **Closing the loop** (not started):
-   - calibration hints from the record ("you took the team's recommendation on 6 of 6 design questions: let it
-     decide those?", "2 of 5 scope decisions overturned: ask about scope?");
-   - how often a message may go (`contact`) as part of the agreement, read by the guard and the watchdog;
-   - flagged decisions in the web app's email digest, and the decision log on `a6g serve`'s local page;
-   - asked, decided and overturned in `a6g metrics --quality`;
-   - the approver's escalations classified the same way.
+4. **Closing the loop:**
+   - **Hints** from the operator's own record of the last 30 days (`calibrationHints`, pure): a topic with two or
+     more overturned decisions, a third of those made, is one to be asked about (or, where it's never asked, to give
+     back to the level); a topic whose three or more questions were all answered with the team's recommendation as it
+     stood is one the team could decide (or, where it's always asked, to give back to the level). Across topics,
+     three or more overturns suggest a closer level, and five or more answers that all took the recommendation suggest
+     `balanced` to a team on `hands-on`. `a6g agreement <team>` prints each with its command, the web app's Agreement
+     page with the change in the form's words; nothing applies by itself. An answer says it took the recommendation
+     (`a6g task answer <id> --recommended`, the web app's recommended choice) and keeps the question's topic, since
+     the ask goes when the task moves on.
+   - **How often a message may go** as part of the agreement: `contact` there (a digest with its window, or each as
+     it's needed) holds in place of `team.json`'s. The watchdog keeps the agreement in force in the run folder
+     (`agreement.json`), which the guard, the planner's context and the outbox read (`contactInForce`).
+   - **Flagged decisions in the web app's email**, at once or in the daily digest, for those who review; and **the
+     decision log on `a6g serve`'s page**, with Agree and Overturn and why each question was asked.
+   - **The check-ins in `a6g metrics --quality`:** raised, decided, flagged, agreed with and overturned, in the period.
+   - **An approver's escalation** says which approval rule sent it up, and with `--topic` what it's about. The
+     agreement still doesn't route it: who approves is `team.json`'s.
 
 ## What's yours to decide
 
@@ -207,7 +219,10 @@ it, so each stands as built until they say otherwise.
 - [x] 2. compiled rules, planner prompt, setup agent, constitution, README, `docs/team.md`, changelog
 - [x] 3. web: Decided for you, Agreement, tabs with the count to review, why a question was asked, audit actions
 - [x] 3. web: unit tests (`web/tests/unit/decided.test.ts`) and four browser tests
-- [ ] 4. closing the loop
+- [x] 4. hints; messages in the agreement; an answer that takes the recommendation; escalations that say why; the
+      check-ins in `a6g metrics --quality`; the decision log on `a6g serve` (`test/check-in-loop.test.ts`)
+- [x] 4. web: hints and messages on the Agreement page, the escalation's line in Waiting on you, flagged decisions in
+      the notifier's emails
 
 ## Review
 
@@ -228,6 +243,19 @@ An independent review of phases 1 and 2 found no high-severity bug. What it foun
 - **A team on a GitHub board** was told to use commands it doesn't have. Its rules now say what to do by hand.
 - **A note written between the operator's click and the watchdog's pass** hid an overturn from the planner's context.
   A review records when it reached the record, and notes count from then.
+
+A second review, of phase 4's harness half, found no serious bug either. What it found, and what was done:
+
+- **A wider level could be suggested over overturned decisions** (on `hands-on`, where no closer one exists). It
+  needs no overturns now.
+- **Hints kept counting what an agreement was changed for,** so taking one brought the next along. Only what was
+  decided and answered under the agreement in force counts.
+- **A question answered three times counted as three.** One answer a question counts: the last.
+- **An answer in the operator's own words could be marked as taking the recommendation** by a caller. `answer()`
+  refuses the two together; the recommendation is taken as it stands.
+- **A draft held under a long window lapsed when the operator shortened it.** A draft keeps the longest window it
+  waited under, and is tried for a day past that.
+- **A window that opens another day** said only the time. It says the day too.
 
 Known limits, left as they are:
 

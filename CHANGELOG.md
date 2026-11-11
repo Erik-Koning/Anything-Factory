@@ -36,6 +36,15 @@ question` takes `--topic`, `--stakes` and `--confidence` from the planner and re
   moves; Article 10 says it sets how readily the planner asks; Article 11 lists the decision log among the records.
 - **A team on a GitHub board** has no store, so neither: its planner's rules say to apply the default by hand and to
   write its decisions in `.a6g/decisions.md` itself.
+- **Closing the loop.** The agreement can set how often a message may reach the operator, in place of `team.json`'s
+  `contact` (`a6g agreement <team> --messages digest --every 2h`, `--messages priority`, `--messages team`): the guard,
+  the planner's context and the watchdog's outbox follow whichever is in force. `a6g agreement <team>` and the web
+  app's Agreement page say what the operator's own reviews and answers of the last 30 days suggest (a topic they keep
+  overturning is one to be asked about; one where they take the recommendation every time is one the team could
+  decide), each with the change that would do it, and change nothing themselves. `a6g task answer <id> --recommended`
+  takes the team's recommendation as it stands. An approver's escalation says which approval rule sent it up, and
+  with `--topic` what it's about. `a6g metrics --quality` counts the period's check-ins, `a6g serve`'s page lists the
+  decision log with Agree and Overturn, and the web app can email a flagged decision at once or in the daily digest.
 - **For a running team:** nothing changes until it's upgraded and its planner rotated. An older planner neither reads
   the agreement nor writes the log; a newer one that raises a question without the three judgments is told what to
   add.

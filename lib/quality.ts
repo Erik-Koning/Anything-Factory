@@ -4,7 +4,9 @@
 // A number that can't be known (no merged task, no run of the suite) is null and says so, never a zero.
 import { unprovenIn } from "./commands/e2e.ts";
 import type { SuiteRecord } from "./suite.ts";
-import { MERGE, type Kind, type Task } from "./tasks/model.ts";
+import type { Control } from "./tasks/controls.ts";
+import { type DecisionRecord, flagged, reviewOf } from "./tasks/decisions.ts";
+import { MERGE, OPERATOR, type Kind, type Task } from "./tasks/model.ts";
 import { dayOf, dollars, round, spendByWork, type UsageDay } from "./tasks/spend.ts";
 
 // The period, in milliseconds; null is open on that side.
@@ -34,6 +36,10 @@ export interface Quality {
   cost: { merged: number; perMerged: number | null; unpriced: number; team: number };
   // From a task's first claim to its merge, for the merged tasks that were claimed.
   claimedToMerged: { tasks: number; medianMin: number | null };
+  // How the check-ins went (lib/tasks/decisions.ts): what the team raised to the operator in the period, what it
+  // decided in their place and how many of those it flagged, and what the operator has said of them since. Null when
+  // the decision log wasn't given.
+  checkIns: { asked: number; decided: number; flagged: number; agreed: number; overturned: number } | null;
 }
 
 const within = (at: string, { since, until }: Period): boolean => {
@@ -79,7 +85,13 @@ const ELSEWHERE = "the suite's runs are kept on the team's lead machine: run thi
 
 // `runs` newest first, as the suite's history keeps them, or null on a machine that doesn't keep them; `days` every
 // day of usage the team has, since a task merged in the period may have been built before it.
-export function quality(tasks: Task[], runs: SuiteRecord[] | null, days: UsageDay[], period: Period): Quality {
+export function quality(
+  tasks: Task[],
+  runs: SuiteRecord[] | null,
+  days: UsageDay[],
+  period: Period,
+  log: { decisions: DecisionRecord[]; controls: Control[] } | null = null
+): Quality {
   const merged = tasks.flatMap((task) => {
     const merge = mergeOf(task);
     return merge && within(merge.at, period) ? [{ task, ...merge }] : [];
@@ -148,6 +160,21 @@ export function quality(tasks: Task[], runs: SuiteRecord[] | null, days: UsageDa
       team: round(rows.reduce((sum, row) => sum + row.cost, 0)),
     },
     claimedToMerged: { tasks: took.length, medianMin: mid === null ? null : Math.round(mid) },
+    checkIns: log ? checkInsIn(tasks, log.decisions, log.controls, period) : null,
+  };
+}
+
+// The check-ins of a period: a question counts when it was raised (the operator's own aren't the team's), a decision
+// when it was made, and its review whenever the operator gave it.
+function checkInsIn(tasks: Task[], decisions: DecisionRecord[], controls: Control[], period: Period): NonNullable<Quality["checkIns"]> {
+  const made = decisions.filter((d) => within(d.at, period));
+  const verdict = (d: DecisionRecord): string | undefined => reviewOf(d, controls)?.verdict;
+  return {
+    asked: tasks.reduce((n, t) => n + t.history.filter((e) => e.to === "question" && e.by !== OPERATOR && within(e.at, period)).length, 0),
+    decided: made.length,
+    flagged: made.filter(flagged).length,
+    agreed: made.filter((d) => verdict(d) === "agreed").length,
+    overturned: made.filter((d) => verdict(d) === "overturned").length,
   };
 }
 
@@ -202,5 +229,14 @@ export function describeQuality(q: Quality): string[] {
     q.claimedToMerged.medianMin === null
       ? "Claimed to merged: no merged task was claimed"
       : `Claimed to merged: ${span(q.claimedToMerged.medianMin)} (the median of ${count(q.claimedToMerged.tasks, "task")})`,
+    ...(q.checkIns
+      ? [
+          `Check-ins: ${count(q.checkIns.asked, "question")} raised to the operator; ${count(q.checkIns.decided, "decision")} made for them${
+            q.checkIns.decided
+              ? ` (${q.checkIns.flagged} flagged; the operator agreed with ${q.checkIns.agreed} and overturned ${q.checkIns.overturned})`
+              : ""
+          }`,
+        ]
+      : []),
   ];
 }

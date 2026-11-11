@@ -6,7 +6,20 @@
 // A review is a control (controls.ts), like a pause: the web app adds it with the access it already has, the watchdog
 // writes it onto the record and passes an overturn to the planner within a minute. Free of the CLI, so the web app
 // reads and reviews with the same code.
-import { type Grade, type Judged, isGrade, isTopic, route, type Topic, TOPICS, GRADES } from "./agreement.ts";
+import {
+  type Agreement,
+  type Grade,
+  type Judged,
+  type Level,
+  isGrade,
+  isReserved,
+  isTopic,
+  route,
+  type Topic,
+  type TopicRule,
+  TOPICS,
+  GRADES,
+} from "./agreement.ts";
 import { agreementOf, type Control, REVIEW_VERDICTS, reviewControl, type ReviewVerdict } from "./controls.ts";
 import { type Actor, type Doc, type Event, type Note, nowIso, OPERATOR, Refused, type Task, withEvent } from "./model.ts";
 import { type Store, update } from "./store.ts";
@@ -260,4 +273,92 @@ export function checkIns(decisions: DecisionRecord[], tasks: Task[], controls: C
     overturned: recent.filter((d) => reviewOf(d, controls)?.verdict === "overturned").length,
     toReview: toReview(decisions, controls).length,
   };
+}
+
+// --- Hints ---------------------------------------------------------------------------------------------------------
+// What the operator's own reviews and answers suggest about the agreement, since `since` or since the agreement in
+// force was set, whichever is later: a topic they keep overturning is one to be asked about; one where they take the
+// team's recommendation every time is one the team could decide. Suggestions only: the operator changes the agreement,
+// or doesn't. Each says what was seen, with its numbers.
+
+export interface Hint {
+  // What to set: a topic's rule ("follow": back to the level), or, with no topic, the level.
+  topic: Topic | null;
+  set: TopicRule | "follow" | Level;
+  why: string;
+  // The option of a6g agreement that makes the change.
+  flag: string;
+}
+// How much is enough to say so: overturns of a topic's decisions (and their share), answers that all took the
+// recommendation, and the same across every topic for the level.
+export const HINT_AT = { overturned: 2, share: 1 / 3, recommended: 3, levelOverturned: 3, levelRecommended: 5 } as const;
+
+export function calibrationHints(
+  decisions: DecisionRecord[],
+  tasks: Task[],
+  controls: Control[],
+  agreement: Agreement,
+  since: string,
+  operator: { technical: boolean } = { technical: true }
+): Hint[] {
+  // Only what happened under the agreement in force counts: what came before is what it was changed for, and
+  // suggesting the same change again, or the next one along, would walk the agreement on with no new evidence.
+  const set = agreementOf(controls).control?.at;
+  const from = set && set > since ? set : since;
+  const recent = decisions.filter((d) => d.at >= from);
+  const overturned = (d: DecisionRecord): boolean => reviewOf(d, controls)?.verdict === "overturned";
+  // One answer a question: the last the operator gave it.
+  const answers = tasks.flatMap((t) => t.notes.filter((n) => n.kind === "answer" && n.at >= from).slice(-1));
+  const tighter: Hint[] = [];
+  const looser: Hint[] = [];
+  for (const topic of TOPICS) {
+    // Not the agreement's to set: always the operator's, or never asked of an operator who isn't technical.
+    if (isReserved(topic) || (topic === "technical" && !operator.technical)) continue;
+    const now = agreement.topics[topic] ?? "follow";
+    const made = recent.filter((d) => d.topic === topic);
+    const undone = made.filter(overturned).length;
+    const asked = answers.filter((n) => n.topic === topic);
+    if (undone >= HINT_AT.overturned && undone / made.length >= HINT_AT.share && now !== "ask") {
+      const set = now === "decide" ? "follow" : "ask";
+      tighter.push({
+        topic,
+        set,
+        why: `You overturned ${undone} of the ${made.length} ${topic} decisions the team made${now === "decide" ? ", and it never asks about them" : ""}.`,
+        flag: `--${set} ${topic}`,
+      });
+    } else if (!undone && asked.length >= HINT_AT.recommended && asked.every((n) => n.took === "recommendation") && now !== "decide") {
+      const set = now === "ask" ? "follow" : "decide";
+      looser.push({
+        topic,
+        set,
+        why: `You took the team's recommendation, as it stood, on all ${asked.length} ${topic} questions it asked${now === "ask" ? ", and it always asks about them" : ""}.`,
+        flag: `--${set === "decide" ? "never" : "follow"} ${topic}`,
+      });
+    }
+  }
+  // Across topics, when no one topic explains it: a level closer, or (from hands-on only) one wider.
+  const undone = recent.filter(overturned).length;
+  const closer: Record<Level, Level | null> = { "hands-off": "balanced", balanced: "hands-on", "hands-on": null };
+  if (!tighter.length && undone >= HINT_AT.levelOverturned && undone / recent.length >= HINT_AT.share && closer[agreement.level])
+    tighter.push({
+      topic: null,
+      set: closer[agreement.level] as Level,
+      why: `You overturned ${undone} of the ${recent.length} decisions the team made, across topics.`,
+      flag: `--level ${closer[agreement.level]}`,
+    });
+  if (
+    !looser.length &&
+    !tighter.length &&
+    !undone &&
+    agreement.level === "hands-on" &&
+    answers.length >= HINT_AT.levelRecommended &&
+    answers.every((n) => n.took === "recommendation")
+  )
+    looser.push({
+      topic: null,
+      set: "balanced",
+      why: `You took the team's recommendation, as it stood, on all ${answers.length} questions it asked.`,
+      flag: "--level balanced",
+    });
+  return [...tighter, ...looser];
 }

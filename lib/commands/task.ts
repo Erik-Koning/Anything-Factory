@@ -87,8 +87,10 @@ export const USAGE = `usage: a6g task <command>
                or --waits-on <ids> [--then close|resume] when it waits for other tasks (settled when they're done)
   ask <id> --reason "…" --recommend "…" [--topic t --stakes s --confidence c]
       a question or blocked task: why it's the operator's and what the team recommends
-  answer <id> "<your answer>"   yours: what you say to a question, or to a block raised to you (the planner hears within a minute)
-  approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"   ·   escalate <id> --reason "…" --recommend "…"
+  answer <id> "<your answer>" | --recommended   yours: what you say to a question, or to a block raised to you; --recommended
+      takes the team's recommendation as it stands (the planner hears within a minute)
+  approve <id> [--note "…"]   ·   reject <id> --reason "…"   ·   research <id> --note "…"
+  escalate <id> --reason "…" --recommend "…" [--topic t]   (the approver: --topic says what it's about, as a question's does)
   claim [<id>] [--kind k]   ·   release <id> [--blocked "…"]   ·   submit <id>   ·   fetch <id> (a worker's branch, on the lead)
   migrate --to mongo|files [--dry-run]   (yours: the whole graph into the other store)`;
 
@@ -197,7 +199,10 @@ export function detail(t: Task): string {
       `the team recommends: ${t.ask.recommendation || "(none: the operator raised it)"}`,
       ...(t.ask.rule
         ? [
-            `asked because: ${t.ask.rule} (${t.ask.topic}, stakes ${t.ask.stakes}, confidence ${t.ask.confidence}; ${t.ask.agreement ? `agreement ${t.ask.agreement}` : "the default agreement"})`,
+            // A planner's question is judged and routed by the agreement; an escalation says which approval rule sent it up.
+            t.ask.stakes
+              ? `asked because: ${t.ask.rule} (${t.ask.topic}, stakes ${t.ask.stakes}, confidence ${t.ask.confidence}; ${t.ask.agreement ? `agreement ${t.ask.agreement}` : "the default agreement"})`
+              : `asked because: ${t.ask.rule}${t.ask.topic ? ` (${t.ask.topic})` : ""}`,
           ]
         : [])
     );
@@ -283,9 +288,16 @@ function saidIn(rest: string[], options: Options): string {
 // The operator's answer in words to what waits on them, as the web app gives it (lib/tasks/answer.ts): a note marked as
 // the answer, which leaves the task where it is. The watchdog passes it to the planner, which moves the task on.
 const answerTask: Handler = async ({ store, who }, [id, ...rest], options) => {
-  if (!id) throw new Refused('which task: a6g task answer <id> "<your answer>"');
-  const task = await answer(store, id, { who, text: saidIn(rest, options) });
-  console.info(`task ${task.id}: answered. The planner hears within a minute and moves it on.`);
+  if (!id) throw new Refused('which task: a6g task answer <id> "<your answer>", or a6g task answer <id> --recommended');
+  // The team's recommendation, as it stands: said with one flag, and counted as taken (the working agreement's hints).
+  const recommended = options["recommended"] === true;
+  const said = saidIn(rest, options);
+  if (recommended && said.trim())
+    throw new Refused("--recommended takes the team's recommendation as it stands; to change it, say your answer in words instead");
+  const task = await answer(store, id, { who, text: said, recommended });
+  console.info(
+    `task ${task.id}: answered${recommended ? ` with the team's recommendation (${task.notes.at(-1)?.text.replace(/^Go with your recommendation: /, "")})` : ""}. The planner hears within a minute and moves it on.`
+  );
   return 0;
 };
 
@@ -594,7 +606,13 @@ const proposalVerdict =
     const reason = optionText(options[flag]) ?? "";
     const recommendation = optionText(options["recommend"]) ?? "";
     try {
-      const task = await decide(store, id ?? "", decision, { who, approval: team.approval, text: reason, recommendation });
+      const task = await decide(store, id ?? "", decision, {
+        who,
+        approval: team.approval,
+        text: reason,
+        recommendation,
+        topic: options["topic"] === undefined ? undefined : (optionText(options["topic"]) ?? ""),
+      });
       console.info(`task ${task.id}: ${task.status}`);
       return 0;
     } catch (error) {
@@ -915,11 +933,11 @@ const OPTIONS: Record<string, string[]> = {
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
   status: ["reason", "recommend", "waits-on", "then", "topic", "stakes", "confidence"],
   ask: ["reason", "recommend", "topic", "stakes", "confidence"],
-  answer: ["text"],
+  answer: ["text", "recommended"],
   approve: ["note"],
   reject: ["reason"],
   research: ["note"],
-  escalate: ["reason", "recommend"],
+  escalate: ["reason", "recommend", "topic"],
   claim: ["kind"],
   release: ["blocked"],
   submit: [],
@@ -962,7 +980,7 @@ export async function task(argv: string[]): Promise<number> {
     console.info(USAGE);
     return sub === "help" || sub === "--help" ? 0 : 2;
   }
-  const { positional, options } = parseArgs(rest, { booleans: ["all", "json", "claimable", "approved", "dry-run", "help"] });
+  const { positional, options } = parseArgs(rest, { booleans: ["all", "json", "claimable", "approved", "dry-run", "help", "recommended"] });
   if (options["help"] === true) {
     console.info(USAGE);
     return 0;

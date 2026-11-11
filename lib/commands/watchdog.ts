@@ -19,10 +19,22 @@ import { answerCheckInByReply, relayAnswers } from "../answers.ts";
 import { applyReviews } from "../reviews.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
-import { type Contact, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
+import { type Contact, contactInForce, DEFAULT_CONTACT, type MessageKind, messageKind, nextAllowed, recordSent, registeredContact } from "../contact.ts";
 import { HEARTBEAT_FILE, heartbeatSettings, hostOf, ping } from "../heartbeat.ts";
 import { budgetCheck } from "../budget.ts";
-import { applyControls, clearNotes, holdNote, markApplied, pendingNotes, progressHold, queueNote, readHold, readLimits, writeLimits } from "../holds.ts";
+import {
+  applyControls,
+  clearNotes,
+  holdNote,
+  keepAgreement,
+  markApplied,
+  pendingNotes,
+  progressHold,
+  queueNote,
+  readHold,
+  readLimits,
+  writeLimits,
+} from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
@@ -104,6 +116,15 @@ export async function alertChannels(reach: Channel[], dir: string, kind: string,
 // notification marks (with how it went), and only a release's first delivery counts against the window: a channel
 // that failed sends it on its next run. One written before a channel was connected isn't sent by it; a failed send
 // is tried again on later runs, for a day past its window, under an id that keeps a retry from arriving twice.
+// The longest window a draft was held under, in minutes (a marker beside it, written while it waits); 0 for none.
+const waitedUnder = (path: string): number => {
+  try {
+    return Number(readFileSync(`${path}.waited`, "utf8")) || 0;
+  } catch {
+    return 0;
+  }
+};
+
 export async function sendOutbox(
   reach: Channel[],
   outbox: string,
@@ -129,7 +150,10 @@ export async function sendOutbox(
     .sort()) {
     const path = join(outbox, draft);
     const age = minutesSince(path);
-    if (age < 1 || age > 1440 + (digest ? contact.everyMin : 0)) continue;
+    // Tried for a day past its window: the one in force, or a longer one it waited under before the operator
+    // shortened it (the working agreement changes it while drafts wait), so a held draft goes rather than lapses.
+    const window = digest ? contact.everyMin : 0;
+    if (age < 1 || age > 1440 + Math.max(window, waitedUnder(path))) continue;
     const released = existsSync(`${path}.notified`);
     if (released && !reach.some((channel) => owes(channel, path))) continue;
     const { subject, text } = outboxMessage(title, draft, readFileSync(path, "utf8"));
@@ -147,7 +171,10 @@ export async function sendOutbox(
           : open("normal")
             ? "normal"
             : null;
-    if (!as) continue;
+    if (!as) {
+      if (window > waitedUnder(path)) writeFileSync(`${path}.waited`, String(window));
+      continue;
+    }
     if (!released && as === "urgent") urgentFree = false;
     const item = { draft, path, subject, text, as, delivered: reach.some((channel) => existsSync(`${path}.sent-${channel.name}`)) };
     due.push(item);
@@ -760,7 +787,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
 
   // The planner's outbox: a notification on this Mac, and the message itself through each connected channel, as often
   // as the team's contact setting allows.
-  await sendOutbox(reach, join(run, "outbox"), title, entry.name, log, registeredContact(entry.contact), (text) => notify(title, text));
+  await sendOutbox(reach, join(run, "outbox"), title, entry.name, log, contactInForce(run, registeredContact(entry.contact)), (text) =>
+    notify(title, text)
+  );
   trimLog(run);
 }
 
@@ -806,6 +835,9 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
     return false;
   }
   const applied = applyControls(entry.run, controls, entry.operator);
+  // The run folder's copy of the agreement in force, put right every pass: a folder made anew, or a version from
+  // before it was kept, catches up within a minute.
+  keepAgreement(entry.run, controls);
   for (const line of [...applied.log, ...reviews.log]) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";

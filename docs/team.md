@@ -168,9 +168,9 @@ How readily the team asks you isn't in `team.json`: it's the working agreement, 
 <team>` or on the web app and change while the team runs (the
 [README](../README.md#what-it-asks-you-and-what-it-decides-for-you) has the levels and the topics). It's kept in the
 team's store, every version of it, and holds from the moment it's recorded. Two settings here bear on it: with
-`operator.technical` false, `technical` questions are never asked whatever the agreement says; and `contact` still
-sets how often a message may reach you, whatever it asks. The design check-in is its own gate: the agreement doesn't
-route it.
+`operator.technical` false, `technical` questions are never asked whatever the agreement says; and `contact` sets
+how often a message may reach you until the agreement sets it in its place (`a6g agreement <team> --messages …`). The
+design check-in is its own gate: the agreement doesn't route it.
 
 ### Models
 

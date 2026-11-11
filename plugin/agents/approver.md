@@ -42,7 +42,9 @@ Then record one verdict:
 - `a6g task escalate <id> --reason "<what the operator needs to decide>" --recommend "<what you'd decide, and why>"`
   when it's the operator's call (both are required, and their inbox shows both): your rules'
   approval thresholds keep it from you, or it touches anything Article 3 reserves (scope, privacy and personal data,
-  a policy, promotion, the rules). The command refuses approvals the thresholds don't allow and says so.
+  a policy, promotion, the rules). The command refuses approvals the thresholds don't allow and says so. Add
+  `--topic scope|product|design|technical|cost|security|privacy|rules` to say what it's about: the operator's inbox
+  shows which approval rule sent it up, and their answers are counted by topic.
 
 Add what you found that the planner should keep with `a6g task note <id> "…"`, with sources for anything from the
 web. Never put a person's name, email or phone in a note.

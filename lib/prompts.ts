@@ -340,7 +340,11 @@ export function compile(team: LoadedTeam, role: string): string {
         `Protected branches, never pushed or merged into by the team: ${team.protectedBranches.map(code).join(", ")}.`,
         role === "planner" && team.owner ? `The operator: ${team.owner} (Article 10).` : null,
         operatorText(team),
-        role === "planner" ? `Messages to the operator (team.json contact), ${contactRule(team.contact)}` : null,
+        role === "planner"
+          ? `Messages to the operator (team.json contact), ${contactRule(team.contact)}${
+              team.board.type === "tasks" ? " Their working agreement may set this in its place: your context says what's in force each wake." : ""
+            }`
+          : null,
       ].filter((line) => line !== null)
     ),
     role === "planner"
