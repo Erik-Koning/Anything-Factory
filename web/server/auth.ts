@@ -78,6 +78,8 @@ const SEND_CONFIRMATION = "/send-verification-email";
 const CONFIRMED_PAGE = "/sign-up/confirmed";
 // The links that sign someone in by proving their inbox.
 const EMAIL_LINK = new Set(["/magic-link/verify", VERIFY_EMAIL]);
+// What an admin who can't get in is told, wherever an email says how they sign in.
+const LOCKED_OUT = "Locked out? Whoever runs this site can start your account afresh with npm run create-admin.";
 
 // Whether a new IP address is checked for this account (access.ts checksIp): accounts from before the choice read as on.
 function checksIpOf(user: object | null | undefined): boolean {
@@ -445,21 +447,39 @@ function makeAuth() {
     await sendMail({
       to: user.email,
       subject: "Confirm your email for Anything Factory",
-      text: `Someone, we hope you, signed up to Anything Factory with this address.\n\nConfirm it's yours with this link within an hour; it signs you in, once: ${url}\n\nIf you didn't sign up, ignore this email: nothing opens for an address that isn't confirmed.`,
+      text: `Confirm your email to finish creating your Anything Factory account:\n\n${url}\n\nThe link works once, for an hour, and signs you in. If you didn't sign up, ignore this email.`,
       link: url,
+      heading: "Confirm your email",
+      lines: ["One step left to finish creating your account."],
+      button: "Confirm email",
+      foot: "The link works once, for an hour, and signs you in. Didn't sign up? Ignore this email.",
     });
   }
 
   // A sign-up for an address that has an account changes nothing and answers like any other; the address's owner is
-  // told here. An unconfirmed sign-up shares its minute with the confirmation it was just sent.
-  async function tellKnown(user: { email: string; emailVerified?: boolean; banned?: unknown }): Promise<void> {
+  // told here, with how that account signs in. An unconfirmed sign-up shares its minute with the confirmation it was
+  // just sent.
+  async function tellKnown(user: { id: string; email: string; emailVerified?: boolean; banned?: unknown; role?: unknown }): Promise<void> {
     if (user.banned === true) return;
     if (!(await mayMail(`${user.emailVerified ? "known" : "confirm"}:${user.email.toLowerCase()}`))) return;
+    const admin = isAdminRole(user.role);
+    // Only an account that signed up and never confirmed has a confirmation to wait on: an invited one has no password.
+    const unconfirmed = !admin && !user.emailVerified && Boolean((await (await auth().$context).internalAdapter.findCredentialAccount(user.id))?.password);
+    const how = admin
+      ? "Admin accounts sign in with a password and an authenticator code, or a passkey."
+      : unconfirmed
+        ? "Its email was never confirmed: sign in with your password and we'll send a new confirmation link."
+        : "Sign in the way you usually do, or ask for a sign-in link there.";
+    const notYou = "Wasn't you? Ignore this email.";
     await sendMail({
       to: user.email,
       subject: "You already have an Anything Factory account",
-      text: `Someone, maybe you, tried to sign up to Anything Factory with this address. It already has an account, so nothing was changed.\n\nSign in at ${baseURL}/sign-in the way you usually do. If you signed up before and never confirmed your email, signing in with your password sends a new confirmation link.\n\nIf it wasn't you, ignore this email.`,
+      text: `Someone tried to sign up to Anything Factory with this address. It already has an account, so nothing was changed.\n\nSign in: ${baseURL}/sign-in\n\n${how}${admin ? ` ${LOCKED_OUT}` : ""}\n\n${notYou}`,
       link: `${baseURL}/sign-in`,
+      heading: "You already have an account",
+      lines: ["Someone tried to sign up with this address. Nothing was changed.", how],
+      button: "Sign in",
+      foot: admin ? `${LOCKED_OUT} ${notYou}` : notYou,
     });
   }
 
@@ -473,7 +493,25 @@ function makeAuth() {
   ): Promise<void> {
     const found = await ctx?.context.internalAdapter.findUserByEmail(email);
     const user = found?.user as { role?: unknown; banned?: unknown } | undefined;
-    if (!user || user.banned === true || isAdminRole(user.role)) return;
+    if (!user || user.banned === true) return;
+    // An admin who asks gets a note in place of the link: the page answers the same for every address, so without it
+    // nothing would say why no link came. It goes to their inbox only, once a minute, and opens nothing but the page.
+    if (isAdminRole(user.role)) {
+      if (!ctx?.request || !(await mayMail(`admin:${email.toLowerCase()}`))) return;
+      const how = "Admin accounts sign in with a password and an authenticator code, or a passkey.";
+      const notYou = "Didn't ask for a link? Ignore this email.";
+      await sendMail({
+        to: email,
+        subject: "No sign-in link for admins on Anything Factory",
+        text: `A sign-in link was asked for this address, and none was sent. ${how}\n\nSign in: ${baseURL}/sign-in\n\n${LOCKED_OUT}\n\n${notYou}`,
+        link: `${baseURL}/sign-in`,
+        heading: "No sign-in link for admins",
+        lines: ["A sign-in link was asked for this address, and none was sent.", how],
+        button: "Sign in",
+        foot: `${LOCKED_OUT} ${notYou}`,
+      });
+      return;
+    }
     if (!(await mayMail(email.toLowerCase()))) return;
     const team = metadata?.["team"];
     const invitation = !ctx?.request && typeof team === "string" && TEAM_NAME.test(team) ? team : null;
@@ -482,14 +520,22 @@ function makeAuth() {
         ? {
             to: email,
             subject: `You're invited to follow ${invitation} on Anything Factory`,
-            text: `You've been invited to follow the team ${invitation} on Anything Factory: send it requests and see how they're going.\n\nSign in with this link within 15 minutes: ${url}\n\nLater, sign in at ${baseURL}/sign-in with this address, and add a passkey from your account page.`,
+            text: `You've been invited to follow the team ${invitation} on Anything Factory: send it requests and see how they're going.\n\nAccept and sign in: ${url}\n\nThe link works once, for 15 minutes. Later, sign in at ${baseURL}/sign-in with this address.`,
             link: url,
+            heading: `You're invited to follow ${invitation}`,
+            lines: ["Send the team requests and see how they're going."],
+            button: "Accept and sign in",
+            foot: `The link works once, for 15 minutes. Later, sign in with this address at ${baseURL}/sign-in`,
           }
         : {
             to: email,
             subject: "Your Anything Factory sign-in link",
-            text: `Sign in to Anything Factory with this link within 15 minutes: ${url}\n\nIf you didn't ask for it, ignore this email.`,
+            text: `Sign in to Anything Factory:\n\n${url}\n\nThe link works once, for 15 minutes. If you didn't ask for it, ignore this email.`,
             link: url,
+            heading: "Sign in to Anything Factory",
+            lines: ["Here's the link you asked for."],
+            button: "Sign in",
+            foot: "It works once, for 15 minutes. Didn't ask for it? Ignore this email.",
           }
     );
   }

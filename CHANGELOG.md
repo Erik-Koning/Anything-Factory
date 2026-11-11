@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased: emails that read at a glance
+
+The web app's emails were paragraphs with a link hundreds of characters long spelled out in them, and an admin who
+asked for a sign-in link got nothing and no word why.
+
+- **A heading, a line, a button.** The sign-up confirmation, "you already have an account", the sign-in link, an
+  invitation and a new IP address to confirm each say what they're for in a line or two, with one button on the link
+  and a line of small print. No address is spelled out. Every other email keeps its text, in the same frame, each
+  address a link under a short name. Light and dark, in the factory's colours. The text part is whole, as before.
+- **"You already have an account" says how that account signs in**: an admin with a password and an authenticator
+  code or a passkey, an account that never confirmed its email by signing in to be sent the link again, anyone else
+  the way they usually do or by a sign-in link.
+- **An admin who asks for a sign-in link gets a note in its place**, once a minute: no link is sent to an admin, how
+  admins sign in, and that whoever runs the site starts a locked-out admin afresh with `npm run create-admin`. The
+  page answers the same as for anyone, and says under the form that admins don't get links.
+
 ## Unreleased: sign up on the web app
 
 The web app was invite only: an admin made every account, and each signed in by a link or a passkey. Now anyone can

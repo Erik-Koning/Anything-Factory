@@ -55,10 +55,12 @@ test("an admin never gets a sign-in link by email", async ({ browser }) => {
   await page.goto("/sign-in");
   await page.getByLabel("Email", { exact: true }).first().fill(state().admin.email);
   await page.getByRole("button", { name: "Email me a link" }).click();
-  // The same answer as for anyone, and nothing sent.
+  // The same answer as for anyone. What's sent is a note that says how an admin signs in: its link is the sign-in page.
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByText("An admin gets a note in place of the link")).toBeVisible();
+  expect(await nextLink(state().admin.email, before)).toBe(`${state().baseURL}/sign-in`);
   await page.waitForTimeout(500);
-  expect(mailsTo(state().admin.email).length).toBe(before);
+  expect(mailsTo(state().admin.email).length).toBe(before + 1);
   await context.close();
 });
 

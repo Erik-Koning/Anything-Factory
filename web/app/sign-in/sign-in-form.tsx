@@ -27,6 +27,9 @@ export function SignInForm({ next }: { next: string }) {
       <section className="panel" aria-live="polite">
         <h2>Check your email</h2>
         <p>If that address has an account, a sign-in link is on its way. It works once, for 15 minutes.</p>
+        <p className="hint">
+          An admin gets a note in place of the link: admins sign in with a passkey, or a password and their authenticator&apos;s code.
+        </p>
         <button type="button" className="linkish" onClick={() => setStep("choose")}>
           Use another way
         </button>
@@ -126,6 +129,7 @@ export function SignInForm({ next }: { next: string }) {
               Email me a link
             </button>
           </div>
+          <p className="hint">Admins never get a link by email: they sign in with a passkey, or a password and their authenticator&apos;s code.</p>
         </form>
       </section>
       <section className="panel" aria-labelledby="with-password">
@@ -163,7 +167,6 @@ export function SignInForm({ next }: { next: string }) {
               Continue
             </button>
           </div>
-          <p className="hint">Admins never get a link by email: they sign in with a passkey, or a password and their authenticator&apos;s code.</p>
         </form>
       </section>
     </>
