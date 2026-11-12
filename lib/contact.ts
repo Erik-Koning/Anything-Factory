@@ -65,7 +65,10 @@ export function nextAllowed(contact: Contact, run: string | null, kind: MessageK
   return Number.isNaN(last) ? now : Math.max(now, last + contact.everyMin * 60_000);
 }
 
-const hours = (minutes: number): string => `${Number((minutes / 60).toFixed(1))} h`;
+// A window in words, exactly (the agreement allows a quarter of an hour): whole and half hours in hours, any other
+// part of an hour in minutes.
+const hours = (minutes: number): string =>
+  minutes < 60 ? `${minutes} min` : minutes % 30 === 0 ? `${minutes / 60} h` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 // The time today; with the day, when it isn't today (a window may be days long).
 const clock = (ms: number, now = Date.now()): string => {
   const at = new Date(ms);

@@ -124,15 +124,19 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
         </p>
       ) : null}
       <div className="verdicts">
-        <Verdict team={team} id={t.id} decision="approve" label="Approve" field="Note (optional)" required={false} className="approve" />
-        <Verdict team={team} id={t.id} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
+        <Verdict team={team} id={t.id} seen={t.version} decision="approve" label="Approve" field="Note (optional)" required={false} className="approve" />
+        <Verdict team={team} id={t.id} seen={t.version} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
       </div>
       {/* A proposal is one of question, proposed and researching, so one of these is always open to it. */}
       <details className="more">
         <summary>{`Research or escalate #${t.id} instead`}</summary>
         <div className="verdicts">
-          {t.status !== "researching" ? <Verdict team={team} id={t.id} decision="research" label="Research it" field="What to find out" required /> : null}
-          {t.status !== "question" ? <Verdict team={team} id={t.id} decision="escalate" label="Escalate" field="What has to be decided" required /> : null}
+          {t.status !== "researching" ? (
+            <Verdict team={team} id={t.id} seen={t.version} decision="research" label="Research it" field="What to find out" required />
+          ) : null}
+          {t.status !== "question" ? (
+            <Verdict team={team} id={t.id} seen={t.version} decision="escalate" label="Escalate" field="What has to be decided" required />
+          ) : null}
         </div>
       </details>
     </li>

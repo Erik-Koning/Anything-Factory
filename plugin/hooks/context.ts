@@ -98,7 +98,7 @@ async function graph(): Promise<string | null> {
       return [
         clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas }), 2500),
         paceText,
-        clip(checkIns, 2200),
+        clip(checkIns, 2800),
       ].join("\n");
     } finally {
       await store.close();

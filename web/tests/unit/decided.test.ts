@@ -213,6 +213,11 @@ test("how often a message may reach the operator: the form's fields to the agree
   assert.deepEqual(messagesFields(undefined), { messages: "team", every: "4" });
   assert.deepEqual(messagesFields({ mode: "digest", everyMin: 90 }), { messages: "digest", every: "1.5" });
   assert.deepEqual(messagesFields({ mode: "digest", everyMin: 1440 }), { messages: "digest", every: "24" });
+  // A window set from the terminal that isn't a quarter of an hour: the field shows it, and sends back the same.
+  const twenty = messagesFields({ mode: "digest", everyMin: 20 });
+  assert.deepEqual(twenty, { messages: "digest", every: "0.33" });
+  assert.deepEqual(contactOfForm("digest", twenty.every), { contact: { mode: "digest", everyMin: 20 } });
+  assert.deepEqual(contactOfForm("digest", messagesFields({ mode: "digest", everyMin: 100 }).every), { contact: { mode: "digest", everyMin: 100 } });
   assert.deepEqual(messagesFields({ mode: "priority", everyMin: 0 }), { messages: "priority", every: "4" });
   assert.deepEqual(contactOfForm("team", "4"), { contact: undefined });
   assert.deepEqual(contactOfForm("", ""), { contact: undefined });

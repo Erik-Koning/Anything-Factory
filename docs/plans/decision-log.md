@@ -103,8 +103,9 @@ Two records, and one rule that joins them.
   `agreementOf(controls)` is the one in force (the newest `agreement` control, else the default).
 
 Set from the terminal with `a6g agreement <team> [--level …] [--ask scope,cost] [--never design] [--follow technical]
-[--notes "…" | --notes-file f | --clear-notes] [--reset]` (the operator's alone; with nothing, it shows the agreement
-and its history), or on the web app's **Agreement** tab with an authenticator code, like a pause.
+[--notes "…" | --notes-file f | --clear-notes] [--messages digest --every 2h | --messages priority | --messages team]
+[--reset]` (the operator's alone; with nothing, it shows the agreement and its history), or on the web app's
+**Agreement** tab with an authenticator code, like a pause.
 
 ## The decision log
 
@@ -256,6 +257,32 @@ A second review, of phase 4's harness half, found no serious bug either. What it
 - **A draft held under a long window lapsed when the operator shortened it.** A draft keeps the longest window it
   waited under, and is tried for a day past that.
 - **A window that opens another day** said only the time. It says the day too.
+
+A third review, of the whole change once it was merged, found nothing that loses work or lets anyone do what they
+may not. What it found, and what was done:
+
+- **An answer on the web app was read against the task as it stood when it was sent, not as the page showed it.** A
+  note by the planner that put the options another way, or another recommendation, between the page loading and the
+  answer, recorded the operator as choosing words they never saw (the form is older than this work; taking the
+  recommendation as it stands made it matter more). The form now carries a token of what it offered, and an answer to
+  a question that changed since comes back with the question as it stands. A decision on a proposal carries the
+  task's version the same way. `answer()` holds a recommendation to the one that was read, and makes its words again
+  when a write is tried again after someone else's.
+- **The Agreement form refused a window set from the terminal** that wasn't a quarter of an hour (20 minutes): the
+  field's own step check. Any part of an hour passes.
+- **A question the operator or the approver raised lost its standing** once the planner had raised it again: the
+  next time, it was judged by the agreement and could be refused. The ask now says who it came from.
+- **A window was told to the planner rounded to a tenth of an hour** (15 minutes as "0.3 h"). It's said exactly.
+- **The planner's context could lose the end of the overturned list** to long standing instructions. The list comes
+  first, and the whole fits its cut.
+- **`a6g agreement --level … <team>`,** with an option before the team's name, slipped past the check for a team on
+  a version that keeps no agreement. The command checks the team's version itself.
+- **`a6g help`** left `--messages` out.
+
+Noted, and left for later: reading the log's reviews costs a pass over the controls for each decision, and every
+team page reads both collections for one count (fine at a few hundred of each; an index by decision when it isn't);
+who set an agreement is worded in three places, and the check-ins are counted in two; the web app tells a team that
+reads the agreement by its published `operator` setting, not by its factory version.
 
 Known limits, left as they are:
 

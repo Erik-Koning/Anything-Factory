@@ -94,7 +94,8 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
             inputMode="decimal"
             min={CONTACT_EVERY.min / 60}
             max={CONTACT_EVERY.max / 60}
-            step="0.25"
+            // Any part of an hour: a window set from the terminal (20 minutes, say) must not fail the field's own check.
+            step="any"
             defaultValue={state.every}
           />
           <span className="hint">At most one message every so many hours, from a quarter of an hour to a week.</span>

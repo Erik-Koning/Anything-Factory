@@ -21,6 +21,7 @@ import { applyReview, calibrationHints, recordDecision, requestReview } from "..
 import { fileStore } from "../lib/tasks/files.ts";
 import { type ApprovalRules, newTask, OPERATOR, type Score, type Status, type Task } from "../lib/tasks/model.ts";
 import { compile } from "../lib/prompts.ts";
+import { type Store, update } from "../lib/tasks/store.ts";
 
 const made = (input: Parameters<typeof agreementFrom>[0]): Agreement => {
   const agreement = agreementFrom(input);
@@ -870,5 +871,66 @@ describe("where the rule in force is read, and who may review on the local page"
     } finally {
       await server.close();
     }
+  });
+});
+
+describe("what the third review found", () => {
+  test("a window is said exactly, down to the quarter of an hour the agreement allows", () => {
+    assert.deepEqual([15, 20, 45, 60, 75, 90, 100, 240, 1440].map(everyWords), [
+      "15 min",
+      "20 min",
+      "45 min",
+      "1 h",
+      "1 h 15 min",
+      "1.5 h",
+      "1 h 40 min",
+      "4 h",
+      "1 d",
+    ]);
+    const run = tmp("a6g-run-");
+    const said = (everyMin: number): string => contactStatus({ mode: "digest", everyMin }, run) ?? "";
+    assert.match(said(15), /^Messages to the operator \(digest, every 15 min\): /);
+    assert.match(said(45), /\(digest, every 45 min\)/);
+    assert.match(said(75), /\(digest, every 1 h 15 min\)/);
+    assert.match(said(90), /\(digest, every 1\.5 h\)/);
+    assert.match(said(1440), /\(digest, every 24 h\)/);
+  });
+
+  test("the recommendation taken is the one the operator read: changed since, it's refused; a write tried again reads it again", async () => {
+    const run = tmp("a6g-run-");
+    const store = fileStore(run, "fixture");
+    const question = await store.tasks.create(
+      newTask({
+        team: "fixture",
+        title: "Which carrier?",
+        kind: "feature",
+        status: "question",
+        by: "planner",
+        ask: { reason: "two fit", recommendation: "(a) the national post", by: "planner", at: new Date().toISOString(), topic: "product" },
+      })
+    );
+    const recommend = (recommendation: string) => update(store.tasks, question.id, (t) => (t.ask ? { ...t, ask: { ...t.ask, recommendation } } : t));
+    // The planner sets another recommendation after the operator's page was drawn.
+    await recommend("(b) a courier");
+    await assert.rejects(
+      answer(store, question.id, { who: OPERATOR, text: "", recommended: true, seen: "(a) the national post" }),
+      /the team changed its recommendation on #1 since you read it: read it again, then answer/
+    );
+    assert.equal((await store.tasks.get(question.id))?.notes.length, 0);
+    // Someone else's write lands between this answer's read and its write: tried again, it says what the task says then.
+    let raced = false;
+    const tasks = Object.assign(Object.create(store.tasks) as Store["tasks"], {
+      replace: async (doc: Task) => {
+        if (!raced) {
+          raced = true;
+          await recommend("(c) both");
+        }
+        return store.tasks.replace(doc);
+      },
+    });
+    const answered = await answer({ ...store, tasks }, question.id, { who: OPERATOR, text: "", recommended: true });
+    assert.ok(raced);
+    const note = answered.notes.at(-1);
+    assert.deepEqual([note?.text, note?.took, note?.topic], ["Go with your recommendation: (c) both", "recommendation", "product"]);
   });
 });

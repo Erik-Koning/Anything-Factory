@@ -1548,6 +1548,77 @@ test("the admin sets how often a message may reach them; answers that take the r
   await expect(hints).toHaveCount(0);
 });
 
+test("an answer or a decision on a task the team changed after the page was loaded comes back with the task as it stands", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const tasks = graph.collection("tasks");
+  const at = new Date().toISOString();
+  const doc = (id: string, fields: Parameters<typeof newTask>[0]) => ({ _id: `shop:${id}` as never, ...newTask(fields), id, version: 1 });
+  const stored = async (id: string): Promise<Task> => (await tasks.findOne({ _id: `shop:${id}` as never })) as unknown as Task;
+  await tasks.insertMany([
+    doc("911", {
+      team: "shop",
+      title: "Q: which courier?",
+      kind: "research",
+      status: "question",
+      by: "planner",
+      body: "Parcels need a courier. Options: (a) the national post, slower and cheaper; (b) a courier, the next day.",
+      ask: { reason: "what delivery costs is the operator's", recommendation: "(a) the national post, slower and cheaper", by: "planner", at },
+    }),
+    doc("912", { team: "shop", title: "Gift wrapping", kind: "feature", status: "proposed", by: "planner", body: "Wrap an order for a small fee." }),
+  ]);
+  try {
+    await page.goto("/t/shop/inbox");
+    const item = page.locator("#task-911");
+    const post = item.getByRole("radio", { name: /^\(a\) the national post, slower and cheaper/ });
+    await expect(post).toBeVisible();
+    // The planner learns something and puts the question the other way round, while the page is open.
+    const changed = new Date().toISOString();
+    await tasks.updateOne({ _id: "shop:911" as never }, {
+      $set: { "ask.recommendation": "(b) the national post, now that it delivers the next day", "ask.at": changed, updatedAt: changed },
+      $push: {
+        notes: {
+          at: changed,
+          by: "planner",
+          text: "The post now delivers the next day. Options: (a) a courier, at twice the price; (b) the national post. Recommendation: (b) the national post.",
+        },
+      },
+      $inc: { version: 1 },
+    } as never);
+    // (a) on this page is the post; on the task it's the courier now. The answer isn't recorded against either.
+    await post.check();
+    await item.getByRole("button", { name: "Send the answer on #911" }).click();
+    await expect(item.getByRole("alert")).toContainText(
+      "The team changed #911 after this page was loaded. It's shown as it stands now: read it again, then answer."
+    );
+    expect((await stored("911")).notes.filter((n) => n.by === "operator")).toHaveLength(0);
+    const courier = item.getByRole("radio", { name: /^\(a\) a courier, at twice the price/ });
+    await expect(courier).toBeVisible();
+    await expect(courier).not.toBeChecked();
+    await courier.check();
+    await item.getByRole("button", { name: "Send the answer on #911" }).click();
+    await expect(page.getByRole("status")).toContainText("Answer sent on #911.");
+    expect((await stored("911")).notes.at(-1)).toMatchObject({ by: "operator", kind: "answer", text: "(a) a courier, at twice the price." });
+
+    // A proposal the planner edits while the Decisions page is open: the decision is on what was read.
+    await page.goto("/t/shop/proposals");
+    await expect(page.getByRole("button", { name: "Reject #912" })).toBeVisible();
+    await tasks.updateOne({ _id: "shop:912" as never }, { $set: { body: "Wrap every order, at no charge.", updatedAt: changed }, $inc: { version: 1 } });
+    await page.locator("#reject-912").fill("Not this quarter");
+    await page.getByRole("button", { name: "Reject #912" }).click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+      "#912 changed after this page was loaded. It's shown as it stands now: read it again, then decide."
+    );
+    expect(await stored("912")).toMatchObject({ status: "proposed" });
+    await page.locator("#reject-912").fill("Not this quarter");
+    await page.getByRole("button", { name: "Reject #912" }).click();
+    await expect(page.getByRole("status")).toContainText("#912 rejected.");
+    expect(await stored("912")).toMatchObject({ status: "rejected" });
+  } finally {
+    await tasks.deleteMany({ _id: { $in: ["shop:911", "shop:912"] as never[] } });
+  }
+});
+
 test("the admin switches between teams, staying on the same page", async () => {
   const { page } = admin;
   await page.goto("/");
