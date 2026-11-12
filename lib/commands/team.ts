@@ -5,6 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { instanceId, loadTeam, modelsOf, type RawTeam, type Team } from "../config.ts";
+import * as docker from "../docker.ts";
 import { defaultModel } from "../models.ts";
 import {
   defaultRunDir,
@@ -39,7 +40,7 @@ import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, parseArgs, readJson, writeJson } from "../util.ts";
+import { die, type Options, parseArgs, readJson, writeJson } from "../util.ts";
 import { acquireSlot } from "../lock.ts";
 import { answers, applyTeamControls, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
@@ -64,6 +65,13 @@ import { checkDue, fileGaps, readVerifyLog } from "../verify.ts";
 
 const quote = (text: string): string => (/[\s"']/.test(text) ? `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"` : text);
 
+// --docker <name>: the Docker engine the team's containers run on, by its context's name or its address.
+function engineOption(value: Options[string]): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) die("--docker takes a Docker context's name (docker context ls lists them) or an engine's address");
+  return value.trim();
+}
+
 function homeFrom(arg: string | undefined): string {
   const home = arg ? realpathSync(resolve(arg)) : findHome();
   if (!home) die("run this in a team's checkout, or name it: a6g register <checkout>");
@@ -80,25 +88,34 @@ export function versionFor(team: Team): string {
   return version;
 }
 
-// A member's environment: team.json's vars, then the factory's own, so a var never decides who a member is or where
-// its team lives.
+// A member's environment: team.json's vars, then the factory's own, so a var never decides who a member is, where
+// its team lives or which Docker engine its containers run on.
 export function memberEnvironment(
   team: Team,
   role: string,
-  { home, run, version }: { home: string; run: string; version: string }
+  { home, run, version, engine }: { home: string; run: string; version: string; engine?: docker.Pin | null }
 ): Record<string, string> {
   const vars = Object.fromEntries(
     Object.entries(team.vars).map(([key, value]) => [key, String(value).replaceAll("${home}", home).replaceAll("${run}", run)])
   );
   // A6G_HOME too: a member's hooks guard the factory's folder wherever the operator keeps it.
-  return { ...vars, A6G_TEAM: team.name, A6G_ROLE: role, A6G_HOME: A6G_HOME, A6G_HOME_DIR: home, A6G_RUN: run, A6G_VERSION: version };
+  return {
+    ...vars,
+    ...(engine ? { DOCKER_HOST: engine.host } : {}),
+    A6G_TEAM: team.name,
+    A6G_ROLE: role,
+    A6G_HOME: A6G_HOME,
+    A6G_HOME_DIR: home,
+    A6G_RUN: run,
+    A6G_VERSION: version,
+  };
 }
 
 export async function register(argv: string[]): Promise<number> {
   operatorOnly("register");
   const { positional, options } = parseArgs(argv, { booleans: ["force", "worker"] });
   const home = homeFrom(positional[0]);
-  const code = registerTeam(home, { force: Boolean(options["force"]), worker: Boolean(options["worker"]) });
+  const code = registerTeam(home, { force: Boolean(options["force"]), worker: Boolean(options["worker"]), engine: engineOption(options["docker"]) });
   if (code === 0 && !options["worker"]) await fileAtRegister(home);
   if (code === 0) await publishTeam(home);
   return code;
@@ -153,7 +170,10 @@ async function fileAtRegister(home: string): Promise<void> {
   }
 }
 
-function registerTeam(home: string, { force, version: target, worker = false }: { force: boolean; version?: string; worker?: boolean }): number {
+function registerTeam(
+  home: string,
+  { force, version: target, worker = false, engine: requested }: { force: boolean; version?: string; worker?: boolean; engine?: string | undefined }
+): number {
   const team = loadTeam(home);
   for (const warning of team.warnings) console.warn(`  note: ${warning}`);
   // Register doesn't write team.json (a change there would hold up every merge until it's committed).
@@ -180,6 +200,16 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
   // One team per checkout: a renamed team would otherwise run beside the old one on the same files.
   const other = teamNames().find((name) => name !== team.name && readRegistry(name)?.home === home);
   if (other) die(`${home} is already registered as the team ${other}; a6g unregister ${other} first, or keep the name ${other}`);
+  // The Docker engine its containers run on (lib/docker.ts), for a team that needs one or whose operator names one.
+  // It stays the one it has until --docker names another.
+  let engine: docker.Pin | null = previous?.docker ?? null;
+  let why = "as it was registered";
+  if (requested || (team.environment.needsDocker && !engine)) {
+    const engines = docker.contexts();
+    const chosen = docker.choose({ requested, engines, up: requested ? [] : docker.running(engines), host: process.env.DOCKER_HOST });
+    if ("problem" in chosen) die(chosen.problem);
+    ({ pin: engine, why } = chosen);
+  }
   const run = previous?.run ?? defaultRunDir(team.name);
   mkdirSync(run, { recursive: true });
   const project = previous?.project ?? team.raw.t3ProjectId ?? t3.projectAdd(team.title, home);
@@ -225,7 +255,7 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     instances[instanceId(team, role)] = t3.instance({
       displayName: `${team.title} · ${role}`,
       launchArgs: flags.join(" "),
-      environment: memberEnvironment(team, role, { home, run, version }),
+      environment: memberEnvironment(team, role, { home, run, version, engine }),
       compactAt: role === "planner" ? team.plannerCompactAt : null,
       homePath: homeOf(role),
     });
@@ -248,6 +278,7 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     models,
     health: team.environment.health,
     needsDocker: team.environment.needsDocker,
+    ...(engine ? { docker: engine } : {}),
     worktreesDir: t3.worktreesDir(home),
     watchdog: team.watchdog,
     contact: team.contact,
@@ -266,6 +297,10 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     `  roles${worker ? " (a worker: builders only; testers test on the lead, where the environment runs)" : ""}: ${roles.map((role) => `${role} (${instanceId(team, role)})`).join(", ")}`
   );
   console.info(`  models: ${describeModels(models)}`);
+  if (engine)
+    console.info(
+      `  Docker engine: ${docker.label(engine)}${engine.context ? ` (${engine.host})` : ""}, ${why}: its members and the factory's commands for it use that one (--docker <name> names another)`
+    );
   // The subscriptions each role runs on, chosen now rather than at the watchdog's next run (else at that run).
   let steered: ReturnType<typeof steer> = null;
   try {
@@ -660,6 +695,7 @@ export async function status(argv: string[]): Promise<number> {
         `   environment: ${state} (${health.map((target, i) => `${target.replace(/^any:/, "")} ${up[i] ? "answers" : "doesn't answer"}`).join(", ")})`
       );
     } else console.info("   environment: no health URLs in team.json, so not checked");
+    if (entry.docker) console.info(`   Docker engine: ${docker.label(entry.docker)}${docker.answers(entry.docker) ? "" : ", which isn't running"}`);
     if (hold && pausing)
       console.info(
         `   pausing after ${describeHold(hold)} (asked ${hold.since.slice(0, 16)}): left ${hold.left.join("; ") || "nothing, so it pauses at the watchdog's next run"}${hold.stuck.length ? `; stopped: ${hold.stuck.join("; ")}` : ""}`
@@ -731,26 +767,28 @@ export function pinned(text: string, version: string): string {
   return `${JSON.stringify(wanted, null, 2)}\n`;
 }
 
-// a6g upgrade <team> [version] [--force]: register the team again on an installed version (this one by default),
-// then move its pin there. It runs in the version it moves to, whose code compiles the prompts and writes the
-// instances; the pin moves only once that worked.
+// a6g upgrade <team> [version] [--force] [--docker <name>]: register the team again on an installed version (this one
+// by default), then move its pin there. It runs in the version it moves to, whose code compiles the prompts and
+// writes the instances; the pin moves only once that worked. --docker names the team's Docker engine, as register's.
 export async function upgrade(argv: string[]): Promise<number> {
   operatorOnly("upgrade");
   const { positional, options } = parseArgs(argv, { booleans: ["force"] });
-  const entry = entryFor(positional[0] ?? die("usage: a6g upgrade <team> [version] [--force]"));
+  const entry = entryFor(positional[0] ?? die("usage: a6g upgrade <team> [version] [--force] [--docker <name>]"));
   const version = positional[1] ?? PACKAGE.version;
+  const engine = engineOption(options["docker"]);
   if (!existsSync(versionDir(version))) die(`Anything Factory ${version} isn't installed (a6g versions lists them)`);
   const force = Boolean(options["force"]);
   if (realpathSync(versionDir(version)) !== realpathSync(FACTORY_ROOT)) {
     if (process.env.A6G_UPGRADING === version)
       die(`Anything Factory ${version} at ${versionDir(version)} handed the upgrade back; run it from that version`);
-    const result = spawnSync(process.execPath, [entryOf(versionDir(version)), "upgrade", entry.name, version, ...(force ? ["--force"] : [])], {
+    const flags = [...(force ? ["--force"] : []), ...(engine ? ["--docker", engine] : [])];
+    const result = spawnSync(process.execPath, [entryOf(versionDir(version)), "upgrade", entry.name, version, ...flags], {
       stdio: "inherit",
       env: { ...process.env, A6G_HANDED_OVER: "1", A6G_UPGRADING: version },
     });
     return result.status ?? 1;
   }
-  registerTeam(entry.home, { force, version, worker: Boolean(entry.worker) });
+  registerTeam(entry.home, { force, version, worker: Boolean(entry.worker), engine });
   await publishTeam(entry.home);
   const file = teamFile(entry.home);
   writeFileSync(file, pinned(readFileSync(file, "utf8"), version));

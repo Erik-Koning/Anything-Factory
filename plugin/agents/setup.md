@@ -160,7 +160,9 @@ In `.a6g/`, write:
   journeys' specs once that suite exists (`harness.journeys`; leave it out).
 - **`roles/<role>.md`:** only for something one role needs that doesn't belong in `notes.md`.
 - **`adapters/`:**
-  - `env.sh` (`up`, `down`, `status`, `reset` and `restart` for the team's own environment);
+  - `env.sh` (`up`, `down`, `status`, `reset` and `restart` for the team's own environment). Where it uses Docker,
+    it runs `docker` as it is: once the team is registered the factory sets `DOCKER_HOST` to its engine, so the
+    script never looks for a socket, sets `DOCKER_HOST` or `DOCKER_CONTEXT`, or runs `docker context use`;
   - `gate.sh` (what CI runs; `--quick` for the subset);
   - `after-merge.sh` (rebuild and recheck after a merge).
 
@@ -179,7 +181,8 @@ to every agent.
    environment, and runs the gate on a fresh worktree of the integration branch.
 3. Show the operator the summary it prints: what the team may and may not do.
 4. Ask whether to start now. If yes, run `a6g register` and then `a6g start <name>`, and tell them how to watch it:
-   `a6g status`, the T3 Code window, `a6g metrics`.
+   `a6g status`, the T3 Code window, `a6g metrics`. When register says several Docker engines are running, ask the
+   operator which one is this team's (it lists them) and run `a6g register --docker <name>`: don't pick one for them.
 
 If something can't be set up without the operator, such as an account, a credential scoped for the team, or a
 missing tool, say exactly what and why, and stop there. A secret only they have is theirs to set: name it and say
