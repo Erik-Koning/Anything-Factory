@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased: a forgotten password
+
+The web app had no way back for someone who forgot their password: a member could still sign in by link, and an admin,
+who never gets one, had to be started afresh with `npm run create-admin`.
+
+- **Forgot your password?** on the sign-in page emails a link to set a new one. It works once, for 30 minutes, signs
+  nobody in, and changes nothing until its page is filled in. Asking answers the same for every address.
+- **An account with an authenticator gives its code as well**, admins always: an inbox alone never changes a password
+  that a second factor guards. Wrong codes count against the person's five.
+- Setting it ends every session of the account, tells its address by email, and is in the audit log. An invited
+  account, which had no password, can set its first this way.
+- A lost authenticator is still `create-admin`'s to mend: the link doesn't take a backup code.
+
 ## Unreleased: thinking streams, and the operator's taste from Ditto
 
 Nobody on a team worked out how a thing should feel before it was built: the builder matched the code that was there,
@@ -36,6 +49,7 @@ record of their taste. The plan is `docs/plans/thinking-streams.md`. Built and t
 - **In Ditto** (its repository, `mcp/`): a grant can be `--notes-only`, and `record_note` saves what an agent
   inferred or passed on. Notes are kept in their own file, shown to agents under their own heading after everything
   of the operator's, and counted in nothing: no conviction, no pattern, no rule.
+
 ## Unreleased: one Docker engine per team
 
 A Mac can run several Docker engines (Docker Desktop, Rancher Desktop, OrbStack, Colima), each with its own containers

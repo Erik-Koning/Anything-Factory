@@ -4,7 +4,7 @@
 // (and each person their own); the team's agents never see this database (Article 8).
 //
 // Sign-ups, sign-ins, sign-outs, second factors, new IP addresses, passkeys and authenticators are recorded from Better
-// Auth's hooks (auth.ts); people, tasks, decisions, requests, pauses, resumes, budgets, the working agreement, reviews
+// Auth's hooks (auth.ts), a password set from an emailed link where it is set (password-reset.ts); people, tasks, decisions, requests, pauses, resumes, budgets, the working agreement, reviews
 // of what a team decided, linked machines and a person's own choices (the IP check, the authenticator put off) from
 // the server actions and endpoints that make them.
 import type { Db } from "mongodb";
@@ -15,6 +15,8 @@ export const AUDIT_ACTIONS = [
   "sign-up",
   "sign-in",
   "sign-in-link",
+  "password.reset-link",
+  "password.reset",
   "sign-out",
   "session.ended",
   "second-factor",
@@ -163,6 +165,8 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   "sign-up": "Sign-up",
   "sign-in": "Sign-in",
   "sign-in-link": "Sign-in link asked for",
+  "password.reset-link": "Password link asked for",
+  "password.reset": "Password set from a link",
   "sign-out": "Signed out",
   "session.ended": "Session ended",
   "second-factor": "Second factor",

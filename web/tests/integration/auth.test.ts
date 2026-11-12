@@ -15,6 +15,7 @@ import { auth, isAdminRole } from "../../server/auth.ts";
 import { createAdmin, type NewAdmin } from "../../server/bootstrap.ts";
 import { authDb, closeMongo } from "../../server/db.ts";
 import { answerChallenge } from "../../server/known-ips.ts";
+import { authenticatorShows, NO_AUTHENTICATOR, readReset, setNewPassword } from "../../server/password-reset.ts";
 import { totpCode } from "../../server/totp.ts";
 import { SoftwarePasskey } from "./authenticator.ts";
 
@@ -980,6 +981,226 @@ test("create-admin run again starts the admin afresh, and makes an existing pers
   const nowAdmin = new Browser();
   await signInAsAdmin(nowAdmin, promoted);
   assert.equal(isAdminRole((await nowAdmin.session())?.user.role), true);
+});
+
+// --- A forgotten password -------------------------------------------------------------------------------------------
+
+const RESET = "Set a new Anything Factory password";
+const CHANGED = "Your Anything Factory password was changed";
+const NEW_PASSWORD = "another-long-password";
+const GONE = { ok: false, error: "This link has expired or was used already. Ask for a new one.", gone: true };
+const WRONG_CODE = { ok: false, error: "That code isn't right. Codes change every 30 seconds." };
+const askReset = (browser: Browser, email: string): Promise<Response> => browser.fetch("/request-password-reset", { body: { email } });
+const tokenIn = (link: string | undefined): string => new URL(link ?? "http://none").searchParams.get("token") ?? "";
+// Six digits the authenticator isn't showing, hasn't just shown and isn't about to.
+function aWrongCode(uri: string): string {
+  const right = [-30_000, 0, 30_000, 60_000].map((drift) => totpCode(uri, Date.now() + drift));
+  for (let n = 0; ; n += 1) if (!right.includes(String(n).padStart(6, "0"))) return String(n).padStart(6, "0");
+}
+// The link an account is emailed when it asks, and its token.
+async function aResetLink(email: string): Promise<{ token: string; link: URL; asker: Browser }> {
+  await forgetSends();
+  const seen = mails.length;
+  const asker = new Browser();
+  const answer = await askReset(asker, email);
+  assert.deepEqual([answer.status, await answer.json(), asker.cookies.size], [200, { status: true }, 0]);
+  const mail = mailFor(email, RESET, seen);
+  assert.ok(mail, `a link to set a new password for ${email}`);
+  return { token: tokenIn(mail.link), link: new URL(mail.link), asker };
+}
+
+test("a forgotten password is set again from an emailed link: it signs nobody in, works once, ends every session, and the old password is gone", async () => {
+  const { browser, email, me } = await aSignedUpPerson({ setUpAuthenticator: false });
+  const seen = mails.length;
+  const { token, link, asker } = await aResetLink(email);
+  assert.equal(`${link.origin}${link.pathname}`, `${BASE}/reset-password`, "the app's own page, which asks before it changes anything");
+  assert.match(token, /^[A-Za-z0-9]{24}$/);
+  assert.deepEqual(await readReset(token), { email, needsCode: false, refused: null });
+  // Only its digest is kept: nothing in the database is the token, or holds it.
+  const kept = await authDb().collection("verification").find({}).toArray();
+  assert.equal(JSON.stringify(kept).includes(token), false);
+  assert.equal(kept.filter((row) => String(row["value"]) === me.user.id && !String(row["identifier"]).includes(":")).length, 1, "filed under a digest");
+  // Asking, and opening the link, change nothing: the password and the session stand.
+  const old = (await credentialOf(email))?.["password"];
+  assert.equal((await browser.session())?.user.email, email);
+  // Better Auth's own endpoints for setting it aren't served: only the app's page does, after its checks.
+  assert.equal(await statusOf(asker.fetch("/reset-password", { body: { newPassword: NEW_PASSWORD, token } })), 403);
+  assert.equal(await statusOf(asker.fetch(`/reset-password/${token}?callbackURL=%2F`)), 403);
+  assert.equal((await credentialOf(email))?.["password"], old);
+
+  const from = { ip: asker.address, userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15" };
+  // What's wrong with the new password is said, and uses nothing up.
+  assert.deepEqual(await setNewPassword({ token, password: "too-short", code: "" }, from), { ok: false, error: "Use at least 12 characters." });
+  assert.deepEqual(await setNewPassword({ token, password: "x".repeat(129), code: "" }, from), {
+    ok: false,
+    error: "Keep it to 128 characters or fewer.",
+  });
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: "" }, from), { ok: true });
+  assert.notEqual((await credentialOf(email))?.["password"], old);
+  assert.equal(await sessionsOf(email), 0, "every session of the account ended");
+  assert.equal(await browser.session(), null);
+  // Once.
+  assert.deepEqual(await setNewPassword({ token, password: "yet-another-password", code: "" }, from), GONE);
+  assert.equal(await readReset(token), null);
+  for (const not of ["", "short", "x".repeat(24), `${token}x`, "../../etc/passwd"]) assert.equal(await readReset(not), null, not);
+
+  // The old password is refused; the new one signs them in, from the address they had confirmed.
+  assert.equal(await statusOf(browser.fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 401);
+  assert.equal(await statusOf(browser.fetch("/sign-in/email", { body: { email, password: NEW_PASSWORD } })), 200);
+  assert.equal((await browser.session())?.user.email, email);
+  // Their address is told, and both steps are in the log: who asked from where, and what set it.
+  assert.equal(mailFor(email, CHANGED, seen)?.link, `${BASE}/sign-in`);
+  const asked = (await audited("password.reset-link", email)).at(-1);
+  assert.deepEqual([asked?.["outcome"], asked?.["ip"], asked?.["userId"]], ["ok", asker.address, null]);
+  const set = await audited("password.reset", email);
+  assert.deepEqual(
+    set.map((entry) => [entry["outcome"], entry["detail"], entry["userId"], entry["ip"]]),
+    [["ok", "link; every session ended", me.user.id, asker.address]]
+  );
+});
+
+test("asking for a password link answers the same, as slowly, for any address; nobody unknown or banned is emailed, and nobody twice in a minute", async () => {
+  const { email: known } = await aSignedUpPerson();
+  const invited = await aPerson("invited");
+  const nobody = anAddress("nobody");
+  const banned = await aPerson("banned");
+  await authDb()
+    .collection("user")
+    .updateOne({ email: banned }, { $set: { banned: true } });
+  await forgetSends();
+
+  const seen = mails.length;
+  const answers = await Promise.all(
+    [known, invited, nobody, banned].map(async (email) => {
+      const browser = new Browser();
+      const started = Date.now();
+      const answer = await askReset(browser, email);
+      return { email, status: answer.status, body: await answer.text(), took: Date.now() - started, cookies: browser.cookies.size };
+    })
+  );
+  for (const answer of answers) {
+    assert.deepEqual([answer.status, answer.body, answer.cookies], [200, '{"status":true}', 0], answer.email);
+    assert.ok(answer.took >= FLOOR_MS, `${answer.email} answered in ${answer.took} ms`);
+  }
+  const sent = () =>
+    [known, invited, nobody, banned].map((email) =>
+      mails
+        .slice(seen)
+        .filter((m) => m.to === email)
+        .map((m) => m.subject)
+    );
+  assert.deepEqual(sent(), [[RESET], [RESET], [], []]);
+  // Asked again within the minute: the same answer, and no second email.
+  assert.equal(await statusOf(askReset(new Browser(), known)), 200);
+  assert.deepEqual(sent(), [[RESET], [RESET], [], []]);
+  // What isn't an address is said at once, and is in the log as it was typed.
+  assert.equal(await statusOf(askReset(new Browser(), "not-an-address")), 400);
+  assert.equal((await audited("password.reset-link", "not-an-address")).at(-1)?.["outcome"], "failed");
+
+  // An invited account had no password: the link, which proves its inbox as a sign-in link would, gives it its first.
+  assert.equal(await credentialOf(invited), null);
+  const token = tokenIn(mailFor(invited, RESET, seen)?.link);
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: "" }, { ip: "203.0.113.20", userAgent: null }), { ok: true });
+  assert.ok((await credentialOf(invited))?.["password"]);
+});
+
+test("links to set a password are held to three asks a minute from one address", async () => {
+  const browser = new Browser();
+  for (let n = 0; n < 3; n += 1) assert.equal(await statusOf(askReset(browser, "not-an-address")), 400);
+  assert.equal(await statusOf(askReset(browser, anAddress("flood"))), 429);
+  assert.equal(await statusOf(askReset(new Browser(), "not-an-address")), 400);
+});
+
+test("the link proves an address nobody had confirmed: whoever signed up with it loses their password, and its new IP addresses are checked", async () => {
+  const email = anAddress("unproven");
+  // Signed up by someone, with their own password and the IP check off, and never confirmed.
+  assert.equal((await signUp(new Browser(), email, { checkNewIps: false })).status, 200);
+  const before = await accountOf(email);
+  assert.deepEqual([before?.["emailVerified"], before?.["ipCheck"]], [false, false]);
+  const { token } = await aResetLink(email);
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: "" }, { ip: "203.0.113.21", userAgent: null }), { ok: true });
+  const after = await accountOf(email);
+  assert.deepEqual([after?.["emailVerified"], after?.["ipCheck"]], [true, true]);
+  assert.equal((await audited("password.reset", email)).at(-1)?.["detail"], "link; every session ended; address confirmed");
+  // The password it was signed up with opens nothing; the inbox's owner signs in, and is asked about the new address.
+  assert.equal(await statusOf(new Browser().fetch("/sign-in/email", { body: { email, password: PASSWORD } })), 401);
+  const owner = new Browser();
+  const seen = mails.length;
+  assert.equal(await statusOf(owner.fetch("/sign-in/email", { body: { email, password: NEW_PASSWORD } })), 200);
+  assert.ok(mailFor(email, NEW_ADDRESS, seen), "the new address is asked about by email");
+  await confirmFromEmail(owner, email, seen);
+  assert.equal(await statusOf(owner.fetch("/list-sessions")), 200);
+});
+
+test("an admin's password changes only with the link and their authenticator's code: the inbox alone changes nothing", async () => {
+  const { browser, admin } = await anAdminSignedIn();
+  const { token, asker } = await aResetLink(admin.email);
+  assert.deepEqual(await readReset(token), { email: admin.email, needsCode: true, refused: null });
+  const from = { ip: asker.address, userAgent: null };
+  const old = (await credentialOf(admin.email))?.["password"];
+  const me = (await browser.session())?.user.id;
+
+  // No code, something that isn't one, a backup code, the wrong one: nothing changes and nobody is signed out.
+  const noCode = { ok: false, error: "Enter the 6-digit code your authenticator shows." };
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: "" }, from), noCode);
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: "12345" }, from), noCode);
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: admin.backupCodes[0] ?? "" }, from), noCode);
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: aWrongCode(admin.totpURI) }, from), WRONG_CODE);
+  assert.equal((await credentialOf(admin.email))?.["password"], old);
+  assert.equal((await browser.session())?.user.id, me);
+  assert.deepEqual(await readReset(token), { email: admin.email, needsCode: true, refused: null }, "a wrong code doesn't use the link up");
+
+  // The code is read from Better Auth's own record of the authenticator: this minute's, and the half-minute either side.
+  const now = Date.now();
+  assert.equal(await authenticatorShows(String(me), totpCode(admin.totpURI, now), now), true);
+  assert.equal(await authenticatorShows(String(me), totpCode(admin.totpURI, now - 30_000), now), true);
+  assert.equal(
+    await authenticatorShows(String(me), totpCode(admin.totpURI, now + 120_000), now),
+    totpCode(admin.totpURI, now + 120_000) === totpCode(admin.totpURI, now)
+  );
+  assert.equal(await authenticatorShows("nobody", totpCode(admin.totpURI, now), now), false);
+
+  // The link and the code together set it. Every session ends; the old password is refused, the new one, with a
+  // code, signs them in.
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: totpCode(admin.totpURI) }, from), { ok: true });
+  assert.equal(await browser.session(), null);
+  assert.equal(await statusOf(new Browser().fetch("/sign-in/email", { body: { email: admin.email, password: admin.password } })), 401);
+  const back = new Browser();
+  await signInAsAdmin(back, { ...admin, password: NEW_PASSWORD });
+  assert.equal((await back.session())?.session.secondFactor, true);
+  assert.deepEqual(
+    (await audited("password.reset", admin.email)).map((entry) => [entry["outcome"], entry["detail"]]),
+    [
+      ["failed", "authenticator code"],
+      ["ok", "link and authenticator code; every session ended"],
+    ]
+  );
+});
+
+test("five wrong codes lock the link for fifteen minutes, the right code included; an admin with no authenticator can't use one at all", async () => {
+  const admin = await createAdmin({ email: anAddress("admin"), name: "Ada Admin" });
+  const { token } = await aResetLink(admin.email);
+  const from = { ip: "203.0.113.22", userAgent: null };
+  const old = (await credentialOf(admin.email))?.["password"];
+  for (let n = 0; n < 5; n += 1)
+    assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: aWrongCode(admin.totpURI) }, from), WRONG_CODE);
+  const locked = { ok: false, error: "That's 5 wrong codes: wait 15 minutes, then try again." };
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: totpCode(admin.totpURI) }, from), locked);
+  assert.equal((await credentialOf(admin.email))?.["password"], old);
+  assert.deepEqual((await audited("password.reset", admin.email)).at(-1)?.["outcome"], "refused");
+  // Fifteen minutes on, the right code sets it.
+  await authDb().collection("code_attempts").deleteMany({});
+  assert.deepEqual(await setNewPassword({ token, password: NEW_PASSWORD, code: totpCode(admin.totpURI) }, from), { ok: true });
+
+  // An admin made without create-admin has a password and no authenticator: nothing proves a second factor, so the
+  // link opens only an explanation.
+  const bare = anAddress("bare-admin");
+  await auth().api.createUser({ body: { email: bare, password: PASSWORD, name: "Bare Admin", role: "admin", data: { emailVerified: true } } });
+  const { token: theirs } = await aResetLink(bare);
+  assert.deepEqual(await readReset(theirs), { email: bare, needsCode: false, refused: NO_AUTHENTICATOR });
+  const kept = (await credentialOf(bare))?.["password"];
+  assert.deepEqual(await setNewPassword({ token: theirs, password: NEW_PASSWORD, code: "" }, from), { ok: false, error: NO_AUTHENTICATOR });
+  assert.equal((await credentialOf(bare))?.["password"], kept);
 });
 
 test("nothing in these tests reached for the network", () => {

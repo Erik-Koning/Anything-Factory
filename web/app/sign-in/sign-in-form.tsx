@@ -135,6 +135,11 @@ export function SignInForm({ next, problem: opened }: { next: string; problem: s
               <div key={method} className="sign-in-swap">
                 <h2 id="sign-in-how">{how.title}</h2>
                 <p className="hint">{how.about}</p>
+                {method === "password" ? (
+                  <p className="hint">
+                    <Link href="/forgot-password">Forgot your password?</Link>
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>
