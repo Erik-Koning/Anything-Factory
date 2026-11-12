@@ -167,6 +167,9 @@ export function SignInForm({ next }: { next: string }) {
               Continue
             </button>
           </div>
+          <p className="hint">
+            <a href="/forgot-password">Forgot your password?</a>
+          </p>
         </form>
       </section>
     </>

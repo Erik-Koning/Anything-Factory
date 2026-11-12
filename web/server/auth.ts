@@ -27,6 +27,9 @@
 //     is refused for an admin. Nobody becomes an admin by signing up.
 // Anyone else may turn on an authenticator too (as they sign up, or from the account page); from then on their
 // sessions need its code as well, whichever way they signed in.
+// A forgotten password is set again from a link by email (password-reset.ts): the link signs nobody in, an account
+// with an authenticator gives its code as well, so an admin's inbox alone changes nothing, and every session of the
+// account ends. Asking answers the same for every address; the app's own page sets the password, never an endpoint here.
 // Each session records whether it began with a second factor (session.secondFactor, set here as it's made and never
 // by the client; a code entered later sets it, second-factor/actions.ts). Every page and server action checks it on
 // the server (viewer.ts, access.ts), and over HTTP a session without it can only sign out or sign in again (the guard
@@ -76,10 +79,14 @@ const VERIFY_EMAIL = "/verify-email";
 const SEND_CONFIRMATION = "/send-verification-email";
 // Where a confirmation link lands: on to the app when it signed the person in, the reason when it didn't.
 const CONFIRMED_PAGE = "/sign-up/confirmed";
+// Asking for a link to set a new password, and the page the link opens (password-reset.ts sets it from there).
+const ASK_RESET = "/request-password-reset";
+const RESET_PAGE = "/reset-password";
 // The links that sign someone in by proving their inbox.
 const EMAIL_LINK = new Set(["/magic-link/verify", VERIFY_EMAIL]);
 // What an admin who can't get in is told, wherever an email says how they sign in.
-const LOCKED_OUT = "Locked out? Whoever runs this site can start your account afresh with npm run create-admin.";
+const LOCKED_OUT =
+  "Forgot your password? Set a new one from the sign-in page, with your authenticator's code. Without the authenticator, whoever runs this site can start your account afresh with npm run create-admin.";
 
 // Whether a new IP address is checked for this account (access.ts checksIp): accounts from before the choice read as on.
 function checksIpOf(user: object | null | undefined): boolean {
@@ -145,13 +152,18 @@ const OPEN_WHILE_PENDING = new Set([
   // Signing up needs no session, and its confirmation link makes one of its own.
   SIGN_UP,
   VERIFY_EMAIL,
+  // Nor does asking for a link to set a new password: whatever session the browser holds, the email goes or doesn't.
+  ASK_RESET,
 ]);
 const openWhilePending = (path: string): boolean => OPEN_WHILE_PENDING.has(path) || path.startsWith("/sign-in/") || path.startsWith("/two-factor/verify-");
 // Never over HTTP, for anyone: the admin plugin's endpoints (the app calls them from its own server actions); turning
 // the authenticator on or off, reading its secret, and making new backup codes (the account page does them, each with
-// a current code, so a stolen session can't copy or replace the second factor).
+// a current code, so a stolen session can't copy or replace the second factor); and setting a new password from an
+// emailed link, which the app's own page does after asking for the authenticator's code (password-reset.ts).
 const SERVER_ONLY = (path: string): boolean =>
   path.startsWith("/admin/") ||
+  path === "/reset-password" ||
+  path.startsWith("/reset-password/") ||
   ["/two-factor/enable", "/two-factor/disable", "/two-factor/get-totp-uri", "/two-factor/generate-backup-codes"].includes(path);
 
 function makeAuth() {
@@ -171,7 +183,14 @@ function makeAuth() {
       requireEmailVerification: true,
       autoSignIn: false,
       onExistingUserSignUp: async ({ user }) => tellKnown(user),
+      // A forgotten password: a link by email, good once, for 30 minutes. Using it ends every session of the account.
+      resetPasswordTokenExpiresIn: 30 * 60,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, token }) => sendReset(user, token),
     },
+    // Only a digest of a password link's token is kept, as with a sign-in link's: whoever reads the database can't
+    // use one. (The key is the start of the name Better Auth files the token under.)
+    verification: { storeIdentifier: { default: "plain", overrides: { "reset-password:": "hashed" } } },
     // The confirmation: emailed as someone signs up, and again when they try their password before confirming. Its
     // link works for an hour and signs them in the once.
     emailVerification: {
@@ -204,6 +223,7 @@ function makeAuth() {
       customRules: {
         [SIGN_UP]: { window: 60, max: 3 },
         [SEND_CONFIRMATION]: { window: 60, max: 3 },
+        [ASK_RESET]: { window: 60, max: 3 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-in/magic-link": { window: 60, max: 5 },
         "/two-factor/*": { window: 60, max: 5 },
@@ -308,7 +328,8 @@ function makeAuth() {
         const name = (ctx.body as { name?: unknown } | undefined)?.name;
         if (typeof name === "string" && name.length > 120) throw new APIError("BAD_REQUEST", { message: "Keep the name under 120 characters." });
         if (ctx.path === SIGN_UP && (typeof name !== "string" || !name.trim())) throw new APIError("BAD_REQUEST", { message: "Tell us your name." });
-        if (ctx.path === SIGN_UP || ctx.path === SEND_CONFIRMATION) mailed.set(ctx.request, { started: Date.now(), created: null });
+        if (ctx.path === SIGN_UP || ctx.path === SEND_CONFIRMATION || ctx.path === ASK_RESET)
+          mailed.set(ctx.request, { started: Date.now(), created: null });
         if (openWhilePending(ctx.path)) return;
         const current = await getSessionFromCtx(ctx);
         if (current && (isAdminRole(current.user.role) || current.user.twoFactorEnabled === true) && current.session.secondFactor !== true)
@@ -380,6 +401,14 @@ function makeAuth() {
         } else if (ctx.path === "/sign-in/magic-link") {
           // Asked for: whether one went is the sender's to know (sendLink), not the log's to say to whoever reads it.
           await audit({ action: "sign-in-link", outcome: failed ? "failed" : "ok", userId: null, email: typed, ...from });
+        } else if (ctx.path === ASK_RESET) {
+          // Asked for, like a sign-in link: whether one went is the sender's to know (sendReset). An address that was
+          // mistyped is told so at once; every other answer takes the same time and says the same thing.
+          await audit({ action: "password.reset-link", outcome: failed ? "failed" : "ok", userId: null, email: typed, ...from });
+          if (failed) return;
+          const mark = mailed.get(ctx.request);
+          if (mark) await settle(mark.started);
+          return ctx.json({ status: true });
         } else if (!failed && ["/passkey/verify-registration", "/passkey/delete-passkey", "/two-factor/generate-backup-codes"].includes(ctx.path)) {
           const current = ctx.context.session ?? (await getSessionFromCtx(ctx).catch(() => null));
           await audit({
@@ -453,6 +482,25 @@ function makeAuth() {
       lines: ["One step left to finish creating your account."],
       button: "Confirm email",
       foot: "The link works once, for an hour, and signs you in. Didn't sign up? Ignore this email.",
+    });
+  }
+
+  // The link to set a new password, for an account whose address asked: nobody banned gets one, nor anyone a second
+  // within a minute. It opens the app's own page, whatever the request asked to be sent back to, and signs nobody in.
+  async function sendReset(user: { email: string; banned?: unknown; twoFactorEnabled?: unknown }, token: string): Promise<void> {
+    if (user.banned === true) return;
+    if (!(await mayMail(`reset:${user.email.toLowerCase()}`))) return;
+    const url = `${baseURL}${RESET_PAGE}?token=${encodeURIComponent(token)}`;
+    const code = user.twoFactorEnabled === true ? " You'll be asked for your authenticator's code too." : "";
+    await sendMail({
+      to: user.email,
+      subject: "Set a new Anything Factory password",
+      text: `Set a new password for your Anything Factory account:\n\n${url}\n\nThe link works once, for 30 minutes.${code} If you didn't ask for it, ignore this email: your password stays as it is.`,
+      link: url,
+      heading: "Set a new password",
+      lines: [`Here's the link you asked for.${code}`],
+      button: "Set a new password",
+      foot: "It works once, for 30 minutes. Didn't ask for it? Ignore this email: nothing changes.",
     });
   }
 

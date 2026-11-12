@@ -1,13 +1,22 @@
 // Before every request: behind the CDN, nothing that didn't come through it (ORIGIN_SECRET); a Content Security Policy
 // with a fresh nonce (Next puts it on its own scripts); and anyone without a session cookie off to sign in (or to sign
-// up, which is open: /sign-up and where its confirmation link lands). The cookie
+// up, which is open: /sign-up and where its confirmation link lands; or to set a new password from an emailed link:
+// /forgot-password and /reset-password). The cookie
 // is only a hint here; every page and action checks the session itself (server/viewer.ts). The machines' endpoints
 // take no session: a machine asks for a code, or brings its own token (server/machine-api.ts).
 import { getSessionCookie } from "better-auth/cookies";
 import { type NextRequest, NextResponse } from "next/server";
 import { originAllowed } from "./server/origin-check.ts";
 
-const OPEN = [/^\/sign-in(\/|$)/, /^\/sign-up(\/|$)/, /^\/api\/auth\//, /^\/api\/health$/, /^\/api\/machines\/(link|token|report|self)$/];
+const OPEN = [
+  /^\/sign-in(\/|$)/,
+  /^\/sign-up(\/|$)/,
+  /^\/forgot-password$/,
+  /^\/reset-password(\/|$)/,
+  /^\/api\/auth\//,
+  /^\/api\/health$/,
+  /^\/api\/machines\/(link|token|report|self)$/,
+];
 
 export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;

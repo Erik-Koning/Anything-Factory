@@ -154,6 +154,8 @@ request (Article 8).
   puts it off, before anything else opens.
 - `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
   address to be confirmed by email; `/sign-in/confirm` is the email's page (“Was this you?”), no session needed.
+- `/forgot-password` and `/reset-password`: asking for a link to set a new password, and the page the link opens
+  (the new password, and the authenticator's code for an account that has one); no session needed, and none made.
 
 ## Linking a machine
 
@@ -221,8 +223,24 @@ emails a sign-in link. An invited account has no password; one that signed up is
     turned off; turning it on confirms the address it's turned on from. An admin's addresses are always checked.
   - Accounts from before these were kept read as: new addresses checked, nothing due.
 - An account whose address is first proven by a sign-in link, not by its confirmation link, loses the password it was
-  signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on. There is no
-  password reset yet: such a person signs in by link or passkey.
+  signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on.
+- **A forgotten password is set again from a link by email** (`/forgot-password`, from the sign-in page;
+  `server/password-reset.ts`). Asking answers the same for every address, as slowly, and emails only an address that
+  has an account, never a banned one, once a minute; three asks a minute from one IP address. The link works once,
+  for 30 minutes, and opens the app's own page (`/reset-password`): opening it changes nothing, and it signs nobody
+  in. Only a digest of its token is stored.
+  - **An account with an authenticator gives its code as well**, so an inbox alone never changes a password that a
+    second factor guards. That is every admin. Each try counts against the person's five (below); a wrong code
+    doesn't use the link up. An admin with no authenticator (made some other way than `create-admin`) can't use the
+    link, and is told who can start the account afresh. A backup code isn't taken here: someone without their
+    authenticator signs in with their password and a backup code, or is started afresh.
+  - Setting it ends every session of the account, emails its address that the password changed and from where, and
+    is audited (asked for; set, failed or refused). The old password is refused from then on.
+  - An account with no password (an invited one) gets its first this way: the link proves the inbox as a sign-in
+    link does. An address nobody had confirmed is confirmed by it, with its IP check on, and the password it was
+    signed up with is gone.
+  - Better Auth's own endpoints for setting the password (`/api/auth/reset-password`) are refused over HTTP: only
+    the app's page sets one, after these checks.
 - **Everyone** signs in with a **passkey**, a **magic link** by email (15 minutes, once), or **their password** when
   they have one (they signed up). A link is sent only to an address with an account: no sign-up by link.
 - **Admins sign in with two factors, by design.** Better Auth enforces two-factor only on email-and-password sign-in,
@@ -233,8 +251,9 @@ emails a sign-in link. An invited account has no password; one that signed up is
   - An admin signs in with **password + authenticator code** (or a backup code), or with a **passkey whose
     authenticator verified them** (PIN or biometrics: the UV flag of the signed assertion, checked on the server).
   - **No magic link for admins**: none is sent to an admin's address, and a session from one is refused for an admin.
-    An admin who asks for one is emailed a note in its place (once a minute): how admins sign in, and that whoever
-    runs the site starts a locked-out admin afresh with `npm run create-admin`. The page answers the same as for
+    An admin who asks for one is emailed a note in its place (once a minute): how admins sign in, that a forgotten
+    password is set again from the sign-in page with the authenticator's code, and that whoever runs the site starts
+    an admin without their authenticator afresh with `npm run create-admin`. The page answers the same as for
     anyone, so without the note nothing would say why no link came.
 - **Anyone else may turn on an authenticator**, as they sign up or from their account page (a QR code, a code to
   prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on every sign-in, by passkey,
@@ -273,7 +292,8 @@ emails a sign-in link. An invited account has no password; one that signed up is
   Sessions, rate limits, the new-address check and the audit log all read the same address.
 - Sessions are revocable from the account page; a ban ends all of a person's sessions and keeps them out.
 - Rate limits: Better Auth's, kept in the database (from one IP address, 3 sign-ups, 3 requests for a confirmation
-  link, 5 password sign-ins, 5 link requests and 5 two-factor tries a minute; 100 auth requests a minute in all),
+  link, 3 for a link to set a new password, 5 password sign-ins, 5 link requests and 5 two-factor tries a minute;
+  100 auth requests a minute in all),
   plus Better Auth's own lockout after repeated wrong
   codes; and at most 20 requests and task suggestions a day per person.
 
@@ -333,7 +353,8 @@ npm run check:infra    # sst install, then tsc against SST's platform: the deplo
 The integration tests (`tests/integration/auth.test.ts`) call `auth().handler` directly, with no server or browser, over
 a throwaway replica set from the same cached mongod binary as below: signing up (nothing before the address is
 confirmed, the same answer for an address that has an account, what a sign-up can't set, the two choices and that no
-request changes them, the limit), magic links, an admin's password and
+request changes them, the limit), magic links, a forgotten password (the link alone for an account without an
+authenticator, the link and a code for one with, what the link proves, the limits), an admin's password and
 authenticator code, confirming a new IP address by email, backup codes, the HTTP guard, passkeys signed by a software
 authenticator (with and without user verification, and from another origin), sessions, bans and `create-admin` run again.
 
@@ -532,6 +553,8 @@ changing the domain means adding passkeys again.
   Other emails show their text, each address a link under a short name.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
 - `server/account-choices.ts`: the two choices made at sign-up, and whether an account has a password.
+- `server/password-reset.ts`: a new password from an emailed link, and the authenticator's code it takes for an
+  account that has one; `server/totp.ts`: an authenticator's codes, made and checked.
 - `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and
   no-journey kinds registered and the level kept in the address.
 - `server/machines.ts`: linked machines, their codes and reports; `server/machine-api.ts`: what the machines'
