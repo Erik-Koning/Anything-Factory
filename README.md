@@ -261,6 +261,49 @@ goes through it (Meta charges each one at its utility rate); a planner's message
 title>". Your replies on WhatsApp don't reach the teams: they arrive at the number's webhook, which belongs to
 whatever else uses the number.
 
+### Thinking streams, and your taste from Ditto
+
+Most work is built the way the codebase already does such things, which is right for code and wrong for the few
+places where how a thing feels decides whether people stay: the first screen, the screen every session passes
+through, the step where the job gets done. For those the planner asks for a **thinking stream** before anyone builds:
+
+```bash
+a6g task stream 12 want --why "The first thing anyone sees, and you want it to be yours."   # the planner marks it
+a6g task stream 12 concept --move "Parting doors: two bands part to show the form." --record <file>   # the innovator
+a6g task stream 12 build concept     # or retreat, the conventional version: the planner settles it
+```
+
+A task marked for one is labelled wherever it shows (`a6g task list`, the graph, the web app's board), and nobody
+claims it until the planner settles what's built. In between, the innovator thinks it through in a fixed order:
+
+1. who meets this, in what moment, and what should it leave them feeling;
+2. your taste: how far from convention you'd go here, and in what register;
+3. the parts that can each be decided alone;
+4. for each part, what it's for, what convention is protecting there, and what's free: your taste chooses within that;
+5. every claim a choice leans on is checked by a subagent asked for what contradicts it, and graded established,
+   contested or folklore; others look for what nature, other fields and culture have with the same shape;
+6. one idea, with the one move that makes it the product's own, carried through every state, and a **retreat**: the
+   conventional version in two lines, so trying the bold one costs a revert;
+7. what performance, empathy, courage and integrity each change;
+8. a first glance: a throwaway sketch, screenshotted, shown to a subagent that hasn't seen the reasoning;
+9. a record with a fixed shape, which the builder builds from, the tester turns into checks and the UX specialist
+   audits against.
+
+The planner judges the concept and decides, as a `design` call recorded in the decision log, so you can overturn it.
+
+Your taste comes from [Ditto](https://github.com/Erik-Koning/Ditto), your own record of it, where the team's rules
+name it (`"ditto": {}` in `team.json`; [the reference](docs/team.md#ditto-and-thinking-streams) has the rest):
+
+```bash
+a6g ditto my-app --grant --server ~/Ditto/mcp/bin/ditto-mcp.js   # --all for the sensitive categories too
+a6g sync my-app && a6g rotate my-app
+```
+
+The planner and the innovator then read it, and with `"notes": true` record what a stream inferred about your taste
+and what you made of a concept. Ditto keeps those as notes from a secondary source: shown to agents as not your
+words, counted in nothing, and never a rule. The grant's token goes straight into the Keychain and is never shown.
+Without Ditto a stream works from your direction, your decisions and the rubric, and says so.
+
 ## How it works
 
 ```
@@ -551,10 +594,10 @@ factory's own files. A team adds its own rules in `never`, each with an example 
 
 `a6g help` lists them all.
 
-| For                                                    | Commands                                                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `budget`, `agreement`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `serve`, `self-install`, `versions`, `harness allow`, `decision review` |
-| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `decision`, `request`, `cycle`, `blast`                                                                                                              |
+| For                                                    | Commands                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The operator**                                       | `doctor`, `init`, `check`, `register` (alias `sync`), `start`, `pause`, `resume`, `budget`, `agreement`, `rotate`, `status`, `teams`, `metrics`, `prompt`, `upgrade`, `unregister`, `watchdog`, `connect`, `disconnect`, `ditto`, `serve`, `self-install`, `versions`, `harness allow`, `decision review` |
+| **Team members** (the guard decides who may run which) | `merge`, `verdict`, `log`, `lock`, `drain`, `gate`, `env`, `finish`, `complete`, `progress`, `pages`, `e2e`, `harness check`, `pr`, `task`, `decision`, `request`, `cycle`, `blast`                                                                                                                       |
 
 ## T3 Code and Claude Code
 
@@ -594,7 +637,7 @@ When T3 Code updates (`t3 update`), run `a6g doctor`:
 CONSTITUTION.md        the purpose, principles and the articles every agent works under
 bin/a6g.ts             the CLI
 lib/                   config, policies, prompts, the T3 Code adapter, locks, detection, and the commands
-plugin/                the Claude Code plugin every agent loads: agents/ (roles and setup), hooks/
+plugin/                the Claude Code plugin every agent loads: agents/ (roles and setup), hooks/, mcp/ (Ditto's launcher)
 templates/team/        the starter .a6g/ that init writes
 schema/                team.schema.json, for editors
 docs/team.md           the team.json reference; docs/architecture.json is the architecture as a BetterDiagram
@@ -652,6 +695,11 @@ To make a release:
   tests on an in-memory database); the check after its merge tries it.
 - **Page checks run after merges, not before.** Builders and reviewers run `a6g pages shots` on a branch's own
   preview, but nothing yet enforces it.
+- **Ditto is read where its profile is: on this machine.** A team reads the Ditto server you run locally, from the
+  profile in `~/.ditto`, on its lead machine only. A profile you keep on a hosted Ditto isn't reached yet. A first
+  glance is a model's, so it catches a screen nobody can read and says nothing of whether a person is delighted.
+  And no team has run a stream end to end under T3 Code yet: `docs/plans/thinking-streams.md` lists what that will
+  prove.
 
 ## License
 

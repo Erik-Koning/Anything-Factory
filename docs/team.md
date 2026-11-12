@@ -56,6 +56,7 @@ team may leave out (`finish`, `afterMerge`, `gate.full`, `environment.script`, �
 | `model`                  | each role's own default                    | The model for every role that names none of its own (`roles.<role>.model`): see [Models](#models)                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `operator.technical`     | `true`                                     | Whether you have a view on the platform, the stack and the architecture. `false`: the team never asks you about them. It chooses itself, the safer way each time (managed, mainstream, little to run, a cost with a ceiling), records each choice with its reason, and asks you only what the product should do, what it may cost, and what needs an account or a key of yours. The setup agent sets it from how you write and what you name, without asking; `a6g init --non-technical` says it outright |
 | `operator.designCheckIn` | `false`; `true` in a new project's draft   | The team builds the foundation (the skeleton and the browser harness), writes the design down (`docs/architecture.md`: each choice, why, what else was weighed, what it costs to run, how it's changed later), then asks you to agree it, and builds no feature until you have: see [The design check-in](#the-design-check-in). Only with `operator.technical` true and a scaffolder on the team                                                                                                         |
+| `ditto`                  | none                                       | Ditto, your own record of your taste and judgment, for the team to read: `{}` gives it to the planner and the innovator. `roles` names who reads it, and `notes: true` lets them record notes there, kept as coming from a secondary source. See [Ditto and thinking streams](#ditto-and-thinking-streams)                                                                                                                                                                                                |
 | `roles`                  | planner, builder, reviewer                 | Which roles the team has, and each one's settings. See below                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `review.required`        | `["builder"]`, and `"scaffolder"` with one | Roles whose branches need a reviewer's approval of the exact commit                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `review.removedPattern`  | assertions, with a tester or scaffolder    | A regex; a branch that removes a line matching it needs a review whatever its role. A team with a tester gets one that finds assertions: `expect(…)`, `assert(…)` and `assert.equal(…)`, Python's `assert`, Rust's `assert!(…)`, xUnit's `assertEqual(…)` and `assertThat(…)`, `x.should.…`, and matchers such as `.toBe(…)` and `.toHaveURL(…)`; not `.toString(…)`, nor a helper such as `assertMainBranch(…)`. `null` turns it off                                                                     |
@@ -171,6 +172,45 @@ team's store, every version of it, and holds from the moment it's recorded. Two 
 `operator.technical` false, `technical` questions are never asked whatever the agreement says; and `contact` sets
 how often a message may reach you until the agreement sets it in its place (`a6g agreement <team> --messages …`). The
 design check-in is its own gate: the agreement doesn't route it.
+
+### Ditto and thinking streams
+
+[Ditto](https://github.com/Erik-Koning/Ditto) holds your taste and judgment as your own answers, rules and
+corrections, and serves them over MCP to the projects you grant. A team with `ditto` in its rules reads it where
+taste decides the work:
+
+- the **planner**, when it decides something in your place, and when it judges which tasks are worth a thinking
+  stream;
+- the **innovator**, in a thinking stream: on a task the planner marked, it works out from first principles and your
+  taste how the thing should function and feel, tests a sketch at first glance, and hands in a concept. The task is
+  labelled on the board and in the graph (`stream: wanted`, then `concept in`, then what was built), and nobody
+  claims it until the planner settles which is built: the concept, or its retreat, the conventional version.
+
+```json
+"ditto": { "roles": ["planner", "innovator"], "notes": true }
+```
+
+| Key     | Default               | Meaning                                                                                                                                                                                                              |
+| ------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roles` | planner and innovator | The roles that read it: each gets Ditto's read tools in its lane (`whoami`, `get_profile`, `consult`, `get_expertise`). Only roles that work in the team's checkout: a builder, tester or scaffolder can't be named  |
+| `notes` | `false`               | Whether those roles may also call `record_note`: what a stream inferred about your taste, or what you decided about a concept. Ditto keeps a note as coming from a secondary source, never as your word (its README) |
+
+Connect it once per team, on the machine the team runs on:
+
+```bash
+a6g ditto <team> --grant --server ~/Ditto/mcp/bin/ditto-mcp.js   # add --all for the sensitive categories too
+a6g sync <team> && a6g rotate <team>
+```
+
+`--grant` makes the team's grant in your Ditto (`a6g-<team>`, bound to the team's checkout; read-only, or notes-only
+with `notes: true`) and keeps its token in the Keychain. The token is never printed, and is in no file and no
+member's environment: a small launcher (`plugin/mcp/ditto.ts`) reads it when a member's Ditto server starts. Alone,
+`a6g ditto <team>` shows what's connected, and `--off` revokes the grant. Ditto's own audit log
+(`~/.ditto/audit.log`) records every call a team makes.
+
+What the team can't do: write anything but notes, read Ditto from a worktree, or reach it from a subagent, which has
+no lane. Without `ditto`, a thinking stream works from your direction, your decisions, the rubric and your notes, and
+says so in its record.
 
 ### Models
 

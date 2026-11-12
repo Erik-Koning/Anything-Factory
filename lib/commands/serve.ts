@@ -21,7 +21,7 @@ import { waitsOnOperator } from "../tasks/answer.ts";
 import { agreementOf, type Control } from "../tasks/controls.ts";
 import { type DecisionRecord, flagged, reviewOf, toReview } from "../tasks/decisions.ts";
 import { betterDiagram, layout } from "../tasks/graph.ts";
-import { answersOn, claimRank, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, type Task } from "../tasks/model.ts";
+import { answersOn, claimRank, type FeatureRequest, journeyDue, type Stakeholder, STATUSES, type Status, streamLabel, type Task } from "../tasks/model.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { Refused, type Store } from "../tasks/store.ts";
 import { parseArgs, text as optionText } from "../util.ts";
@@ -398,7 +398,7 @@ const esc = (value: unknown): string => String(value ?? "").replace(/[&<>"']/g, 
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 const meta = (t: Task): string =>
-  [t.kind, t.severity, t.priority === null ? null : `p${t.priority}`]
+  [t.kind, t.severity, t.priority === null ? null : `p${t.priority}`, streamLabel(t)]
     .filter(Boolean)
     .map((part) => `<span class="chip">${esc(part)}</span>`)
     .join("");

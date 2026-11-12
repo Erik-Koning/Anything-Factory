@@ -51,6 +51,9 @@ Set up and run a team (the operator)
   a6g connect app [--url <url>] [--machine <name>] [--test]   sign in to the web app in your browser and link this
                                       machine to your account: the app shows you it and the teams it runs
                                       ·  a6g disconnect email|whatsapp|heartbeat|app
+  a6g ditto <team> [--grant [--server <ditto-mcp.js>] [--categories <codes> | --all] [--sensitive]] [--off]
+                                      connect a team to your Ditto, your own record of your taste: makes its grant
+                                      there and keeps the token in the Keychain. Alone, it shows what's connected
   a6g harness allow <branch> --sha <commit> --why "…"   let that commit of a branch check less (the operator's call)
   a6g self-install [--link] [--force] install this checkout's version into ~/.a6g  ·  a6g versions
 
@@ -125,11 +128,15 @@ function handOver(): void {
   if (!pin || !VERSION_NAME.test(pin)) return;
   if (pin === PACKAGE.version || !existsSync(versionDir(pin)) || realpathSync(versionDir(pin)) === realpathSync(FACTORY_ROOT)) return;
   // A command the team's version doesn't have yet says so, rather than that version's "no command".
-  const since: Record<string, string> = { agreement: "lib/commands/agreement.ts", decision: "lib/commands/decision.ts" };
-  if (since[command] && !existsSync(resolve(versionDir(pin), since[command]))) {
-    console.error(
-      `a6g ${command}: this team runs factory ${pin}, which keeps no decision log or working agreement; a6g upgrade <team> moves it to ${PACKAGE.version}`
-    );
+  const LOG = "keeps no decision log or working agreement";
+  const since: Record<string, { file: string; lacks: string }> = {
+    agreement: { file: "lib/commands/agreement.ts", lacks: LOG },
+    decision: { file: "lib/commands/decision.ts", lacks: LOG },
+    ditto: { file: "lib/commands/ditto.ts", lacks: "doesn't connect a team to Ditto" },
+  };
+  const newer = since[command];
+  if (newer && !existsSync(resolve(versionDir(pin), newer.file))) {
+    console.error(`a6g ${command}: this team runs factory ${pin}, which ${newer.lacks}; a6g upgrade <team> moves it to ${PACKAGE.version}`);
     process.exit(2);
   }
   const result = spawnSync(process.execPath, [entryOf(versionDir(pin)), command, ...args], {
@@ -162,6 +169,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   watchdog: () => import("../lib/commands/watchdog.ts").then((m) => m.watchdog(args)),
   connect: () => import("../lib/commands/connect.ts").then((m) => m.connect(args)),
   disconnect: () => import("../lib/commands/connect.ts").then((m) => m.disconnect(args)),
+  ditto: () => import("../lib/commands/ditto.ts").then((m) => m.ditto(args)),
   "self-install": () => import("../lib/commands/install.ts").then((m) => m.selfInstall(args)),
   versions: () => import("../lib/commands/install.ts").then((m) => m.versions()),
   merge: () => import("../lib/commands/merge.ts").then((m) => m.run(args)),

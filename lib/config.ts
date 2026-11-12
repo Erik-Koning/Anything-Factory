@@ -3,6 +3,7 @@
 // describes the same file for editors, and test/audit-setup.test.ts keeps the two in step.
 import { existsSync, readFileSync } from "node:fs";
 import { type Contact, DEFAULT_CONTACT } from "./contact.ts";
+import { DITTO_ROLES, type DittoSettings, dittoTools } from "./ditto.ts";
 import { teamFile, VERSION_NAME } from "./paths.ts";
 import { POLICIES, type PolicyState } from "./policies.ts";
 import { MACHINE_NAME } from "./machine.ts";
@@ -96,6 +97,7 @@ export interface RawTeam {
   priorities?: { weights?: Record<string, number> };
   approval?: { mode?: string; maxSize?: string; findings?: string; stakeholders?: string };
   operator?: { technical?: boolean; designCheckIn?: boolean };
+  ditto?: { roles?: string[]; notes?: boolean } | null;
   critical?: string[];
   hosts?: string[];
   branchPrefix?: string;
@@ -173,6 +175,10 @@ export interface Team {
   // foundation (its skeleton and the choices under it) waits for their agreement before features are built on it
   // (lib/tasks/design.ts); only ever with a technical operator.
   operator: { technical: boolean; designCheckIn: boolean };
+  // The operator's own record of their taste (lib/ditto.ts), or null for a team without it: the roles that read it,
+  // which then have its tools in their lane, and whether they may record notes there, kept as coming from a secondary
+  // source. Only roles that work in the team's checkout: the operator's grant is bound to that folder.
+  ditto: DittoSettings | null;
   // Paths (regexes) whose changes get the full review whatever their size.
   critical: string[];
   // Hosts beyond this machine the team may reach (policies.ts network): api.example.com, or *.example.com.
@@ -288,6 +294,7 @@ const KNOWN_KEYS = new Set([
   "priorities",
   "approval",
   "operator",
+  "ditto",
   "critical",
   "hosts",
   "model",
@@ -509,6 +516,29 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     roles[id] = lane;
   }
   if (!roles["planner"]) problems.push("roles.planner: every team has a planner");
+  // Ditto (lib/ditto.ts): the roles that read the operator's taste get its tools in their lane, which is what the
+  // guard passes and what their rules list. Left out, the planner and the innovator where the team has them.
+  let ditto: DittoSettings | null = null;
+  if (input.ditto !== undefined && input.ditto !== null) {
+    const settings = object(input.ditto, "ditto", ["roles", "notes"]) ?? {};
+    const named = list(settings.roles, "ditto.roles", role);
+    for (const id of named ?? []) {
+      if (!roles[id]) problems.push(`ditto.roles: the team has no ${id}`);
+      // The operator's grant holds in the team's checkout only, and a worktree is another folder.
+      else if (roles[id].worktree)
+        problems.push(
+          `ditto.roles: the ${id} works in a worktree of its own, where the team's grant doesn't hold; it gets the operator's taste through its task`
+        );
+    }
+    ditto = {
+      roles: (named ?? DITTO_ROLES).filter((id) => roles[id] && !roles[id].worktree),
+      notes: flag(settings.notes, "ditto.notes") ?? false,
+    };
+    for (const id of ditto.roles) {
+      const lane = roles[id];
+      if (lane) lane.mcp = [...new Set([...lane.mcp, ...dittoTools(ditto, id)])];
+    }
+  }
   // A model this version has no price for still runs, but its tokens count for nothing in a6g usage or a budget.
   const unpriced = new Map<string, string[]>();
   for (const [id, lane] of Object.entries(roles)) if (!priced(lane.model)) unpriced.set(lane.model, [...(unpriced.get(lane.model) ?? []), id]);
@@ -820,6 +850,7 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
       stakeholders: stakeholders === "screened" ? "screened" : "operator",
     },
     operator: { technical, designCheckIn: designCheckIn && technical },
+    ditto,
     critical: list(input.critical, "critical", regex) ?? [],
     hosts:
       list(input.hosts, "hosts", (value, where) =>

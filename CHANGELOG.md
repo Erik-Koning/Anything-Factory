@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased: thinking streams, and the operator's taste from Ditto
+
+Nobody on a team worked out how a thing should feel before it was built: the builder matched the code that was there,
+and the UX specialist judged the result. And the operator's taste reached a team only as prose they wrote for it.
+Now the few tasks where feel matters most get a concept first, reasoned from first principles and the operator's own
+record of their taste. The plan is `docs/plans/thinking-streams.md`. Built and tested; no team has run one yet.
+
+- **A thinking stream.** The innovator has a second kind of brief. On a task the planner marked, it frames who meets
+  the thing and what it should leave them feeling, reads the operator's taste, splits the problem into parts, and
+  for each asks what it's for, what convention protects there and what's free. Subagents check every claim a choice
+  leans on (established, contested or folklore) and look to nature, other fields and culture for the same shape. It
+  makes one idea with one move and a conventional retreat, holds it to performance, empathy, courage and integrity,
+  shows a sketch to a subagent that hasn't seen the reasoning, and hands in a record with a fixed shape.
+- **The mark, and the hold.** `a6g task stream <id> want --why "…"` (the planner) marks a task. The innovator hands
+  in its concept with `concept --move "…" --record <file>`, and the record must be there. The planner settles which
+  is built with `build concept|retreat`, or takes the mark off with `off --reason "…"`. Nobody settles their own
+  concept. A marked
+  task is labelled in `a6g task list` and `show`, the graph, `a6g serve` and the web app's board and task page, and
+  no builder claims it until it's settled: the claim refuses it, so the pace passes it by. The planner's context
+  lists the streams to start and the concepts to judge every wake.
+- **The planner's part.** It marks only what warrants one (a first impression, a screen most sessions pass through,
+  the step where the job gets done), using Ditto to tell where the operator's conviction is. It judges the concept
+  as its reviewer, challenges it once, and decides it as a `design` call in the decision log, with the retreat as
+  its undo. The builder builds from the concept, the tester asserts its "Done looks like", and the UX specialist
+  audits against its frame.
+- **Ditto.** `"ditto": {}` in `team.json` gives the planner and the innovator Ditto's read tools: in their lane, so
+  the guard passes them and their rules list them, and in their launch, beside T3 Code's tools. Only roles that work
+  in the team's checkout can be named, since the operator's grant is bound to that folder. `"notes": true` adds the
+  one write, `record_note`. A subagent has no lane and reaches none of it.
+- **`a6g ditto <team>`.** `--grant` makes the team's grant in the operator's Ditto (read-only, or notes-only) and
+  puts its token in the Keychain: never printed, in no file, in no member's environment. A launcher
+  (`plugin/mcp/ditto.ts`) reads it when a member's Ditto server starts. `--all` grants the sensitive categories too,
+  `--off` revokes, and alone it shows what's connected. The operator's alone: the guard refuses it to agents.
+- **In Ditto** (its repository, `mcp/`): a grant can be `--notes-only`, and `record_note` saves what an agent
+  inferred or passed on. Notes are kept in their own file, shown to agents under their own heading after everything
+  of the operator's, and counted in nothing: no conviction, no pattern, no rule.
+
 ## Unreleased: the decision log and the working agreement
 
 A team already decided most product questions itself and asked only what its operator's direction left open. What it

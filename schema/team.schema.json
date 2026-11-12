@@ -384,6 +384,22 @@
         }
       }
     },
+    "ditto": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Ditto, your own record of your taste and judgment, for the roles named here to read (a6g ditto <team> --grant connects it). Left out, the team doesn't use it.",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/roleName" },
+          "description": "The roles that read it. Only roles that work in the team's checkout: your grant is bound to that folder, so a builder, tester or scaffolder, each in a worktree of its own, can't be named. Left out: the planner and the innovator."
+        },
+        "notes": {
+          "type": "boolean",
+          "description": "Whether those roles may record notes in your Ditto: what a thinking stream inferred about your taste, or what you decided about a concept. Ditto keeps them as coming from a secondary source, never as your word. Default false: they only read."
+        }
+      }
+    },
     "hosts": {
       "type": "array",
       "items": {

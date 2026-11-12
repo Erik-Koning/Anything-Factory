@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/ui.tsx";
-import { DIMENSIONS, journeyDue } from "../../../../../../lib/tasks/model.ts";
+import { awaitsStream, DIMENSIONS, journeyDue, streamLabel } from "../../../../../../lib/tasks/model.ts";
 import { can, TASK_ID } from "../../../../../server/access.ts";
 import { storeFor } from "../../../../../server/factory.ts";
 import { waitsOnOperator } from "../../../../../../lib/tasks/answer.ts";
@@ -58,10 +58,18 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           {task.severity ? <Chip tone={task.severity === "blocker" ? "warn" : ""}>{task.severity}</Chip> : null}
           {task.priority !== null ? <Chip tone="">{`priority ${task.priority}`}</Chip> : null}
           {journeyDue(task, tasks) ? <Chip tone="caution">due its verification</Chip> : null}
+          {task.stream ? <Chip tone={awaitsStream(task) ? "caution" : ""}>{streamLabel(task)}</Chip> : null}
         </div>
         <p className="small muted">
           {origins.of(task, true)} · added <Ago at={task.createdAt} /> · updated <Ago at={task.updatedAt} />
         </p>
+        {/* A thinking stream: why the work is worth one, then the concept once it's in. Its record stays on the team's machine. */}
+        {task.stream ? (
+          <p className="small">
+            {awaitsStream(task) ? "Held for a thinking stream: nobody builds it until its concept is settled. " : "Built from a thinking stream. "}
+            {task.stream.move ?? task.stream.why}
+          </p>
+        ) : null}
         {task.body ? <p className="text">{task.body}</p> : <p className="empty">No description.</p>}
         {answer || decide ? (
           <p className="inline">

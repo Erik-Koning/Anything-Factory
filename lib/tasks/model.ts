@@ -167,9 +167,53 @@ export interface Task extends Doc {
   from?: string | null;
   // The planner's screen of the stakeholder's words it came from (its own, or its request's).
   screen?: Screen | null;
+  // Marked for a thinking stream, and where that stands (below); none for most work.
+  stream?: Stream | null;
   createdAt: string;
   updatedAt: string;
   history: Event[];
+}
+
+// A thinking stream (plugin/agents/innovator.md): on the few pieces of work where how it feels matters most, the
+// innovator works out from first principles and the operator's taste how it should function and feel, before anyone
+// builds it. The planner marks the task (`wanted`, saying why it's worth one); the innovator hands in its concept
+// (`concept`: its name and one move, and where its record is); the planner judges it and says which is built, the
+// concept or its retreat, the conventional version (`settled`). Until it's settled nobody claims the task, and the
+// mark shows wherever the task does (streamLabel).
+export const STREAM_STATES = ["wanted", "concept", "settled"] as const;
+export type StreamState = (typeof STREAM_STATES)[number];
+export const STREAM_BUILDS = ["concept", "retreat"] as const;
+export type StreamBuild = (typeof STREAM_BUILDS)[number];
+export interface Stream {
+  state: StreamState;
+  // Why it's worth a stream, in the planner's words.
+  why: string;
+  // The concept as the innovator handed it in.
+  move?: string;
+  record?: string;
+  // What the planner settled on.
+  build?: StreamBuild;
+  by: string;
+  at: string;
+}
+// Whether a task still waits for its stream: marked, and not settled.
+export const awaitsStream = (t: Pick<Task, "stream">): boolean => Boolean(t.stream) && t.stream?.state !== "settled";
+// The mark in a few words, for a list, a card or a node of the graph.
+export function streamLabel(t: Pick<Task, "stream">): string | null {
+  const stream = t.stream;
+  if (!stream) return null;
+  if (stream.state === "wanted") return "stream: wanted";
+  if (stream.state === "concept") return "stream: concept in";
+  return `stream: ${stream.build ?? "concept"}`;
+}
+// In a line, for the task's own page.
+export function streamLine(t: Pick<Task, "stream">): string | null {
+  const stream = t.stream;
+  if (!stream) return null;
+  const concept = `${stream.move ?? ""}${stream.record ? ` Record: ${stream.record}` : ""}`.trim();
+  if (stream.state === "wanted") return `thinking stream wanted: ${stream.why} Nobody claims it until its concept is settled`;
+  if (stream.state === "concept") return `thinking stream, concept in, for the planner to judge: ${concept}`;
+  return `thinking stream, settled: build ${stream.build === "retreat" ? "the retreat, its conventional version" : "the concept"}. ${concept}`;
 }
 
 export const REQUEST_STATUSES = ["new", "researching", "promoted", "rejected"] as const;
@@ -771,6 +815,10 @@ export function claimRefusal(task: Task, role: string, all: Task[], hold: Hold |
   const byId = new Map(all.map((t) => [t.id, t]));
   const waiting = task.after.filter((id) => byId.get(id)?.status !== "done");
   if (waiting.length) return `task ${task.id} waits for ${waiting.map((id) => `${id} (${byId.get(id)?.status ?? "missing"})`).join(", ")}`;
+  if (awaitsStream(task))
+    return `task ${task.id} waits for its thinking stream (${
+      task.stream?.state === "concept" ? "its concept is in, for the planner to judge" : "wanted, and not run yet"
+    }): nobody builds it until the planner settles what's built`;
   const design = FOUNDATION.includes(task.kind) ? null : designOpen(all);
   if (design)
     return `task ${task.id} waits for the operator to agree the design (#${design.id}, ${design.status}): until then only ${FOUNDATION.join(" and ")} work is claimed`;
