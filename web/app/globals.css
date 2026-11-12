@@ -208,6 +208,10 @@ h3:where(:not(.level-graph *)) {
 .lane h2,
 .facts dt,
 table.figures th,
+.team-at-work p,
+.sign-in-how h2,
+.sign-in-fields label > span,
+.sign-in-readout > span,
 h3:where(:not(.title, .small, .level-graph *)) {
   color: var(--ink-2);
   font: 500 11px/1.45 var(--font-code);
@@ -2083,6 +2087,305 @@ code.big {
   letter-spacing: 0.08em;
 }
 
+/* --- Signing in ------------------------------------------------------------------------------------------------- */
+/* The sign-in page: a team at work drawn on the sheet, what the page asks at the foot of it, and under that a bar
+   along the bottom to match the one along the top, the way in on its left and what that way takes on its right. */
+body:has(.sign-in) {
+  display: flex;
+  flex-direction: column;
+}
+main:has(> .sign-in) {
+  flex: 1;
+  display: flex;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+.sign-in {
+  /* How long choosing another way in takes, and greeting someone by name. */
+  --switch: 240ms;
+  --greet: 500ms;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The drawing (app/sign-in/team-at-work.tsx) has whatever room the window leaves above the words. */
+.team-at-work {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  pointer-events: none;
+}
+/* Its canvas is put over the band it draws in; the names beside the agents are in the mono face. */
+.team-at-work canvas {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  font-family: var(--font-code);
+}
+/* Where the cycle has got to, like a drawing's title: under the brand, in the page's column. */
+.team-at-work p {
+  position: absolute;
+  inset: 16px 0 auto;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 20px;
+  white-space: nowrap;
+}
+/* What's asked on the left, over the toggle; the chosen way, and anything that went wrong, on the right over its
+   fields. */
+.sign-in-context {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 48px 20px 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px 56px;
+}
+.sign-in-what {
+  flex: 0 1 34rem;
+  min-width: 0;
+}
+.sign-in-what h1 {
+  font-size: clamp(30px, 4.4vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.034em;
+  margin: 0 0 14px;
+}
+/* Whoever signed in last in this browser is greeted by their first name (app/first-name.ts): “Sign in” gives way to
+   the greeting, in its place. */
+.greeting {
+  display: grid;
+}
+.greeting > span {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--greet) var(--ease),
+    transform var(--greet) var(--ease),
+    filter var(--greet) var(--ease);
+}
+.greeting.named > span:first-child {
+  opacity: 0;
+  transform: translateY(-0.2em);
+  filter: blur(6px);
+}
+.greeting.named > span:last-child {
+  animation: arrive var(--greet) var(--ease) both;
+}
+/* Words that take the place of others come up into it, out of a blur. */
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.2em);
+    filter: blur(6px);
+  }
+}
+.sign-in-what .lede {
+  margin: 0;
+  text-wrap: balance;
+}
+.sign-in-what .lede + .lede {
+  margin-top: 4px;
+}
+.sign-in-how {
+  flex: 0 1 26rem;
+  min-width: 0;
+  text-align: right;
+}
+/* Nothing to say about the way in, and nothing wrong: no gap kept for it. */
+.sign-in-how:not(:has(h2, p)) {
+  display: none;
+}
+/* The chosen way's words come in as the toggle moves. */
+.sign-in-swap {
+  animation: arrive var(--switch) var(--ease) both;
+}
+.sign-in-how h2 {
+  margin: 0 0 4px;
+}
+.sign-in-how .notice {
+  margin: 14px 0 0;
+  text-align: left;
+}
+.sign-in-how > :empty + .notice {
+  margin-top: 0;
+}
+/* The bar: raised like the top one, and as tall. It stays at the foot of the window while the page scrolls. */
+.sign-in-bar {
+  --ctl: var(--h);
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--face);
+  border-top: 1px solid var(--line);
+  box-shadow: var(--rim);
+}
+.sign-in-bar-inner {
+  max-width: 1240px;
+  min-height: 56px;
+  margin: 0 auto;
+  padding: 8px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 22px;
+}
+.sign-in-bar fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* The toggle is one row, as tall as the fields beside it, each way as wide as the next: so the raised key is one part
+   that slides along the rail to whichever is chosen (--i of --n), where elsewhere each choice raises its own. */
+.sign-in-bar .segmented {
+  --n: 2;
+  --i: 0;
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+.sign-in-bar .segmented:has(> label:nth-child(3)) {
+  --n: 3;
+}
+.sign-in-bar .segmented:has(> label:nth-child(2) > input:checked) {
+  --i: 1;
+}
+.sign-in-bar .segmented:has(> label:nth-child(3) > input:checked) {
+  --i: 2;
+}
+.sign-in-bar .segmented::before {
+  content: "";
+  position: absolute;
+  inset-block: 3px;
+  left: 3px;
+  width: calc((100% - 6px - (var(--n) - 1) * 2px) / var(--n));
+  border-radius: var(--r-ctl);
+  background: var(--key);
+  box-shadow:
+    var(--rim),
+    var(--raise-s),
+    0 0 0 1px var(--line);
+  transform: translateX(calc(var(--i) * (100% + 2px)));
+  transition: transform var(--switch) var(--ease);
+}
+.sign-in-bar .segmented span {
+  position: relative;
+  justify-content: center;
+  min-height: calc(var(--ctl) - 8px);
+  padding-block: 0;
+  white-space: nowrap;
+  transition: color var(--switch) var(--ease);
+}
+.sign-in-bar .segmented span::before {
+  transition:
+    background-color var(--switch) var(--ease),
+    box-shadow var(--switch) var(--ease);
+}
+.sign-in-bar .segmented input:checked + span {
+  background: none;
+  box-shadow: none;
+}
+.sign-in-fields {
+  flex: 1 1 26rem;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* A field in the bar: its name stamped inside it, like a cell of a drawing's title block. */
+.sign-in-fields label {
+  flex: 0 1 300px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--ctl);
+  padding: 0 0 0 12px;
+  background: var(--field);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
+  overflow: hidden;
+  cursor: text;
+  transition:
+    flex var(--switch) var(--ease),
+    min-height var(--switch) var(--ease),
+    margin var(--switch) var(--ease),
+    padding var(--switch) var(--ease),
+    border-width var(--switch) var(--ease),
+    opacity var(--switch) var(--ease),
+    border-color 120ms ease;
+}
+/* A cell the chosen way doesn't take closes up, and what's left slides over (the margin takes back its gap). */
+.sign-in-fields label.off {
+  flex: 0 1 0px;
+  margin-left: -8px;
+  padding-left: 0;
+  border-width: 0;
+  opacity: 0;
+}
+.sign-in-fields label > span {
+  flex: none;
+  line-height: 1;
+}
+.sign-in-fields label:hover {
+  border-color: var(--ink-3);
+}
+.sign-in-fields label:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+}
+.sign-in-fields label input {
+  flex: 1;
+  align-self: stretch;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 12px 0 0;
+  background: none;
+  border: 0;
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+  box-shadow: none;
+  outline: none;
+}
+/* What a password manager fills in keeps the cell's own colour: its tint would cover the cell only past the name. */
+.sign-in-fields label input:autofill {
+  box-shadow: inset 0 0 0 100px var(--field);
+  -webkit-text-fill-color: var(--ink);
+}
+.sign-in-fields button {
+  flex: none;
+}
+/* The button says what each way does, one over the other, so it's as wide whichever is chosen and only its words
+   change. */
+.sign-in-go {
+  display: grid;
+  justify-items: center;
+}
+.sign-in-go > span {
+  grid-area: 1 / 1;
+  transition: opacity var(--switch) var(--ease);
+}
+.sign-in-go > .off {
+  opacity: 0;
+}
+/* A link is on its way: who it's for, where the toggle was. */
+.sign-in-readout {
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
 /* --- Rhythm ----------------------------------------------------------------------------------------------------- */
 /* One step between whatever follows whatever in a panel, a narrow page and a part that opens; a row's lines sit
    closer. After the parts above, so it sets their top margin whatever they set themselves. */
@@ -2123,6 +2426,39 @@ details > * + * {
   }
   .person {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* Signing in: the chosen way goes under what's asked, read from the left; the bar's toggle takes a row of its own,
+     and the fields fill the one below. */
+  .sign-in-context {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sign-in-what,
+  .sign-in-how {
+    flex: none;
+    max-width: 34rem;
+  }
+  .sign-in-how {
+    text-align: left;
+  }
+  .sign-in-bar-inner {
+    padding-block: 12px;
+    gap: 10px;
+  }
+  .sign-in-bar fieldset {
+    flex-basis: 100%;
+  }
+  .sign-in-bar .segmented {
+    width: fit-content;
+  }
+  .sign-in-fields label {
+    flex: 1 1 200px;
+  }
+}
+/* A window too short for both bars and the words between them: the bottom one scrolls with the page. */
+@media (max-height: 480px) {
+  .sign-in-bar {
+    position: static;
   }
 }
 @media (max-width: 720px) {
@@ -2180,6 +2516,19 @@ details > * + * {
   .memberships > li {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* The bottom bar scrolls with the page too. */
+  .team-at-work p {
+    padding: 0 16px;
+  }
+  .sign-in-context {
+    padding: 32px 16px 22px;
+  }
+  .sign-in-bar {
+    position: static;
+  }
+  .sign-in-bar-inner {
+    padding: 12px 16px 16px;
+  }
 }
 @media (max-width: 560px) {
   /* A topic of the agreement: what it covers, then how it's treated under it. */
@@ -2220,6 +2569,24 @@ details > * + * {
     display: grid;
     width: 100%;
   }
+  /* The sign-in bar's toggle keeps its one row, as wide as the screen; its fields stand one above the other, the
+     button as wide as they are, and a field the chosen way doesn't take closes upwards. */
+  .sign-in-bar .segmented {
+    width: 100%;
+  }
+  .sign-in-bar .segmented span {
+    padding-inline: 6px;
+  }
+  .sign-in-fields {
+    flex-direction: column;
+  }
+  .sign-in-fields label {
+    flex: 0 0 var(--ctl);
+  }
+  .sign-in-fields label.off {
+    min-height: 0;
+    margin: -8px 0 0;
+  }
   .counts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2259,12 +2626,19 @@ details > * + * {
   .linkish {
     padding-block: 12px;
   }
+  .sign-in-bar {
+    --ctl: 44px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 0.01ms !important;
+  }
+  /* The sign-in page's words change without coming in. */
+  .sign-in * {
+    animation-duration: 0.01ms !important;
   }
 }
 @media (forced-colors: active) {

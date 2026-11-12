@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { param, type SearchParams } from "../../components/ui.tsx";
 import { blocked } from "../../server/access.ts";
@@ -24,18 +23,5 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
   const next = safeNext(param(params["next"]));
   if (viewer && !blocked(viewer)) redirect(next);
   const error = param(params["error"]);
-  return (
-    <div className="narrow">
-      <h1>Sign in</h1>
-      <p className="lede">
-        Use the address you were invited with or signed up with. No account yet? <Link href="/sign-up">Create one</Link>
-      </p>
-      {error ? (
-        <p className="notice error" role="alert">
-          {ERRORS[error] ?? "That didn't sign you in. Try again."}
-        </p>
-      ) : null}
-      <SignInForm next={next} />
-    </div>
-  );
+  return <SignInForm next={next} problem={error ? (ERRORS[error] ?? "That didn't sign you in. Try again.") : null} />;
 }
