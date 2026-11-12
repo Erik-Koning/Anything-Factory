@@ -85,11 +85,15 @@ export async function freshCode(page: Page, uri: string): Promise<string> {
   return code;
 }
 
+// Chooses a way in on the sign-in page's toggle. The page opens on the link by email.
+export const signInWith = (page: Page, way: "Email link" | "Password" | "Passkey"): Promise<void> =>
+  page.getByRole("group", { name: "Sign in with" }).getByText(way, { exact: true }).click();
+
 // Signs in by a link: asks for one on the sign-in page and opens it.
 export async function signInByLink(page: Page, email: string): Promise<void> {
   const seen = mailsTo(email).length;
   await page.goto("/sign-in");
-  await page.getByLabel("Email", { exact: true }).first().fill(email);
+  await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByRole("button", { name: "Email me a link" }).click();
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await page.goto(await nextLink(email, seen));
@@ -101,14 +105,16 @@ let lastCode = "";
 export async function signInAsAdmin(page: Page, { backupCode, confirm = false }: { backupCode?: string; confirm?: boolean } = {}): Promise<void> {
   const { admin } = state();
   await page.goto("/sign-in");
-  const form = page.getByRole("region", { name: "With your password" });
+  await signInWith(page, "Password");
+  const form = page.getByRole("group", { name: "With your password" });
   await form.getByLabel("Email").fill(admin.email);
   await form.getByLabel("Password").fill(admin.password);
   await form.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Your authenticator's code" })).toBeVisible();
   if (backupCode) {
-    await page.getByRole("button", { name: "Use a backup code instead" }).click();
-    await page.getByLabel("Backup code").fill(backupCode);
+    await page.getByRole("group", { name: "The code is from" }).getByText("Backup code").click();
+    await expect(page.getByRole("heading", { name: "A backup code" })).toBeVisible();
+    await page.getByRole("textbox", { name: "Backup code" }).fill(backupCode);
   } else {
     let code = totpCode(admin.totpURI);
     while (code === lastCode) {

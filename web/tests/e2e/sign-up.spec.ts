@@ -3,7 +3,7 @@
 // turned off and on from the account page, and an admin adding someone who signed up to a team. Each person comes from
 // addresses of their own, so the limit on sign-ups (three a minute from one address) is never met.
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { closeDatabases, databases, freshCode, mailsTo, newPage, nextLink, nextLinkLike, signInAsAdmin, state } from "./helpers.ts";
+import { closeDatabases, databases, freshCode, mailsTo, newPage, nextLink, nextLinkLike, signInAsAdmin, signInWith, state } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 test.afterAll(async () => {
@@ -31,7 +31,8 @@ async function signUp(page: Page, name: string, email: string): Promise<void> {
 
 async function signInWithPassword(page: Page, email: string): Promise<void> {
   await page.goto("/sign-in");
-  const form = page.getByRole("region", { name: "With your password" });
+  await signInWith(page, "Password");
+  const form = page.getByRole("group", { name: "With your password" });
   await form.getByLabel("Email").fill(email);
   await form.getByLabel("Password").fill(PASSWORD);
   await form.getByRole("button", { name: "Continue" }).click();

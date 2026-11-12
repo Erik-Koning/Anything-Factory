@@ -8,7 +8,20 @@ import { newTask, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../../lib/tasks/mongo.ts";
 import { update } from "../../../lib/tasks/store.ts";
 import { DEFAULT_IP, ORIGIN_SECRET } from "../../playwright.config.ts";
-import { actionIdOn, closeDatabases, databases, errorOf, freshCode, mailsTo, newPage, nextLink, signInAsAdmin, signInByLink, state } from "./helpers.ts";
+import {
+  actionIdOn,
+  closeDatabases,
+  databases,
+  errorOf,
+  freshCode,
+  mailsTo,
+  newPage,
+  nextLink,
+  signInAsAdmin,
+  signInByLink,
+  signInWith,
+  state,
+} from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -55,7 +68,7 @@ test("an admin never gets a sign-in link by email", async ({ browser }) => {
   const { context, page } = await newPage(browser);
   const before = mailsTo(state().admin.email).length;
   await page.goto("/sign-in");
-  await page.getByLabel("Email", { exact: true }).first().fill(state().admin.email);
+  await page.getByLabel("Email", { exact: true }).fill(state().admin.email);
   await page.getByRole("button", { name: "Email me a link" }).click();
   // The same answer as for anyone. What's sent is a note that says how an admin signs in: its link is the sign-in page.
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
@@ -1677,6 +1690,7 @@ test("an admin session without its second factor is refused every admin page and
     await route.fulfill({ response, json: { ...(await response.json()), userVerification: "discouraged" } });
   });
   await unverified.page.goto("/sign-in");
+  await signInWith(unverified.page, "Passkey");
   await unverified.page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(unverified.page).toHaveURL(/\/second-factor$/);
   await expect(unverified.page.getByRole("heading", { name: "Enter your authenticator's code" })).toBeVisible();
@@ -1719,6 +1733,7 @@ test("an admin session without its second factor is refused every admin page and
   const third = await cdp3.send("WebAuthn.addVirtualAuthenticator", { options: KEY });
   await cdp3.send("WebAuthn.addCredential", { authenticatorId: third.authenticatorId, credential: used! });
   await verified.page.goto("/sign-in");
+  await signInWith(verified.page, "Passkey");
   await verified.page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(verified.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
   await verified.page.goto("/t/shop/proposals");

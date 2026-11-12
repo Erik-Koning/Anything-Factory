@@ -7,6 +7,7 @@ import { blocked, can } from "../server/access.ts";
 import { allTeams, storeFor } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { getViewer, type Person } from "../server/viewer.ts";
+import { RememberName } from "./remember-name.tsx";
 import { SignOutButton } from "./sign-out-button.tsx";
 import "./globals.css";
 
@@ -105,6 +106,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <main id="main" tabIndex={-1}>
           {children}
         </main>
+        {signedIn ? <RememberName name={viewer.name} /> : null}
       </body>
     </html>
   );

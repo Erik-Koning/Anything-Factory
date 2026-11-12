@@ -18,7 +18,7 @@ async function signInByLinkFrom(page: import("@playwright/test").Page, email: st
   await (await databases()).accounts.collection("magic_link_sends").deleteMany({ _id: email as never });
   const seen = mailsTo(email).length;
   await page.goto("/sign-in");
-  await page.getByLabel("Email", { exact: true }).first().fill(email);
+  await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByRole("button", { name: "Email me a link" }).click();
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await page.goto(await nextLink(email, seen));
@@ -125,6 +125,10 @@ test("a session taken somewhere new waits for its person; “it wasn't me” end
     await page.goto("/");
     await expect(page).toHaveURL(/\/sign-in/);
   }
+  // Their own browser still greets them by their first name, which it alone has kept: no cookie carries it.
+  await expect(home.page.getByRole("heading", { name: "Welcome back, Morgan" })).toBeVisible();
+  expect(await home.page.evaluate(() => window.localStorage.getItem("a6g.first-name"))).toBe("Morgan");
+  expect((await home.context.cookies()).some((cookie) => cookie.value.includes("Morgan"))).toBe(false);
   expect(await accounts.collection("session").countDocuments({ userId: user?._id })).toBe(0);
   expect(await accounts.collection("known_ips").countDocuments({ userId: String(user?._id), ip: "192.0.2.99" })).toBe(0);
   expect(await accounts.collection("audit").findOne({ action: "ip.denied", email })).toMatchObject({ ip: "192.0.2.99", outcome: "ok" });
