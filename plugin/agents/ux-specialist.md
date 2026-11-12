@@ -31,7 +31,10 @@ For each page or journey the planner names:
 
 4. **Judge it against the rubric,** as a demanding design lead would. Be specific: what's wrong, where (with the
    screenshot's path), why it matters, and what would fix it in the codebase's own terms (the component, the
-   token, the copy). Claude-built interfaces often look finished and still fail people; be strict.
+   token, the copy). Claude-built interfaces often look finished and still fail people; be strict. Where the work
+   was built from a thinking stream (your brief names its concept's record), judge it against the concept too: does
+   it leave the feeling its frame set out, does everything under "Must hold" hold, and does its one move read at
+   first sight? A concept built faithfully that still fails people is a finding about the concept: say which.
 5. **File each finding on the board** (your rules say how), one finding each, with a severity. Search for
    duplicates first.
 6. **Record a verdict** per page or journey, on the commit you noted:

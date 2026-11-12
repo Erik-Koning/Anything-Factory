@@ -1,6 +1,7 @@
 // A task as a card on the board: what it is, where it came from, and what its column says about it (who holds it,
 // what it waits for, when it merged). Server-only, like ui.tsx.
 import Link from "next/link";
+import { awaitsStream, streamLabel } from "../../lib/tasks/model.ts";
 import type { Card } from "../server/views.ts";
 import { Ago, Chip } from "./ui.tsx";
 
@@ -27,6 +28,8 @@ export function TaskCard({
         <Chip tone="">{t.kind}</Chip>
         {t.severity ? <Chip tone={t.severity === "blocker" ? "warn" : ""}>{t.severity}</Chip> : null}
         {t.priority !== null ? <Chip tone="">{`p${t.priority}`}</Chip> : null}
+        {/* Marked for a thinking stream: held from claims until its concept is settled. */}
+        {t.stream ? <Chip tone={awaitsStream(t) ? "caution" : ""}>{streamLabel(t)}</Chip> : null}
       </div>
       {t.status === "building" && t.claim ? (
         <p className="meta">

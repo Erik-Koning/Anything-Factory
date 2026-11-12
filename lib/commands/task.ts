@@ -49,6 +49,9 @@ import {
   statusRefusal,
   type Screen,
   securityLine,
+  STREAM_BUILDS,
+  streamLabel,
+  streamLine,
   type Task,
   theirWords,
   ticketOf,
@@ -75,6 +78,10 @@ export const USAGE = `usage: a6g task <command>
       agreed it (answer it, or a6g task status <id> done), only scaffold and test-infra work is claimed
   list [--status s,t] [--kind k] [--all] [--claimable] [--json]   ·   show <id> [--json]   ·   graph [--out <file>] [--all]
   note <id> "<text>"   ·   screen <id> clear|risky --note "…" (the planner: a stakeholder's words, before they're a proposal)
+  stream <id> want --why "…"   ·   stream <id> concept --move "…" --record <file>   ·   stream <id> build concept|retreat [--note "…"]
+      a thinking stream, for the few tasks where how it feels matters most: the planner marks one and says why, the
+      innovator hands in a concept, and the planner settles which is built, the concept or its retreat. Until then
+      nobody claims the task, and it's labelled wherever it shows   ·   stream <id> off --reason "…" takes the mark off
   edit <id> [--title …] [--body … | --body-file f] [--kind k] [--sev s] [--area a] [--files p,q] [--parent id|none] [--after id,id|none]
   score <id> --pain N --reach N --revenue N --wow N --distribution N --leverage N --urgency N --risk N
              --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…"]
@@ -159,7 +166,9 @@ export function line(t: Task, all: Task[] = []): string {
   const due = journeyDue(t, all) ? " (due its verification)" : "";
   // A stakeholder's own title, quoted (lib/untrusted.ts).
   const title = theirWords(t) ? `${quoted(t.title)} (a stakeholder's words)` : t.title;
-  return `#${pad(t.id, 4)} ${pad(t.status, 11)} ${pad(t.kind, 10)} ${pad(t.severity ?? "", 7)} ${pad(t.priority === null ? "" : `p${t.priority}`, 4)} ${title}${claim}${due}`;
+  // Marked for a thinking stream, and where that stands.
+  const stream = streamLabel(t) ? ` ≈ ${streamLabel(t)}` : "";
+  return `#${pad(t.id, 4)} ${pad(t.status, 11)} ${pad(t.kind, 10)} ${pad(t.severity ?? "", 7)} ${pad(t.priority === null ? "" : `p${t.priority}`, 4)} ${title}${claim}${due}${stream}`;
 }
 
 // The screen, as a line.
@@ -189,6 +198,8 @@ export function detail(t: Task): string {
   if (t.ui !== null || t.critical.length) out.push(`touches: ${[t.ui ? "UI" : null, ...t.critical].filter(Boolean).join(", ") || "no UI"}`);
   const security = securityLine(t);
   if (security) out.push(security);
+  const stream = streamLine(t);
+  if (stream) out.push(stream);
   if (t.gate) out.push(`gate: asked ${t.gate.asked} · instead ${t.gate.simplify} · simplest ${t.gate.simplest}`);
   if (t.score)
     out.push(`score: ${DIMENSIONS.map((d) => `${d} ${t.score?.[d]}`).join(", ")}; confidence ${t.score.confidence}, size ${t.score.size}. ${t.score.why}`);
@@ -326,6 +337,75 @@ const screen: Handler = async ({ store, who }, [id, verdict], options) => {
     withEvent({ ...t, screen: { verdict: chosen, by: who, at: nowIso(), note } }, who, `screened ${chosen}: ${note}`)
   );
   console.info(`task ${task.id}: screened ${chosen}${chosen === "risky" ? "; only the operator approves it" : ""}`);
+  return 0;
+};
+
+// A thinking stream on a task (model.ts Stream). The planner marks the work worth one and says why; the innovator
+// hands in its concept, whose record must be there; the planner settles which is built. Nobody settles their own
+// concept (Article 4), and the task isn't claimed until it's settled (claimRefusal).
+const BEFORE_BUILD: Status[] = ["triage", "proposed", "researching", "approved", "question", "blocked"];
+const stream: Handler = async ({ team, store, who }, [id, step, choice], options) => {
+  const task = await getTask(store, id);
+  const marked = task.stream ?? null;
+  const at = nowIso();
+  if (step === "want") {
+    need(who, ["planner"], "marking work for a thinking stream");
+    if (!team.roles["innovator"]) throw new Refused("this team has no innovator to think a stream through (team.json roles)");
+    const why = optionText(options["why"])?.trim();
+    if (!why) throw new Refused('say why it\'s worth one: --why "<what people meet here, and what the operator wants of it>"');
+    const built = CLAIMS["builder"] ?? [];
+    if (!built.includes(task.kind)) throw new Refused(`task ${task.id} is ${task.kind} work: a stream is for what a builder builds (${built.join(", ")})`);
+    if (task.branch || !BEFORE_BUILD.includes(task.status))
+      throw new Refused(`task ${task.id} is ${task.branch ? "already begun" : task.status}: a stream comes before the work is built`);
+    if (marked && marked.state !== "wanted")
+      throw new Refused(`task ${task.id} has its concept already (${streamLabel(task)}): a6g task stream ${task.id} off first, to ask for another`);
+    await update(store.tasks, task.id, (t) =>
+      withEvent({ ...t, stream: { state: "wanted", why, by: who, at } }, who, `marked for a thinking stream: ${why}`)
+    );
+    console.info(`task ${task.id}: marked for a thinking stream; nobody claims it until its concept is settled`);
+    return 0;
+  }
+  if (!["concept", "build", "off"].includes(step ?? ""))
+    throw new Refused(`a6g task stream ${task.id} want --why "…" | concept --move "…" --record <file> | build concept|retreat | off --reason "…"`);
+  if (!marked) throw new Refused(`task ${task.id} isn't marked for a thinking stream; the planner marks it: a6g task stream ${task.id} want --why "…"`);
+  if (marked.state === "settled") throw new Refused(`task ${task.id}'s stream is settled (${streamLabel(task)})`);
+  if (step === "concept") {
+    need(who, ["innovator"], "handing in a concept");
+    const move = optionText(options["move"])?.trim();
+    const file = optionText(options["record"]);
+    if (!move || !file) throw new Refused("--move \"<the concept's name, and its one move>\" --record <the record's file>");
+    const record = resolve(file);
+    if (!existsSync(record)) throw new Refused(`there's no record at ${record}: write it first, in the shape your instructions give`);
+    await update(store.tasks, task.id, (t) =>
+      withEvent({ ...t, stream: { ...(t.stream ?? marked), state: "concept", move, record, by: who, at } }, who, `handed in a concept: ${move}`)
+    );
+    console.info(`task ${task.id}: concept handed in; the planner judges it and settles what's built`);
+    return 0;
+  }
+  if (step === "build") {
+    need(who, ["planner"], "settling what a stream's task is built to");
+    const build = oneOf(choice, STREAM_BUILDS, "what's built");
+    if (!build) throw new Refused(`the concept or its retreat: a6g task stream ${task.id} build concept|retreat`);
+    if (marked.state !== "concept")
+      throw new Refused(`task ${task.id} has no concept yet: the innovator hands one in first (or take the mark off: a6g task stream ${task.id} off)`);
+    const note = optionText(options["note"])?.trim();
+    await update(store.tasks, task.id, (t) =>
+      withEvent(
+        { ...t, stream: { ...(t.stream ?? marked), state: "settled", build, by: who, at } },
+        who,
+        `settled its stream: build the ${build}${note ? `. ${note}` : ""}`
+      )
+    );
+    console.info(
+      `task ${task.id}: built to ${build === "retreat" ? "the retreat" : "its concept"}; ${task.status === "approved" ? "it can be claimed" : `it's claimed once it's approved (it's ${task.status})`}`
+    );
+    return 0;
+  }
+  need(who, ["planner"], "taking a stream off a task");
+  const reason = optionText(options["reason"])?.trim();
+  if (!reason) throw new Refused('say why: --reason "…"');
+  await update(store.tasks, task.id, (t) => withEvent({ ...t, stream: null }, who, `took the thinking stream off: ${reason}`));
+  console.info(`task ${task.id}: no thinking stream; it's built as it stands`);
   return 0;
 };
 
@@ -929,6 +1009,7 @@ const OPTIONS: Record<string, string[]> = {
   show: ["json"],
   note: ["text"],
   screen: ["note"],
+  stream: ["why", "move", "record", "note", "reason"],
   edit: ["title", "body", "body-file", "kind", "sev", "area", "files", "parent", "after"],
   score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
   status: ["reason", "recommend", "waits-on", "then", "topic", "stakes", "confidence"],
@@ -954,6 +1035,7 @@ const COMMANDS: Record<string, Handler> = {
   show,
   note,
   screen,
+  stream,
   edit,
   score,
   status: setStatus,

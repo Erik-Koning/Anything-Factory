@@ -2,7 +2,7 @@
 // tasks inside, a band for the tasks in no journey, columns by how many tasks must come first, and an edge for each
 // dependency. Open it with `npx @mosphere/better-diagrams <file>`; a6g serve draws the same layout itself. The web app
 // also draws it by level (levelDiagram, below): the journeys on the top level, their tasks drilled into.
-import { claimOrder, journeyDue, type Kind, type Task } from "./model.ts";
+import { claimOrder, journeyDue, type Kind, streamLabel, type Task } from "./model.ts";
 
 const W = 220;
 const H = 76;
@@ -103,7 +103,13 @@ export function betterDiagram(tasks: Task[], { title, all = false }: { title: st
         w: W,
         h: H,
         parentId: band.id,
-        description: [t.status, t.severity, t.priority === null ? null : `p${t.priority}`, t.claim ? `${t.claim.role}@${t.claim.machine}` : null]
+        description: [
+          t.status,
+          t.severity,
+          t.priority === null ? null : `p${t.priority}`,
+          t.claim ? `${t.claim.role}@${t.claim.machine}` : null,
+          streamLabel(t),
+        ]
           .filter(Boolean)
           .join(" · "),
         ...(t.status === "done" || t.status === "rejected" ? { status: "dark" } : {}),
@@ -300,6 +306,7 @@ export function levelDiagram(
         t.severity,
         t.priority === null ? null : `p${t.priority}`,
         waits.length ? `waits on ${waits.map((w) => `#${w}`).join(", ")}` : null,
+        streamLabel(t),
       ]
         .filter(Boolean)
         .join(" · "),

@@ -36,6 +36,7 @@ import {
 import { plannerBusy, readSteering, retirePlanner, steer } from "../steer.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
+import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
 import { die, parseArgs, readJson, writeJson } from "../util.ts";
@@ -201,6 +202,14 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
     const chosen = fresh.roles[role];
     return chosen ? (logins.find((a) => a.name === chosen)?.configDir ?? null) : null;
   };
+  // The roles that read the operator's taste start with Ditto's server beside T3 Code's tools (lib/ditto.ts). The
+  // file names the factory's launcher and holds no secret; the launcher reads the team's token when it starts.
+  const withDitto = roles.filter((role) => team.ditto?.roles.includes(role));
+  const dittoConfig = withDitto.length ? writeMcpConfig(run, team.name, version) : null;
+  if (dittoConfig && !(dittoServer() && hasToken(team.name)))
+    console.warn(
+      `  note: team.json gives the ${withDitto.join(" and the ")} Ditto, which isn't connected here yet: a6g ditto ${team.name} --grant --server <ditto-mcp.js>`
+    );
   for (const role of roles) {
     const prompt = writePrompt(team, role, run);
     const flags = [
@@ -208,8 +217,10 @@ function registerTeam(home: string, { force, version: target, worker = false }: 
       `--plugin-dir ${quote(pluginDir(version))}`,
       `--append-system-prompt-file ${quote(prompt)}`,
       `--setting-sources ${team.isolation === "strict" ? "project" : "user,project"}`,
-      // The planner keeps the account's connectors for its email; everyone else gets only T3 Code's tools.
+      // The planner keeps the account's connectors for its email; everyone else gets only T3 Code's tools, and
+      // Ditto's where the team's rules give the role them.
       team.isolation === "strict" && role !== "planner" ? "--strict-mcp-config" : null,
+      dittoConfig && withDitto.includes(role) ? `--mcp-config ${quote(dittoConfig)}` : null,
     ].filter((flag) => flag !== null);
     instances[instanceId(team, role)] = t3.instance({
       displayName: `${team.title} · ${role}`,

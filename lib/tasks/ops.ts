@@ -9,6 +9,7 @@ import { acquireSlot } from "../lock.ts";
 import { hash, localTime, readJson, writeJson } from "../util.ts";
 import {
   type Actor,
+  awaitsStream,
   CLAIMS,
   type FeatureRequest,
   heldHere,
@@ -370,6 +371,24 @@ export function summary(
     );
   const due = all.filter((j) => journeyDue(j, all));
   if (due.length) parts.push(`Journeys due their verification: ${due.map(line).join("; ")}.`);
+  // Work marked for a thinking stream and not settled: nobody claims it, so only the planner moves it on.
+  const streams = all.filter((t) => awaitsStream(t) && t.status !== "done" && t.status !== "rejected");
+  if (streams.length) {
+    const judged = streams.filter((t) => t.stream?.state === "concept");
+    const wanted = streams.filter((t) => t.stream?.state === "wanted" && t.status === "approved");
+    const later = streams.filter((t) => t.stream?.state === "wanted" && t.status !== "approved");
+    parts.push(
+      `Thinking streams (held from claims until settled): ${[
+        judged.length ? `concept in, yours to judge and settle (a6g task stream <id> build concept|retreat): ${judged.map(line).join("; ")}` : null,
+        wanted.length
+          ? `wanted: ${wanted.map(line).join("; ")} (${ideas?.running ? "an innovator is at work" : 'start the innovator on one: "a thinking stream on task <id>"'})`
+          : null,
+        later.length ? `wanted once approved: ${later.map((t) => `#${t.id}`).join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join(". ")}.`
+    );
+  }
   // An approved journey with nothing left open and nothing done never comes due by itself: it needs tasks or an end.
   const OPEN: Status[] = ["triage", "proposed", "researching", "approved", "building", "review", "blocked", "question"];
   const empty = all.filter(

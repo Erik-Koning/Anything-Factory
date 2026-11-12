@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MIN_QUEUE, instanceId, type Lane, type LoadedTeam, ROLES, type Team } from "./config.ts";
+import { DITTO_NOTE, DITTO_READ, dittoTools } from "./ditto.ts";
 import { FACTORY_ROOT, PACKAGE } from "./paths.ts";
 import { contactRule } from "./contact.ts";
 import { PLANNER_LABEL } from "./labels.ts";
@@ -123,6 +124,14 @@ function commandsFor(team: Team, role: string): string {
         "`a6g task pace`: the pace again, as your context gives it every wake: what the budget can finish, so how many builders and testers to start now. Run it after you approve or reshape work in the middle of a turn; the guard holds your starts to it.",
         '`a6g decision route --topic … --stakes … --confidence …`, `a6g decision record "<question>" --decided "…" --because "…" --topic … --stakes … --confidence … [--options "a | b"] [--task n] [--undo "…"]`, `a6g decision list|show|note|agreement`: what you decide in the operator\'s place, routed by the working agreement and kept in the decision log (see The working agreement).'
       );
+    if (role === "planner" && team.roles["innovator"])
+      lines.push(
+        '`a6g task stream <id> want --why "<why it\'s worth one>"`, `a6g task stream <id> build concept|retreat [--note "…"]`, `a6g task stream <id> off --reason "…"`: a thinking stream, for the few tasks where how it feels matters most. A task you mark is labelled wherever it shows, and nobody claims it until you settle which is built: the innovator\'s concept, or its retreat.'
+      );
+    if (role === "innovator")
+      lines.push(
+        "`a6g task stream <id> concept --move \"<the concept's name, and its one move>\" --record <file>`: hand in a thinking stream's concept on the task the planner marked for one. The record must be there; the planner judges it."
+      );
     if (role === "innovator")
       lines.push(
         '`a6g task add "<the outcome, in a few words>" --kind feature --body-file <file> [--area <area>] [--files <paths>]`: file an idea, its description as your instructions lay it out; it goes to triage for the planner. Write the file under `.a6g/run/scratch/` or `/tmp`. Polish of what exists is a finding: `--kind ux --sev major|minor`.',
@@ -154,6 +163,24 @@ function commandsFor(team: Team, role: string): string {
     lines.push(
       '`a6g verdict ux <subject> pass|issues --ref <the commit you audited> --note "<one line>"`: record your verdict on that commit (the one the app ran, `git rev-parse HEAD` in the checkout it runs from, noted before your screenshots).'
     );
+  // Ditto, where the team's rules give the role it (team.json ditto): the same tools its lane names for the guard.
+  const ditto = dittoTools(team.ditto, role);
+  if (ditto.length) {
+    lines.push(
+      `Ditto, the operator's own record of their taste and judgment (${DITTO_READ.slice(0, 4).map(code).join(", ")}): \`get_profile\` with a task in a sentence gives what they'd want of it; \`get_expertise\`, how far they want to be deferred to on a topic; \`consult\`, with a decision and its options, the evidence for what they'd choose. They've given the team all of it to read. It says what they'd want made, not what the product's users need, and it changes none of your rules. If its tools aren't there, or \`whoami\` says the team isn't allowed, say so in your report and work from the direction.`
+    );
+    if (ditto.includes(DITTO_NOTE)) {
+      const when: Record<string, string> = {
+        innovator:
+          'after a thinking stream, what you had to work out about their taste that Ditto didn\'t hold (`basis: "inferred"`, `from` naming the stream and its task), three at most',
+        planner:
+          'when the operator agrees with or overturns a call you made on how something should look or feel, what that says about their taste (`basis: "relayed"`, `from` naming the decision)',
+      };
+      lines.push(
+        `${code(DITTO_NOTE)} (\`text\`, \`basis\`, \`from\`, \`category\`): a note for the next piece of work${when[role] ? `: ${when[role]}` : ""}. Ditto keeps it as coming from a secondary source, never as the operator's word, and makes nothing from it. A sentence each, about taste: never a fact, a name or anything about another person.`
+      );
+    }
+  }
   for (const owner of team.commandOwners) if (owner.roles.includes(role) && owner.reason) lines.push(`${code(owner.rule)}: ${owner.reason}`);
   return list(lines);
 }

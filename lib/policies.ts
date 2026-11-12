@@ -774,7 +774,7 @@ export function webRefusal(team: Pick<Team, "policies" | "hosts">, tool: string,
 
 // The factory's own commands, which only a person (or the setup agent, for check, register and start) runs.
 export const OPERATOR_COMMANDS = new RegExp(
-  `${START}a6g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|agreement|subscriptions|rotate|stop|unregister|connect|disconnect|serve)${END}`
+  `${START}a6g\\s+(?:init|register|sync|upgrade|self-install|watchdog|start|pause|resume|budget|agreement|subscriptions|rotate|stop|unregister|connect|disconnect|ditto|serve)${END}`
 );
 
 // An env file named in a command it reads or writes. Not in what only lists names (ls -la .env*), and not in what

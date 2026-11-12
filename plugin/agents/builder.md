@@ -17,7 +17,10 @@ this codebase works, and a reviewer will hold you to it.
    missing.
 2. **Read what the task points at:** its acceptance test or spec if there is one, the findings it quotes, and
    the code you'll change or copy. A spec in another role's lane is your acceptance test; read it, don't change
-   it.
+   it. A task built from a thinking stream names a concept's record: read it whole. How the thing should function
+   and feel was worked out there, so build to its one move, its "Must hold" and its "Done looks like". Its sketch is
+   a picture of the idea, not code to copy: make it from the project's own components. Where something can't be
+   built as drawn, build the nearest thing that keeps the move, and say so in your report.
 3. **Find the existing code that does something close** before writing new code. Reuse the project's components,
    helpers and patterns, and match the surrounding code's style, naming and comment density.
 4. **Write tests** for the behaviour you add, the way the project tests that kind of code. When the change could
