@@ -3,6 +3,7 @@
 // Claude sessions in the same repository set none of these, so the factory never affects them.
 import { resolve } from "node:path";
 import { type LoadedTeam, loadTeam, roleOfAgent } from "./config.ts";
+import { pinOf, useEngine } from "./docker.ts";
 import { defaultRunDir, findHome } from "./paths.ts";
 import { die } from "./util.ts";
 
@@ -51,6 +52,9 @@ export function teamSession({
   if (!home) throw new Error("not in a team: no A6G_HOME_DIR and no .a6g/team.json above the working directory");
   const team = loadTeam(home, { strict });
   const run = process.env.A6G_RUN ? resolve(process.env.A6G_RUN) : defaultRunDir(team.name);
+  // What the command goes on to run (the gate, the environment's script, a check after a merge) reaches the team's
+  // Docker engine, whoever runs it: a member's instance sets it too, but a person's shell doesn't.
+  useEngine(pinOf(team.name, home));
   return { home, team, run, role: roleFor(agentType) };
 }
 

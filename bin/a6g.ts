@@ -17,6 +17,7 @@ Set up and run a team (the operator)
                                       starts the environment and runs the gate
   a6g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);
                                       --worker on a machine other than a Mongo team's lead: builders and testers only
+                                      --docker <context>: the Docker engine its containers run on, from then on
   a6g start <team>                    run the watchdog now (it starts the planner); a paused team stays paused
   a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
                                       stop a team now, or once the work (or journeys) under way is merged
@@ -41,7 +42,7 @@ Set up and run a team (the operator)
   a6g metrics --quality [--since] [--until] [--json]
                                       how the merged work went: first-time reviews, found after merge, cost per task
   a6g prompt <team> <role>            the text a role works under
-  a6g upgrade <team> [<version>] [--force]   move a team to another installed factory version
+  a6g upgrade <team> [<version>] [--force] [--docker <context>]   move a team to another installed factory version
   a6g unregister <team>               remove its T3 instances and registry entry (keeps its files)
   a6g watchdog install|remove|run     the one launchd job that looks after every team
   a6g connect [email|whatsapp] [--test]  send you the watchdog's alerts and the planner's outbox: email through

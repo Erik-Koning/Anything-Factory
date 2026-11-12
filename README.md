@@ -377,6 +377,15 @@ stays done.
   `a6g env use -- <command>`) hold its lock, so a merge doesn't restart it under them. `a6g env use` waits
   `--wait-min` minutes for it (8 unless said), and ends a command that holds it past `--max-min` (30 unless said, 120
   at most) with everything it started, so a run that hangs doesn't keep merges waiting.
+- **One Docker engine per team.** A Mac can run several (Docker Desktop, Rancher Desktop, OrbStack, Colima), each
+  with its own containers and volumes, all publishing ports on the same machine. A team that needs Docker
+  (`environment.needsDocker`) is tied to one when it's registered: the only one running, the one `DOCKER_HOST` names,
+  or the one you name (`a6g register --docker <context>`, as `docker context ls` lists them; with several running and
+  none named, register asks you to). Its members and every command the factory runs for it get `DOCKER_HOST` set to
+  that engine, the watchdog checks that one and starts it when it's down (its app, or `colima start`), and it stays
+  the team's until you name another. `a6g doctor` says when a team's engine is down, when containers of its checkout
+  are on another engine, and when two engines hold the same containers or publish the same ports. A team's scripts
+  shouldn't pick an engine themselves; `a6g check` warns about one that does.
 
 ```bash
 a6g pages status                     # each page: its checks, its UX verdict, and whether it looks different
@@ -582,7 +591,8 @@ When T3 Code updates (`t3 update`), run `a6g doctor`:
   drafted it), and its agents run that release. A team without a pin runs whichever version registers it.
 - **Upgrading:** `a6g upgrade <team> [version]` registers the team with the target version first, and moves the pin
   only once that worked (`--force` registers even when T3 Code doesn't meet the contract). A running planner keeps
-  its old prompt until `a6g rotate <team>`.
+  its old prompt until `a6g rotate <team>`. A team registered before teams had a Docker engine of their own gets
+  one then (`--docker <context>` names it; needed when several are running).
 - **Development:** `self-install --link` adds `versions/dev`, pointing at this checkout, for teams that should pick
   up changes immediately.
 - **Which code runs:** the installed `a6g` hands a team's commands to the version the team pins. A source checkout

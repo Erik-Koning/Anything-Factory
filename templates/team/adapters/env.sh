@@ -3,6 +3,10 @@
 # operator's dev server and databases. The planner runs up, reset, restart and down (a6g env …); anyone runs
 # status. State lives in .a6g/run/env/ in the team's checkout.
 #
+# Docker: once the team is registered, the factory runs this with DOCKER_HOST set to the team's engine (the one
+# a6g register chose), so docker, docker compose and the Supabase CLI reach it as they are. Don't look for an engine
+# or set one here.
+#
 #   .a6g/adapters/env.sh up|down|restart|reset|status
 set -uo pipefail
 ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { instanceId, type Lane, type LoadedTeam, loadTeam, ROLES, type Team } from "../config.ts";
 import { contactRule } from "../contact.ts";
+import { pinOf, useEngine } from "../docker.ts";
 import { HARNESS_FILE, pagePlan, readHarness } from "../harness.ts";
 import { FACTORY_ROOT, findHome, versionDir } from "../paths.ts";
 import { ALLOWED_EXAMPLES, policyStates } from "../policies.ts";
@@ -251,11 +252,17 @@ const BACKUP = /(~|\.(bak|orig|rej|swp|swo|tmp))$|^#.*#$/;
 
 const gitRun = (home: string, ...args: string[]) => spawnSync("git", args, { cwd: home, encoding: "utf8" });
 
+// A script that chooses the Docker engine, outside a comment. The factory sets DOCKER_HOST to the team's own
+// (lib/docker.ts); one that looks for an engine builds the team's containers on whichever it finds that day.
+const PICKS_ENGINE = /^[^#\n]*(\bDOCKER_(HOST|CONTEXT)=|\bdocker\s+context\s+use\b)/m;
+
 export async function check(argv: string[]): Promise<number> {
   const { positional, options } = parseArgs(argv, { booleans: ["run"] });
   const home = positional[0] ? resolve(positional[0]) : findHome();
   if (!home) die("run this in a team's checkout, or name it: a6g check <checkout>");
   const team = loadTeam(home, { strict: false });
+  // --run starts the environment and the gate on the team's Docker engine, once it's registered with one.
+  useEngine(pinOf(team.name, existsSync(home) ? realpathSync(home) : home));
   let failures = 0;
   const line = (level: Level, text: string) => {
     if (level === "FAIL") failures++;
@@ -315,6 +322,11 @@ export async function check(argv: string[]): Promise<number> {
     if (parsed.error) line("warn", `${script}: couldn't run ${shell} -n to check it`);
     else if (parsed.status !== 0) line("FAIL", `${script} isn't valid ${shell}: ${parsed.stderr.trim().split("\n")[0] ?? ""}`);
     else line("ok", `${script} parses (${shell} -n)`);
+    if (PICKS_ENGINE.test(readFileSync(path, "utf8")))
+      line(
+        "warn",
+        `${script} picks a Docker engine itself (it sets DOCKER_HOST or DOCKER_CONTEXT, or runs docker context use): the factory hands it the team's, the one a6g register chose (--docker), so take that out`
+      );
   }
   if (!existsSync(join(home, ".a6g", ".gitignore")) || !/^run\/?$/m.test(readFileSync(join(home, ".a6g", ".gitignore"), "utf8")))
     line("FAIL", ".a6g/.gitignore must ignore run/");

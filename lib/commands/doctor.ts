@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { browserProblem } from "../browser.ts";
 import { loadTeam, TeamError } from "../config.ts";
+import * as docker from "../docker.ts";
 import { emailSettings, readKey } from "../email.ts";
 import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
@@ -160,6 +161,31 @@ export async function doctor(): Promise<number> {
     if (missing.length) fail(`${team} is listed to run on ${missing.join(", ")}, which isn't a subscription here (a6g subscriptions add, or use)`);
   }
 
+  // The Docker engines that answer, and what's on each (lib/docker.ts). Each has its own containers and they share
+  // this Mac's ports: the same container on two is a copy nothing reaches, and a port two publish only one gets.
+  const engines = docker.running(docker.contexts());
+  const onEach = engines.map((engine) => ({ ...engine, containers: docker.containersOn(engine.host) ?? [] }));
+  if (onEach.length > 1) {
+    const found = docker.clashes(onEach);
+    const copies = new Map<string, string[]>();
+    for (const { name, engines: on } of found.names) copies.set(on.join(" and "), [...(copies.get(on.join(" and ")) ?? []), name]);
+    for (const [where, names] of copies)
+      warn(
+        `Docker: ${names.length} ${names.length === 1 ? "container is" : "containers are"} on both ${where} (${docker.some(names)}): one copy of each is a stray (docker --context <name> ps -a shows an engine's)`
+      );
+    if (found.ports.length)
+      warn(
+        `Docker: containers on different engines publish the same ${found.ports.length === 1 ? "port" : "ports"} of this Mac, which only one of them gets: ${docker.some(
+          found.ports.map(({ port, held }) => {
+            const on = new Map<string, string[]>();
+            for (const { engine, container } of held) on.set(container, [...(on.get(container) ?? []), engine]);
+            return `${port} (${[...on].map(([container, where]) => `${container} on ${where.join(" and ")}`).join(", ")})`;
+          }),
+          2
+        )}`
+      );
+  }
+
   for (const name of teamNames()) {
     try {
       const entry = readRegistry(name);
@@ -171,8 +197,28 @@ export async function doctor(): Promise<number> {
       // Its agents run the registered version; a6g register would compile with the pinned one.
       const pin = team.factory ?? PACKAGE.version;
       if (pin === PACKAGE.version && team.problems.length) throw new TeamError(team.file, team.problems);
-      if (team.environment.needsDocker && spawnSync("docker", ["info"], { stdio: "ignore" }).status !== 0)
-        warn(`${name}: needs Docker, which isn't running`);
+      // Its Docker engine (lib/docker.ts): running, and holding what the team's checkout started.
+      const engine = entry.docker;
+      if (engine) {
+        const id = engines.find((candidate) => candidate.host === engine.host)?.id ?? docker.engineId(engine.host);
+        if (id === null && team.environment.needsDocker) warn(`${name}: its Docker engine (${docker.label(engine)}) isn't running`);
+        const roots = [entry.home, entry.worktreesDir];
+        for (const { engine: other, containers } of docker.strays(
+          roots,
+          onEach.filter((candidate) => candidate.id !== id)
+        ))
+          warn(
+            `${name}: ${containers.length} ${containers.length === 1 ? "container of its checkout is" : "containers of its checkout are"} on ${other} (${docker.some(containers)}), though its Docker engine is ${docker.label(engine)}`
+          );
+      } else if (team.environment.needsDocker) {
+        // Registered before teams had an engine, or by a version that has none.
+        const fix = pin === PACKAGE.version ? `a6g register ${entry.home} --docker <name>` : `a6g upgrade ${name} --docker <name>`;
+        if (engines.length > 1)
+          warn(
+            `${name}: no Docker engine is chosen for it and ${engines.length} are running (${engines.map((candidate) => candidate.name).join(", ")}), so its containers go to whichever a command reaches (${fix})`
+          );
+        else if (!docker.answers()) warn(`${name}: needs Docker, which isn't running`);
+      }
       if (!existsSync(versionDir(entry.version))) fail(`${name}: its agents run Anything Factory ${entry.version}, which isn't installed`);
       if (pin !== entry.version) warn(`${name}: pins Anything Factory ${pin} but is registered with ${entry.version} (a6g register ${entry.home})`);
       if (pin !== PACKAGE.version && !existsSync(versionDir(pin))) {

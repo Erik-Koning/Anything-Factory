@@ -20,6 +20,8 @@ process.env.HOME = tmp("a6g-user-");
 process.env.A6G_SKIP_BROWSER = "1";
 for (const key of ["A6G_TEAM", "A6G_HOME_DIR", "A6G_RUN", "A6G_ROLE", "A6G_SETUP", "A6G_VERSION", "A6G_MERGE_QUEUED", "CLAUDE_PROJECT_DIR"])
   delete process.env[key];
+// Nor does a test register a team on the Docker engine of whoever runs the tests (lib/docker.ts).
+for (const key of ["DOCKER_HOST", "DOCKER_CONTEXT"]) delete process.env[key];
 // Stand-ins for t3, launchctl, docker, osascript, open and an empty Keychain's security first on PATH (test/fake-t3/),
 // for the tests that run a6g without a machine of their own; and a T3 server address where nothing listens, since
 // lib/t3.ts would otherwise try the real server's default port.

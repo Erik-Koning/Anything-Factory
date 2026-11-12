@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased: one Docker engine per team
+
+A Mac can run several Docker engines (Docker Desktop, Rancher Desktop, OrbStack, Colima), each with its own containers
+and volumes and all publishing ports on the same machine. Nothing tied a team to one: its scripts used whichever a
+plain `docker` reached that day, the watchdog checked that one, and when it was down it opened the first Docker app
+installed, which could be a different engine. A team's containers could then be built a second time on the other
+engine, where containers left by earlier work held its ports.
+
+- **A team has one engine.** `a6g register` chooses it for a team that needs Docker (`environment.needsDocker`) and
+  keeps it in the registry: the one named (`--docker <context>`, as `docker context ls` lists them, or an engine's
+  address), else the one `DOCKER_HOST` names, else the only one running. With several running and none named it
+  stops and lists them, so the operator says which. It stays the team's through later registers and upgrades until
+  `--docker` names another. `a6g upgrade <team> --docker <context>` gives one to a team registered before.
+- **Everything the team runs uses it.** Its members' instances carry `DOCKER_HOST`, and the factory sets it for the
+  commands it runs for the team (`a6g env`, `a6g gate`, merges and their checks, `a6g check --run`), whoever runs
+  them. The watchdog checks the team's engine and starts that one when it's down: its app, or `colima start` for a
+  Colima profile. An engine it doesn't know how to start is logged, not replaced by another.
+- **`a6g doctor` reads every engine that answers.** It says when a team's engine is down, when containers that mount
+  a team's checkout are on another engine, when the same containers exist on two engines, and when containers on
+  different engines publish the same port. A team with no engine chosen, on a Mac where several run, is told how to
+  choose. `a6g status` shows a team's engine.
+- **Scripts leave the choice alone.** The template's `env.sh` and the setup agent say so, and `a6g check` warns about
+  an adapter that sets `DOCKER_HOST` or `DOCKER_CONTEXT` or runs `docker context use`.
+- **For a running team:** nothing changes until it's upgraded: a team registered by an earlier version has no engine
+  and behaves as before.
+
 ## Unreleased: the decision log and the working agreement
 
 A team already decided most product questions itself and asked only what its operator's direction left open. What it

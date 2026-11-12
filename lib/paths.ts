@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Team } from "./config.ts";
+import type { Pin } from "./docker.ts";
 
 // The launcher, the hooks and the watchdog start Node with its compile cache on (NODE_COMPILE_CACHE), so the .ts
 // files aren't stripped of their types again on every call. It's for the factory's own process: what the factory
@@ -78,6 +79,9 @@ export interface RegistryEntry {
   models?: Record<string, string>;
   health: string[];
   needsDocker: boolean;
+  // The Docker engine its containers run on, chosen when it's registered (lib/docker.ts). Missing in entries
+  // registered before teams had one, and for a team that needs none: whichever engine a plain `docker` reaches.
+  docker?: Pin;
   worktreesDir: string;
   watchdog: Team["watchdog"];
   // Missing in entries registered before the setting existed: priority (registeredContact).
