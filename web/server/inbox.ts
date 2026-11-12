@@ -1,6 +1,7 @@
 // What waits on the operator, worked out from a team's graph (never stored): the questions the planner or the approver
 // asked them, the blocked work raised to them, what they answered that the planner hasn't acted on yet, and what was settled
 // lately. Pure: the inbox pages, the header's count and the notifier read it, and the unit tests prove it.
+import { createHash } from "node:crypto";
 import { answersOn, waitingSince, waitsOnOperator } from "../../lib/tasks/answer.ts";
 import { type Note, OPERATOR, type Status, type Task } from "../../lib/tasks/model.ts";
 
@@ -127,6 +128,16 @@ function questionOf(task: Task): Waiting["question"] & { choices: Choice[]; reco
   const choices = choicesIn(found.text).map((c) => ({ ...c, recommended: c.key === key }));
   return { ...found, shown: choices.length || recommendation ? withoutChoices(found.text) : found.text, recommendation, choices };
 }
+
+// What the answer form is drawn with, as a short token the form sends back: when it came to wait, why, the question's
+// text, its options and the recommendation. The team can change any of them while the page is open (a note with new
+// options, a recommendation set again), and an answer is read against the task as it is then: one whose token no
+// longer matches is shown again instead of being recorded in words the operator never saw.
+export const shownAs = (w: Pick<Waiting, "since" | "why" | "question" | "choices" | "recommendation">): string =>
+  createHash("sha256")
+    .update(JSON.stringify([w.since, w.why, w.question.shown, w.choices.map((c) => [c.key, c.text]), w.recommendation]))
+    .digest("hex")
+    .slice(0, 16);
 
 // The task ids `text` mentions ("#21", "tasks 56, 59").
 export const mentions = (text: string): string[] => [...new Set([...text.matchAll(/#([1-9]\d{0,8})\b/g)].map((m) => m[1] ?? ""))];

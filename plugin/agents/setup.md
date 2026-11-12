@@ -126,8 +126,9 @@ Claude Code's own usage report) makes the watchdog warn at 80% of a limit, pause
 100%, and pause it now at 110%. Offer to say which command sets what they told you; they run it.
 
 How readily the team checks in with them is theirs too, and changes while it runs: the working agreement
-(`a6g agreement <team> --level hands-on|balanced|hands-off`, with `--ask` and `--never` for topics, and `--notes` for
-standing instructions in their words). A team that sets nothing is `balanced`: asked only when two options still fit
+(`a6g agreement <team> --level hands-on|balanced|hands-off`, with `--ask` and `--never` for topics, `--notes` for
+standing instructions in their words, and `--messages` for how often a message may reach them, in place of the
+`contact` you write here). A team that sets nothing is `balanced`: asked only when two options still fit
 and a wrong call would be costly, with what it decides in their place kept in a decision log they can overturn. Say
 so in a line when you ask about contact, and give the command if they want it closer or wider; they run it.
 

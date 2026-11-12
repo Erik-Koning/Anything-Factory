@@ -34,8 +34,10 @@ Set up and run a team (the operator)
                                       how much of a subscription the teams may use (all: their weeks added up)
   a6g agreement <team> [--level hands-on|balanced|hands-off] [--ask <topics>] [--never <topics>] [--follow <topics>]
                                       [--notes "…" | --notes-file <f> | --clear-notes] [--reset]
+                                      [--messages digest --every <2h|30m|1d> | --messages priority | --messages team]
                                       the working agreement: how readily the team asks you, what's always or never
-                                      asked, and your standing instructions; it holds at once. Alone, it shows it
+                                      asked, your standing instructions, and how often a message may reach you; it
+                                      holds at once. Alone, it shows it
   a6g rotate <team>                   a fresh planner thread (refused while members run)
   a6g status [<team>]  ·  a6g teams   planner, members, environment, drain, the watchdog's last lines  ·  every team
   a6g metrics [--team <t>] [--since]  agents, runs, requests, tokens and time per role

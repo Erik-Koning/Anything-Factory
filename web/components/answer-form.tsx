@@ -13,12 +13,15 @@ const EMPTY: AnswerFormState = { error: null, pick: "", extra: "" };
 
 // The answer to what waits on the operator: one of the options the question offers (the team's recommendation marked),
 // or their own words; or, for one they answered already, more words.
+// `shown` is the question as this form was drawn (server/inbox.ts shownAs): the action sends an answer to one the
+// team changed since back here, with the question as it stands.
 export function AnswerForm({
   team,
   id,
   back,
   choices,
   recommendation,
+  shown,
   adding = false,
 }: {
   team: string;
@@ -26,6 +29,7 @@ export function AnswerForm({
   back: string;
   choices: AnswerChoice[];
   recommendation: string | null;
+  shown?: string;
   adding?: boolean;
 }) {
   const [state, action, pending] = useActionState(answerAction, EMPTY);
@@ -49,6 +53,7 @@ export function AnswerForm({
       <input type="hidden" name="team" value={team} />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="back" value={back} />
+      {shown ? <input type="hidden" name="shown" value={shown} /> : null}
       {offered ? (
         <fieldset className="choices">
           <legend>Your answer to #{id}</legend>

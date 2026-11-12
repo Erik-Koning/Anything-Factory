@@ -657,14 +657,22 @@ const ask: Handler = async ({ team, store, who }, [id], options) => {
   if (refusal) throw new Refused(refusal);
   // Judged again when the planner says how (a question only): otherwise it keeps how it was judged when it was raised.
   // One that was never judged (raised before the agreement, or imported as a question from an old board) is judged
-  // now, unless the approver or the operator raised it: theirs go by the approval rules, not the agreement.
-  const unjudged = !task.ask?.rule && task.ask?.by !== "approver" && task.ask?.by !== OPERATOR;
+  // now, unless the approver or the operator raised it: theirs go by the approval rules, not the agreement. Raised
+  // again by the planner it stays theirs: the ask then says who it came from, since `by` is whoever raised it last.
+  const theirs = task.ask?.rule
+    ? undefined
+    : task.ask?.by === OPERATOR
+      ? "the operator raised it themselves"
+      : task.ask?.by === "approver"
+        ? "the approver sent it up to the operator"
+        : undefined;
+  const unjudged = !task.ask?.rule && theirs === undefined;
   const judged =
     task.status === "question" && task.kind !== "design" && who === "planner" ? await judgedAsk({ team, store }, task, options, unjudged) : null;
   if (!judged && ["topic", "stakes", "confidence"].some((key) => options[key] !== undefined))
     throw new Refused("--topic, --stakes and --confidence are the planner's judgment of a question it raised");
   await update(store.tasks, task.id, (t) => {
-    const kept = { topic: t.ask?.topic, stakes: t.ask?.stakes, confidence: t.ask?.confidence, rule: t.ask?.rule, agreement: t.ask?.agreement };
+    const kept = { topic: t.ask?.topic, stakes: t.ask?.stakes, confidence: t.ask?.confidence, rule: t.ask?.rule ?? theirs, agreement: t.ask?.agreement };
     const how = Object.fromEntries(Object.entries(judged ?? kept).filter(([, value]) => value !== undefined));
     return withEvent({ ...t, ask: { reason, recommendation, by: who, at: nowIso(), ...how } }, who, `raised to the operator: ${reason}`);
   });

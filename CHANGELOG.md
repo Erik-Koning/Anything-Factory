@@ -107,6 +107,9 @@ question` takes `--topic`, `--stakes` and `--confidence` from the planner and re
   takes the team's recommendation as it stands. An approver's escalation says which approval rule sent it up, and
   with `--topic` what it's about. `a6g metrics --quality` counts the period's check-ins, `a6g serve`'s page lists the
   decision log with Agree and Overturn, and the web app can email a flagged decision at once or in the daily digest.
+- **An answer is to the question that was read.** On the web app, an answer or a decision on a task the team changed
+  after the page was loaded (new options, another recommendation, an edited proposal) comes back with the task as it
+  stands instead of being recorded against it. `answer()` holds a recommendation taken to the one that was read.
 - **For a running team:** nothing changes until it's upgraded and its planner rotated. An older planner neither reads
   the agreement nor writes the log; a newer one that raises a question without the three judgments is told what to
   add.

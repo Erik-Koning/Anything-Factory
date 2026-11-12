@@ -3,7 +3,7 @@
 // settled lately. The pages pass the team's inbox in; the forms write through the team's server actions.
 import Link from "next/link";
 import { OPERATOR, type Task } from "../../lib/tasks/model.ts";
-import type { Inbox, Settled, Waiting } from "../server/inbox.ts";
+import { type Inbox, type Settled, shownAs, type Waiting } from "../server/inbox.ts";
 import { AnswerForm } from "./answer-form.tsx";
 import { LinkedText } from "./linked-text.tsx";
 import { Ago, Chip, clip } from "./ui.tsx";
@@ -247,7 +247,7 @@ function WaitingItem({
           </ul>
         </details>
       ) : null}
-      <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} />
+      <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} />
       {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
       {t.kind === "design" ? null : (
         <details className="more">
@@ -263,9 +263,20 @@ function WaitingItem({
                 required={false}
                 className="approve"
                 back={back}
+                seen={t.version}
               />
             ) : null}
-            <Verdict team={team} id={t.id} decision="reject" label="Reject" field="Why it's rejected" required className="reject" back={back} />
+            <Verdict
+              team={team}
+              id={t.id}
+              decision="reject"
+              label="Reject"
+              field="Why it's rejected"
+              required
+              className="reject"
+              back={back}
+              seen={t.version}
+            />
           </div>
           {approvable(t) ? null : (
             <p className="hint">

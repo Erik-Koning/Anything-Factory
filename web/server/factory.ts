@@ -101,8 +101,9 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
 // which the lead's watchdog passes to the planner within a minute.
 // `recommended`: the answer is the team's recommendation as it stood, with no words of the operator's (`text` empty):
 // the factory writes the recommendation's and marks the note so (the hints on the working agreement count those).
-export const answerAsOperator = (team: string, id: string, text: string, recommended = false): Promise<Task> =>
-  answer(storeFor(team), id, { who: OPERATOR, text, recommended });
+// `seen`: that recommendation as the page showed it, which the factory holds the answer to.
+export const answerAsOperator = (team: string, id: string, text: string, recommended = false, seen?: string): Promise<Task> =>
+  answer(storeFor(team), id, { who: OPERATOR, text, recommended, seen: recommended ? seen : undefined });
 
 // A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
 // added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,

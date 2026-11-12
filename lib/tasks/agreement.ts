@@ -168,15 +168,15 @@ function contactFrom(input: unknown): AgreementContact | null | { problem: strin
   return { mode: "digest", everyMin: every };
 }
 
-// A window in words: "4 h", "30 min", "2 d".
+// A window in words, exactly: "4 h", "30 min", "2 d", "1.5 h", "1 h 40 min".
 export const everyWords = (minutes: number): string =>
   minutes % 1440 === 0
     ? `${minutes / 1440} d`
-    : minutes % 60 === 0
-      ? `${minutes / 60} h`
-      : minutes > 60
-        ? `${Number((minutes / 60).toFixed(1))} h`
-        : `${minutes} min`;
+    : minutes < 60
+      ? `${minutes} min`
+      : minutes % 30 === 0
+        ? `${minutes / 60} h`
+        : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 export const contactWords = (contact: AgreementContact): string =>
   contact.mode === "priority" ? "each as soon as it's needed" : `a digest, at most one every ${everyWords(contact.everyMin)}`;
 

@@ -40,7 +40,7 @@ import {
   storeFor,
   teamDoc,
 } from "../../../server/factory.ts";
-import { answerText, asRecommended, waitingOf } from "../../../server/inbox.ts";
+import { answerText, asRecommended, shownAs, waitingOf } from "../../../server/inbox.ts";
 import { memberships, takeRequestAllowance } from "../../../server/people.ts";
 import { checkCode } from "../../../server/step-up.ts";
 import { allowed, authHeaders, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
@@ -194,6 +194,11 @@ export async function decideAction(form: FormData): Promise<void> {
     if (!TASK_ID.test(id) || !isDecision(decision)) throw new Refused("That isn't a decision on a task.");
     const problem = decisionProblem(decision, note);
     if (problem) throw new Refused(problem);
+    // The page's own copy of the task (its version, in the form): the planner can edit a proposal while the page is
+    // open, and a decision is on what was read. The page comes back with the task as it stands.
+    const seen = text(form, "seen");
+    if (seen && String((await storeFor(team).tasks.get(id))?.version) !== seen)
+      throw new Refused(`#${id} changed after this page was loaded. It's shown as it stands now: read it again, then decide.`);
     const task = await decideAsOperator(team, id, decision, note);
     notice = { ok: `#${task.id} ${DONE[decision]}.` };
     await record(viewer, {
@@ -243,13 +248,28 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     const task = await storeFor(team).tasks.get(id);
     if (!task) return again(`There's no task #${id} on this team.`);
     const waiting = waitingOf(task, [task]);
+    // The form answers the question it was drawn with (its token; the form for adding to an answer offers nothing
+    // and sends none). One the team changed since comes back as it stands, with nothing chosen: the options an answer
+    // is read against here would otherwise be ones the operator never saw.
+    const shown = text(form, "shown");
+    if ((pick || shown) && shown !== shownAs(waiting)) {
+      await record(viewer, {
+        action: "task.answered",
+        outcome: "refused",
+        team,
+        target: `#${id} ${task.title}`,
+        detail: "the question changed after the page was loaded",
+      });
+      revalidatePath("/", "layout");
+      return { error: `The team changed #${id} after this page was loaded. It's shown as it stands now: read it again, then answer.`, pick: "", extra };
+    }
     const said = answerText(pick, extra, waiting);
     if ("problem" in said) return again(said.problem);
     // The team's recommendation as it stood (the one it gave when it raised the task, not one read out of the task's
     // words; the recommendation, or the option it names, with nothing added) is answered as that: the factory writes
     // its words and marks the answer so. Anything else is the operator's own answer, in the form's words.
     const recommended = waiting.recommendationFrom === "asked" && asRecommended(pick, extra, waiting);
-    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended);
+    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended, waiting.recommendation ?? undefined);
     await record(viewer, {
       action: "task.answered",
       outcome: "ok",

@@ -11,6 +11,7 @@ import {
   mentions,
   recommendationIn,
   recommendedKey,
+  shownAs,
   waitingCount,
   waitingOf,
   withoutChoices,
@@ -241,4 +242,34 @@ test("asRecommended: the recommendation as it stood, or the option it names, wit
   assert.equal(asRecommended("recommended", "", { choices: [], recommendation: "wait a week" }), true);
   assert.equal(asRecommended("recommended", "", { choices: [], recommendation: null }), false);
   assert.equal(asRecommended("z", "", offered), false);
+});
+
+test("shownAs: the answer form's token changes with what the form offers, and with nothing else", () => {
+  const at = "2026-11-01T10:00:00.000Z";
+  const asked = moved(
+    task("approved", {
+      body: "Guests can't see orders. Options: (a) keep them hidden; (b) open them to signed-in customers.",
+      ask: { reason: "who sees orders is the operator's", recommendation: "(b) open them to signed-in customers", by: "planner", at },
+    }),
+    "question",
+    "planner",
+    "who sees orders is the operator's",
+    at
+  );
+  const token = (t: Task): string => shownAs(waitingOf(t, [t]));
+  const before = token(asked);
+  assert.match(before, /^[0-9a-f]{16}$/);
+  assert.equal(token({ ...asked, version: 7, updatedAt: "2026-11-02T00:00:00.000Z" }), before, "the same question, written again");
+  // A member's note with no options in it, and the operator's own answer, leave the form as it was.
+  const noted = { ...asked, notes: [...asked.notes, { at, by: "builder", text: "The orders table has 40 rows today." }] };
+  assert.equal(token(noted), before);
+  assert.equal(token({ ...asked, notes: [...asked.notes, { at, by: OPERATOR, text: "(a) keep them hidden.", kind: "answer" as const }] }), before);
+  // Another recommendation, another reason, or a note that puts the options another way: not the form that was read.
+  const other = (ask: Partial<NonNullable<Task["ask"]>>): Task => ({ ...asked, ask: asked.ask ? { ...asked.ask, ...ask } : undefined }) as Task;
+  assert.notEqual(token(other({ recommendation: "(a) keep them hidden" })), before);
+  assert.notEqual(token(other({ reason: "a customer complained" })), before);
+  const reput = { ...asked, notes: [...asked.notes, { at, by: "planner", text: "Options: (a) open them to everyone; (b) keep them hidden." }] };
+  assert.notEqual(token(reput), before);
+  // The same key is another option now: what an answer by key would be read against.
+  assert.equal(waitingOf(reput, [reput]).choices[0]?.text, "open them to everyone");
 });

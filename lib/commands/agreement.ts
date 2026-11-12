@@ -2,10 +2,10 @@
 // it asks them, which topics are always or never asked, and their standing instructions. With no options it shows the
 // one in force, how the check-ins have gone and every earlier version; with some, it records a new one, which holds
 // from that moment and reaches the planner at once (a control, like a6g pause and a6g budget). The operator's alone.
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { loadTeam } from "../config.ts";
-import type { RegistryEntry } from "../paths.ts";
+import { PACKAGE, type RegistryEntry, versionDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import {
   type Agreement,
@@ -73,6 +73,14 @@ export async function agreement(argv: string[]): Promise<number> {
   const unknown = Object.keys(options).filter((key) => key !== "--" && !known.includes(key));
   if (unknown.length) die(`${USAGE}\n(not ${unknown.map((k) => `--${k}`).join(", ")})`);
   const entry = entryFor(positional[0] ?? die(USAGE));
+  // A team on a factory version that keeps no working agreement would never read one. The command line hands a
+  // team's commands to its own version only when the team is the first argument and this runs from an installed
+  // version (bin/a6g.ts), so it's refused here as well.
+  const pinned = versionDir(entry.version);
+  if (existsSync(pinned) && !existsSync(join(pinned, "lib", "commands", "agreement.ts")))
+    die(
+      `agreement: ${entry.name} runs factory ${entry.version}, which keeps no decision log or working agreement; a6g upgrade ${entry.name} moves it to ${PACKAGE.version}`
+    );
   const tasks = entry.tasks ?? die(`${entry.name} keeps its tickets on a GitHub board, which has no working agreement`);
   const operator = operatorOf(entry);
   const store = await openStore({ name: entry.name, tasks }, entry.run);

@@ -456,9 +456,10 @@ export function summary(
 }
 
 // The working agreement in force, for the planner's context every wake (plugin/hooks/context.ts): its version, who set
-// it and when, what it says, the operator's standing instructions (cut to `notesMax`: a6g decision agreement shows
-// them whole), and the decisions they overturned that the planner hasn't noted yet. How the planner hears of a change
-// the moment it's made is the watchdog's message (lib/holds.ts); this is how it never works from an old one.
+// it and when, what it says, the decisions they overturned that the planner hasn't noted yet, and the operator's
+// standing instructions (cut to `notesMax`: a6g decision agreement shows them whole), last, so whatever cuts this
+// short cuts those and never the overturned list. How the planner hears of a change the moment it's made is the
+// watchdog's message (lib/holds.ts); this is how it never works from an old one.
 export function agreementContext(
   controls: Control[],
   decisions: DecisionRecord[],
@@ -471,12 +472,6 @@ export function agreementContext(
     ? `Working agreement (${control.id}, set by ${who} at ${localTime(new Date(control.at))})`
     : "Working agreement (the default: the operator hasn't changed it)";
   const parts = [`${head}. ${agreementLines(agreement, operator).join(" ")}`];
-  if (agreement.notes)
-    parts.push(
-      `The operator's standing instructions: ${
-        agreement.notes.length > notesMax ? `${agreement.notes.slice(0, notesMax)}… (cut: a6g decision agreement shows them whole)` : agreement.notes
-      }`
-    );
   const open = overturnedOpen(decisions);
   if (open.length)
     parts.push(
@@ -484,6 +479,12 @@ export function agreementContext(
         .slice(0, 6)
         .map((d) => `${d.id} "${d.question.slice(0, 60)}"`)
         .join("; ")}${open.length > 6 ? ` and ${open.length - 6} more` : ""}.`
+    );
+  if (agreement.notes)
+    parts.push(
+      `The operator's standing instructions: ${
+        agreement.notes.length > notesMax ? `${agreement.notes.slice(0, notesMax)}… (cut: a6g decision agreement shows them whole)` : agreement.notes
+      }`
     );
   return parts.join("\n");
 }

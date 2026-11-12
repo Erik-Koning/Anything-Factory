@@ -249,7 +249,7 @@ describe("what the review of this work found", () => {
       })
     );
     assert.equal((await a6g(["task", "ask", escalated.id, "--reason", "over the size", "--recommend", "split it first"], as("planner"))).code, 0);
-    assert.equal((await store().tasks.get(escalated.id))?.ask?.rule, undefined);
+    assert.equal((await store().tasks.get(escalated.id))?.ask?.rule, "the approver sent it up to the operator");
     // The approver re-raising the planner's judged question keeps how it was judged.
     assert.equal((await a6g(["task", "ask", imported.id, "--reason", "carriers differ", "--recommend", "(b) a courier"], as("approver"))).code, 0);
     assert.deepEqual(
@@ -396,12 +396,12 @@ describe("the guard, the rules and the context", () => {
       lines[0] ?? "",
       /^Working agreement \(k1, set by the operator, on the web app at .*\)\. Level hands-on: .* Always asked: scope\. Never asked \(decided, and flagged when it matters\): design, technical\. Always the operator's: privacy, rules\.$/
     );
-    assert.equal(lines[1], "The operator's standing instructions: Away until Monday.");
-    assert.equal(lines[2], "Batch everything.");
     assert.equal(
-      lines[3],
+      lines[1],
       'Overturned by the operator, for you to act on and note (a6g decision show <id>, then a6g decision note <id> "…"): d1 "Cap on uploads?".'
     );
+    assert.equal(lines[2], "The operator's standing instructions: Away until Monday.");
+    assert.equal(lines[3], "Batch everything.");
     assert.match(
       agreementContext(
         [{ ...agreementControl("fixture", OPERATOR, { ...DEFAULT_AGREEMENT, notes: "x".repeat(40) }), id: "k9", version: 1 }],
@@ -664,5 +664,90 @@ describe("a6g agreement, and the watchdog", () => {
     } finally {
       await w.close();
     }
+  });
+});
+
+describe("what the third review found", () => {
+  test("a question the operator or the approver raised stays theirs however often the planner raises it again", async () => {
+    const { as, store } = setup();
+    const at = "2026-11-01T00:00:00.000Z";
+    // Under this agreement nothing is the planner's to ask: a question judged now would be refused.
+    await store().controls.create(agreementControl("fixture", OPERATOR, { level: "hands-off", topics: {}, notes: "" }));
+    const raisers = [
+      [OPERATOR, "the operator raised it themselves"],
+      ["approver", "the approver sent it up to the operator"],
+    ] as const;
+    for (const [by, rule] of raisers) {
+      const task = await store().tasks.create(
+        newTask({
+          team: "fixture",
+          title: `Which plan, raised by the ${by}?`,
+          kind: "feature",
+          status: "question",
+          by: "planner",
+          ask: { reason: "two plans fit", recommendation: "(a) the smaller", by, at },
+        })
+      );
+      const again = (recommend: string) => a6g(["task", "ask", task.id, "--reason", "two plans still fit", "--recommend", recommend], as("planner"));
+      assert.equal((await again("(a) the smaller, as before")).code, 0);
+      const second = await again("(b) the larger, on reflection");
+      assert.equal(second.code, 0, second.out);
+      const ask = (await store().tasks.get(task.id))?.ask;
+      assert.deepEqual([ask?.by, ask?.rule, ask?.recommendation], ["planner", rule, "(b) the larger, on reflection"]);
+    }
+  });
+
+  test("a team on a factory version that keeps no agreement is refused one, wherever the team's name is on the line", async () => {
+    const { fakeWorld } = await import("./fake-t3.ts");
+    const w = await fakeWorld(baseTeam({ board: "tasks" }));
+    try {
+      const file = join(w.a6gHome, "teams", "fixture.json");
+      const entry = JSON.parse(readFileSync(file, "utf8")) as { version: string };
+      write(join(w.a6gHome, "teams"), { "fixture.json": { ...entry, tasks: { store: "files", database: "a6g", lead: null } } });
+      // Its version, installed, from before the agreement: no such command in it.
+      const pinned = join(w.a6gHome, "versions", entry.version);
+      mkdirSync(join(pinned, "lib", "commands"), { recursive: true });
+      const store = fileStore(w.run, "fixture");
+      for (const line of [["fixture", "--level", "hands-off"], ["--level", "hands-off", "fixture"], ["fixture"]]) {
+        const refused = await w.a6g("agreement", ...line);
+        assert.equal(refused.code, 2, refused.out);
+        assert.match(refused.out, /fixture runs factory .*, which keeps no decision log or working agreement; a6g upgrade fixture/);
+      }
+      assert.deepEqual(await store.controls.all(), [], "nothing recorded for a team that would never read it");
+      // Upgraded: the version has the command, and the agreement is set.
+      write(join(pinned, "lib", "commands"), { "agreement.ts": "export {};\n" });
+      assert.equal((await w.a6g("agreement", "--level", "hands-off", "fixture")).code, 0);
+      assert.equal(agreementOf(await store.controls.all()).agreement.level, "hands-off");
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("the planner's context lists what was overturned before the standing instructions, so a cut never takes the list", async () => {
+    const run = tmp("a6g-run-");
+    const store = fileStore(run, "fixture");
+    const asked: Control[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = await recordDecision(
+        store,
+        "fixture",
+        { question: `Decision ${i}: ${"which of the two layouts for the orders list ".repeat(2)}`, decision: "the first", because: "the brief" },
+        { topic: "design", stakes: "low", confidence: "high" },
+        "planner"
+      );
+      asked.push(await requestReview(store, "fixture", { id: d.id, verdict: "overturned", note: "The second.", by: OPERATOR }));
+    }
+    await applyReviews(run, store, asked);
+    const longest = agreementControl("fixture", OPERATOR, {
+      level: "hands-on",
+      topics: { scope: "ask", cost: "ask", design: "decide" },
+      notes: "n".repeat(2000),
+    });
+    const context = agreementContext([{ ...longest, id: "k1", version: 1 }], await store.decisions.all());
+    const lines = context.split("\n");
+    assert.match(lines[1] ?? "", /^Overturned by the operator, .*: d1 ".*"; d2 ".*"; d3 ".*"; d4 ".*"; d5 ".*"; d6 ".*" and 1 more\.$/);
+    assert.match(lines[2] ?? "", /^The operator's standing instructions: n{1200}… \(cut: a6g decision agreement shows them whole\)$/);
+    // The hook cuts the whole at 2,800 characters (plugin/hooks/context.ts): the longest agreement and list fit in it.
+    assert.ok(context.length <= 2800, `${context.length} characters`);
   });
 });
