@@ -1,8 +1,7 @@
 # Plan: running the factory from the web app
 
-Status: built and tested on branch `run-from-the-site` (see Checklist and Review). Not merged, deployed or released,
-and no project has been started from the site for real: the setup agent's unattended run has only ever run as a
-stand-in in the tests.
+Status: built, tested, merged and released in 0.8.0 (2026-11-13; see Checklist and Review). No project has been
+started from the site for real yet: the setup agent's unattended run has only ever run as a stand-in in the tests.
 
 ## Why
 
@@ -142,8 +141,8 @@ Web app (`web/`):
 - [x] Web: the Teams page that folds
 - [x] Web: unit, integration and browser tests
 - [x] The look, judged from screenshots until each page scores 8 of 10 or more
-- [ ] A real project started from the site in the lab (it spends: the operator's call)
-- [ ] Merge, deploy the web app, and a factory release for the Mac's side (the operator's call)
+- [x] Merged, and released in 0.8.0
+- [ ] A real project started from the site (it spends: the operator's call)
 
 ## Review
 

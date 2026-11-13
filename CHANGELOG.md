@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased: running the factory from the web app
+## 0.8.0: Running the factory from the web app, decisions made for you, and a model for each role
+
+Everything built since 0.7.0, newest first. A team moves to it with `a6g upgrade <team>`, and its planner takes the
+new prompt at `a6g rotate <team>`; until then it keeps working as it did on the version it pins.
+
+### Running the factory from the web app
 
 Three things still needed a terminal on the team's Mac: starting a project, choosing which Claude subscriptions a team
 runs on, and seeing every project at once without scrolling past all of them. The operator asked for all three from the
@@ -30,7 +35,7 @@ start <team>` carries on one that stopped.
 - **No WebSocket.** The Mac asks the site, never the other way; a page with something in flight reads itself again
   every ten seconds and stops when nothing is.
 
-## Unreleased: a forgotten password
+### A forgotten password
 
 The web app had no way back for someone who forgot their password: a member could still sign in by link, and an admin,
 who never gets one, had to be started afresh with `npm run create-admin`.
@@ -43,7 +48,7 @@ who never gets one, had to be started afresh with `npm run create-admin`.
   account, which had no password, can set its first this way.
 - A lost authenticator is still `create-admin`'s to mend: the link doesn't take a backup code.
 
-## Unreleased: thinking streams, and the operator's taste from Ditto
+### Thinking streams, and the operator's taste from Ditto
 
 Nobody on a team worked out how a thing should feel before it was built: the builder matched the code that was there,
 and the UX specialist judged the result. And the operator's taste reached a team only as prose they wrote for it.
@@ -80,7 +85,7 @@ record of their taste. The plan is `docs/plans/thinking-streams.md`. Built and t
   inferred or passed on. Notes are kept in their own file, shown to agents under their own heading after everything
   of the operator's, and counted in nothing: no conviction, no pattern, no rule.
 
-## Unreleased: one Docker engine per team
+### One Docker engine per team
 
 A Mac can run several Docker engines (Docker Desktop, Rancher Desktop, OrbStack, Colima), each with its own containers
 and volumes and all publishing ports on the same machine. Nothing tied a team to one: its scripts used whichever a
@@ -106,7 +111,7 @@ engine, where containers left by earlier work held its ports.
 - **For a running team:** nothing changes until it's upgraded: a team registered by an earlier version has no engine
   and behaves as before.
 
-## Unreleased: the decision log and the working agreement
+### The decision log and the working agreement
 
 A team already decided most product questions itself and asked only what its operator's direction left open. What it
 decided was a line in a file, seen in the Done report, and how readily it asked was fixed by its prompt. Now both are
@@ -158,7 +163,7 @@ question` takes `--topic`, `--stakes` and `--confidence` from the planner and re
   the agreement nor writes the log; a newer one that raises a question without the three judgments is told what to
   add.
 
-## Unreleased: emails that read at a glance
+### Emails that read at a glance
 
 The web app's emails were paragraphs with a link hundreds of characters long spelled out in them, and an admin who
 asked for a sign-in link got nothing and no word why.
@@ -174,7 +179,7 @@ asked for a sign-in link got nothing and no word why.
   admins sign in, and that whoever runs the site starts a locked-out admin afresh with `npm run create-admin`. The
   page answers the same as for anyone, and says under the form that admins don't get links.
 
-## Unreleased: sign up on the web app
+### Sign up on the web app
 
 The web app was invite only: an admin made every account, and each signed in by a link or a passkey. Now anyone can
 create one, with an email address and a password, and choose as they do how it's guarded. Invitations work as before.
@@ -207,7 +212,7 @@ create one, with an email address and a password, and choose as they do how it's
   link, loses the password it was signed up with (whoever chose it hadn't proven the inbox) and signs in by link or
   passkey from then on.
 
-## Unreleased: how a project starts
+### How a project starts
 
 Tried on a new project (a gateway for sensor boards and its dashboard, from an empty repository), the factory made a
 sound skeleton and a poor record of why. The setup agent had fixed the whole stack in the brief before anyone
@@ -278,7 +283,7 @@ question to the operator, with no feature claimed before the answer.
   team, add `"operator": { "designCheckIn": true }` and run `a6g register`; `a6g task status <id> done` from you ends
   it.
 
-## Unreleased: a model for each role
+### A model for each role
 
 - **Each role runs on its own model.** `roles.<role>.model` in `team.json` sets one role's, and `model` every role's
   that names none. Left out, the planner, the innovator and the scaffolder run on Fable (`claude-fable-5-1`), since a
@@ -297,7 +302,7 @@ question to the operator, with no feature claimed before the answer.
   already set `model` keeps every role on it. A planner started before the upgrade is told the model to pass by the
   guard's refusal the first time it starts a member.
 
-## Unreleased: security, and how the merged work went
+### Security, and how the merged work went
 
 - **Secrets are stored through a secret manager, their values never in a command.** A new policy, `secrets`, allowed
   by default (`"secrets": "deny"` turns it off): one command that stores one secret, with its value on standard input,
@@ -353,7 +358,7 @@ question to the operator, with no feature claimed before the answer.
   task beside what the team spent; and the median time from claimed to merged. A number that can't be known says so
   and why, never 0. It needs the task graph, and the planner may run it.
 
-## Unreleased: the scaffolder, and checks that hold
+### The scaffolder, and checks that hold
 
 - **A new role, the scaffolder** (`plugin/agents/scaffolder.md`): it owns the team's means of checking (Playwright in
   the repository, sign-ins, test data kept apart per run, stand-ins, stable screenshots) and the repository's
@@ -415,7 +420,7 @@ question to the operator, with no feature claimed before the answer.
   are written by the factory's commands only. Reading them with `cat`, `jq` or `grep` is as before. Known limits in
   the README says what this doesn't stop.
 
-## Unreleased: teams on several Claude subscriptions
+### Teams on several Claude subscriptions
 
 - **Each team, or each role in it, runs on the subscriptions you choose, in order.** `a6g subscriptions use <team>
 <sub>[,<sub>…] [--role <role>]` (this machine's choice, never `team.json`'s); a team without one runs on this Mac's own

@@ -1,6 +1,6 @@
 {
   "name": "anything-factory",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Provision a harness-based software engineering team in any code repo, on T3 Code and Claude Code.",
   "type": "module",
   "license": "UNLICENSED",
