@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { type MachineTeam, online } from "../../../lib/fleet.ts";
+import { Command } from "../../components/command.tsx";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
 import { can, roleIn, type Viewer, visibleMachines } from "../../server/access.ts";
@@ -45,11 +46,27 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
       <p className="hint">
         To link one, run <code>a6g connect app</code> on it: it shows a code and opens <Link href="/machines/link">the page to approve it on</Link>.
       </p>
+      {/* How a Mac comes to start projects, each command a block of its own: the Starts projects fact links here. */}
+      <section className="how-projects" id="start-projects" aria-labelledby="how-projects">
+        <h2 id="how-projects">Starting projects from here</h2>
+        <p className="hint">
+          A linked Mac starts the projects you ask for on{" "}
+          <Link className="nowrap" href="/new">
+            Start a project
+          </Link>{" "}
+          once you&apos;ve turned that on at its own terminal. It can&apos;t be turned on from here, and it holds for the one folder you name:
+        </p>
+        <Command>a6g connect app --projects ~/code</Command>
+        <p className="hint">A Mac that needs a newer factory: update it first, in the folder you installed the factory from on that Mac.</p>
+        <Command>git pull && npm install && node bin/a6g.ts self-install</Command>
+      </section>
     </>
   );
 }
 
 function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer: Viewer; owner: string | null; up: boolean }) {
+  // Only its own person asks it to start a project, or turns that on at its terminal.
+  const mine = machine.userId === viewer.userId;
   return (
     <li>
       <div className="head">
@@ -78,6 +95,58 @@ function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer:
             <dd>{machine.factory}</dd>
           </>
         ) : null}
+        <dt>Starts projects</dt>
+        <dd>
+          {machine.projects ? (
+            <>
+              yes, in <code className="path">{machine.projects.dir}</code> ·{" "}
+              {machine.projects.repos.length
+                ? `${machine.projects.repos.length} repositor${machine.projects.repos.length === 1 ? "y" : "ies"} with no team`
+                : "no repository without a team"}
+              {mine && can(viewer, "projects:start") ? (
+                <>
+                  {" "}
+                  <span className="nowrap">
+                    ·{" "}
+                    <Link className="nowrap" href="/new">
+                      Start one
+                    </Link>
+                  </span>
+                </>
+              ) : null}
+            </>
+          ) : machine.canStart ? (
+            <span className="muted">
+              no: not turned on
+              {mine ? (
+                <>
+                  {" "}
+                  <span className="nowrap">
+                    ·{" "}
+                    <Link className="nowrap" href="#start-projects">
+                      How to turn it on
+                    </Link>
+                  </span>
+                </>
+              ) : null}
+            </span>
+          ) : (
+            <span className="muted">
+              no: needs a newer factory
+              {mine ? (
+                <>
+                  {" "}
+                  <span className="nowrap">
+                    ·{" "}
+                    <Link className="nowrap" href="#start-projects">
+                      How to update it
+                    </Link>
+                  </span>
+                </>
+              ) : null}
+            </span>
+          )}
+        </dd>
       </dl>
       <h3 className="small">{up ? "Teams" : "Teams, at its last report"}</h3>
       {machine.teams.length ? (

@@ -2,9 +2,9 @@
 // The app keeps no rules of its own about tasks or requests; it only reads, and writes through these.
 //
 // Only these modules of ../lib/tasks are imported: mongo.ts (storeOver), store.ts (update), model.ts, requests.ts,
-// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts, agreement.ts, decisions.ts and spend.ts. Never
-// files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never openStore (the Keychain, the run folder and child
-// processes are the CLI's).
+// decide.ts, answer.ts, add.ts, teams.ts, graph.ts, controls.ts, agreement.ts, decisions.ts, spend.ts and start.ts.
+// Never files.ts, ops.ts, machines.ts, migrate.ts or mongoUri.ts, and never openStore (the Keychain, the run folder and
+// child processes are the CLI's).
 import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
 import { agreementChanges, agreementFrom, sameAgreement } from "../../lib/tasks/agreement.ts";
 import { answer } from "../../lib/tasks/answer.ts";
@@ -18,7 +18,10 @@ import {
   limitsOf,
   pauseControl,
   resumeControl,
+  startControl,
+  subscriptionsControl,
 } from "../../lib/tasks/controls.ts";
+import type { StartAsk } from "../../lib/tasks/start.ts";
 import { type DecisionRecord, requestReview } from "../../lib/tasks/decisions.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import { type Decision, decide } from "../../lib/tasks/decide.ts";
@@ -32,8 +35,9 @@ import { graphDb, mongo } from "./db.ts";
 
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
-export type { TeamDoc } from "../../lib/tasks/teams.ts";
-export type { Control, HoldScope, HoldState, Limits } from "../../lib/tasks/controls.ts";
+export type { TeamDoc, TeamSubscriptions } from "../../lib/tasks/teams.ts";
+export type { Control, HoldScope, HoldState, Limits, StartState } from "../../lib/tasks/controls.ts";
+export type { StartAsk } from "../../lib/tasks/start.ts";
 export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
 export type { Agreement } from "../../lib/tasks/agreement.ts";
 export type { DecisionRecord } from "../../lib/tasks/decisions.ts";
@@ -190,3 +194,27 @@ export async function agreementFromWeb(
   if (sameAgreement(current, made)) throw new Refused("Nothing changed: the agreement says that already.");
   return { control: await store.controls.create(agreementControl(team, `web:${ask.from}`, made)), changes: agreementChanges(current, made) };
 }
+
+// The team's subscriptions from the web, by an admin's stakeholder id: every role's list, or one role's own, in order
+// (an empty list clears it). Only what the team's lead last reported it has may be named, and only by a team whose
+// lead reads the control (it reports its subscriptions when it does): the lead's watchdog writes the list and moves the
+// roles within a minute. One that changes nothing is refused.
+export async function subscriptionsFromWeb(team: string, ask: { role: string | null; use: string[]; from: string }): Promise<Control> {
+  const doc = await teamDoc(team);
+  const reported = doc?.status?.subscriptions;
+  if (!doc || !reported) throw new Refused("This team's Mac doesn't take its subscriptions from here yet: it needs a newer factory version.");
+  if (ask.role !== null && !doc.roles.includes(ask.role)) throw new Refused(`The team has no ${ask.role}.`);
+  const known = reported.available.map((a) => a.name);
+  const use = [...new Set(ask.use)];
+  const unknown = use.filter((name) => !known.includes(name));
+  if (unknown.length) throw new Refused(`The team's Mac has no subscription named ${unknown.join(", ")}.`);
+  const current = reported.use[ask.role ?? "*"] ?? [];
+  if (current.length === use.length && current.every((name, i) => name === use[i]))
+    throw new Refused(use.length ? "Nothing changed: it runs on those already, in that order." : "Nothing changed: there's no list to clear.");
+  return storeFor(team).controls.create(subscriptionsControl(team, `web:${ask.from}`, { role: ask.role, use }));
+}
+
+// An ask to start the team `team` (lib/tasks/start.ts), by an admin's stakeholder id on it; null withdraws the one
+// before it. A control under the new team's name, where the machine it names reads it.
+export const startFromWeb = (team: string, ask: StartAsk | null, from: string): Promise<Control> =>
+  storeFor(team).controls.create(startControl(team, `web:${from}`, ask));

@@ -170,6 +170,9 @@ export function controlSaid(c: Control): string {
   if (c.kind === "budget") return "Asked to set the budget";
   if (c.kind === "agreement") return "Changed the working agreement";
   if (c.kind === "review") return `${c.review?.verdict === "overturned" ? "Overturned" : "Agreed with"} ${c.review?.decision ?? "a decision"}`;
+  if (c.kind === "subscriptions") return "Asked to change the subscriptions";
+  if (c.kind === "start") return c.start ? "Asked to start the team" : "Withdrew the ask to start the team";
+  if (c.kind === "starting") return "Said how far the team's start had got";
   return c.scope === "now" || !c.scope
     ? "Asked to pause now"
     : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}`;
@@ -183,7 +186,9 @@ export const askedBy = (by: string): string =>
       ? "the team's Mac, as the pause settled"
       : by.startsWith("web:")
         ? "an admin, here"
-        : "the operator, in the terminal";
+        : by.startsWith("machine:")
+          ? `the Mac ${by.slice("machine:".length)}`
+          : "the operator, in the terminal";
 
 // Spend each day for the `n` days ending `last` (the lead's day, YYYY-MM-DD), every machine's added up; a day with
 // nothing counted is $0.

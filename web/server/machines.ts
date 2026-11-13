@@ -27,6 +27,7 @@ import {
   type LinkError,
   MACHINE_TOKEN,
   MAX_MACHINES,
+  type MachineProjects,
   type MachineReport,
   type MachineTeam,
   POLL_SECONDS,
@@ -93,6 +94,10 @@ interface MachineDoc {
   lastIp: string | null;
   factory: string | null;
   teams: MachineTeam[];
+  // What it offers to start, as its last report said (lib/fleet.ts): absent or null when it starts no projects.
+  projects?: MachineProjects | null;
+  // Whether that report said anything of projects at all: a factory version that can start them says so, on or off.
+  projectsKnown?: boolean;
   // When it last reported; null until its first report.
   at: Date | null;
 }
@@ -106,6 +111,10 @@ export interface Machine {
   lastIp: string | null;
   factory: string | null;
   teams: MachineTeam[];
+  // The folder it starts projects in, its repositories and its subscriptions, or null when it starts none; and
+  // whether its factory version could (its operator says so at its terminal, a6g connect app --projects).
+  projects: MachineProjects | null;
+  canStart: boolean;
   at: string | null;
 }
 
@@ -156,6 +165,8 @@ const view = (doc: Omit<MachineDoc, "tokenHash" | "previousHash"> & Partial<Mach
   lastIp: doc.lastIp,
   factory: doc.factory,
   teams: doc.teams,
+  projects: doc.projects ?? null,
+  canStart: doc.projectsKnown === true || Boolean(doc.projects),
   at: doc.at ? doc.at.toISOString() : null,
 });
 const idleSince = (now: Date): Date => new Date(now.getTime() - IDLE_DAYS * 86_400_000);
@@ -426,7 +437,16 @@ export async function recordReport(
   now = new Date()
 ): Promise<false | { token: string | null }> {
   const token = bearing.due ? newToken() : null;
-  const set: Partial<MachineDoc> = { factory: report.factory, teams: report.teams, at: now, lastSeenAt: now, lastIp: ip };
+  // What it offers to start goes with each report: a machine whose operator took that back says nothing of it.
+  const set: Partial<MachineDoc> = {
+    factory: report.factory,
+    teams: report.teams,
+    projects: report.projects ?? null,
+    projectsKnown: report.projects !== undefined,
+    at: now,
+    lastSeenAt: now,
+    lastIp: ip,
+  };
   if (token) Object.assign(set, { tokenHash: hash(token), issuedAt: now, seen: false });
   if (token && bearing.which === "current")
     Object.assign(set, { previousHash: bearing.currentHash, previousUntil: new Date(now.getTime() + ROTATE_GRACE_HOURS * 3_600_000) });

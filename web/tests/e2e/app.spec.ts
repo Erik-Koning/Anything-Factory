@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { answersMessage, answersSince } from "../../../lib/tasks/answer.ts";
-import { type Control, holdOf, holdReport } from "../../../lib/tasks/controls.ts";
+import { type Control, holdOf, holdReport, startingControl } from "../../../lib/tasks/controls.ts";
 import { applyReview, noteDecision } from "../../../lib/tasks/decisions.ts";
 import { newTask, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { type MongoClientLike, storeOver } from "../../../lib/tasks/mongo.ts";
@@ -338,10 +338,12 @@ test("a person sees the machines linked to their account and the teams each runs
   await expect(studio.getByText("/Users/morgan/code/shop-a6g")).toBeVisible();
   for (const other of ["attic", "kiosk"]) await expect(page.getByRole("heading", { name: other })).toHaveCount(0);
   await expect(page.getByText("Owner", { exact: true })).toHaveCount(0);
-  // Each team's card says where it runs, its lead first: its members' and admins' machines, not the contributor's that
-  // says it leads Shop too.
+  // Each team's row says where it runs, its lead first: its members' and admins' machines, not the contributor's that
+  // says it leads Shop too. One that isn't reporting is marked, not only said.
   await page.goto("/");
-  await expect(page.getByRole("listitem").filter({ hasText: "Shop" }).getByText("studio (lead), attic (worker, not reporting)")).toBeVisible();
+  const runsOn = page.locator("#shop").locator("dd", { hasText: "studio (lead)" });
+  await expect(runsOn).toContainText("studio (lead), attic (worker)");
+  await expect(runsOn.getByText("not reporting", { exact: true })).toBeVisible();
   await expect(page.getByText(/kiosk/)).toHaveCount(0);
 
   await admin.page.goto("/machines");
@@ -1655,6 +1657,320 @@ test("the admin switches between teams, staying on the same page", async () => {
   await page.getByText("Switch team").click();
   await page.getByRole("link", { name: /^Shop/ }).click();
   await expect(page).toHaveURL(/\/t\/shop\/board$/);
+});
+
+// Running the factory from the app (docs/plans/run-from-the-site.md): the Teams page that folds, a team's
+// subscriptions, and asking a Mac to start a project.
+
+test("the Teams page folds: its key goes to the team, and what's left open is kept, one at a time or all", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.removeItem("a6g.teams.open");
+    localStorage.removeItem("a6g.teams.one");
+  });
+  await page.reload();
+  const shop = page.locator("details#shop");
+  const blog = page.locator("details#blog");
+  await expect(page.getByRole("heading", { name: /^All teams/ })).toBeVisible();
+  // A shut row still says how the team is; an open one shows where its work stands and the ways in.
+  await page.getByRole("button", { name: "Collapse all" }).click();
+  await expect(shop).toHaveJSProperty("open", false);
+  await expect(shop.locator("summary")).toContainText("at work");
+  await expect(shop.getByRole("link", { name: "Board" })).toBeHidden();
+  await shop.locator("summary").click();
+  await expect(shop.getByRole("link", { name: "Board" })).toBeVisible();
+  await expect(shop.getByRole("link", { name: "Add a task" })).toHaveAttribute("href", "/t/shop/add");
+  await expect(shop.locator(".counts li")).toHaveCount(7);
+  // Folding has its own words; the row's key says where it goes.
+  await expect(page.getByRole("link", { name: "Shop: overview" })).toHaveAttribute("href", "/t/shop");
+
+  // Kept in this browser.
+  await page.reload();
+  await expect(page.locator("details#shop")).toHaveJSProperty("open", true);
+  await expect(page.locator("details#blog")).toHaveJSProperty("open", false);
+
+  // One at a time: opening one shuts the other; all can't be opened while it holds.
+  const one = page.getByRole("button", { name: "One at a time" });
+  await one.click();
+  await expect(one).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Expand all" })).toBeDisabled();
+  await blog.locator("summary").click();
+  await expect(blog).toHaveJSProperty("open", true);
+  await expect(shop).toHaveJSProperty("open", false);
+  // A link that names a team opens that one.
+  await page.goto("/#shop");
+  await expect(page.locator("details#shop")).toHaveJSProperty("open", true);
+  await expect(page.locator("details#blog")).toHaveJSProperty("open", false);
+  await one.click();
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.locator("details.team[open]")).toHaveCount(2);
+  await page.evaluate(() => {
+    localStorage.removeItem("a6g.teams.open");
+    localStorage.removeItem("a6g.teams.one");
+  });
+});
+
+test("the admin chooses a team's subscriptions with a code, from what its Mac reports; an older team is told where they're chosen", async () => {
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  // A team whose Mac doesn't report its subscriptions has no form.
+  await page.goto("/t/shop");
+  const panel = page.getByRole("region", { name: "Subscriptions" });
+  await expect(panel).toContainText("chosen on its Mac for now");
+  await expect(panel.getByText("Change the order")).toHaveCount(0);
+
+  // Its lead reports them: two on its list (one used up), one not, and the reviewers with an order of their own.
+  const soon = new Date(Date.now() + 2 * 86_400_000).toISOString();
+  await graph.collection<{ _id: string }>("teams").updateOne(
+    { _id: "shop" },
+    {
+      $set: {
+        "status.subscriptions": {
+          available: [
+            { name: "default", percent: 41, resetsAt: soon, closed: null },
+            { name: "work", percent: 100, resetsAt: soon, closed: "work has used its week" },
+            { name: "spare", percent: null, resetsAt: null, closed: null },
+          ],
+          use: { "*": ["work", "default"], reviewer: ["default"] },
+          roles: { planner: "default", builder: "default", reviewer: "default" },
+          moving: {},
+          waiting: {},
+        },
+      },
+    }
+  );
+  await page.reload();
+  await expect(panel.getByRole("heading", { name: "The order for the planner and builders" })).toBeVisible();
+  const listed = panel.locator("ol.subs > li");
+  await expect(listed).toHaveCount(3);
+  await expect(listed.nth(0)).toContainText("work");
+  await expect(listed.nth(0)).toContainText("closed");
+  await expect(listed.nth(0)).toContainText("100% of its week used · opens again");
+  await expect(listed.nth(2)).toContainText("not in its order");
+  await expect(panel).toContainText("The reviewers have an order of their own: default.");
+
+  // The form starts from the order in force, and says what changing it leaves alone.
+  await panel.getByText("Change the order").click();
+  await expect(panel.getByLabel("Whose order")).toContainText("The planner and builders");
+  await expect(panel).toContainText("The reviewers keep their own order (default).");
+  await panel.getByRole("button", { name: "Move default up" }).click();
+  await panel.getByRole("button", { name: "Add spare to the list" }).click();
+  // A wrong code changes nothing, and the form is there again.
+  await panel.getByLabel(/Code from your authenticator/).fill("000000");
+  await panel.getByRole("button", { name: "Save this order" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(await shopControls("subscriptions")).toHaveLength(0);
+  await expect(panel.getByRole("button", { name: "Save this order" })).toBeVisible();
+
+  await panel.getByRole("button", { name: "Move default up" }).click();
+  await panel.getByRole("button", { name: "Add spare to the list" }).click();
+  await panel.getByLabel(/Code from your authenticator/).fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Save this order" }).click();
+  await expect(page.getByRole("status").first()).toContainText("The team runs on default, then work, then spare.");
+  // The newest by when it was asked: ids sort as text, so k10 comes before k9.
+  const newest = () => graph.collection("controls").findOne({ team: "shop", kind: "subscriptions" }, { sort: { at: -1 } });
+  expect(await newest()).toMatchObject({
+    by: expect.stringMatching(/^web:s\d+$/),
+    subscriptions: { role: null, use: ["default", "work", "spare"] },
+  });
+  expect(await accounts.collection("audit").findOne({ team: "shop", action: "team.subscriptions", outcome: "ok" })).toMatchObject({
+    detail: "The team runs on default, then work, then spare",
+  });
+  // Until the Mac says it has it, the panel says what was asked.
+  await expect(panel).toContainText("default, then work, then spare. The team's Mac applies it within a minute.");
+
+  // One role's own order: cleared, they follow the team's again.
+  await panel.getByText("Change the order").click();
+  await panel.getByLabel("Whose order").selectOption("reviewer");
+  await expect(panel).toContainText("This replaces the reviewers' own order.");
+  await panel.getByRole("button", { name: "Take default off the list" }).click();
+  await panel.getByLabel(/Code from your authenticator/).fill(await freshCode(page, state().admin.totpURI));
+  await panel.getByRole("button", { name: "Save this order" }).click();
+  await expect(page.getByRole("status").first()).toContainText("The reviewers follow the team's list.");
+  expect(await newest()).toMatchObject({ subscriptions: { role: "reviewer", use: [] } });
+
+  // Blog is published as an older factory version publishes: its subscriptions are chosen on its Mac.
+  await page.goto("/t/blog");
+  await expect(page.getByRole("region", { name: "Subscriptions" })).toContainText("a6g subscriptions use blog");
+  await graph.collection("controls").deleteMany({ team: "shop", kind: "subscriptions" });
+  await graph.collection<{ _id: string }>("teams").updateOne({ _id: "shop" }, { $unset: { "status.subscriptions": "" } });
+});
+
+test("the admin asks a Mac of theirs to start a project: each step as the Mac says it, one that stopped with its command, and taking an ask back", async ({
+  browser,
+}) => {
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  // A field of the form by its own name, whole: "Title" is also a word in a choice's hint.
+  const field = (name: string) => page.getByRole("textbox", { name, exact: true });
+  // No Mac of theirs starts projects until it's said at its terminal: the page says how.
+  await page.goto("/new");
+  await expect(page.getByRole("heading", { name: "None of your Macs starts projects yet" })).toBeVisible();
+  await expect(page.getByText("a6g connect app --projects ~/code")).toBeVisible();
+
+  // Their Mac reports that it does, with what it offers.
+  const attic = await accounts.collection<{ _id: string }>("machines").findOne({ name: "attic" });
+  expect(attic).toBeTruthy();
+  const offers = { dir: "~/code", repos: ["blog-engine"], subscriptions: [{ name: "default", percent: 41 }] };
+  await accounts
+    .collection<{ _id: string }>("machines")
+    .updateOne({ _id: attic?._id ?? "" }, { $set: { projects: offers, projectsKnown: true, at: new Date(), lastSeenAt: new Date() } });
+  await page.goto("/machines");
+  await expect(card(page, "attic")).toContainText("yes, in ~/code · 1 repository with no team");
+
+  await page.goto("/");
+  await page.getByRole("link", { name: "Start a project" }).click();
+  await expect(page).toHaveURL(/\/new$/);
+  // The key waits for the form; a name that's taken is said as it's typed.
+  const send = page.getByRole("button", { name: "Start the project" });
+  await expect(send).toBeDisabled();
+  await expect(page.locator("#start-missing")).toHaveText("Needs a title, a short name, what should exist when the team is done and a folder.");
+  await field("Title").fill("Shop");
+  await expect(field("Short name")).toHaveValue("shop");
+  await expect(page.getByText("There's a team named shop already.")).toBeVisible();
+  // The short name and the new repository's folder follow the title until one is typed.
+  await field("Title").fill("Shop two");
+  await expect(field("Short name")).toHaveValue("shop-two");
+  await expect(field("Folder")).toHaveValue("shop-two");
+  await expect(page.getByText("~/code/shop-two-a6g")).toBeVisible();
+  await field("What should exist when the team is done").fill("A shop that takes orders.\n\nIt ships to Canada.");
+  // What's blank is said back as a choice.
+  const recap = page.locator("dl.recap");
+  await expect(recap).toContainText("none: it spends without a limit");
+  await expect(recap).toContainText("attic's own login");
+  await field("A day, in dollars").fill("20");
+  await page.getByRole("button", { name: "Add default to the list" }).click();
+  await expect(recap).toContainText("$20 a day");
+  await expect(recap).toContainText("shop-two");
+  await expect(send).toBeEnabled();
+  await expect(page.locator("#start-missing")).toHaveCount(0);
+  // A wrong code keeps what was typed.
+  await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill("000000");
+  await send.click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(field("What should exist when the team is done")).toHaveValue("A shop that takes orders.\n\nIt ships to Canada.");
+  await expect(field("Title")).toHaveValue("Shop two");
+  expect(await graph.collection("controls").countDocuments({ team: "shop-two" })).toBe(0);
+
+  await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
+  await send.click();
+  await expect(page).toHaveURL(/\/\?ok=/);
+  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Shop two.");
+  const asked = await graph.collection("controls").findOne({ team: "shop-two", kind: "start" });
+  expect(asked).toMatchObject({
+    id: "k1",
+    by: expect.stringMatching(/^web:s\d+$/),
+    start: {
+      machine: attic?._id,
+      machineName: "attic",
+      title: "Shop two",
+      repo: { create: "shop-two" },
+      goal: "A shop that takes orders.\n\nIt ships to Canada.",
+      technical: true,
+      limits: { daily: 20, weekly: null, total: null, unit: "usd" },
+      use: ["default"],
+    },
+  });
+  expect(await accounts.collection("audit").findOne({ team: "shop-two", action: "project.asked", outcome: "ok" })).toBeTruthy();
+  const starting = page.locator("#start-shop-two");
+  await expect(starting.getByRole("heading", { name: "Shop two" })).toBeVisible();
+  await expect(starting).toContainText("waiting for the Mac");
+  await expect(starting).toContainText("attic looks every five minutes.");
+  // The same name can't be asked for twice.
+  await page.goto("/new");
+  await field("Title").fill("Shop two");
+  await expect(page.getByText("There's a team named shop-two already.")).toBeVisible();
+
+  // The Mac says each step (lib/commands/projects.ts): the card follows.
+  const mac = storeOver({ db: () => graph, close: async () => {} } as unknown as MongoClientLike, {
+    name: "shop-two",
+    tasks: { store: "mongo", database: state().a6gDatabase, lead: null },
+  });
+  for (const step of ["picked-up", "repository", "draft", "setup"] as const)
+    await mac.controls.create(startingControl("shop-two", "attic", { of: "k1", step, problem: null }));
+  await page.goto("/");
+  await expect(starting).toContainText("setting the team up");
+  await expect(starting).toContainText("A setup agent is finishing the team's rules.");
+  await expect(starting.locator("ol.marks li.done")).toHaveCount(3);
+  await expect(starting.locator("ol.marks li.now")).toContainText("Setup");
+  // Under way, it can't be withdrawn.
+  await expect(starting.getByRole("button", { name: /Withdraw/ })).toHaveCount(0);
+
+  // It stops: why, what the failing command said, what to do, and the command to run, each on its own.
+  await mac.controls.create(
+    startingControl("shop-two", "attic", {
+      of: "k1",
+      step: "failed",
+      stoppedAt: "check",
+      problem: "The setup didn't pass its check.",
+      said: "gate.sh: typecheck failed",
+      fix: "To finish the setup yourself, on attic:",
+      command: "a6g init ~/code/shop-two --name shop-two",
+    })
+  );
+  await page.reload();
+  await expect(starting).toContainText("stopped");
+  await expect(starting.locator("ol.marks li.stopped")).toContainText("Check");
+  await expect(starting.locator(".notice.error")).toContainText("The setup didn't pass its check.");
+  await expect(starting.locator(".notice.error .said")).toHaveText("gate.sh: typecheck failed");
+  await expect(starting).toContainText("To finish the setup yourself, on attic:");
+  await expect(starting.locator(".command code")).toHaveText("a6g init ~/code/shop-two --name shop-two");
+  // Asked again, the form opens with what that one said.
+  await starting.getByRole("link", { name: "Ask again" }).click();
+  await expect(page).toHaveURL(/\/new\?again=shop-two$/);
+  await expect(field("Title")).toHaveValue("Shop two");
+  await expect(field("Short name")).toHaveValue("shop-two");
+  await expect(field("What should exist when the team is done")).toHaveValue("A shop that takes orders.\n\nIt ships to Canada.");
+  await expect(field("A day, in dollars")).toHaveValue("20");
+  // Cleared, it's gone from the page: a start with nothing in it.
+  await page.goto("/");
+  await starting.getByRole("button", { name: "Clear Shop two" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Cleared Shop two from this page.");
+  await expect(page.locator("#start-shop-two")).toHaveCount(0);
+  expect(await graph.collection("controls").findOne({ team: "shop-two", kind: "start" }, { sort: { at: -1 } })).toMatchObject({ start: null });
+
+  // One the Mac hasn't picked up is taken back; an existing repository is chosen from the Mac's own.
+  await page.goto("/new");
+  await field("Title").fill("Blog engine");
+  await field("What should exist when the team is done").fill("Posts, tags and a feed.");
+  await page.getByText("One that's there already").click();
+  await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue("blog-engine");
+  await page.getByText("The team chooses").click();
+  await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
+  await page.getByRole("button", { name: "Start the project" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Blog engine.");
+  expect(await graph.collection("controls").findOne({ team: "blog-engine", kind: "start" })).toMatchObject({
+    start: { repo: { existing: "blog-engine" }, technical: false, limits: null, use: [] },
+  });
+  // The new pages fit a phone's width, with a project being started on them.
+  await page.setViewportSize({ width: 360, height: 740 });
+  for (const path of ["/", "/new", "/machines"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1 }).first(), path).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), path).toBeLessThanOrEqual(0);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await page.locator("#start-blog-engine").getByRole("button", { name: "Withdraw Blog engine" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Withdrawn: attic won't start Blog engine.");
+  await expect(page.getByRole("heading", { name: /^Being started/ })).toHaveCount(0);
+  expect(await accounts.collection("audit").countDocuments({ action: "project.withdrawn", outcome: "ok" })).toBe(2);
+
+  // Only an admin asks: a member has no such page, and no key to it.
+  const other = await newPage(browser, { storageState: memberSession });
+  await other.page.goto("/");
+  await expect(other.page.getByRole("link", { name: "Start a project" })).toHaveCount(0);
+  await other.page.goto("/new");
+  await expect(other.page.getByRole("heading", { name: "Not found" })).toBeVisible();
+  await other.context.close();
+
+  // As it was: the Mac starts no projects, and nothing of these two is left.
+  await accounts.collection<{ _id: string }>("machines").updateOne({ _id: attic?._id ?? "" }, { $unset: { projects: "", projectsKnown: "" } });
+  for (const name of ["controls", "stakeholders"]) await graph.collection(name).deleteMany({ team: { $in: ["shop-two", "blog-engine"] } });
+  await graph
+    .collection<{ _id: string }>("counters")
+    .deleteMany({ _id: { $in: ["shop-two:controls", "shop-two:stakeholders", "blog-engine:controls", "blog-engine:stakeholders"] } });
 });
 
 test("an admin session without its second factor is refused every admin page and action", async ({ browser }) => {
