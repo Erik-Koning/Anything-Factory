@@ -53,7 +53,11 @@ Set up and run a team (the operator)
   a6g connect mongo [--machine <name>]  this machine's connection to a team's shared task graph (the string on stdin)
   a6g connect app [--url <url>] [--machine <name>] [--test]   sign in to the web app in your browser and link this
                                       machine to your account: the app shows you it and the teams it runs
+  a6g connect app --projects <dir> | --no-projects   whether this machine starts the projects the web app asks for,
+                                      in that folder only; off until you say so here
                                       ·  a6g disconnect email|whatsapp|heartbeat|app
+  a6g projects [start <team>]         the projects the web app asked this machine to start, and where each stands;
+                                      start carries on one that stopped
   a6g ditto <team> [--grant [--server <ditto-mcp.js>] [--categories <codes> | --all] [--sensitive]] [--off]
                                       connect a team to your Ditto, your own record of your taste: makes its grant
                                       there and keeps the token in the Keychain. Alone, it shows what's connected
@@ -107,6 +111,7 @@ function handOver(): void {
       "watchdog",
       "teams",
       "subscriptions",
+      "projects",
       "init",
       "upgrade",
       "connect",
@@ -170,6 +175,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   upgrade: () => import("../lib/commands/team.ts").then((m) => m.upgrade(args)),
   metrics: () => import("../lib/commands/metrics.ts").then((m) => m.run(args)),
   watchdog: () => import("../lib/commands/watchdog.ts").then((m) => m.watchdog(args)),
+  projects: () => import("../lib/commands/projects.ts").then((m) => m.projects(args)),
   connect: () => import("../lib/commands/connect.ts").then((m) => m.connect(args)),
   disconnect: () => import("../lib/commands/connect.ts").then((m) => m.disconnect(args)),
   ditto: () => import("../lib/commands/ditto.ts").then((m) => m.ditto(args)),

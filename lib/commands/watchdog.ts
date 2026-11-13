@@ -4,7 +4,8 @@
 // team's health URLs and its run folder, and sends anything that needs a checkout to the team's planner as a
 // message. What needs the operator also goes through every channel they've connected (a6g connect,
 // lib/channels.ts), and their replies go to the planner. Run from a terminal (a6g watchdog run, a6g start) it also
-// clears finished worktrees. A run of every team ends by reporting this machine and its teams to the web app, if it's
+// clears finished worktrees. A run of every team ends by taking the web app's asks to start a project, if this machine
+// starts them (a6g connect app --projects, lib/orders.ts), reporting this machine and its teams to the web app, if it's
 // linked (a6g connect app, lib/fleet.ts), and pinging the heartbeat, if one is connected (lib/heartbeat.ts).
 //
 // Per team, in its run folder: watchdog.log, planner-thread, heartbeat/, outbox/, replies/, paused, hold.json,
@@ -37,6 +38,9 @@ import {
   writeLimits,
 } from "../holds.ts";
 import { PLANNER_TAG } from "../labels.ts";
+import { machineProjects, projectsSetting, takeOrders, underHome } from "../orders.ts";
+import { driver } from "../tasks/mongo.ts";
+import { readUri } from "../tasks/mongoUri.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
@@ -46,7 +50,7 @@ import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, FOUNDATION, journeyDue, type Task } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
-import { readSteering, steer, steeringNote } from "../steer.ts";
+import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
 import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
 import { collectUsage, transcriptDirsByAccount } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
@@ -424,14 +428,55 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
   if (reach.some((channel) => channel.replies)) writeJson(seenFile, [...seen].slice(-500));
   warnFailing(reach, glog);
   if (!only) {
+    await takeProjectAsks(reach, glog);
     await reportThisMachine(glog);
     await beat(glog);
   }
   return skipped;
 }
 
-// A path under the home folder as ~/…: the home folder's own path names its user.
-const underHome = (path: string): string => (path.startsWith(`${homedir()}/`) ? `~/${path.slice(homedir().length + 1)}` : path);
+// The web app's asks to start a project on this machine (lib/orders.ts), once its operator said it takes them (a6g
+// connect app --projects): one picked up is started in a process of its own, and the operator hears of it through
+// this machine's own channels, with how to stop it. A failure to read them is logged at most hourly.
+async function takeProjectAsks(reach: Channel[], glog: (text: string) => void): Promise<void> {
+  const mark = join(A6G_HOME, ".stamp-asks-unread");
+  const failed = (text: string): void => {
+    if (minutesSince(mark) < 60) return;
+    writeFileSync(mark, "");
+    glog(text);
+  };
+  try {
+    if (!projectsSetting()) return;
+    const uri = readUri();
+    if (!uri) return failed("this machine starts projects for the web app, but isn't connected to MongoDB, where it asks: a6g connect mongo");
+    const { MongoClient } = await driver();
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 8000, appName: "a6g" });
+    await client.connect();
+    try {
+      await takeOrders({
+        client,
+        log: glog,
+        tell: async (team, ask, repo) => {
+          const text = `The web app asked ${machineName()} to start a project: ${plain(ask.title)} (${team}), on ${underHome(repo)}. It's being set up now; a6g projects shows how it goes.\n\nIf you didn't ask for it: a6g connect app --no-projects stops this machine taking more, a6g pause ${team} stops the team once it's registered, and change your web app password.`;
+          notify(`A project is starting: ${plain(ask.title)}`, `The web app asked for it. a6g projects shows how it goes.`);
+          for (const line of await alertChannels(
+            reach,
+            A6G_HOME,
+            `start-${team}`,
+            `[Anything Factory] Starting ${plain(ask.title)}, asked from the web app`,
+            text
+          ))
+            glog(line);
+        },
+      });
+      rmSync(mark, { force: true });
+    } finally {
+      await client.close();
+    }
+  } catch (error) {
+    failed(`couldn't read the web app's asks to start a project: ${cleaned((error as Error).message.replace(/mongodb(\+srv)?:\/\/\S+/g, "(MongoDB)"))}`);
+  }
+}
 
 // This machine and every team registered on it (lib/fleet.ts), as a full run sees them. A title goes as one plain line
 // the app takes (team.json's has no limit): one that's too long or holds a newline mustn't stop the whole report.
@@ -452,7 +497,13 @@ export function machineReport(): MachineReport {
       members,
     });
   }
-  return { name: machineName(), factory: PACKAGE.version, teams };
+  // What it offers to start for the app, when its operator said it starts projects (lib/orders.ts); null says this
+  // version could and hasn't been told to.
+  let projects: MachineReport["projects"] = null;
+  try {
+    projects = machineProjects();
+  } catch {}
+  return { name: machineName(), factory: PACKAGE.version, teams, projects };
 }
 
 const registered = (): RegistryEntry[] =>
@@ -832,7 +883,15 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   // The run folder's copy of the agreement in force, put right every pass: a folder made anew, or a version from
   // before it was kept, catches up within a minute.
   keepAgreement(entry.run, controls);
-  for (const line of [...applied.log, ...reviews.log]) log(line);
+  // The subscriptions the operator chose on the web app: written where a6g subscriptions use writes them, and the
+  // roles moved at once (lib/steer.ts). One that can't be applied never keeps a pause from applying.
+  let moved: string[] = [];
+  try {
+    moved = applySubscriptionControls(entry, controls);
+  } catch (error) {
+    problem(`couldn't set the team's subscriptions: ${(error as Error).message.split("\n")[0]}`);
+  }
+  for (const line of [...applied.log, ...moved, ...reviews.log]) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
@@ -869,7 +928,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
           : "no planner yet: the control waits for one"
     );
   }
-  return applied.log.length + reviews.log.length > 0;
+  return applied.log.length + moved.length + reviews.log.length > 0;
 }
 
 // Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from
@@ -1015,8 +1074,20 @@ function teamState(entry: RegistryEntry, run: string): TeamState {
     spend: readJson<Spend | null>(join(run, "spend.json"), null),
     planner: planner ? (t3.threadShow(planner)?.status ?? null) : null,
     members,
+    // The lead applies the operator's choice of subscriptions, so it's the one that says what there is to choose.
+    ...(entry.worker ? {} : { subscriptions: subscriptionsOf(entry) }),
     at: new Date().toISOString(),
   };
+}
+
+// The team's subscriptions for its state (lib/steer.ts), or null when they can't be read: a state without them still
+// goes.
+function subscriptionsOf(entry: RegistryEntry): NonNullable<TeamState["subscriptions"]> | null {
+  try {
+    return subscriptionsView(entry);
+  } catch {
+    return null;
+  }
 }
 
 // The lead's report of where the team stands; `log` says when Mongo didn't take it (at most hourly).

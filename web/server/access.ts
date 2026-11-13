@@ -63,9 +63,11 @@ export type Ability =
   | "audit:read"
   // Invite people, set their roles, remove and ban them.
   | "people:manage"
-  // Pause and resume a team, set its budget, and see and change its working agreement (how readily it asks the
-  // operator): how it runs, the operator's alone, each change with an authenticator code.
-  | "team:control";
+  // Pause and resume a team, set its budget and its subscriptions, and see and change its working agreement (how
+  // readily it asks the operator): how it runs, the operator's alone, each change with an authenticator code.
+  | "team:control"
+  // Ask a machine of one's own to start a new team (lib/tasks/start.ts): an admin's alone, with a code.
+  | "projects:start";
 
 const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
   member: ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest", "decisions:read"],

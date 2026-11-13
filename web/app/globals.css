@@ -2419,6 +2419,774 @@ details > * + * {
   margin-top: var(--gap);
 }
 
+/* --- Teams: rows that fold, and projects being started ----------------------------------------------------------- */
+/* A page's heading with the one thing to do there beside it. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 18px;
+}
+.page-head .lede {
+  margin-bottom: 0;
+}
+/* The list's own heading, with the keys that fold its rows. */
+.folds-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  margin: 26px 0 8px;
+}
+.folds-bar > h2 {
+  margin: 0;
+}
+.folds-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+/* A mode among the keys: pressed in and ticked while it holds, and set apart from the keys that act once. */
+.folds-keys button[aria-pressed="true"] {
+  background: var(--well);
+  border-color: var(--edge);
+  box-shadow: var(--sink);
+  color: var(--ink);
+}
+.folds-keys .divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line);
+}
+.team-rows {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 var(--gap);
+}
+/* A team's row: a raised part whose top edge is the fold. Its way in sits on that edge, outside the fold itself. */
+.team-row {
+  position: relative;
+  background: var(--face);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--raise);
+}
+details.team > summary {
+  display: grid;
+  /* The name, then its figures close by: the eye goes from one to the other without crossing the row. */
+  grid-template-columns: 12px minmax(150px, 240px) auto;
+  justify-content: start;
+  align-items: center;
+  gap: 4px 14px;
+  width: 100%;
+  min-height: 58px;
+  padding: 12px 124px 12px 18px;
+  border-radius: var(--r-panel);
+  color: var(--ink);
+  font-weight: 400;
+}
+details.team > summary::before {
+  margin: 0 0 2px 2px;
+}
+details.team > summary:hover {
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent);
+}
+details.team[open] > summary {
+  margin-bottom: 0;
+  border-radius: var(--r-panel) var(--r-panel) 0 0;
+  border-bottom: 1px solid var(--line);
+}
+.team-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.team-name .title {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+/* What a shut row says: four figures, each in its own column on every row, so the eye runs down one. */
+.glance {
+  display: grid;
+  grid-template-columns: 152px 78px 118px 136px;
+  align-items: center;
+  gap: 2px 14px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.glance-item {
+  white-space: nowrap;
+}
+.glance-item b {
+  color: var(--ink);
+  font: 600 13.5px/1.2 var(--font-code);
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+.team-open {
+  position: absolute;
+  top: 13px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-s);
+  padding: 0 12px;
+  background: var(--key);
+  border: 1px solid color-mix(in srgb, var(--edge) 45%, var(--line));
+  border-radius: var(--r-ctl);
+  box-shadow: var(--rim), var(--raise-s);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.team-open:hover {
+  border-color: var(--edge);
+  filter: brightness(0.97);
+}
+details.team > .team-body {
+  display: grid;
+  gap: 18px;
+  margin-top: 0;
+  padding: 16px 18px 18px;
+}
+.team-body h3 {
+  margin-bottom: 8px;
+}
+.team-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 18px 40px;
+  align-items: start;
+}
+.team-cols > section {
+  min-width: 0;
+}
+/* Counts at a row's size: the same sunk figures in one even strip, a word under each that never breaks, and faint
+   where there's nothing to count. */
+.counts.mini {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.counts.mini li {
+  padding: 8px 10px 9px;
+}
+/* Every count keeps its own cell: the last of an odd number isn't stretched across the row, as a page's own is. */
+.counts.mini > li:last-child:nth-child(odd) {
+  grid-column: auto;
+}
+.counts.mini b {
+  font-size: 18px;
+}
+.counts.mini .muted {
+  font-size: 12px;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.counts.mini li.none b {
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.runs-on {
+  white-space: nowrap;
+}
+.runs-on .chip {
+  margin-left: 2px;
+}
+.spent {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+.spent > li {
+  display: grid;
+  gap: 3px;
+}
+.spent-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+}
+.spent-line b {
+  font-family: var(--font-code);
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+.spent .meter {
+  margin: 0;
+}
+/* How full, in words: the bar's colour is never the only sign. */
+.spent-share {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.spent-share.near {
+  color: var(--warn);
+}
+.spent-share.over {
+  color: var(--signal);
+}
+
+/* A project being started: what was asked, a row of marks for how far it has got, and why it stopped when it did. */
+.starting {
+  margin: 22px 0 0;
+}
+.starting > h2 {
+  margin-bottom: 8px;
+}
+.starts {
+  display: grid;
+  gap: 10px;
+}
+.start-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 20px 18px;
+  background: var(--face);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow:
+    inset 3px 0 0 var(--chart),
+    var(--rim),
+    var(--raise);
+}
+.start-card.ended {
+  box-shadow:
+    inset 3px 0 0 var(--signal),
+    var(--rim),
+    var(--raise);
+}
+.start-card > * {
+  min-width: 0;
+  margin: 0;
+}
+.start-card .where {
+  margin-top: -6px;
+}
+.marks {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+}
+.marks li {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-3);
+  font: 500 11px/1.3 var(--font-code);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.marks .dot {
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.marks li.done {
+  color: var(--ink-2);
+}
+.marks li.done .dot {
+  background: var(--ok);
+}
+.marks li.now {
+  color: var(--ink);
+  font-weight: 600;
+}
+.marks li.now .dot {
+  background: linear-gradient(90deg, var(--chart) 40%, color-mix(in srgb, var(--chart) 35%, transparent) 50%, var(--chart) 60%) 0 0 / 300% 100%;
+  animation: mark-now 1.8s linear infinite;
+}
+.marks li.stopped {
+  color: var(--signal);
+  font-weight: 600;
+}
+.marks li.stopped .dot {
+  background: var(--signal);
+}
+@keyframes mark-now {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+/* On a phone the marks are bars alone, and this line says the step they've reached. */
+.marks-now {
+  display: none;
+  color: var(--ink);
+  font: 600 11px/1.3 var(--font-code);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.start-card.ended .marks-now {
+  color: var(--signal);
+}
+.start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+a.button.s {
+  min-height: var(--h-s);
+  padding: 0 11px;
+  font-size: 13.5px;
+}
+/* A command to run: sunken like a field, in mono. It wraps at its spaces, never inside a word unless one word is
+   wider than the block, and is never wider than what holds it; the key that copies it stays at its top right. */
+.command {
+  display: flex;
+  /* A command of one line sits level with its key; the key stays at the top of one that runs to more. */
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 3px 3px 12px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
+}
+.command > code {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 0;
+  background: none;
+  border: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  /* One word wider than the block scrolls sideways before it's broken. */
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+.command .word {
+  white-space: nowrap;
+}
+.command > button {
+  flex: none;
+  align-self: flex-start;
+}
+/* What a command that failed said, under the sentence that says what went wrong: its own words, in its own face. */
+.notice .said {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font: 400 13px/1.5 var(--font-code);
+  font-stretch: 87.5%;
+}
+.start-actions > .hint {
+  flex: 1 1 260px;
+}
+.nowrap {
+  white-space: nowrap;
+}
+
+/* --- Start a project: the form in steps, and what happens next beside it ------------------------------------- */
+.start-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  gap: var(--gap);
+  align-items: start;
+  margin: var(--gap) 0;
+}
+.start-layout .panel {
+  margin: 0;
+}
+.start > .step {
+  display: grid;
+  gap: 14px;
+}
+.step > h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 2px;
+}
+/* A step of the form: a small sunk disc. Only the form's own steps have one. */
+.num {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  box-shadow: var(--sink);
+  color: var(--ink-2);
+  font: 600 12px/1 var(--font-code);
+}
+.step .where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+}
+input.code,
+b.code,
+span.code {
+  font-family: var(--font-code);
+  font-stretch: 87.5%;
+}
+/* A code of six digits: a field as wide as what goes in it. */
+input.six {
+  width: 9.5rem;
+  letter-spacing: 0.14em;
+}
+.hint.wrong {
+  color: var(--signal);
+}
+.hint .count {
+  float: right;
+  margin-left: 12px;
+}
+.hint.paths code {
+  word-break: break-all;
+}
+/* Beside a label: what needn't be filled in, or how long a code is. */
+.optional {
+  margin-left: 4px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+/* Two ways to say one thing, side by side: the one chosen is pressed in. */
+.segments {
+  display: inline-flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
+}
+.segments label {
+  display: block;
+  cursor: pointer;
+}
+.segments input {
+  position: absolute;
+  width: 1px;
+  min-height: 0;
+  height: 1px;
+  opacity: 0;
+}
+.segments span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.segments input:checked + span {
+  background: var(--surface);
+  box-shadow: var(--rim), var(--raise-s);
+  color: var(--ink);
+}
+.segments input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.amounts > label {
+  flex: 1 1 90px;
+}
+.amounts .amount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+/* A code and the key that sends it, side by side. */
+.code-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.code-row > input {
+  flex: none;
+}
+.step.commit h3 {
+  margin-bottom: 4px;
+}
+#start-missing {
+  margin-top: 2px;
+}
+.step.commit {
+  background: color-mix(in srgb, var(--solid) 4%, var(--surface));
+}
+/* The ask, said back before it's sent: a sunk readout. */
+.facts.recap {
+  padding: 12px 14px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--sink);
+  font-size: 14px;
+}
+.next-steps {
+  position: sticky;
+  top: 76px;
+  display: grid;
+  gap: 12px;
+}
+.next-steps > * {
+  margin: 0;
+}
+/* What happens, in order: plain mono numerals, so the list doesn't read as more steps of the form. */
+.timeline,
+ol.setup {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.timeline > li,
+ol.setup > li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1.6ch minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: 13.5px;
+  line-height: 1.5;
+  counter-increment: step;
+}
+.timeline > li::before,
+ol.setup > li::before {
+  content: counter(step);
+  color: var(--ink-3);
+  font: 600 13px/1.5 var(--font-code);
+  text-align: right;
+}
+/* What to run, in order: each step's words, then its command on a line of its own. */
+ol.setup {
+  gap: 16px;
+  margin: 14px 0;
+}
+ol.setup > li {
+  font-size: 15px;
+}
+ol.setup > li > * {
+  grid-column: 2;
+}
+.panel.how > p,
+.panel.how > ol > li > span {
+  max-width: 70ch;
+}
+/* How to turn something on, under the list it's about: a heading, a few words, each command in a block of its own. */
+.how-projects {
+  display: grid;
+  gap: 8px;
+  max-width: 70ch;
+  margin-top: 22px;
+}
+.how-projects > * {
+  margin: 0;
+}
+.how-projects > h2 {
+  font-size: 14.5px;
+}
+.how-projects > .command + .hint {
+  margin-top: 6px;
+}
+
+/* --- Subscriptions: the order a team takes them in ----------------------------------------------------------- */
+.order {
+  display: grid;
+  gap: 8px;
+}
+.order-list,
+.order-rest,
+.subs {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.order-list > li,
+.order-rest > li,
+.subs > li {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--sink);
+}
+.order-rest > li,
+.subs > li.unused {
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--edge) 55%, var(--line));
+  box-shadow: none;
+}
+.order-rest > li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.subs {
+  max-width: 56rem;
+  margin: 0 0 12px;
+}
+.subs > li {
+  grid-template-columns: 2ch minmax(0, 1fr);
+  align-items: start;
+  padding: 10px 14px 11px 12px;
+}
+/* A place in an order: a plain mono numeral. */
+.place {
+  color: var(--ink-2);
+  font: 600 14px/1.3 var(--font-code);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.sub {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sub b {
+  font: 600 14px/1.3 var(--font-code);
+  font-stretch: 87.5%;
+}
+.sub .muted {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.sub .meter {
+  margin: 5px 0 3px;
+}
+.order-keys {
+  display: flex;
+  gap: 6px;
+}
+.order-empty {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+#subscriptions > h3 {
+  margin-top: 16px;
+}
+#subscriptions > p {
+  max-width: 56rem;
+}
+#subscriptions > .small + .small {
+  margin-top: 0;
+}
+@media (max-width: 960px) {
+  .start-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .next-steps {
+    position: static;
+  }
+  /* Four figures in two lines, the same on every row. */
+  details.team > summary {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+  .glance {
+    grid-column: 2;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    margin-right: -104px;
+  }
+}
+@media (max-width: 720px) {
+  details.team > summary {
+    padding-right: 112px;
+  }
+  .team-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .counts.mini {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  /* The marks as bars alone; their names stay for a screen reader, and the step reached is said once under them. */
+  .marks {
+    margin-bottom: -4px;
+  }
+  .marks .mark-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .marks-now {
+    display: block;
+  }
+  /* One that's waiting or under way keeps to its name, its marks and a line: where it runs is on the form it came from. */
+  .start-card:not(.ended) .where {
+    display: none;
+  }
+  .order-list > li {
+    grid-template-columns: 2ch minmax(0, 1fr);
+    align-items: start;
+  }
+  .order-keys {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  /* Three keys on one line. */
+  .folds-keys {
+    gap: 6px;
+  }
+  .folds-keys button {
+    padding: 0 9px;
+  }
+  /* On a phone the figures sit under the name, so the name takes the row. */
+  details.team > summary {
+    grid-template-columns: 12px minmax(0, 1fr);
+  }
+}
+@media (pointer: coarse) {
+  .team-open {
+    top: 8px;
+    min-height: 44px;
+  }
+  details.team > summary {
+    min-height: 62px;
+  }
+  /* The name's line is as tall as the key beside it, so the figures start under both. */
+  .team-name {
+    min-height: 44px;
+  }
+  .order-keys {
+    gap: 8px;
+  }
+  a.button.s {
+    min-height: 44px;
+  }
+}
+
 /* --- Small screens, touch, motion, forced colours ---------------------------------------------------------------- */
 @media (max-width: 900px) {
   .grid.lead {

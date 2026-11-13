@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { SpendPanel } from "../../../components/spend-panel.tsx";
+import { SubscriptionsPanel } from "../../../components/subscriptions-panel.tsx";
 import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
@@ -89,6 +90,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
       {control ? (
         <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
       ) : null}
+      {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
 
       <div className="grid">
         <section className="panel" aria-labelledby="journeys">

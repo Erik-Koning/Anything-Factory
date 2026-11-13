@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased: running the factory from the web app
+
+Three things still needed a terminal on the team's Mac: starting a project, choosing which Claude subscriptions a team
+runs on, and seeing every project at once without scrolling past all of them. The operator asked for all three from the
+site. The plan is `docs/plans/run-from-the-site.md`. Built and tested; no project has been started from the site for
+real yet, and a Mac needs this factory version to take part.
+
+- **Start a project** (`/new`, admins). The form takes what to build, a Mac of your own and a repository in its
+  folder (or a name for a new one), whether to agree the design first, a budget, the subscriptions in order, and your
+  authenticator's code. The Mac picks the ask up at its next full run, makes the repository when it's new, drafts the
+  team, runs the setup agent with nobody there, proves the result with `a6g check --run`, registers it and starts it.
+  Each step shows on the Teams page as it goes; one that fails says why, and what to run on the Mac.
+- **Off until said at the Mac.** `a6g connect app --projects <dir>` lets a Mac start projects the site asks for, in
+  that folder only; `--no-projects` stops it. Its report then names the repositories in that folder and its
+  subscriptions. The link still carries reports one way: an ask is a control in the task graphs' database, where the
+  site already writes pauses and budgets. `a6g projects` shows what was asked and where each stands; `a6g projects
+start <team>` carries on one that stopped.
+- **The setup agent, unattended.** It reads the repository and the goal, decides what it would have asked, writes each
+  assumption into the brief, and proves the setup. It runs with a fixed list of tools and commands, nothing skipped: a
+  call outside the list is refused, not asked about. `a6g init` takes `--title`, `--store` and `--goal-file` for it.
+- **Subscriptions on a team's overview.** The subscriptions on the team's Mac with how much of each one's week is used,
+  the order the team takes them in, what each role runs on now, and a form that changes the order for every role or for
+  one. A control, like a pause: the lead's watchdog writes the list where `a6g subscriptions use` writes it and moves
+  the roles within a minute. A team on an older factory version is told where they're chosen instead.
+- **A Teams page that folds.** Each team is a row: shut, its state, who's at work, what waits on you and what it spent
+  today; open, where its work stands, the team's facts, its spend against its budget, and the ways in. What's open is
+  remembered in the browser; one at a time, all open or all shut; a link with `#<team>` opens that one.
+- **No WebSocket.** The Mac asks the site, never the other way; a page with something in flight reads itself again
+  every ten seconds and stops when nothing is.
+
 ## Unreleased: a forgotten password
 
 The web app had no way back for someone who forgot their password: a member could still sign in by link, and an admin,

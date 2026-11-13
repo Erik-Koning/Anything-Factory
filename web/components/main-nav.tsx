@@ -10,8 +10,9 @@ export function MainNav({ links }: { links: { href: string; label: string; count
   // On a phone the links are one row that scrolls sideways: the current page's stays in view.
   const row = useRef<HTMLElement>(null);
   useEffect(() => showCurrent(row.current), [path]);
-  // A team's pages are under Teams.
-  const under = (href: string) => (href === "/" ? path === "/" || path.startsWith("/t/") : path === href || path.startsWith(`${href}/`));
+  // A team's pages are under Teams, and so is starting one.
+  const under = (href: string) =>
+    href === "/" ? path === "/" || path === "/new" || path.startsWith("/t/") : path === href || path.startsWith(`${href}/`);
   return (
     <nav aria-label="Main" ref={row} onFocus={(e) => showFocused(e)}>
       {links.map(({ href, label, count = 0 }) => (

@@ -39,12 +39,25 @@ request (Article 8).
 
 ## Pages
 
-- `/` Teams: the teams you can see, each with its state, planner, members at work by role, the machines it runs on
-  (for members and admins: its lead first, and any not reporting), aim, last merge, and links to its pages.
+- `/` Teams: the teams you can see, each a row that folds. Shut, it says the team's state and the same four figures
+  on every row (what waits on you, who's at work, what it spent today, its last merge). Open, it shows where the work
+  stands, the planner, members at work by role, the machines it runs on (for members and admins: its lead first, and
+  any not reporting), its subscriptions, aim and last merge, what it spent against its budget (admins), and links to
+  its pages. What's open is kept in the browser; **One at a time** shuts the rest when one opens; `/#<team>` opens
+  that one. For an admin, above the rows: the projects their Macs are starting, each with how far it has got, and
+  **Start a project**.
+- `/new` Start a project (admins): what to build, a Mac of your own that starts projects and a repository in its
+  folder (or a new one), who chooses the platform and the stack, a budget, the subscriptions in order, and your
+  authenticator's code. It records a control of kind `start` under the new team's name (`lib/tasks/start.ts`), which
+  the Mac picks up at its next full run and answers step by step; the Teams page shows each step, and for one that
+  stopped: why, what the failing command said, what to do, and the command to run. With no Mac that starts projects
+  yet, the page says how to turn that on at the Mac's terminal (`a6g connect app --projects <dir>`): it can't be
+  turned on from here. The plan is `docs/plans/run-from-the-site.md`.
 - `/machines` Machines: your linked machines (an admin's: every one, with its owner), those reporting first, each with
-  its last report and the address it came from, when it was linked, and the teams registered on it: lead or worker,
-  state, planner, members at work and checkout (a team whose tasks are in files is named, with no pages here); and
-  Unlink. `/machines/link`: where `a6g connect app` sends you to look up its code, check it, and approve or refuse it.
+  its last report and the address it came from, when it was linked, whether it starts projects (and in which folder),
+  and the teams registered on it: lead or worker, state, planner, members at work and checkout (a team whose tasks
+  are in files is named, with no pages here); and Unlink. `/machines/link`: where `a6g connect app` sends you to look
+  up its code, check it, and approve or refuse it.
 - `/t/<team>/add`, as an admin, **Approve it now** takes a code from your authenticator, as a pause does: the task goes
   straight to the builders.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
@@ -58,7 +71,11 @@ request (Article 8).
   week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause,
   in dollars or in percent of a Claude subscription's week (over 100% for more than one subscription's worth). Once
   the subscription is measured (`a6g subscriptions`), every figure also shows its share of a subscription's week, and
-  the panel what the subscription's own usage report says.
+  the panel what the subscription's own usage report says. Then **Subscriptions**: the Claude subscriptions on the
+  team's Mac with how much of each one's week is used, the order the team takes them in and whose order it is, what
+  each role runs on now, and a form that changes the order for every role or for one, with an authenticator code. It
+  records a control the lead's watchdog applies within a minute, as `a6g subscriptions use` does at the terminal; a
+  team whose Mac doesn't report its subscriptions (an older factory version) is told where they're chosen instead.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
   `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
   operator, and each block raised to them (a block the team sorts out, or that waits on other tasks, isn't listed).

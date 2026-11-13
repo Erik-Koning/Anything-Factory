@@ -38,6 +38,7 @@ import {
   sendRequest,
   stakeholderOf,
   storeFor,
+  subscriptionsFromWeb,
   teamDoc,
 } from "../../../server/factory.ts";
 import { answerText, asRecommended, shownAs, waitingOf } from "../../../server/inbox.ts";
@@ -377,6 +378,42 @@ export async function budgetAction(form: FormData): Promise<void> {
     await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: notice.error });
   }
   redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=budget" : ""}`);
+}
+
+// An admin chooses the Claude subscriptions the team runs on, as the operator, with a code from their authenticator:
+// every role's list, or one role's own, in order (none clears it). Which login a team's agents use, and so whose limits
+// they spend, changes only for someone holding their second factor at that moment. The lead's watchdog writes the list
+// and moves the roles within a minute (lib/steer.ts).
+export async function subscriptionsAction(form: FormData): Promise<void> {
+  const team = text(form, "team");
+  if (!TEAM_PARAM.test(team)) redirect("/");
+  const role = text(form, "role").trim() || null;
+  const use = form.getAll("use").filter((value): value is string => typeof value === "string");
+  let notice: { ok?: string; error?: string };
+  let viewer = null;
+  try {
+    viewer = await allowed("team:control", team);
+    if (use.length > 8 || use.some((name) => !/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)))
+      throw new Refused("Choose the subscriptions from the team's Mac's own.");
+    if (role !== null && !/^[a-z][a-z0-9-]{0,40}$/.test(role)) throw new Refused("Choose a role from the list.");
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+    if (wrong) throw new Refused(wrong);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const control = await subscriptionsFromWeb(team, { role, use, from });
+    const whose = role ? `The ${role === "planner" ? "planner" : `${role}s`}` : "The team";
+    const said = use.length
+      ? `${whose} ${role && role !== "planner" ? "run" : "runs"} on ${use.join(", then ")}`
+      : role
+        ? `${whose} ${role === "planner" ? "follows" : "follow"} the team's list`
+        : "The team runs on its Mac's own login";
+    notice = { ok: `${said}. The team's Mac applies it within a minute, and moves each role once nothing of it is at work.` };
+    await record(viewer, { action: "team.subscriptions", outcome: "ok", team, target: control.id, detail: said });
+  } catch (error) {
+    notice = { error: reasonOf(error) };
+    await record(viewer ?? (await getViewer()), { action: "team.subscriptions", outcome: "refused", team, target: null, detail: notice.error });
+  }
+  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=subscriptions" : ""}#subscriptions`);
 }
 
 // An admin reviews what the team decided in the operator's place: agrees with it, or overturns it and says what to do

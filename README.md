@@ -561,6 +561,18 @@ second one, never yours replaced. `a6g connect app --test` reports now; `--url` 
 than `https://app.anythingfactory.dev` (https, or http://localhost for one on this Mac), which the Mac keeps until
 it's linked elsewhere, and `--machine` the Mac's name.
 
+**Starting a project from the web app.** A linked Mac starts nothing the app asks for until you say so at its own
+terminal: `a6g connect app --projects ~/code` names the one folder it may start projects in (never Documents, Desktop
+or Downloads, which the watchdog can't read), and `--no-projects` takes it back. From then on its report names the
+repositories directly inside that folder that have no team, and its subscriptions, and an admin sees **Start a
+project** on the app for it. An ask there takes their authenticator's code and is a control in the task graphs'
+database, like a pause, so the Mac also needs `a6g connect mongo`. At its next full run the watchdog picks it up and
+tells you through your own channels, then makes the repository when it's new, drafts the team (`a6g init
+--no-interview`), runs the setup agent with nobody there (a fixed list of tools; it writes what it assumed into the
+brief), proves it with `a6g check --run`, registers it with the budget and subscriptions you chose, and starts it. One
+at a time. `a6g projects` shows each ask and where it stands; `a6g projects start <team>` carries on one that stopped,
+and its log is `~/.a6g/orders/<team>.log`. The link itself still only reports: nothing the app answers is acted on.
+
 ## The two places you edit
 
 | Where                                                  | What                                                                                                                                                                                                                                                                                                 |

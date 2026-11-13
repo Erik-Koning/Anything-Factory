@@ -21,6 +21,7 @@ const ALLOWED = new Set([
   "lib/tasks/agreement.ts",
   "lib/tasks/decisions.ts",
   "lib/tasks/spend.ts",
+  "lib/tasks/start.ts",
   "lib/fleet.ts",
 ]);
 

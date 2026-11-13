@@ -8,6 +8,8 @@
 //   a6g connect mongo [--machine <name>] [--no-check]   this machine's connection to a team's shared task graph
 //   a6g connect app [--url <url>] [--machine <name>] [--no-open]   link this machine to the operator's account on the
 //                                                 web app, which shows them it and the teams it runs (lib/fleet.ts)
+//   a6g connect app --projects <dir> | --no-projects   whether this machine starts the projects the web app asks for,
+//                                                 in that folder only (lib/orders.ts); off until it's said here
 //   a6g connect email|whatsapp|heartbeat|app --test   send another test message, ping, or report
 //   a6g disconnect email|whatsapp|heartbeat|app
 //
@@ -17,7 +19,9 @@
 // The heartbeat (lib/heartbeat.ts) is kept only after a test ping goes through. The web app's link (lib/app.ts) is
 // made by signing in to the app in a browser and approving this machine there.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import {
   APP_FILE,
   appSettings,
@@ -29,10 +33,12 @@ import {
   readAppLink,
   saveLink,
   sendReport,
+  setProjects,
   startLink,
   unlinkSelf,
 } from "../app.ts";
 import { IDLE_DAYS } from "../fleet.ts";
+import { guardedFolder } from "../orders.ts";
 import { MACHINE_NAME, machineName, saveMachineName, savedMachineName } from "../machine.ts";
 import { driver, MONGO_URI, shownUri } from "../tasks/mongo.ts";
 import { forgetUri, hasUri, readUri, storeUri } from "../tasks/mongoUri.ts";
@@ -426,8 +432,45 @@ function appStatus(): void {
   else if (!readAppLink()) console.info(`app  ${settings.url}, but this machine's link isn't in the Keychain any more: a6g connect app`);
   else
     console.info(
-      `app  ${settings.url}, as the machine ${settings.machine.name}, since ${localTime(new Date(settings.linkedAt))} (a6g connect app --test reports it now)`
+      `app  ${settings.url}, as the machine ${settings.machine.name}, since ${localTime(new Date(settings.linkedAt))} (a6g connect app --test reports it now); ${
+        settings.projects
+          ? `starts the projects the web app asks for, in ${settings.projects.dir} (--no-projects stops it)`
+          : "starts no projects for it (a6g connect app --projects <dir>)"
+      }`
     );
+}
+
+// The folder this machine starts projects in, as given: one that exists, by its real path, and never the whole home
+// folder or the disk, since any repository in it can then be made a team's from the web app.
+function projectsFolder(given: string): string {
+  const path = resolve(given.replace(/^~(?=\/|$)/, homedir()));
+  let real: string;
+  try {
+    real = realpathSync(path);
+    if (!statSync(real).isDirectory()) throw new Error("not a folder");
+  } catch {
+    die(`--projects: ${path} isn't a folder; make it first, or name the one your projects are in`);
+  }
+  if (real === "/" || real === realpathSync(homedir())) die("--projects: name a folder for projects (like ~/code), not the whole home folder or the disk");
+  // The watchdog picks the asks up, and macOS doesn't let a background job read these without asking.
+  const guarded = guardedFolder(real);
+  if (guarded) die(`--projects: the watchdog can't read ~/${guarded} (macOS asks first for a background job); name a folder outside it, like ~/code`);
+  return real;
+}
+
+// Keeps whether this machine starts projects for the web app, and says what that lets the app do.
+function keepProjects(dir: string | null): number {
+  if (!setProjects(dir)) die("this machine isn't linked to the web app yet: a6g connect app links it");
+  if (!dir) {
+    console.info("a6g: this machine starts no projects for the web app now. One being set up carries on; a6g projects shows it.");
+    return 0;
+  }
+  console.info(`a6g: this machine now starts the projects the web app asks for, in ${dir} and nowhere else.
+  An admin's ask there, with their authenticator code, makes a repository in that folder (or uses one), sets a team up
+  on it and starts it; this machine's report now names the repositories in the folder. You hear of each one here
+  (a6g connect email), and a6g projects shows them. a6g connect app --no-projects stops it.`);
+  if (!hasUri()) console.warn("a6g: a project from the web app keeps its tasks in MongoDB, and this machine isn't connected to it yet: a6g connect mongo");
+  return 0;
 }
 
 // Sends this machine's report now, as the watchdog does at the end of every run.
@@ -450,10 +493,17 @@ async function reportNow(): Promise<number> {
 // the person signs in there, checks the code and the machine, and approves; the CLI then keeps the machine's token.
 // Linking again (to the same app) shows the app the link so far, which the new one replaces.
 async function connectApp(argv: string[]): Promise<number> {
-  const { options } = parseArgs(argv, { booleans: ["test", "no-open"] });
+  const { options } = parseArgs(argv, { booleans: ["test", "no-open", "no-projects"] });
   if (options["test"]) return reportNow();
   const previous = readAppLink();
   const named = text(options["url"]);
+  // Whether it starts projects for the app: said here, at its own terminal, and nowhere else.
+  if (options["no-projects"] && options["projects"] !== undefined) die("--projects <dir> or --no-projects, not both");
+  if (options["projects"] === true) die("--projects: the folder this machine starts projects in, like ~/code");
+  const folder = text(options["projects"]);
+  const projects = options["no-projects"] ? null : folder !== undefined ? projectsFolder(folder) : undefined;
+  // Linked already, and nothing about the link asked for: only that changes.
+  if (projects !== undefined && previous && appSettings() && named === undefined && options["machine"] === undefined) return keepProjects(projects);
   const given = named ?? previous?.url ?? DEFAULT_APP;
   const base = appUrl(given);
   if (!base) die(`--url: the web app's address, https://… (or http://localhost:<port> for one on this Mac), not ${given}`);
@@ -507,6 +557,7 @@ Approve it only if you started this, here, just now. The code works for ${minute
   The watchdog reports it and its teams there every five minutes; a machine that reports nothing for ${IDLE_DAYS} days is
   unlinked. Unlink it from the app's Machines page, or with a6g disconnect app. Its token is in the Keychain, and
   ${APP_FILE} says what it's linked to.`);
+  if (projects !== undefined) keepProjects(projects);
   const linked = readAppLink();
   const sent = linked ? await sendReport(linked, machineReport()) : null;
   if (sent && !sent.ok) console.error(`a6g: its first report didn't go through: ${sent.problem}. The watchdog tries again in five minutes.`);
