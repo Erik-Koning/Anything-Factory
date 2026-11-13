@@ -101,16 +101,31 @@ export interface MachineTeam {
   members: Record<string, number>;
 }
 
+// What a machine offers to start for the web app, once its operator said so at its terminal (a6g connect app
+// --projects <dir>, lib/orders.ts): the folder, the repositories in it that no team uses yet, and its subscriptions, for
+// the form that asks. A machine that starts none sends nothing.
+export interface MachineProjects {
+  // The folder, under ~/ when it's in the home folder.
+  dir: string;
+  // Each repository directly inside it, by its folder's name.
+  repos: string[];
+  // The Claude subscriptions here, by name, with how much of each one's week is used as last read (null before).
+  subscriptions: { name: string; percent: number | null }[];
+}
+
 // What a machine sends: the app adds when it came, and from which account's link.
 export interface MachineReport {
   name: string;
   // The factory version a person runs here (a6g self-install).
   factory: string;
   teams: MachineTeam[];
+  // Null from a machine whose factory version starts projects but whose operator hasn't said it may; absent from one
+  // whose version doesn't know how.
+  projects?: MachineProjects | null;
 }
 
 // The most a report may hold; the app refuses a bigger one whole.
-export const REPORT_LIMITS = { bytes: 256 * 1024, teams: 100, members: 30, text: 200, home: 1024 } as const;
+export const REPORT_LIMITS = { bytes: 256 * 1024, teams: 100, members: 30, text: 200, home: 1024, repos: 200, subscriptions: 20 } as const;
 
 const STATES: readonly TeamState["state"][] = ["active", "pausing", "paused", "idle", "complete"];
 // A team's name as a report may give it: the shape of one in the app's URLs, which every name team.json allows fits.
@@ -146,16 +161,39 @@ function parseTeam(value: unknown): MachineTeam | null {
   return { name, title, part, store, home, factory, state: state as TeamState["state"], planner, members: counted };
 }
 
+// A repository's folder (lib/tasks/start.ts REPO_NAME) and a subscription's name (lib/subscriptions.ts).
+const REPO = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SUBSCRIPTION = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+// What a machine offers to start: undefined when it's wrong.
+function parseProjects(value: unknown): MachineProjects | undefined {
+  if (!isObject(value)) return undefined;
+  const { dir, repos, subscriptions } = value;
+  if (!isText(dir, REPORT_LIMITS.home) || !(dir.startsWith("/") || dir.startsWith("~/"))) return undefined;
+  if (!Array.isArray(repos) || repos.length > REPORT_LIMITS.repos || repos.some((repo) => typeof repo !== "string" || !REPO.test(repo))) return undefined;
+  if (!Array.isArray(subscriptions) || subscriptions.length > REPORT_LIMITS.subscriptions) return undefined;
+  const listed: MachineProjects["subscriptions"] = [];
+  for (const sub of subscriptions) {
+    if (!isObject(sub) || typeof sub["name"] !== "string" || !SUBSCRIPTION.test(sub["name"])) return undefined;
+    const percent = sub["percent"];
+    if (percent !== null && (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 1000)) return undefined;
+    listed.push({ name: sub["name"], percent });
+  }
+  return { dir, repos: repos as string[], subscriptions: listed };
+}
+
 // The report in `body`, rebuilt from the fields it may have (anything else is dropped), or null when any is wrong.
 export function parseReport(body: unknown): MachineReport | null {
   if (!isObject(body)) return null;
-  const { name, factory, teams } = body;
+  const { name, factory, teams, projects } = body;
   if (typeof name !== "string" || !MACHINE_NAME.test(name)) return null;
   if (typeof factory !== "string" || !VERSION.test(factory)) return null;
   if (!Array.isArray(teams) || teams.length > REPORT_LIMITS.teams) return null;
   const parsed = teams.map(parseTeam);
   if (parsed.some((team) => team === null)) return null;
-  return { name, factory, teams: parsed as MachineTeam[] };
+  const offered = projects === undefined || projects === null ? null : parseProjects(projects);
+  if (offered === undefined) return null;
+  return { name, factory, teams: parsed as MachineTeam[], ...(projects === undefined ? {} : { projects: offered }) };
 }
 
 // --- Reading reports ------------------------------------------------------------------------------------------------

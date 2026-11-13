@@ -15,7 +15,7 @@
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { accountClosures } from "./budget.ts";
-import { readLimits } from "./holds.ts";
+import { applied, markApplied, readLimits, whoAsked } from "./holds.ts";
 import type { RegistryEntry } from "./paths.ts";
 import {
   type Account,
@@ -24,13 +24,17 @@ import {
   type Choice,
   chooseFor,
   describeWait,
+  gate,
   listFor,
+  setTeamUses,
   subscriptionLimits,
   subscriptionState,
   teamUses,
 } from "./subscriptions.ts";
 import * as t3 from "./t3.ts";
+import type { Control } from "./tasks/controls.ts";
 import type { Spend } from "./tasks/spend.ts";
+import type { TeamSubscriptions } from "./tasks/teams.ts";
 import { hash, readJson, writeJson } from "./util.ts";
 
 export interface Steering {
@@ -219,4 +223,87 @@ export function steer(entry: Pick<RegistryEntry, "name" | "run" | "worker">, now
   writeJson(steeringFile(entry.run), steering);
   const tell = changes.length ? { key: `subscriptions-${hash(...signature)}`, text: `Subscriptions: the team's ${changes.join("; the ")}.` } : null;
   return { said, plannerMoved: Object.hasOwn(homes, "planner"), tell, steering };
+}
+
+// The operator's `subscriptions` controls the run folder hasn't applied yet (the web app's; a6g subscriptions use
+// writes the list itself): each one's list is written where that command writes it, oldest first, and the team is
+// steered once. A subscription this machine doesn't have, or a role the team doesn't, is refused whole and said in
+// the log: the list stays as it was. Resolves to lines for the team's log; empty when there was none.
+export function applySubscriptionControls(entry: Pick<RegistryEntry, "name" | "run" | "worker">, controls: Control[], now = new Date()): string[] {
+  const done = applied(entry.run);
+  const fresh = controls.filter((c) => c.kind === "subscriptions" && !done(c.id));
+  if (!fresh.length) return [];
+  const said: string[] = [];
+  const known = accounts().map((a) => a.name);
+  const roles = Object.keys(t3.teamInstances(entry.name) ?? {});
+  const uses = teamUses();
+  const mine = { ...(uses[entry.name] ?? {}) };
+  let changed = false;
+  for (const control of fresh) {
+    const ask = control.subscriptions;
+    if (!ask) continue;
+    const whose = ask.role ? `the ${ask.role} role's` : "the team's";
+    const unknown = ask.use.filter((name) => !known.includes(name));
+    if (unknown.length) {
+      said.push(
+        `${whoAsked(control.by)} asked for ${whose} subscriptions to be ${ask.use.join(", then ")} (${control.id}), but this Mac has no ${unknown.join(", ")} (it has ${known.join(", ")}): nothing changed`
+      );
+      continue;
+    }
+    if (ask.role && roles.length && !roles.includes(ask.role)) {
+      said.push(
+        `${whoAsked(control.by)} asked for the ${ask.role}'s own subscriptions (${control.id}), but the team has no ${ask.role} here: nothing changed`
+      );
+      continue;
+    }
+    const key = ask.role ?? "*";
+    if (ask.use.length) mine[key] = ask.use;
+    else delete mine[key];
+    changed = true;
+    said.push(
+      ask.use.length
+        ? `${whoAsked(control.by)} set ${whose} subscriptions (${control.id}): ${ask.use.join(", then ")}`
+        : `${whoAsked(control.by)} cleared ${whose} subscriptions (${control.id}): ${ask.role ? "they follow the team's list" : "the team runs on this Mac's own login"}`
+    );
+  }
+  if (changed) {
+    if (Object.keys(mine).length) uses[entry.name] = mine;
+    else delete uses[entry.name];
+    setTeamUses(uses);
+    const steered = steer(entry, now);
+    if (steered) said.push(...steered.said);
+    else said.push("T3 Code's settings couldn't be read: the roles move at the watchdog's next run");
+  }
+  markApplied(
+    entry.run,
+    fresh.map((c) => c.id)
+  );
+  return said;
+}
+
+// The subscriptions on this machine and which the team runs on, as its lead reports them to the web app
+// (lib/tasks/teams.ts): names and readings, never a login or a folder.
+export function subscriptionsView(entry: Pick<RegistryEntry, "name" | "run">, now = new Date()): TeamSubscriptions {
+  const list = accounts();
+  const names = list.map((a) => a.name);
+  const state = subscriptionState();
+  const limits = subscriptionLimits();
+  let spend: Spend | null = null;
+  try {
+    spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
+  } catch {}
+  const closedFor = accountClosures(readLimits(entry.run), spend);
+  const steering = readSteering(entry.run);
+  return {
+    available: names.map((name) => {
+      const reading = state.readings[name];
+      const live = reading && Date.parse(reading.resetsAt) > now.getTime() ? reading : null;
+      const shut = closedFor[name] ?? gate(name, state, limits, names, now).why;
+      return { name, percent: live ? live.percent : null, resetsAt: live ? live.resetsAt : null, closed: shut ?? null };
+    }),
+    use: teamUses()[entry.name] ?? {},
+    roles: steering?.roles ?? {},
+    moving: steering?.moving ?? {},
+    waiting: Object.fromEntries(Object.entries(steering?.waiting ?? {}).map(([role, wait]) => [role, { why: wait.why, until: wait.until }])),
+  };
 }

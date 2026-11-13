@@ -11,6 +11,7 @@
 // where the team stands; work stays stopped until the operator resumes it.
 import { type Agreement, DEFAULT_AGREEMENT, normalised } from "./agreement.ts";
 import { designOpen, FOUNDATION, journeyDue, nowIso, Refused, type Doc, type Task } from "./model.ts";
+import { START_EXPIRES_HOURS, type StartAsk, type StartProgress, type StartStep } from "./start.ts";
 
 export const HOLD_SCOPES = ["now", "tasks", "journeys"] as const;
 export type HoldScope = (typeof HOLD_SCOPES)[number];
@@ -48,10 +49,21 @@ export interface ReviewAsk {
   note: string;
 }
 
+// Which subscriptions a team runs on, on its lead (lib/subscriptions.ts TeamUse): every role's list (`role` null), or
+// one role's own, in order. An empty list clears it: a role's own goes back to the team's, the team's to the lead's own
+// login.
+export interface SubscriptionsAsk {
+  role: string | null;
+  use: string[];
+}
+
 export interface Control extends Doc {
   team: string;
-  kind: "pause" | "resume" | "budget" | "agreement" | "review";
-  // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), or "budget" (the watchdog, at a limit).
+  // `start` and `starting` come before the team does: an ask to start it, and the machine's word on each step
+  // (start.ts). The watchdog of the team they made passes over them.
+  kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting";
+  // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit), or
+  // "machine:<name>" (a machine's word on an ask to start a team).
   by: string;
   at: string;
   // The operator's words: a resume's feedback goes to the planner.
@@ -69,6 +81,12 @@ export interface Control extends Doc {
   agreement?: Agreement | null;
   // A review: the operator's verdict on one decision.
   review?: ReviewAsk | null;
+  // Subscriptions: the list from now on.
+  subscriptions?: SubscriptionsAsk | null;
+  // A start: the ask, or null to withdraw the one before it.
+  start?: StartAsk | null;
+  // Starting: where the machine has got with an ask.
+  starting?: StartProgress | null;
 }
 
 // The pause in force, from the latest pause or resume.
@@ -194,6 +212,73 @@ export const reviewControl = (team: string, by: string, review: ReviewAsk, at = 
   note: review.note,
   review,
 });
+
+// The team's subscriptions from now on (the lead's watchdog writes the list and moves the roles, lib/steer.ts).
+export const subscriptionsControl = (team: string, by: string, ask: SubscriptionsAsk, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "subscriptions",
+  by,
+  at,
+  subscriptions: { role: ask.role, use: [...new Set(ask.use)] },
+});
+
+// An ask to start the team `team` (start.ts), or null to withdraw the one before it.
+export const startControl = (team: string, by: string, ask: StartAsk | null, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "start",
+  by,
+  at,
+  start: ask,
+});
+
+// A machine's word on an ask: the step it has reached, or why it stopped.
+export const startingControl = (team: string, machine: string, progress: StartProgress, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "starting",
+  by: `machine:${machine}`,
+  at,
+  starting: progress,
+});
+
+// Where an ask to start a team stands: the newest ask under its name and the machine's newest word on it ("waiting"
+// until it has said anything; "expired" once nothing picked it up in START_EXPIRES_HOURS). Null when there's no ask, or
+// the newest was withdrawn.
+export interface StartState {
+  control: Control;
+  ask: StartAsk;
+  step: StartStep | "waiting" | "expired";
+  stoppedAt: StartStep | null;
+  problem: string | null;
+  // For one that stopped: what the command that failed said, what to do about it at the machine, and the command to
+  // run there.
+  said: string | null;
+  fix: string | null;
+  command: string | null;
+  // When it was asked, and when the machine last said anything about it.
+  asked: string;
+  at: string;
+}
+export function startOf(controls: Control[], now = Date.now()): StartState | null {
+  const control = controls.findLast((c) => c.kind === "start");
+  if (!control?.start) return null;
+  const said = controls.findLast((c) => c.kind === "starting" && c.starting?.of === control.id);
+  const expired = !said && now - Date.parse(control.at) > START_EXPIRES_HOURS * 3_600_000;
+  return {
+    control,
+    ask: control.start,
+    step: said?.starting?.step ?? (expired ? "expired" : "waiting"),
+    stoppedAt: said?.starting?.stoppedAt ?? null,
+    problem: said?.starting?.problem ?? null,
+    said: said?.starting?.said ?? null,
+    fix: said?.starting?.fix ?? null,
+    command: said?.starting?.command ?? null,
+    asked: control.at,
+    at: said?.at ?? control.at,
+  };
+}
 
 const ids = (list: string[]): string => list.map((id) => `#${id}`).join(", ");
 export function describeHold(hold: Pick<Hold, "scope" | "tasks" | "journeys">): string {

@@ -37,6 +37,9 @@ export interface AppSettings {
   url: string;
   machine: { id: string; name: string };
   linkedAt: string;
+  // Set by `a6g connect app --projects <dir>`, at this machine's terminal only: the folder in which it starts the
+  // projects the web app asks for (lib/orders.ts). Absent: it starts none.
+  projects?: { dir: string } | null;
 }
 // What the Keychain holds: where the token goes, and the token.
 export interface AppLink {
@@ -79,9 +82,20 @@ export const saveToken = (url: string, token: string): boolean =>
   MACHINE_TOKEN.test(token) &&
   storeSecret(...KEYCHAIN, "Anything Factory: web app", Buffer.from(JSON.stringify({ url, token } satisfies AppLink)).toString("base64url"));
 // Keeps a new link: false when the Keychain wouldn't take its token (then nothing is saved).
+// A link made again keeps where this machine starts projects only when it's to the same app: another one is asked anew.
 export function saveLink(url: string, link: LinkToken): boolean {
   if (!saveToken(url, link.access_token)) return false;
-  writeJson(APP_FILE, { url, machine: link.machine, linkedAt: new Date().toISOString() } satisfies AppSettings);
+  const before = appSettings();
+  const projects = before?.url === url ? before.projects : null;
+  writeJson(APP_FILE, { url, machine: link.machine, linkedAt: new Date().toISOString(), ...(projects ? { projects } : {}) } satisfies AppSettings);
+  return true;
+}
+// Says where this machine starts projects for the web app, or (null) that it starts none: false when it isn't linked.
+export function setProjects(dir: string | null): boolean {
+  const settings = appSettings();
+  if (!settings) return false;
+  const { projects: _before, ...rest } = settings;
+  writeJson(APP_FILE, dir ? { ...rest, projects: { dir } } : rest);
   return true;
 }
 export function forgetLink(): void {

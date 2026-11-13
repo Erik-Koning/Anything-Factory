@@ -25,7 +25,8 @@ import { machinesRunning, online } from "../lib/fleet.ts";
 import { machineReport } from "../lib/commands/watchdog.ts";
 import { markMoved, migrate } from "../lib/tasks/migrate.ts";
 import { openStore, update } from "../lib/tasks/store.ts";
-import { type MongoClientLike, type MongoCollectionLike, storeOver } from "../lib/tasks/mongo.ts";
+import { storeOver } from "../lib/tasks/mongo.ts";
+import { fakeMongo } from "./fake-mongo.ts";
 
 const team = (overrides: RawTeam = {}) =>
   baseTeam({ roles: { planner: {}, builder: { limit: 2 }, reviewer: { limit: 1 }, approver: { limit: 1 } }, ...overrides });
@@ -126,56 +127,6 @@ describe("cycles", () => {
     assert.match((await a6g(["cycle", "list"], finishing.as("planner"))).out, /works to a finish line/);
   });
 });
-
-// An in-memory stand-in for the few driver calls the Mongo store makes.
-function fakeMongo(): MongoClientLike {
-  const dbs = new Map<string, Map<string, Map<string, Record<string, unknown>>>>();
-  const matches = (doc: Record<string, unknown>, filter: Record<string, unknown>) => Object.entries(filter).every(([k, v]) => doc[k] === v);
-  return {
-    db(name) {
-      const db = dbs.get(name) ?? new Map();
-      dbs.set(name, db);
-      return {
-        collection(cname): MongoCollectionLike {
-          const docs = db.get(cname) ?? new Map<string, Record<string, unknown>>();
-          db.set(cname, docs);
-          const clone = (d: Record<string, unknown> | undefined) => (d ? structuredClone(d) : null);
-          return {
-            findOne: async (filter) => clone([...docs.values()].find((d) => matches(d, filter))),
-            find: (filter) => ({ toArray: async () => [...docs.values()].filter((d) => matches(d, filter)).map((d) => structuredClone(d)) }),
-            insertOne: async (doc) => {
-              if (docs.has(String(doc._id))) throw Object.assign(new Error("duplicate"), { code: 11000 });
-              docs.set(String(doc._id), structuredClone(doc));
-            },
-            replaceOne: async (filter, doc) => {
-              const current = [...docs.values()].find((d) => matches(d, filter));
-              if (!current) return { matchedCount: 0 };
-              docs.set(String(current._id), structuredClone(doc));
-              return { matchedCount: 1 };
-            },
-            findOneAndUpdate: async (filter, update) => {
-              const id = String(filter._id);
-              const doc = docs.get(id) ?? { _id: id, seq: 0 };
-              const inc = (update.$inc ?? {}) as Record<string, number>;
-              for (const [k, v] of Object.entries(inc)) doc[k] = Number(doc[k] ?? 0) + v;
-              docs.set(id, doc);
-              return structuredClone(doc);
-            },
-            updateOne: async (filter, update) => {
-              const id = String(filter._id);
-              const doc = docs.get(id) ?? { _id: id, seq: 0 };
-              for (const [k, v] of Object.entries((update.$max ?? {}) as Record<string, number>)) doc[k] = Math.max(Number(doc[k] ?? 0), v);
-              Object.assign(doc, structuredClone((update.$set ?? {}) as Record<string, unknown>));
-              docs.set(id, doc);
-            },
-            createIndex: async () => "ok",
-          };
-        },
-      };
-    },
-    close: async () => {},
-  };
-}
 
 describe("the decision log in Mongo", () => {
   test("a decision is recorded, reviewed by a control and written onto its record, each team's apart; migrate takes it along", async () => {
@@ -348,7 +299,9 @@ describe("the machines the web app lists", () => {
         ]
       );
       assert.equal(report.teams[1]?.planner, null, "a worker runs no planner");
-      assert.deepEqual(Object.keys(report).sort(), ["factory", "name", "teams"], "nothing about whose it is");
+      assert.deepEqual(Object.keys(report).sort(), ["factory", "name", "projects", "teams"], "nothing about whose it is");
+      // It says it starts no projects for the app, until its operator says it may (a6g connect app --projects).
+      assert.equal(report.projects, null);
 
       // Which machines run a team, its lead first; and which have reported lately.
       const at = new Date().toISOString();

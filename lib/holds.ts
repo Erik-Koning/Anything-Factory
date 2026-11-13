@@ -128,7 +128,11 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     if (done(control.id)) continue;
     // A review is written onto its decision's record, in the store (lib/reviews.ts), and marked applied there.
     if (control.kind === "review") continue;
+    // The team's subscriptions are the machine's to set, not the run folder's (lib/steer.ts applies them).
+    if (control.kind === "subscriptions") continue;
     now.push(control.id);
+    // The ask that started this team and its machine's word on each step: done with before the team was (start.ts).
+    if (control.kind === "start" || control.kind === "starting") continue;
     const hold = control.kind === "pause" ? holdOf([control]) : null;
     const budget = control.by === "budget";
     // The watchdog's own record of a hold that settled: the run folder has it already.

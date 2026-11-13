@@ -1,5 +1,6 @@
 // a6g init [<repo>] [--name <team>] [--branch <integration>] [--base <ref>] [--checkout <dir> | --in-place]
 //          [--owner <email>] [--non-technical] [--model <name>] [--no-interview]
+//          [--title <title>] [--store files|mongo] [--goal-file <file>]
 //
 // Sets up a team in a repository:
 // 1. Detects what it can: git, package manager and scripts, what CI runs, how the repository reaches outside the
@@ -15,6 +16,10 @@
 //    .a6g/, prove it with a6g check --run, and register and start the team if the operator says so. Its guard lets
 //    it write only .a6g/. It runs on Fable unless --model names another (fable, opus, sonnet, haiku, or a model id):
 //    what it settles here, every task after is built on.
+//
+// A project started from the web app (lib/commands/projects.ts) drafts with --no-interview, its title, its tasks in
+// MongoDB (--store mongo) and the operator's goal from the form (--goal-file), then runs the setup agent with nobody
+// there (setupUnattended, below).
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -24,7 +29,7 @@ import { MODEL_ID, modelId } from "../models.ts";
 import { FACTORY_ROOT, PACKAGE, versionDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, git, gitOk, hash, parseArgs, text as optionText, which, writeJson } from "../util.ts";
+import { die, git, gitOk, hash, parseArgs, readJson, text as optionText, which, writeJson } from "../util.ts";
 
 const TEMPLATES = join(FACTORY_ROOT, "templates", "team");
 
@@ -71,6 +76,22 @@ export function init(argv: string[]): number {
   const port = 9300 + (Number.parseInt(hash(name), 16) % 90);
   const draft = draftTeam(found, { name, branch, owner: optionText(options["owner"]), technical: !options["non-technical"] });
   draft.base = base;
+  // What a project started from the web app is given (lib/commands/projects.ts): its title, its tasks in MongoDB,
+  // where the app reads them, and the operator's goal from the form.
+  const title = optionText(options["title"]);
+  if (title !== undefined) draft.title = title;
+  const store = optionText(options["store"]);
+  if (store !== undefined && store !== "files" && store !== "mongo") die(`--store ${store}: files (in the run folder) or mongo (a6g connect mongo)`);
+  if (store === "mongo") draft.tasks = { store: "mongo" };
+  const goalFile = optionText(options["goal-file"]);
+  let goal: string | null = null;
+  if (goalFile !== undefined) {
+    try {
+      goal = readFileSync(resolve(goalFile), "utf8").trim() || null;
+    } catch {
+      die(`--goal-file: ${resolve(goalFile)} can't be read`);
+    }
+  }
   const app = hasApp(found);
   if (app) draft.environment = { ...draft.environment, health: [`http://localhost:${port}/`] };
   // Refuse a draft that couldn't load (a protected integration branch, a bad owner) before making anything.
@@ -132,7 +153,7 @@ export function init(argv: string[]): number {
   write(
     "brief.md",
     fill("brief.md", {
-      GOAL: "(The operator's direction goes here.)",
+      GOAL: goal ?? "(The operator's direction goes here.)",
       FINISH: "(How done is proven: the finish command in team.json.)",
       BUDGET: "(None given.)",
     })
@@ -203,16 +224,7 @@ export function init(argv: string[]): number {
     );
     return 0;
   }
-  const first = [
-    `Set up an Anything Factory team for the repository at ${repo}.`,
-    `The team's checkout is ${checkout} on its integration branch ${branch} (from ${base}); the team is named ${name}.`,
-    `The detection report is ${report}. The draft is in ${dir}. The reference for team.json is ${join(FACTORY_ROOT, "docs", "team.md")}.`,
-    ...(found.empty ? ["Nothing is built here yet: this is a new project, and its foundation is yours to propose."] : []),
-    ...(draft.operator?.technical === false
-      ? ["The draft says the operator isn't technical (operator.technical): whoever started this said so, so it stands."]
-      : []),
-    "Read them and the repository first, then interview me.",
-  ].join(" ");
+  const first = `${setupOpening({ repo, checkout, branch, base, name, empty: found.empty, technical: draft.operator?.technical !== false })} Read them and the repository first, then interview me.`;
   const session = spawnSync(
     "claude",
     ["--plugin-dir", join(FACTORY_ROOT, "plugin"), "--agent", "a6g:setup", "--model", model, "--setting-sources", "project", first],
@@ -223,4 +235,101 @@ export function init(argv: string[]): number {
     }
   );
   return session.status ?? 0;
+}
+
+// How the setup agent's first message opens: where everything is, and what whoever started the setup already said.
+function setupOpening(at: { repo: string; checkout: string; branch: string; base: string; name: string; empty: boolean; technical: boolean }): string {
+  const dir = join(at.checkout, ".a6g");
+  return [
+    `Set up an Anything Factory team for the repository at ${at.repo}.`,
+    `The team's checkout is ${at.checkout} on its integration branch ${at.branch} (from ${at.base}); the team is named ${at.name}.`,
+    `The detection report is ${join(dir, "run", "setup", "detect.json")}. The draft is in ${dir}. The reference for team.json is ${join(FACTORY_ROOT, "docs", "team.md")}.`,
+    ...(at.empty ? ["Nothing is built here yet: this is a new project, and its foundation is yours to propose."] : []),
+    ...(at.technical ? [] : ["The draft says the operator isn't technical (operator.technical): whoever started this said so, so it stands."]),
+  ].join(" ");
+}
+
+// What the setup agent may run when nobody is there to be asked (a team started from the web app,
+// lib/commands/projects.ts): reading (its guard keeps it from secrets, as it keeps every agent), writing (its guard
+// keeps that to .a6g/), and the few commands its instructions name. Nothing else is allowed, and no permission check
+// is skipped: a call outside this list is refused, not asked about.
+export const UNATTENDED_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Write",
+  "Edit",
+  "Bash(git add *)",
+  "Bash(git commit *)",
+  "Bash(git status *)",
+  "Bash(git diff *)",
+  "Bash(git log *)",
+  "Bash(a6g check *)",
+  "Bash(a6g doctor *)",
+  "Bash(a6g help *)",
+  "Bash(chmod *)",
+  "Bash(bash -n *)",
+];
+const UNATTENDED_MIN = 45;
+
+// Runs the setup agent with nobody there, on a checkout `a6g init --no-interview` drafted: it reads the repository and
+// the goal in the brief, decides what it would have asked, and proves the result (plugin/agents/setup.md, "When the
+// operator isn't there"). Its message goes on standard input, since the list of tools would otherwise take it for one
+// more. Resolves to its exit status and what it printed.
+export function setupUnattended(repo: string, checkout: string, { model = "fable" }: { model?: string } = {}): { code: number; out: string } {
+  const team = readJson<{ name?: string; branch?: string; base?: string; operator?: { technical?: boolean } } | null>(
+    join(checkout, ".a6g", "team.json"),
+    null
+  );
+  if (!team?.name) return { code: 1, out: `${join(checkout, ".a6g", "team.json")} can't be read: a6g init --no-interview drafts it` };
+  if (!which("claude")) return { code: 1, out: "Claude Code (claude) isn't on the watchdog's PATH on this machine" };
+  let empty = false;
+  try {
+    empty = detect(repo).empty;
+  } catch {}
+  const first = [
+    setupOpening({
+      repo,
+      checkout,
+      branch: team.branch ?? "a6g/next",
+      base: team.base ?? "main",
+      name: team.name,
+      empty,
+      technical: team.operator?.technical !== false,
+    }),
+    "This setup is unattended: the operator started it from the web app and isn't at this machine, so nobody can answer you.",
+    `What they asked for is in ${join(checkout, ".a6g", "brief.md")}, under "What should exist when the team is done": their goal, in their words.`,
+    'Follow "When the operator isn\'t there" in your instructions.',
+  ].join(" ");
+  const session = spawnSync(
+    "claude",
+    [
+      "-p",
+      "--plugin-dir",
+      join(FACTORY_ROOT, "plugin"),
+      "--agent",
+      "a6g:setup",
+      "--model",
+      modelId(model),
+      "--setting-sources",
+      "project",
+      "--allowedTools",
+      UNATTENDED_TOOLS.join(","),
+    ],
+    {
+      cwd: checkout,
+      input: first,
+      encoding: "utf8",
+      timeout: UNATTENDED_MIN * 60_000,
+      maxBuffer: 32 * 1024 * 1024,
+      env: { ...process.env, A6G_SETUP: "1", A6G_UNATTENDED: "1", A6G_HOME_DIR: checkout, A6G_FACTORY: FACTORY_ROOT },
+    }
+  );
+  const out = `${session.stdout ?? ""}${session.stderr ?? ""}`;
+  if (session.error)
+    return {
+      code: 1,
+      out: `${out}\n${(session.error as NodeJS.ErrnoException).code === "ETIMEDOUT" ? `the setup agent took more than ${UNATTENDED_MIN} minutes` : session.error.message}`,
+    };
+  return { code: session.status ?? 1, out };
 }
