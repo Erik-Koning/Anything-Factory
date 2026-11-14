@@ -12,8 +12,8 @@ export const MARKS: { step: StartStep; label: string; will: string; doing: strin
   {
     step: "repository",
     label: "Repository",
-    will: "It makes the repository when it's new, with a README that holds the title and what you wrote.",
-    doing: "Making the repository and its first commit.",
+    will: "It makes the repository when it's new (on GitHub too, when you ask), or clones yours from GitHub: its fork, when your Mac's GitHub account can't push to it.",
+    doing: "Getting the repository: making it, or cloning it from GitHub.",
   },
   {
     step: "draft",
@@ -36,7 +36,7 @@ export const MARKS: { step: StartStep; label: string; will: string; doing: strin
   {
     step: "register",
     label: "Start",
-    will: "The team is registered with the budget and subscriptions you chose, its planner starts, and it shows on Teams.",
-    doing: "Registering the team with its budget and subscriptions, and starting its planner.",
+    will: "The team is registered with the budget, subscriptions and agreement you chose, and shows on Teams. Its planner starts, or it waits for you if you asked.",
+    doing: "Registering the team with its budget, subscriptions and agreement, and starting it.",
   },
 ];

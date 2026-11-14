@@ -54,7 +54,7 @@ describe("an ask to start a team", () => {
     assert.match(problem({ title: "two\nlines" }), /one line/);
     assert.match(problem({ repo: { existing: "../etc" } }), /repository's folder/);
     assert.match(problem({ repo: { existing: ".hidden" } }), /repository's folder/);
-    assert.match(problem({ repo: { existing: "a", create: "b" } }), /repository's folder/);
+    assert.match(problem({ repo: { existing: "a", create: "b" } }), /Choose a repository/);
     assert.match(problem({ goal: "" }), /what should exist/);
     assert.match(problem({ goal: "x".repeat(4001) }), /4000/);
     assert.match(problem({ goal: "hidden‮text" }), /plain text/);
@@ -143,7 +143,11 @@ describe("what a machine offers to start", () => {
     assert.equal(projectsSetting(), null);
     assert.equal(setProjects(dir), true);
     assert.deepEqual(projectsSetting(), { dir, machine: { id: MACHINE, name: "studio" } });
-    assert.deepEqual(machineProjects(), { dir, repos: ["shop"], subscriptions: [{ name: "default", percent: null }] });
+    assert.deepEqual(
+      machineProjects(new Date(), () => null),
+      { dir, repos: ["shop"], subscriptions: [{ name: "default", percent: null }], github: null }
+    );
+    assert.equal(machineProjects(new Date(), () => "octocat")?.github, "octocat", "the GitHub account it clones and forks as");
     assert.equal(setProjects(null), true);
     assert.equal(machineProjects(), null);
     assert.equal(guardedFolder(join(process.env.HOME ?? "", "Documents", "code")), "Documents");

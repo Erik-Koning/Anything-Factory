@@ -283,6 +283,9 @@ export interface StartState {
   said: string | null;
   fix: string | null;
   command: string | null;
+  // What the machine's steps did that the operator should know (the repository cloned or forked, the team waiting for
+  // them), in order.
+  notes: string[];
   // When it was asked, and when the machine last said anything about it.
   asked: string;
   at: string;
@@ -290,7 +293,8 @@ export interface StartState {
 export function startOf(controls: Control[], now = Date.now()): StartState | null {
   const control = controls.findLast((c) => c.kind === "start");
   if (!control?.start) return null;
-  const said = controls.findLast((c) => c.kind === "starting" && c.starting?.of === control.id);
+  const steps = controls.filter((c) => c.kind === "starting" && c.starting?.of === control.id);
+  const said = steps.at(-1);
   const expired = !said && now - Date.parse(control.at) > START_EXPIRES_HOURS * 3_600_000;
   return {
     control,
@@ -301,6 +305,7 @@ export function startOf(controls: Control[], now = Date.now()): StartState | nul
     said: said?.starting?.said ?? null,
     fix: said?.starting?.fix ?? null,
     command: said?.starting?.command ?? null,
+    notes: steps.flatMap((c) => (c.starting?.note ? [c.starting.note] : [])),
     asked: control.at,
     at: said?.at ?? control.at,
   };

@@ -1466,6 +1466,21 @@ fieldset.choices > legend {
   gap: 6px;
   padding-left: 26px;
 }
+/* Two choices side by side where there's room. */
+@media (min-width: 721px) {
+  fieldset.choices.pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  fieldset.choices.pair > legend,
+  fieldset.choices.pair > p {
+    grid-column: 1 / -1;
+  }
+}
+/* The groups of how a team works with the operator, each set apart by a rule. */
+.step.how > fieldset {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 /* A plain-text report (a settled pause's), as written. */
 pre.report {
   white-space: pre-wrap;
@@ -2692,12 +2707,70 @@ details.team > .team-body {
     var(--rim),
     var(--raise);
 }
+/* Set up and paused, as asked: it waits on the operator ("held": li.waiting is the inbox's). */
+.start-card.held {
+  box-shadow:
+    inset 3px 0 0 var(--warn),
+    var(--rim),
+    var(--raise);
+}
 .start-card > * {
   min-width: 0;
   margin: 0;
 }
 .start-card .where {
   margin-top: -6px;
+}
+/* What the Mac's steps did that the operator should know: the repository cloned, forked or made on GitHub. */
+.start-card .notes {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--ink-2);
+}
+.start-card .notes a.code {
+  font-family: var(--font-code);
+  font-stretch: 87.5%;
+  font-weight: 400;
+}
+/* After the command an older Mac is updated with, what follows from it, on a line of its own. */
+.older .then {
+  display: block;
+  margin-top: 8px;
+}
+/* Names inside a sentence (a repository, a Mac): mono, without the chip a path or a command gets. */
+.ids code {
+  padding: 0;
+  background: none;
+  border: 0;
+  display: inline;
+  font-size: 0.95em;
+}
+/* The Mac's GitHub account, under where it starts projects. */
+.github-as {
+  display: block;
+  margin-top: 2px;
+}
+/* Trusting someone else's code to run on the Mac: a tick of its own, set apart. */
+.check.trust .hint {
+  display: block;
+  margin-top: 2px;
+}
+/* Until it's ticked, a word says the start waits for it. */
+.check.trust .needed-word {
+  margin-left: 8px;
+  color: var(--warn);
+  font: 600 11px/1.3 var(--font-code);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.check.trust {
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--r-ctl);
 }
 .marks {
   display: grid;
@@ -2740,6 +2813,16 @@ details.team > .team-body {
 }
 .marks li.stopped .dot {
   background: var(--signal);
+}
+.marks li.held {
+  color: var(--warn);
+  font-weight: 600;
+}
+.marks li.held .dot {
+  background: repeating-linear-gradient(90deg, var(--warn) 0 8px, color-mix(in srgb, var(--warn) 35%, transparent) 8px 12px);
+}
+.start-card.held .marks-now {
+  color: var(--warn);
 }
 @keyframes mark-now {
   from {
@@ -2926,8 +3009,11 @@ input.six {
 }
 .segments input:checked + span {
   background: var(--surface);
-  box-shadow: var(--rim), var(--raise-s);
-  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--brand) 55%, transparent),
+    var(--rim),
+    var(--raise-s);
+  color: var(--brand);
 }
 .segments input:focus-visible + span {
   outline: 2px solid var(--focus);
@@ -3169,10 +3255,7 @@ ol.setup > li > * {
   .marks-now {
     display: block;
   }
-  /* One that's waiting or under way keeps to its name, its marks and a line: where it runs is on the form it came from. */
-  .start-card:not(.ended) .where {
-    display: none;
-  }
+
   .order-list > li {
     grid-template-columns: 2ch minmax(0, 1fr);
     align-items: start;

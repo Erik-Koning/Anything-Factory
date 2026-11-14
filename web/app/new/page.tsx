@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { online } from "../../../lib/fleet.ts";
-import { repoOf } from "../../../lib/tasks/start.ts";
 import { Command } from "../../components/command.tsx";
 import { Refresh } from "../../components/refresh.tsx";
 import { MARKS } from "../../components/start-marks.ts";
@@ -24,6 +23,15 @@ const EMPTY: StartFormState = {
   repo: "new",
   create: "",
   existing: "",
+  github: "",
+  publish: "private",
+  trusted: false,
+  base: "",
+  mode: "finish",
+  approval: "operator",
+  push: "pull-request",
+  level: "balanced",
+  hold: false,
   title: "",
   name: "",
   goal: "",
@@ -53,6 +61,9 @@ export default async function StartPage({ searchParams }: { searchParams: Search
       repos: machine.projects?.repos ?? [],
       subscriptions: machine.projects?.subscriptions ?? [],
       teams: machine.teams.map((team) => team.name),
+      // Whether it reads an ask's newer choices (its report says which GitHub account it uses, or none), and which.
+      newer: machine.projects?.github !== undefined,
+      github: machine.projects?.github ?? null,
     }));
   // Names taken: every team that published its settings (those taken off the site keep theirs), and the asks open.
   const teams = await allTeams({ retired: true });
@@ -66,9 +77,19 @@ export default async function StartPage({ searchParams }: { searchParams: Search
       ? {
           ...EMPTY,
           machine: before.ask.machine,
-          repo: repoOf(before.ask).create ? "new" : "existing",
-          create: repoOf(before.ask).create ? repoOf(before.ask).name : "",
-          existing: repoOf(before.ask).create ? "" : repoOf(before.ask).name,
+          repo: "github" in before.ask.repo ? "github" : "existing" in before.ask.repo ? "existing" : before.ask.repo.publish ? "new-github" : "new",
+          create: "create" in before.ask.repo ? before.ask.repo.create : "",
+          existing: "existing" in before.ask.repo ? before.ask.repo.existing : "",
+          github: "github" in before.ask.repo ? before.ask.repo.github : "",
+          publish: "create" in before.ask.repo && before.ask.repo.publish === "public" ? "public" : "private",
+          // Trusting someone's code is said again each time, never carried over.
+          trusted: false,
+          base: before.ask.base ?? "",
+          mode: before.ask.mode ?? "finish",
+          approval: before.ask.approval ?? "operator",
+          push: before.ask.push ?? "none",
+          level: before.ask.level ?? "balanced",
+          hold: before.ask.hold ?? false,
           title: before.ask.title,
           name: before.team,
           goal: before.ask.goal,

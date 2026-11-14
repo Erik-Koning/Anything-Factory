@@ -9,7 +9,7 @@
 //
 // Per ask, in ~/.a6g/orders: <team>.log (everything its steps printed), <team>.pid (the process carrying it out) and
 // <team>.json (what it made, so a second try doesn't refuse its own repository).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +20,18 @@ import { A6G_HOME, FACTORY_ROOT, readRegistry } from "./paths.ts";
 import { accounts, subscriptionState } from "./subscriptions.ts";
 import { startingControl, startOf, type StartState } from "./tasks/controls.ts";
 import { type MongoClientLike, storeOver } from "./tasks/mongo.ts";
-import { REPO_NAME, repoOf, START_TEAM, type StartAsk, startEnded, startFrom, type StartStep, STEP_WORDS } from "./tasks/start.ts";
+import {
+  GITHUB_LOGIN,
+  githubRepoOf,
+  REPO_NAME,
+  repoOf,
+  START_TEAM,
+  type StartAsk,
+  startEnded,
+  startFrom,
+  type StartStep,
+  STEP_WORDS,
+} from "./tasks/start.ts";
 import type { Store } from "./tasks/store.ts";
 import { readJson, writeJson } from "./util.ts";
 
@@ -92,8 +103,42 @@ export function offeredRepos(dir: string): string[] {
     .slice(0, REPORT_LIMITS.repos);
 }
 
-// What this machine offers the web app (lib/fleet.ts), or null when it starts no projects for it.
-export function machineProjects(now = new Date()): MachineProjects | null {
+// The GitHub account this machine's gh is signed in as, which clones, forks and makes repositories for an ask; null
+// when there's none. The watchdog reports it every five minutes, so GitHub is asked at most hourly while there's one,
+// and every five minutes while there isn't (an answer kept in ~/.a6g/orders/github.json); a failed asking keeps the
+// account it had for a day, and is tried again in ten minutes.
+const GITHUB_FILE = join(ORDERS, "github.json");
+const askGithub = (): string | null | undefined => {
+  const done = spawnSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8", timeout: 15_000 });
+  if (done.error) return null;
+  const login = (done.stdout ?? "").trim();
+  if (done.status === 0) return GITHUB_LOGIN.test(login) ? login : null;
+  // Signed out says so; anything else (no network, GitHub down) is a failed asking.
+  return /not logged|gh auth login|authenticat/i.test(done.stderr ?? "") ? null : undefined;
+};
+export function githubAccount(now = Date.now(), ask: () => string | null | undefined = askGithub): string | null {
+  type Kept = { login: string | null; at: string; tried?: string };
+  let kept: Kept | null = null;
+  try {
+    kept = readJson<Kept | null>(GITHUB_FILE, null);
+  } catch {}
+  const age = (at: string | undefined) => (at ? now - Date.parse(at) : Infinity);
+  // An account is kept an hour; none, five minutes, so signing in shows soon.
+  if (kept && age(kept.at) < (kept.login ? 3_600_000 : 300_000)) return kept.login;
+  if (kept && age(kept.tried) < 600_000) return age(kept.at) < 86_400_000 ? kept.login : null;
+  const login = ask();
+  const at = new Date(now).toISOString();
+  try {
+    mkdirSync(ORDERS, { recursive: true });
+    writeJson(GITHUB_FILE, login === undefined ? { login: kept?.login ?? null, at: kept?.at ?? at, tried: at } : { login, at });
+  } catch {}
+  if (login !== undefined) return login;
+  return kept && age(kept.at) < 86_400_000 ? kept.login : null;
+}
+
+// What this machine offers the web app (lib/fleet.ts), or null when it starts no projects for it. `github` also says
+// this version reads an ask's newer settings (lib/tasks/start.ts NEWER_ASK).
+export function machineProjects(now = new Date(), github: () => string | null = () => githubAccount(now.getTime())): MachineProjects | null {
   const setting = projectsSetting();
   if (!setting) return null;
   const { readings } = subscriptionState();
@@ -106,6 +151,7 @@ export function machineProjects(now = new Date()): MachineProjects | null {
         const reading = readings[name];
         return { name, percent: reading && Date.parse(reading.resetsAt) > now.getTime() ? reading.percent : null };
       }),
+    github: github(),
   };
 }
 
@@ -136,7 +182,7 @@ export const orderPaths = (ask: Pick<StartAsk, "repo">, dir: string): { repo: st
 // Why this machine won't start `team` as asked, in words for the operator, or null when it will. What an earlier ask
 // under the same name made (its repository, its checkout) is that name's own, not someone else's: an ask made again
 // after one stopped carries on with it.
-export function refusalOf(ask: StartAsk, team: string, setting: ProjectsSetting): string | null {
+export function refusalOf(ask: StartAsk, team: string, setting: ProjectsSetting, github: () => string | null = () => githubAccount()): string | null {
   const here = machineName();
   if (!START_TEAM.test(team)) return `${team} isn't a team's name: lowercase letters, digits and dashes, starting with a letter.`;
   if (readRegistry(team)) return `${here} already runs a team named ${team}. Give this one another short name.`;
@@ -163,6 +209,16 @@ export function refusalOf(ask: StartAsk, team: string, setting: ProjectsSetting)
   const known = accounts().map((a) => a.name);
   const unknown = ask.use.filter((sub) => !known.includes(sub));
   if (unknown.length) return `${here} has no subscription named ${unknown.join(", ")} (it has ${known.join(", ")}).`;
+  // GitHub, as this machine's own account: one to clone or fork, or a new one to make there.
+  const fromGithub = "github" in ask.repo ? githubRepoOf(ask.repo.github) : null;
+  if ("github" in ask.repo && !fromGithub) return `${ask.repo.github} isn't a GitHub repository's name (owner/name).`;
+  if (fromGithub || ("create" in ask.repo && ask.repo.publish)) {
+    const login = github();
+    if (!login) return `${here} isn't signed in to GitHub: run gh auth login there, then ask again.`;
+    // Someone else's code runs here as the team sets it up: only when the operator said they trust it.
+    if (fromGithub && fromGithub.owner.toLowerCase() !== login.toLowerCase() && ask.trusted !== true)
+      return `${fromGithub.full} isn't ${login}'s: ask again, ticking that you trust its code to run on ${here}.`;
+  }
   return null;
 }
 

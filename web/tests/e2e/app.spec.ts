@@ -1916,6 +1916,11 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   await page.goto("/");
   await page.getByRole("link", { name: "Start a project" }).click();
   await expect(page).toHaveURL(/\/new$/);
+  // A Mac on an older factory is offered only what it reads.
+  await expect(page.getByText("One on GitHub")).toHaveCount(0);
+  await expect(page.getByText("attic runs an older factory, so it can't start from GitHub or take the team's rules from this form.")).toBeVisible();
+  await expect(page.locator("p.where")).toContainText("older factory");
+  await expect(page.getByRole("group", { name: "Its aim", exact: true })).toHaveCount(0);
   // The key waits for the form; a name that's taken is said as it's typed.
   const send = page.getByRole("button", { name: "Start the project" });
   await expect(send).toBeDisabled();
@@ -2028,7 +2033,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   await page.goto("/new");
   await field("Title").fill("Blog engine");
   await field("What should exist when the team is done").fill("Posts, tags and a feed.");
-  await page.getByText("One that's there already").click();
+  await page.getByText("One already on this Mac").click();
   await expect(page.getByRole("combobox", { name: "Repository" })).toHaveValue("blog-engine");
   await page.getByText("The team chooses").click();
   await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
@@ -2065,6 +2070,113 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   await graph
     .collection<{ _id: string }>("counters")
     .deleteMany({ _id: { $in: ["shop-two:controls", "shop-two:stakeholders", "blog-engine:controls", "blog-engine:stakeholders"] } });
+});
+
+test("the admin starts a project from someone else's GitHub repository, with the team's rules chosen and set up to wait; the card says what the Mac did", async () => {
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  const field = (name: string | RegExp) => page.getByRole("textbox", { name, exact: typeof name === "string" });
+  const machines = accounts.collection<{ _id: string }>("machines");
+  const attic = await machines.findOne({ name: "attic" });
+  const offers = { dir: "~/code", repos: ["blog-engine"], subscriptions: [{ name: "default", percent: 41 }] };
+  // The Mac reads the newer choices, but isn't signed in to GitHub: the GitHub choices wait for it.
+  await machines.updateOne(
+    { _id: attic?._id ?? "" },
+    { $set: { projects: { ...offers, github: null }, projectsKnown: true, at: new Date(), lastSeenAt: new Date() } }
+  );
+  await page.goto("/new");
+  await expect(page.getByRole("radio", { name: /One on GitHub/ })).toBeDisabled();
+  await expect(page.getByText("Needs attic signed in to GitHub (gh auth login).").first()).toBeVisible();
+  await page.goto("/machines");
+  await expect(card(page, "attic")).toContainText("Not signed in to GitHub: on it, gh auth login");
+
+  await machines.updateOne({ _id: attic?._id ?? "" }, { $set: { projects: { ...offers, github: "octocat" } } });
+  await page.goto("/machines");
+  await expect(card(page, "attic")).toContainText("On GitHub as octocat");
+  await page.goto("/new");
+  await expect(page.locator("p.where")).toContainText("on GitHub as octocat");
+  await field("Title").fill("Hello");
+  await field("What should exist when the team is done").fill("Say hello in French too.");
+  await page.getByRole("radio", { name: /One on GitHub/ }).check();
+  await field("Repository on GitHub").fill("https://github.com/someone/hello.git");
+  await expect(page.locator("#github-hint")).toContainText(
+    "Not octocat's. When attic picks this up it asks GitHub: if octocat can push to it, it's cloned; if not, it's forked to octocat/hello first and the fork is cloned."
+  );
+  // Someone else's code: the key waits for the tick.
+  const send = page.getByRole("button", { name: "Start the project" });
+  await expect(send).toBeDisabled();
+  await expect(page.locator("#start-missing")).toContainText("your word that you trust its code");
+  await page.getByRole("checkbox", { name: /I trust/ }).check();
+  await page.getByRole("textbox", { name: /^Base branch/ }).fill("develop");
+  // The team's rules, each with the safer default until chosen.
+  await expect(page.getByRole("radio", { name: /^A finish line/ })).toBeChecked();
+  await expect(page.getByRole("radio", { name: /^I do/ })).toBeChecked();
+  await expect(page.getByRole("radio", { name: "Balanced" })).toBeChecked();
+  await expect(page.getByRole("radio", { name: /^Push its branch and open a pull request/ })).toBeChecked();
+  await expect(page.getByText("Into develop, for you to merge. On a fork, both go to the fork, never the original.")).toBeVisible();
+  await page.getByRole("radio", { name: /^In cycles/ }).check();
+  await expect(field("What it should work toward")).toHaveValue("Say hello in French too.");
+  await page.getByRole("radio", { name: /^The team's approver/ }).check();
+  await page.getByText("Hands-off", { exact: true }).click();
+  await page.getByRole("radio", { name: /^Set it up, then wait for me/ }).check();
+  const recap = page.locator("dl.recap");
+  await expect(recap).toContainText("someone/hello, cloned if octocat can push to it, or forked to octocat/hello (the Mac checks), into ~/code/hello");
+  await expect(recap).toContainText("you approve the stack first; its approver approves up to medium, you the rest; asks you: hands-off");
+  await expect(recap).toContainText("in cycles");
+  await expect(recap).toContainText("pushes a6g/next to someone/hello, or the fork octocat/hello, with a pull request into develop");
+  await expect(page.getByText("needed to start")).toHaveCount(0);
+  await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
+  await page.getByRole("button", { name: "Set up the project" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Hello.");
+  expect(await graph.collection("controls").findOne({ team: "hello", kind: "start" })).toMatchObject({
+    start: {
+      repo: { github: "someone/hello" },
+      trusted: true,
+      base: "develop",
+      mode: "cycles",
+      approval: "thresholds",
+      push: "pull-request",
+      level: "hands-off",
+      hold: true,
+    },
+  });
+  expect(await accounts.collection("audit").findOne({ team: "hello", action: "project.asked", outcome: "ok" })).toMatchObject({
+    detail: "on attic, from GitHub someone/hello, to wait once set up",
+  });
+
+  // What the Mac did, as it says it: forked, then set up and waiting.
+  const starting = page.locator("#start-hello");
+  await expect(starting).toContainText("from GitHub someone/hello");
+  const mac = storeOver({ db: () => graph, close: async () => {} } as unknown as MongoClientLike, {
+    name: "hello",
+    tasks: { store: "mongo", database: state().a6gDatabase, lead: null },
+  });
+  const forked = "Forked someone/hello to octocat/hello: octocat can't push to the original. Its pull requests go to the fork.";
+  await mac.controls.create(startingControl("hello", "attic", { of: "k1", step: "picked-up", problem: null }));
+  await mac.controls.create(startingControl("hello", "attic", { of: "k1", step: "repository", problem: null }));
+  await mac.controls.create(startingControl("hello", "attic", { of: "k1", step: "draft", problem: null, note: forked }));
+  await page.reload();
+  await expect(starting.locator(".notes")).toHaveText(forked);
+  await mac.controls.create(
+    startingControl("hello", "attic", {
+      of: "k1",
+      step: "started",
+      problem: null,
+      note: "Set up, and waiting for you: resume it from its overview when you're ready.",
+    })
+  );
+  await page.reload();
+  await expect(starting).toContainText("set up, waiting for you");
+  await expect(starting).toContainText("Set up and checked, and paused as you asked: nothing runs or spends until you resume it.");
+  await expect(starting.getByRole("link", { name: "Open to resume" })).toHaveAttribute("href", "/t/hello");
+  await expect(starting.locator("ol.marks li.held")).toContainText("Waiting");
+  await expect(starting.locator("ol.marks li.done")).toHaveCount(5);
+  await expect(starting.locator(".notes li")).toHaveCount(1);
+
+  // As it was.
+  await machines.updateOne({ _id: attic?._id ?? "" }, { $unset: { projects: "", projectsKnown: "" } });
+  for (const name of ["controls", "stakeholders"]) await graph.collection(name).deleteMany({ team: "hello" });
+  await graph.collection<{ _id: string }>("counters").deleteMany({ _id: { $in: ["hello:controls", "hello:stakeholders"] } });
 });
 
 test("an admin session without its second factor is refused every admin page and action", async ({ browser }) => {

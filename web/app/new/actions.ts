@@ -6,7 +6,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { withNotice } from "../../components/ui.tsx";
-import { REPO_NAME, START_TEAM, startFrom } from "../../../lib/tasks/start.ts";
+import { isLevel, type Level } from "../../../lib/tasks/agreement.ts";
+import { BRANCH_NAME, githubRepoOf, newerAsk, REPO_NAME, START_TEAM, type StartAsk, startFrom } from "../../../lib/tasks/start.ts";
 import { type Limits, Refused, stakeholderOf, startFromWeb, teamDoc } from "../../server/factory.ts";
 import { linkedMachines } from "../../server/machines.ts";
 import { takeRequestAllowance } from "../../server/people.ts";
@@ -28,9 +29,19 @@ function reasonOf(error: unknown): string {
 export interface StartFormState {
   error: string | null;
   machine: string;
-  repo: "new" | "existing";
+  // A new repository on the Mac (and on GitHub too: "new-github"), one in its folder, or one on GitHub.
+  repo: "new" | "new-github" | "existing" | "github";
   create: string;
   existing: string;
+  github: string;
+  publish: "private" | "public";
+  trusted: boolean;
+  base: string;
+  mode: "finish" | "cycles";
+  approval: "operator" | "thresholds";
+  push: "none" | "branch" | "pull-request";
+  level: Level;
+  hold: boolean;
   title: string;
   name: string;
   goal: string;
@@ -45,11 +56,23 @@ export interface StartFormState {
 
 // An ask from the form. What was typed comes back with a refusal, so a wrong code doesn't lose the goal.
 export async function startProjectAction(_previous: StartFormState, form: FormData): Promise<StartFormState> {
+  const source = text(form, "repo");
+  const pushed = text(form, "push");
+  const level = text(form, "level");
   const fields: Omit<StartFormState, "error"> = {
     machine: text(form, "machine"),
-    repo: text(form, "repo") === "existing" ? "existing" : "new",
+    repo: source === "existing" || source === "github" || source === "new-github" ? source : "new",
     create: text(form, "create").trim(),
     existing: text(form, "existing"),
+    github: text(form, "github").trim(),
+    publish: text(form, "publish") === "public" ? "public" : "private",
+    trusted: text(form, "trusted") === "yes",
+    base: text(form, "base").trim(),
+    mode: text(form, "mode") === "cycles" ? "cycles" : "finish",
+    approval: text(form, "approval") === "thresholds" ? "thresholds" : "operator",
+    push: pushed === "branch" || pushed === "pull-request" ? pushed : "none",
+    level: isLevel(level) ? level : "balanced",
+    hold: text(form, "hold") === "yes",
     title: text(form, "title"),
     name: text(form, "name").trim(),
     goal: text(form, "goal").replace(/\r\n?/g, "\n"),
@@ -73,12 +96,34 @@ export async function startProjectAction(_previous: StartFormState, form: FormDa
       return again(`There's a team named ${fields.name} already. Give this one another short name.`);
     const before = await startFor(fields.name);
     if (before && startOpen(before)) return again(`${fields.name} is being started already: the Teams page shows how far it is.`);
-    const repoName = fields.repo === "existing" ? fields.existing : fields.create;
+    // What a Mac reads of an ask: the newer choices only where its report says it reads them (lib/tasks/start.ts).
+    const newer = machine.projects.github !== undefined;
+    const login = machine.projects.github ?? null;
+    const onGithub = fields.repo === "github" || fields.repo === "new-github";
+    if (onGithub && !newer) return again(`${machine.name} runs an older factory, which can't start from GitHub: update it first.`);
+    if (onGithub && !login) return again(`${machine.name} isn't signed in to GitHub. On it, run gh auth login, then ask again.`);
+    const named = fields.repo === "github" ? githubRepoOf(fields.github) : null;
+    if (fields.repo === "github" && !named) return again("Name the GitHub repository as owner/name, like octocat/hello-world, or paste its address.");
+    const repoName = named ? named.name : fields.repo === "existing" ? fields.existing : fields.create;
     if (fields.repo === "existing" && !machine.projects.repos.includes(repoName)) return again(`Choose a repository from ${machine.name}'s folder.`);
-    if (fields.repo === "new" && !REPO_NAME.test(repoName))
-      return again("Name the new repository's folder: letters, digits, dots, dashes and underscores, like shop-redesign.");
-    if (fields.repo === "new" && machine.projects.repos.includes(repoName))
-      return again(`${machine.name} has a repository named ${repoName} already. Choose it from the list, or give the new one another name.`);
+    if (fields.repo !== "existing" && !REPO_NAME.test(repoName))
+      return again(
+        named
+          ? `${named.full} can't be a folder's name on ${machine.name}: letters, digits, dots, dashes and underscores.`
+          : "Name the new repository's folder: letters, digits, dots, dashes and underscores, like shop-redesign."
+      );
+    if (fields.repo !== "existing" && machine.projects.repos.includes(repoName))
+      return again(
+        named
+          ? `${machine.name} has ${repoName} in its folder already: choose it under "One that's there already".`
+          : `${machine.name} has a repository named ${repoName} already. Choose it from the list, or give the new one another name.`
+      );
+    // Someone else's code runs on the Mac as the team sets it up: only with the tick.
+    const theirs = named !== null && named.owner.toLowerCase() !== (login ?? "").toLowerCase();
+    if (theirs && !fields.trusted) return again(`Tick that you trust ${named?.full}'s code to run on ${machine.name}.`);
+    const canBase = fields.repo === "existing" || fields.repo === "github";
+    if (canBase && fields.base && !BRANCH_NAME.test(fields.base))
+      return again("The base is a branch's name, like main or develop, or blank for the default.");
     const known = machine.projects.subscriptions.map((sub) => sub.name);
     if (fields.use.some((sub) => !known.includes(sub))) return again(`Choose the subscriptions from ${machine.name}'s own.`);
     // The budget, as the team's own form takes it: dollars, or percent of a subscription's week; blank for none.
@@ -98,17 +143,38 @@ export async function startProjectAction(_previous: StartFormState, form: FormDa
       daily === null && weekly === null && total === null
         ? null
         : { daily, weekly, total, unit: fields.unit, autoResume: fields.autoResume, since: new Date().toISOString() };
+    const repo: StartAsk["repo"] = named
+      ? { github: named.full }
+      : fields.repo === "existing"
+        ? { existing: repoName }
+        : fields.repo === "new-github"
+          ? { create: repoName, publish: fields.publish }
+          : { create: repoName };
     const ask = startFrom({
       machine: machine.id,
       machineName: machine.name,
       title: fields.title,
-      repo: fields.repo === "existing" ? { existing: repoName } : { create: repoName },
+      repo,
       goal: fields.goal,
       technical: fields.technical,
       limits,
       use: fields.use,
+      // The rules chosen on the form, for a Mac that reads them; one that doesn't gets none, as before.
+      ...(newer
+        ? {
+            ...(theirs ? { trusted: true } : {}),
+            ...(canBase ? { base: fields.base || null } : {}),
+            mode: fields.mode,
+            approval: fields.approval,
+            push: fields.repo === "new" ? "none" : fields.push,
+            level: fields.level,
+            hold: fields.hold,
+          }
+        : {}),
     });
     if ("problem" in ask) return again(ask.problem);
+    // A Mac on an older factory would act on part of it and drop the rest: it gets only what it reads.
+    if (!newer && newerAsk(ask)) return again(`${machine.name} runs an older factory, which can't take these choices: update it first.`);
     const mine = new Set(startingMachines(await linkedMachines(), viewer.userId).map((m) => m.id));
     const open = (await starts(new Set())).filter((start) => startOpen(start) && mine.has(start.ask.machine)).length;
     if (open >= OPEN_STARTS) return again(`${OPEN_STARTS} projects are being started on your Macs already: wait for one to finish, or withdraw one.`);
@@ -124,7 +190,13 @@ export async function startProjectAction(_previous: StartFormState, form: FormDa
       outcome: "ok",
       team: fields.name,
       target: `${control.id} ${ask.title}`,
-      detail: `on ${machine.name}, ${fields.repo === "existing" ? "in" : "a new repository"} ${repoName}${limits ? ", with a budget" : ""}${ask.use.length ? `, on ${ask.use.join(", then ")}` : ""}`,
+      detail: `on ${machine.name}, ${
+        named
+          ? `from GitHub ${named.full}`
+          : fields.repo === "existing"
+            ? `in ${repoName}`
+            : `a new repository ${repoName}${fields.repo === "new-github" ? ` on GitHub (${fields.publish})` : ""}`
+      }${limits ? ", with a budget" : ""}${ask.use.length ? `, on ${ask.use.join(", then ")}` : ""}${ask.hold ? ", to wait once set up" : ""}`,
     });
   } catch (error) {
     const reason = reasonOf(error);
