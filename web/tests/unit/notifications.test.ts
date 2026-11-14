@@ -10,6 +10,7 @@ import {
   digestMoment,
   KIND_TEXT,
   modeFor,
+  mutedAfter,
   nextDigest,
   nowMail,
   type Prefs,
@@ -298,4 +299,9 @@ test("nowMail and digestMail: a flagged call says how to settle it, and the dige
   assert.equal(both.link, `${BASE}/inbox`);
   assert.ok(both.text.indexOf("Waiting on you:") < both.text.indexOf("Decided for you, and not reviewed yet:"));
   assert.doesNotMatch(digestMail([call], [], titles, BASE, "Monday, November 2").text, /not reviewed yet/);
+});
+
+test("saving keeps the mutes of teams the form didn't show (one off the site), and sets those it did", () => {
+  assert.deepEqual(mutedAfter(["trial", "shop"], ["shop", "blog"], new Set(["shop"])), ["blog", "trial"]);
+  assert.deepEqual(mutedAfter([], ["shop"], new Set(["shop"])), []);
 });

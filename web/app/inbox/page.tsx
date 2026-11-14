@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TeamInbox } from "../../components/inbox.tsx";
-import { Chip, Notice, type SearchParams } from "../../components/ui.tsx";
+import { Chip, Notice, QuietNote, type SearchParams } from "../../components/ui.tsx";
 import { can } from "../../server/access.ts";
 import { allTeams, storeFor } from "../../server/factory.ts";
 import { inbox } from "../../server/inbox.ts";
 import { requireViewer } from "../../server/viewer.ts";
+import { quietSince } from "../../server/views.ts";
 
 export const metadata: Metadata = { title: "Waiting on you" };
 
@@ -19,7 +20,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
     teams.map(async (team) => {
       const tasks = await storeFor(team.name).tasks.all();
       const box = inbox(tasks);
-      return { team, box, tasks, open: box.questions.length + box.blocked.length };
+      return { team, box, tasks, open: box.questions.length + box.blocked.length, noMac: quietSince(team) };
     })
   );
   const waiting = boxes.filter((b) => b.open || b.box.answered.length).sort((a, b) => b.open - a.open);
@@ -36,7 +37,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
         <Link href="/account/notifications">Notifications</Link> say how you hear about new ones.
       </p>
       <Notice searchParams={searchParams} />
-      {waiting.map(({ team, box, tasks, open }) => (
+      {waiting.map(({ team, box, tasks, open, noMac }) => (
         <section key={team.name} className="team-inbox" aria-labelledby={`team-${team.name}`}>
           <div className="head">
             <h2 id={`team-${team.name}`} className="title">
@@ -45,12 +46,14 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
             <Chip>{team.status?.state ?? "no status yet"}</Chip>
             <span className="muted small">{open ? `${open} waiting` : "all answered"}</span>
           </div>
+          {open && noMac ? <QuietNote last={noMac.last} /> : null}
           <TeamInbox
             team={team.name}
             box={{ ...box, settled: [] }}
             back="/inbox"
             titles={new Map(tasks.map((t) => [t.id, t.title]))}
             agreement={can(viewer, "team:control", team.name)}
+            waits={noMac !== null}
           />
         </section>
       ))}

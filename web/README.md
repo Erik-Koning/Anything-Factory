@@ -44,8 +44,10 @@ request (Article 8).
   stands, the planner, members at work by role, the machines it runs on (for members and admins: its lead first, and
   any not reporting), its subscriptions, aim and last merge, what it spent against its budget (admins), and links to
   its pages. What's open is kept in the browser; **One at a time** shuts the rest when one opens; `/#<team>` opens
-  that one. For an admin, above the rows: the projects their Macs are starting, each with how far it has got, and
-  **Start a project**.
+  that one. The figure of what waits on you is a link to it. A team whose lead hasn't reported for 15 minutes is marked
+  "no Mac runs it" (here and on its pages). For an admin, above the rows: the projects their Macs are starting, each
+  with how far it has got, and **Start a project**; below them, the teams the linked Macs run that this page doesn't
+  show and why (tasks in files on that Mac, or not published yet), and the teams taken off the site.
 - `/new` Start a project (admins): what to build, a Mac of your own that starts projects and a repository in its
   folder (or a new one), who chooses the platform and the stack, a budget, the subscriptions in order, and your
   authenticator's code. It records a control of kind `start` under the new team's name (`lib/tasks/start.ts`), which
@@ -76,6 +78,11 @@ request (Article 8).
   each role runs on now, and a form that changes the order for every role or for one, with an authenticator code. It
   records a control the lead's watchdog applies within a minute, as `a6g subscriptions use` does at the terminal; a
   team whose Mac doesn't report its subscriptions (an older factory version) is told where they're chosen instead.
+  Then **On the site** (admins): a team no Mac runs can be taken off the site, with an optional note and an
+  authenticator code, and put back the same way; for one a Mac runs, the command that unregisters it there, which
+  takes it off too. A team that's off isn't on Teams, in Waiting on you, the header's count, the emails, the team
+  switcher or the invitations; its pages still open from a link, each saying it's off. It records a control of kind
+  `retire` or `restore` (and `a6g unregister` and `register` record them too); only the app reads them.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
   `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
   operator, and each block raised to them (a block the team sorts out, or that waits on other tasks, isn't listed).
@@ -87,7 +94,8 @@ request (Article 8).
   watchdog passes it to the planner within a minute, which records it in its decisions and moves the task on; until
   then it's under "Answered, with the planner" (marked when the planner hasn't acted for 15 minutes), and once it has,
   under "Settled this week". "Or decide it yourself" approves (scored work only, never a research question) or
-  rejects, as on Decisions, and comes back here.
+  rejects, as on Decisions, and comes back here. Under a team no Mac runs (no report for 15 minutes): an answer waits
+  until one does.
 - `/t/<team>/board` Board (members and admins): a lane per step of a task's way through the team, left to right:
   Triage, Proposed (escalated and researching marked), Approved (in claim order, with what each waits for), Building
   (which role on which machine, and the lease left or run out), Review (branch, commit, rounds of changes), Blocked
@@ -509,7 +517,8 @@ Things to know:
      decisions; the app's code changes only a task's status, approval and notes, through the factory's move table).
      MongoDB can't scope a role to fields, so whoever holds this user's password can add and rewrite any team's tasks,
      which agents then act on: keep it only in the deployment's environment, and rotate it if it leaks;
-   - `insert` on `controls` (an admin's pause, resume or budget, a change to the working agreement, and a review of
+   - `insert` on `controls` (an admin's pause, resume or budget, a change to the working agreement, taking a team off
+     the site or putting it back, and a review of
      what the team decided: the app only adds them, never changes one, so they're also the record; the watchdog
      applies them). An agreement's standing instructions reach the planner as the operator's words, so, as with
      tasks, whoever holds this user's password could write some: the same care. The decision log needs no grant of

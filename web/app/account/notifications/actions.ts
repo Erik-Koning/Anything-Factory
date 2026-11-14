@@ -13,6 +13,7 @@ import {
   isTimeZone,
   kindsIn,
   type Mode,
+  mutedAfter,
   prefsOr,
   savedPrefs,
   savePrefs,
@@ -62,7 +63,7 @@ export async function saveNotificationsAction(form: FormData): Promise<void> {
     reminder: teams.some((team) => can(viewer, "proposals:decide", team)) ? form.get("reminder") === "on" : current.reminder,
     digestHour: hour,
     timeZone,
-    muted: teams.filter((team) => !heard.has(team)),
+    muted: mutedAfter(current.muted, teams, heard),
   };
   await savePrefs(next);
   await record(viewer, {

@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { Tabs } from "../../../components/tabs.tsx";
 import { type SwitchTo, TeamSwitcher } from "../../../components/team-switcher.tsx";
-import { Chip } from "../../../components/ui.tsx";
+import Link from "next/link";
+import { Ago, Chip, QuietMark } from "../../../components/ui.tsx";
 import { can, roleIn, type Viewer } from "../../../server/access.ts";
-import { allTeams } from "../../../server/factory.ts";
+import { allTeams, retiredOf } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
+import { offSite, quietSince } from "../../../server/views.ts";
 import { toReview } from "../../../../lib/tasks/decisions.ts";
 import { controlsFor, decisionsFor, tasksOf, teamFor } from "./team.ts";
 
@@ -32,6 +34,9 @@ export default async function TeamLayout({ children, params }: { children: React
   // What the team decided and flagged, for those who review it: how many they haven't yet.
   const reviews = can(viewer, "proposals:decide", team.name);
   const unreviewed = reviews && open.includes("decided") ? toReview(...(await Promise.all([decisionsFor(team.name), controlsFor(team.name)]))).length : 0;
+  // Off the site: its pages still open from a link, and say so (components/site-panel.tsx puts it back).
+  const retired = offSite(team, retiredOf(await controlsFor(team.name)));
+  const quiet = retired ? null : quietSince(team);
   const switchTo: SwitchTo[] = (await allTeams())
     .filter((t) => roleIn(viewer, t.name) !== null)
     .map((t) => ({ name: t.name, title: t.title, state: t.status?.state ?? "no status yet", sections: sectionsFor(viewer, t.name) }));
@@ -51,9 +56,22 @@ export default async function TeamLayout({ children, params }: { children: React
       <div className="head team-head">
         <h1>{team.title || team.name}</h1>
         <Chip>{team.status?.state ?? "no status yet"}</Chip>
+        {quiet ? <QuietMark last={quiet.last} /> : null}
         <span className="muted small">you: {role}</span>
         <TeamSwitcher current={team.name} teams={switchTo} />
       </div>
+      {retired ? (
+        <p className="notice attention off-site">
+          <span>
+            <b>Taken off the site</b> <Ago at={retired.at} />. It isn&apos;t on Teams or in Waiting on you, and nobody is emailed about it.
+          </span>
+          {can(viewer, "team:retire", team.name) ? (
+            <Link className="button" href={`${base}#site`}>
+              Put it back
+            </Link>
+          ) : null}
+        </p>
+      ) : null}
       <Tabs
         links={open
           .filter((s) => s !== "add")

@@ -3,11 +3,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type FeatureRequest, MERGE, newTask, type Status, type Task } from "../../../lib/tasks/model.ts";
-import { budgetControl, type Control, pauseControl, resumeControl } from "../../../lib/tasks/controls.ts";
+import { budgetControl, type Control, pauseControl, restoreControl, resumeControl, retireControl } from "../../../lib/tasks/controls.ts";
 import type { TeamState } from "../../../lib/tasks/teams.ts";
 import {
   askedBy,
   axis,
+  controlSaid,
   controlsView,
   dailySpend,
   dollars,
@@ -15,7 +16,9 @@ import {
   kanban,
   merges,
   progress,
+  offSite,
   proposals,
+  quietSince,
   rejectionOf,
   requestState,
 } from "../../server/views.ts";
@@ -236,4 +239,33 @@ test("the spend chart: 14 days ending on the lead's day, every machine added, em
   assert.equal(dollars(42.4), "$42");
   assert.equal(dollars(12_345), "$12K");
   assert.equal(dollars(1_250), "$1,250");
+});
+
+test("no Mac runs a team its lead hasn't reported for 15 minutes, or ever, 15 minutes after it was published", () => {
+  const now = Date.parse("2026-11-13T12:00:00.000Z");
+  const ago = (min: number): string => new Date(now - min * 60_000).toISOString();
+  const state = (at: string) => ({ at }) as TeamState;
+  assert.equal(quietSince({ status: state(ago(4)), publishedAt: ago(600) }, now), null, "reported on its last run");
+  assert.equal(quietSince({ status: state(ago(14)), publishedAt: ago(600) }, now), null);
+  assert.deepEqual(quietSince({ status: state(ago(15)), publishedAt: ago(600) }, now), { last: ago(15) });
+  assert.deepEqual(quietSince({ status: state(ago(3000)) }, now), { last: ago(3000) });
+  assert.equal(quietSince({ status: null, publishedAt: ago(5) }, now), null, "too soon after it was published to say");
+  assert.deepEqual(quietSince({ status: null, publishedAt: ago(20) }, now), { last: null });
+  assert.deepEqual(quietSince({ status: null }, now), { last: null }, "never heard from, and nothing says it's new");
+});
+
+test("taking a team off the site and putting it back read in their own words, and aren't pauses waiting to apply", () => {
+  const off = { ...retireControl("shop", "web:s1", "a trial"), id: "k1", version: 1 } as Control;
+  const back = { ...restoreControl("shop", "operator"), id: "k2", version: 1 } as Control;
+  assert.deepEqual([off, back].map(controlSaid), ["Took the team off the site", "Put the team back on the site"]);
+  assert.deepEqual(controlsView(null, [off, back]), { pending: null, recent: [] });
+});
+
+test("a team stays off the site until its lead reports after it was taken off", () => {
+  const off = { ...retireControl("shop", "web:s1"), id: "k1", version: 1, at: "2026-11-13T12:00:00.000Z" } as Control;
+  const reported = (at: string) => ({ at }) as TeamState;
+  assert.equal(offSite({ status: null }, off), off);
+  assert.equal(offSite({ status: reported("2026-11-13T11:00:00.000Z") }, off), off);
+  assert.equal(offSite({ status: reported("2026-11-13T12:05:00.000Z") }, off), null, "a Mac runs it again");
+  assert.equal(offSite({ status: null }, null), null);
 });

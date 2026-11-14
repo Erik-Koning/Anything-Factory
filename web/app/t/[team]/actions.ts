@@ -33,7 +33,9 @@ import {
   isHoldScope,
   pauseFromWeb,
   Refused,
+  restoreFromWeb,
   resumeFromWeb,
+  retireFromWeb,
   reviewFromWeb,
   sendRequest,
   stakeholderOf,
@@ -44,6 +46,7 @@ import {
 import { answerText, asRecommended, shownAs, waitingOf } from "../../../server/inbox.ts";
 import { memberships, takeRequestAllowance } from "../../../server/people.ts";
 import { checkCode } from "../../../server/step-up.ts";
+import { quietSince } from "../../../server/views.ts";
 import { allowed, authHeaders, getViewer, NotAllowed, record } from "../../../server/viewer.ts";
 
 const text = (form: FormData, key: string): string => {
@@ -290,7 +293,16 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     return again(reason);
   }
   revalidatePath("/", "layout");
-  redirect(withNotice(back, { ok: `Answer sent on #${id}. The planner gets it within a minute and moves #${id} on.` }));
+  // A team no Mac runs gets it once one does (server/views.ts quietSince).
+  const doc = await teamDoc(team).catch(() => null);
+  const waits = doc ? quietSince(doc) !== null : false;
+  redirect(
+    withNotice(back, {
+      ok: waits
+        ? `Answer sent on #${id}. No Mac runs the team now: the planner gets it once one does.`
+        : `Answer sent on #${id}. The planner gets it within a minute and moves #${id} on.`,
+    })
+  );
 }
 
 // An admin pauses or resumes the team, as the operator, with a code from their authenticator: how a team runs changes
@@ -330,6 +342,41 @@ export async function controlAction(form: FormData): Promise<void> {
   }
   // A refused pause opens its form again (open=…, beside the signed notice), so it's there to correct.
   redirect(`${withNotice(`/t/${team}`, notice)}${notice.error && kind !== "resume" ? "&open=pause" : ""}`);
+}
+
+// An admin takes a team no Mac runs off the site, or puts one back, as the operator, with a code from their
+// authenticator. Nothing on any Mac changes: the site stops listing it, or lists it again (server/factory.ts).
+export async function siteAction(form: FormData): Promise<void> {
+  const team = text(form, "team");
+  const kind = text(form, "kind");
+  const note = text(form, "note").trim();
+  if (!TEAM_PARAM.test(team)) redirect("/");
+  const action = kind === "restore" ? "team.restored" : "team.retired";
+  let notice: { ok?: string; error?: string };
+  let viewer = null;
+  try {
+    viewer = await allowed("team:retire", team);
+    if (kind !== "retire" && kind !== "restore") throw new Refused("That isn't taking the team off the site or putting it back.");
+    if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+    if (wrong) throw new Refused(wrong);
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const control = kind === "retire" ? await retireFromWeb(team, { note, from }) : await restoreFromWeb(team, { from });
+    notice = {
+      ok:
+        kind === "retire"
+          ? "Taken off the site. Its pages still open from a link, and you can put it back from here."
+          : "Back on the site: on Teams, and in Waiting on you when it asks.",
+    };
+    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: kind === "retire" ? note || "taken off the site" : "put back" });
+  } catch (error) {
+    notice = { error: reasonOf(error) };
+    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind}: ${notice.error}` });
+  }
+  revalidatePath("/", "layout");
+  // A refused one opens its form again (open=site), so it's there to correct.
+  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error && kind === "retire" ? "&open=site" : ""}`);
 }
 
 // An admin sets the team's budget, as the operator, with a code from their authenticator. Each limit is dollars

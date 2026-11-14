@@ -14,18 +14,22 @@ import { Verdict } from "./verdict.tsx";
 const approvable = (t: Task): boolean => t.kind !== "research" && Boolean(t.score || (t.kind !== "feature" && t.severity));
 
 // `agreement`: the viewer may open the team's working agreement, so a question that says why it was asked links to it.
+// `waits`: no Mac runs the team now (server/views.ts quietSince), so an answer waits for one instead of reaching the
+// planner within a minute.
 export function TeamInbox({
   team,
   box,
   back,
   titles,
   agreement = false,
+  waits = false,
 }: {
   team: string;
   box: Inbox;
   back: string;
   titles: ReadonlyMap<string, string>;
   agreement?: boolean;
+  waits?: boolean;
 }) {
   const base = `/t/${team}`;
   const open = box.questions.length + box.blocked.length;
@@ -48,7 +52,7 @@ export function TeamInbox({
           <p className="hint">The team keeps going on everything else, and settles these once you answer.</p>
           <ul className="plain rows">
             {box.questions.map((w) => (
-              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} />
+              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} waits={waits} />
             ))}
           </ul>
         </section>
@@ -61,7 +65,7 @@ export function TeamInbox({
           <p className="hint">Stopped until something changes: say what will, approve it again, or drop it.</p>
           <ul className="plain rows">
             {box.blocked.map((w) => (
-              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} />
+              <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} waits={waits} />
             ))}
           </ul>
         </section>
@@ -73,7 +77,7 @@ export function TeamInbox({
           </h2>
           <ul className="plain rows">
             {box.answered.map((w) => (
-              <AnsweredItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} />
+              <AnsweredItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} waits={waits} />
             ))}
           </ul>
         </section>
@@ -119,6 +123,7 @@ function WaitingItem({
   back,
   titles,
   agreement,
+  waits,
 }: {
   team: string;
   base: string;
@@ -126,6 +131,7 @@ function WaitingItem({
   back: string;
   titles: ReadonlyMap<string, string>;
   agreement: boolean;
+  waits: boolean;
 }) {
   const t = w.task;
   const fromNote = w.question.by !== null;
@@ -247,7 +253,7 @@ function WaitingItem({
           </ul>
         </details>
       ) : null}
-      <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} />
+      <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} waits={waits} />
       {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
       {t.kind === "design" ? null : (
         <details className="more">
@@ -294,7 +300,21 @@ function WaitingItem({
 // Past this, an answer the planner hasn't acted on is worth a word: it may be busy, paused or stopped.
 const SLOW_MS = 15 * 60_000;
 
-function AnsweredItem({ team, base, w, back, titles }: { team: string; base: string; w: Waiting; back: string; titles: ReadonlyMap<string, string> }) {
+function AnsweredItem({
+  team,
+  base,
+  w,
+  back,
+  titles,
+  waits,
+}: {
+  team: string;
+  base: string;
+  w: Waiting;
+  back: string;
+  titles: ReadonlyMap<string, string>;
+  waits: boolean;
+}) {
   const last = w.answers.at(-1);
   const slow = last ? Date.now() - Date.parse(last.at) > SLOW_MS : false;
   return (
@@ -311,7 +331,11 @@ function AnsweredItem({ team, base, w, back, titles }: { team: string; base: str
         </div>
       ))}
       <p className="small">
-        {slow ? (
+        {waits ? (
+          <>
+            <Chip tone="caution">waiting for a Mac</Chip> No Mac runs the team now: the planner gets it once one does.
+          </>
+        ) : slow ? (
           <>
             <Chip tone="caution">not acted on yet</Chip> The planner hasn&apos;t moved #{w.task.id} on: it may be busy, or the team paused. Its overview
             says how it&apos;s running.
@@ -324,7 +348,7 @@ function AnsweredItem({ team, base, w, back, titles }: { team: string; base: str
       </p>
       <details className="more">
         <summary>Add to your answer</summary>
-        <AnswerForm team={team} id={w.task.id} back={back} choices={[]} recommendation={null} adding />
+        <AnswerForm team={team} id={w.task.id} back={back} choices={[]} recommendation={null} adding waits={waits} />
       </details>
     </li>
   );

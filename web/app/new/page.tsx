@@ -54,7 +54,8 @@ export default async function StartPage({ searchParams }: { searchParams: Search
       subscriptions: machine.projects?.subscriptions ?? [],
       teams: machine.teams.map((team) => team.name),
     }));
-  const teams = await allTeams();
+  // Names taken: every team that published its settings (those taken off the site keep theirs), and the asks open.
+  const teams = await allTeams({ retired: true });
   const open = (await starts(new Set(teams.map((team) => team.name)))).filter(startOpen);
   const taken = [...teams.map((team) => team.name), ...open.map((start) => start.team)];
   // Asked again after one stopped: the form opens with what that one said.

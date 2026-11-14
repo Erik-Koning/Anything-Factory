@@ -58,6 +58,31 @@ export function Chip({ children, tone }: { children: ReactNode; tone?: string })
   return <span className={`chip ${cls}`.trim()}>{children}</span>;
 }
 
+// A team no Mac runs now (server/views.ts quietSince), beside its state; when it was last heard from is in its title.
+export function QuietMark({ last }: { last: string | null }) {
+  return (
+    <span className="chip caution" title={last ? `Last heard from ${new Date(last).toUTCString()}` : "Never heard from"}>
+      no Mac runs it
+    </span>
+  );
+}
+
+// What an answer to such a team does, where the operator answers it: waits.
+export function QuietNote({ last }: { last: string | null }) {
+  return (
+    <p className="small quiet-note">
+      {last ? (
+        <>
+          No Mac runs this team now (last heard from <Ago at={last} />)
+        </>
+      ) : (
+        "No Mac has run this team yet"
+      )}
+      : an answer waits until one does.
+    </p>
+  );
+}
+
 // "3 min ago", from an ISO time; the exact time is in the element's title and datetime.
 export function Ago({ at }: { at: string | null | undefined }) {
   if (!at) return <span className="muted">never</span>;

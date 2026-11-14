@@ -1,6 +1,7 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
 import { claimRank, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
 import { type Control, describeHold } from "../../lib/tasks/controls.ts";
+import { ONLINE_MIN } from "../../lib/fleet.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
 
@@ -173,10 +174,27 @@ export function controlSaid(c: Control): string {
   if (c.kind === "subscriptions") return "Asked to change the subscriptions";
   if (c.kind === "start") return c.start ? "Asked to start the team" : "Withdrew the ask to start the team";
   if (c.kind === "starting") return "Said how far the team's start had got";
+  if (c.kind === "retire") return "Took the team off the site";
+  if (c.kind === "restore") return "Put the team back on the site";
   return c.scope === "now" || !c.scope
     ? "Asked to pause now"
     : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}`;
 }
+
+// When no Mac runs the team now: its lead reports its state on every full watchdog run (about every five minutes), so
+// none for ONLINE_MIN minutes, or none at all that long after it was published, means none does. `last` is when it was
+// last heard from (null: never). Null while a Mac runs it, or too soon after it was published to say.
+export function quietSince(team: { status: { at: string } | null; publishedAt?: string | null }, now = Date.now()): { last: string | null } | null {
+  const last = team.status?.at ?? null;
+  const from = last ?? team.publishedAt ?? null;
+  if (from === null) return { last: null };
+  return now - Date.parse(from) >= ONLINE_MIN * 60_000 ? { last } : null;
+}
+
+// The control that took the team off the site, while it's off: a report from its lead after that means a Mac runs it
+// again (one that was asleep, or a lead moved to another Mac), and a team a Mac runs is never hidden.
+export const offSite = (team: { status: { at: string } | null }, retired: Control | null): Control | null =>
+  retired && !(team.status?.at && team.status.at > retired.at) ? retired : null;
 
 // Who asked for a control, in words.
 export const askedBy = (by: string): string =>
