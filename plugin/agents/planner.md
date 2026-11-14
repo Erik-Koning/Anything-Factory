@@ -449,6 +449,11 @@ Then:
 3. Run `a6g complete`: it checks the finish line again (with the end-to-end suite, when your rules require it) and marks
    the work complete only if it holds. Write the log, and stop starting work. The watchdog drops to a nightly tick.
 4. On those ticks, re-check the finish line. Email again only if something broke or the operator added scope.
+5. When work arrives after that from the operator or a stakeholder (a task they added or approved, a new feature
+   request), the watchdog lifts the mark and wakes you with what arrived: the work isn't complete any more. Take it
+   through like any other. When the finish line holds again, run `a6g complete`; if this round built something, finish
+   from step 1 first (its pull request and its report, with what this round built). One that came to nothing (a request
+   you turned down) gets no new report.
 
 ## Cycles
 

@@ -542,6 +542,45 @@ describe("the watchdog and the task graph", () => {
     }
   });
 
+  test("a finished team wakes once for work from outside it added after it finished, lifting the mark; its own doesn't", async () => {
+    const { w, store } = await world({ mode: "finish" });
+    try {
+      write(w.run, { "planner-thread": "mcp:planner\n" });
+      // Left in triage when it finished: the nightly tick, not a wake.
+      await store.tasks.createAs("1", newTask({ team: "fixture", title: "old finding", kind: "bug", status: "triage", by: "reviewer" }));
+      await new Promise((done) => setTimeout(done, 20));
+      write(w.run, { complete: `${new Date().toISOString()}\n` });
+      const sent = () => w.calls().filter((c) => c.includes("new work since the work was marked complete")).length;
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.equal(sent(), 0, w.calls().join("\n"));
+      assert.ok(w.calls().some((c) => /thread send mcp:planner .*nightly: the work is complete/.test(c)));
+      assert.ok(existsSync(join(w.run, "complete")));
+
+      // A finding its own reviewer files afterwards (a flaky check, say) waits for the nightly tick too.
+      await new Promise((done) => setTimeout(done, 20));
+      await store.tasks.createAs("2", newTask({ team: "fixture", title: "flaky check", kind: "bug", status: "triage", by: "reviewer" }));
+      await w.a6g("watchdog", "run", "fixture");
+      assert.equal(sent(), 0, w.calls().join("\n"));
+      assert.ok(existsSync(join(w.run, "complete")));
+
+      // A task the operator adds afterwards wakes it once, with what to do, and the mark goes: it's at work again.
+      await store.tasks.createAs("3", newTask({ team: "fixture", title: "Export to CSV", kind: "feature", status: "proposed", by: "operator" }));
+      await w.a6g("watchdog", "run", "fixture");
+      assert.equal(sent(), 1, w.calls().join("\n"));
+      const woke = w.calls().find((c) => c.includes("new work since the work was marked complete")) ?? "";
+      assert.match(
+        woke,
+        /new work since the work was marked complete: 1 task to triage, approve, build, review or verify\. The work isn't marked complete any more/
+      );
+      assert.match(woke, /run a6g complete \(a new Done report only if this round built something\)/);
+      assert.ok(!existsSync(join(w.run, "complete")), "the mark is lifted");
+      await w.a6g("watchdog", "run", "fixture");
+      assert.equal(sent(), 1, "once");
+    } finally {
+      await w.close();
+    }
+  });
+
   test("a worker machine starts members for approved work, up to its limits, counting the threads it started", async () => {
     const { w, store } = await world({ worker: true, limits: { builder: 2, tester: 1 }, branch: "a6g/next" });
     try {

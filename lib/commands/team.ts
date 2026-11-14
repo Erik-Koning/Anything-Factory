@@ -54,7 +54,10 @@ import {
   type Limits,
   limitsOf,
   pauseControl,
+  restoreControl,
   resumeControl,
+  retireControl,
+  retiredOf,
 } from "../tasks/controls.ts";
 import { fileDesignCheckIn } from "../tasks/design.ts";
 import { designOpen, nowIso, OPERATOR, Refused } from "../tasks/model.ts";
@@ -124,7 +127,8 @@ export async function register(argv: string[]): Promise<number> {
 // Registers the team in `home` to run `version` (else the one its team.json pins). Dies before changing anything
 // when it can't.
 // A team whose task graph is in Mongo shows in the web app: the lead publishes its settings there (the app reads no
-// team.json). A failure is said, and changes nothing else: register again once Mongo answers.
+// team.json), and puts it back on the app when it was taken off (unregistered, or from the app). A failure is said, and
+// changes nothing else: register again once Mongo answers.
 async function publishTeam(home: string): Promise<void> {
   const team = loadTeam(home);
   if (team.board.type !== "tasks" || team.tasks.store !== "mongo" || !isLead(team)) return;
@@ -133,6 +137,7 @@ async function publishTeam(home: string): Promise<void> {
     try {
       await store.publish(settingsOf(team, PACKAGE.version));
       console.info(`  published ${team.name}'s settings for the web app`);
+      if (await putBackOnApp(store, team.name)) console.info(`  ${team.name} was off the web app; it's back on it`);
     } finally {
       await store.close();
     }
@@ -336,13 +341,39 @@ export function describeSteering(steering: ReturnType<typeof readSteering>): str
   return [...on, ...waiting].join("; ");
 }
 
-export function unregister(argv: string[]): number {
+// The team off the web app, as the operator, unless it's off already; and back on it, unless it's on. Each resolves to
+// whether it changed anything.
+export async function takeOffApp(store: Store, team: string, why: string): Promise<boolean> {
+  if (retiredOf(await store.controls.all())) return false;
+  await store.controls.create(retireControl(team, OPERATOR, why));
+  return true;
+}
+export async function putBackOnApp(store: Store, team: string): Promise<boolean> {
+  if (!retiredOf(await store.controls.all())) return false;
+  await store.controls.create(restoreControl(team, OPERATOR));
+  return true;
+}
+
+export async function unregister(argv: string[]): Promise<number> {
   operatorOnly("unregister");
   const name = argv[0] ?? die("usage: a6g unregister <team>");
   const entry = readRegistry(name) ?? die(`no team named ${name}`);
   const removed = t3.removeInstances(name);
   rmSync(registryFile(name), { force: true });
   console.info(`a6g: unregistered ${name} (${removed} T3 instances removed; its run folder ${entry.run} and checkout are kept)`);
+  // Its lead takes it off the web app too: its tasks and history stay there, and a6g register puts it back.
+  if (entry.tasks?.store === "mongo" && !entry.worker)
+    try {
+      const store = await openStore({ name, tasks: entry.tasks }, entry.run);
+      try {
+        await takeOffApp(store, name, `unregistered on ${machineName()}`);
+        console.info(`  ${name} is off the web app (a6g register puts it back)`);
+      } finally {
+        await store.close();
+      }
+    } catch (error) {
+      console.warn(`  couldn't take ${name} off the web app: ${(error as Error).message.split("\n")[0]}. An admin can, from its overview there.`);
+    }
   return 0;
 }
 
