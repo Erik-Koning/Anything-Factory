@@ -1,6 +1,7 @@
 // a6g init [<repo>] [--name <team>] [--branch <integration>] [--base <ref>] [--checkout <dir> | --in-place]
 //          [--owner <email>] [--non-technical] [--model <name>] [--no-interview]
 //          [--title <title>] [--store files|mongo] [--goal-file <file>]
+//          [--mode finish|cycles] [--approval operator|thresholds] [--push none|branch|pull-request]
 //
 // Sets up a team in a repository:
 // 1. Detects what it can: git, package manager and scripts, what CI runs, how the repository reaches outside the
@@ -18,8 +19,8 @@
 //    what it settles here, every task after is built on.
 //
 // A project started from the web app (lib/commands/projects.ts) drafts with --no-interview, its title, its tasks in
-// MongoDB (--store mongo) and the operator's goal from the form (--goal-file), then runs the setup agent with nobody
-// there (setupUnattended, below).
+// MongoDB (--store mongo), the operator's goal from the form (--goal-file) and the rules they chose there (--base,
+// --mode, --approval, --push), then runs the setup agent with nobody there (setupUnattended, below).
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -98,6 +99,25 @@ export async function init(argv: string[]): Promise<number> {
   if (asked !== undefined && asked !== "files" && asked !== "mongo") die(`--store ${asked}: files (in the run folder) or mongo (a6g connect mongo)`);
   const store = asked ?? (hasUri() ? "mongo" : "files");
   if (store === "mongo") draft.tasks = { store: "mongo" };
+  // Its rules where the operator chose them on the web app's form, for the setup agent to keep: its aim, who approves
+  // its proposals (the approver up to a medium task needs an approver), and what it may push to its origin.
+  const mode = optionText(options["mode"]);
+  if (mode !== undefined && mode !== "finish" && mode !== "cycles") die(`--mode ${mode}: finish (to a finish line) or cycles`);
+  if (mode !== undefined) draft.mode = mode;
+  const approval = optionText(options["approval"]);
+  if (approval !== undefined && approval !== "operator" && approval !== "thresholds") die(`--approval ${approval}: operator or thresholds`);
+  if (approval === "operator") draft.approval = { mode: "operator" };
+  if (approval === "thresholds") {
+    draft.approval = { mode: "thresholds", maxSize: "M" };
+    draft.roles = { ...draft.roles, approver: draft.roles?.["approver"] ?? {} };
+  }
+  const push = optionText(options["push"]);
+  if (push !== undefined && push !== "none" && push !== "branch" && push !== "pull-request") die(`--push ${push}: none, branch or pull-request`);
+  if (push !== undefined && push !== "none" && !gitOk(repo, "remote", "get-url", "origin"))
+    die(`--push ${push}: ${repo} has no origin remote for the team to push to`);
+  if (push === "none") draft.push = null;
+  if (push === "branch" || push === "pull-request")
+    draft.push = { remote: "origin", branch, every: "6h", ...(push === "pull-request" ? { pullRequest: true } : {}) };
   const goalFile = optionText(options["goal-file"]);
   let goal: string | null = null;
   if (goalFile !== undefined) {

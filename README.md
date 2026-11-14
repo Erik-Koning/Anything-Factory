@@ -573,6 +573,20 @@ brief), proves it with `a6g check --run`, registers it with the budget and subsc
 at a time. `a6g projects` shows each ask and where it stands; `a6g projects start <team>` carries on one that stopped,
 and its log is `~/.a6g/orders/<team>.log`. The link itself still only reports: nothing the app answers is acted on.
 
+**From GitHub, and the team's rules.** A Mac signed in to GitHub (`gh auth login`) says so in its report, as which
+account, and the form then offers two more places the code can come from: a new repository that's also made on GitHub
+under that account (private or public, and pushed), or a repository on GitHub by `owner/name`. For that one the Mac
+asks GitHub, as its own account, what it may do: it clones a repository the account can push to, and forks one it can
+only read to that account first, then clones the fork, keeping the original as `upstream`; the start card says which.
+A repository whose owner isn't that account takes a tick on the form that you trust its code to run on the Mac
+(setting a team up installs its packages and runs its scripts and tests), and the Mac refuses an ask without it. The
+form also chooses what the setup agent would otherwise settle alone: the base branch, a finish line or cycles, whether
+you or the team's approver (up to a medium task) approves new work, how readily it asks you, and what it may do on
+GitHub: nothing, push its branch, or push it with a pull request into the base, for you to merge, to the repository
+it pushes to (a fork's, never the original). And whether it starts once set up, or waits, paused, for you to resume
+it. The Mac drafts with `a6g init --base --mode --approval --push`, records the agreement and any pause when it
+registers the team, and the setup agent keeps them. A Mac on an older factory is offered none of these.
+
 **Which teams the web app shows.** **Teams** shows a team whose tasks are in MongoDB once its lead publishes it
 (`a6g register`). `a6g init` keeps a new team's tasks there by default on a Mac connected to MongoDB, and in files
 otherwise (`--store` chooses), and refuses a name another team has used there; a team in files moves with

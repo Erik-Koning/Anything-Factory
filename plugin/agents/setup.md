@@ -212,7 +212,9 @@ form there, and isn't at this machine. Nobody reads what you print as you go, an
   operator wasn't asked.
 - **Keep what the draft was given.** The team's name, title, factory pin and `tasks` (its tasks are in MongoDB, where
   the web app reads them), and `operator.technical` and `operator.designCheckIn` as the draft has them: whoever
-  started this chose them on the form.
+  started this chose them on the form. So, when the draft has them, are its `base`, its `mode`, its `approval` (and
+  the approver that comes with thresholds) and its `push`: those rows of the table are answered already. Where the
+  draft has none, settle them as above.
 - **The commands you have** are `git add`, `git commit`, `git status`, `git diff`, `git log`, `a6g check`,
   `a6g doctor`, `a6g help`, `chmod` and `bash -n`, with the tools that read, search and write files. Anything else is
   refused without a question, so don't plan around it.

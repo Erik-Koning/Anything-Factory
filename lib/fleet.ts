@@ -111,6 +111,9 @@ export interface MachineProjects {
   repos: string[];
   // The Claude subscriptions here, by name, with how much of each one's week is used as last read (null before).
   subscriptions: { name: string; percent: number | null }[];
+  // The GitHub account its gh is signed in as (null: none), which clones, forks and makes repositories for an ask. A
+  // report from a version that can't do those, or read the settings an ask may carry since, has no such key.
+  github?: string | null;
 }
 
 // What a machine sends: the app adds when it came, and from which account's link.
@@ -164,11 +167,13 @@ function parseTeam(value: unknown): MachineTeam | null {
 // A repository's folder (lib/tasks/start.ts REPO_NAME) and a subscription's name (lib/subscriptions.ts).
 const REPO = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SUBSCRIPTION = /^[a-z0-9][a-z0-9-]{0,39}$/;
+// A GitHub account's name (lib/tasks/start.ts GITHUB_LOGIN): kept here too, as SUBSCRIPTION is.
+const GITHUB_ACCOUNT = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 
 // What a machine offers to start: undefined when it's wrong.
 function parseProjects(value: unknown): MachineProjects | undefined {
   if (!isObject(value)) return undefined;
-  const { dir, repos, subscriptions } = value;
+  const { dir, repos, subscriptions, github } = value;
   if (!isText(dir, REPORT_LIMITS.home) || !(dir.startsWith("/") || dir.startsWith("~/"))) return undefined;
   if (!Array.isArray(repos) || repos.length > REPORT_LIMITS.repos || repos.some((repo) => typeof repo !== "string" || !REPO.test(repo))) return undefined;
   if (!Array.isArray(subscriptions) || subscriptions.length > REPORT_LIMITS.subscriptions) return undefined;
@@ -179,7 +184,8 @@ function parseProjects(value: unknown): MachineProjects | undefined {
     if (percent !== null && (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 1000)) return undefined;
     listed.push({ name: sub["name"], percent });
   }
-  return { dir, repos: repos as string[], subscriptions: listed };
+  if (github !== undefined && github !== null && (typeof github !== "string" || !GITHUB_ACCOUNT.test(github))) return undefined;
+  return { dir, repos: repos as string[], subscriptions: listed, ...(github === undefined ? {} : { github }) };
 }
 
 // The report in `body`, rebuilt from the fields it may have (anything else is dropped), or null when any is wrong.

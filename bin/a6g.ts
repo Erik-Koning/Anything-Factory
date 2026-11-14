@@ -15,6 +15,8 @@ Set up and run a team (the operator)
                                       --model <name> (the interview's; fable unless named)
                                       --store files|mongo (its tasks; mongo, where the web app shows it, on a Mac
                                       connected to MongoDB, files otherwise)
+                                      --mode finish|cycles --approval operator|thresholds
+                                      --push none|branch|pull-request (to its origin; a pull request into --base)
   a6g check [<checkout>] [--run]      prove the setup: rules, adapters, a guard self-test, prompts; --run also
                                       starts the environment and runs the gate
   a6g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);
