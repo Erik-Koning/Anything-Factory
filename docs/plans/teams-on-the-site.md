@@ -1,7 +1,8 @@
 # Plan: every team where it belongs on the site
 
-Status: planned 2026-11-13, at the operator's word ("make a thorough plan and then implement this until done").
-Building on branch `teams-waiting-link`, to ship as 0.8.1.
+Status: built, reviewed and released in 0.8.1 (2026-11-13), at the operator's word ("make a thorough plan and then
+implement this until done"); deployed to both sites and installed on the operator's Mac, where the finished team it
+runs had nothing that counted as new work and kept its nightly tick.
 
 ## Why
 
@@ -157,4 +158,4 @@ claiming approved work until they're unregistered too; "since" compares the Mac'
 - [x] Tests, screenshots, review: factory 748 of 749 (one skipped, as before), web unit and integration 152, browser
       55; screenshots of each changed page in both themes at desktop and phone width, looked over (the answer
       forms of a team no Mac runs promised "within a minute": now they say it waits)
-- [ ] Merged, released as 0.8.1, deployed to both sites, installed on this Mac
+- [x] Merged, released as 0.8.1, deployed to both sites, installed on the operator's Mac
