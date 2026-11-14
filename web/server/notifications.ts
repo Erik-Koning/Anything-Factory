@@ -48,6 +48,13 @@ export function prefsOr(saved: Prefs | null, userId: string, role: "admin" | Tea
   if (saved) return { ...saved, modes: { ...DEFAULTS[role], ...saved.modes } };
   return { _id: userId, modes: { ...DEFAULTS[role] }, reminder: role === "admin", digestHour: 8, timeZone, muted: [], updatedAt: new Date(0) };
 }
+// The teams muted after a save: those of the teams the form showed (`shown`) that weren't ticked (`heard`), and the
+// ones muted before that it didn't show (a team off the site, or out of their sight now), as they were.
+export const mutedAfter = (before: readonly string[], shown: readonly string[], heard: ReadonlySet<string>): string[] => [
+  ...shown.filter((team) => !heard.has(team)),
+  ...before.filter((team) => !shown.includes(team)),
+];
+
 // The mode for `kind` on a team where they're `role`: their choice once they've saved one, the role's default before.
 export const modeFor = (saved: Prefs | null, kind: EventKind, role: "admin" | TeamRole): Mode => saved?.modes[kind] ?? DEFAULTS[role][kind];
 

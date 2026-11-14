@@ -679,6 +679,16 @@ test("the admin approves one proposal with a note and rejects another with a rea
 test("the admin sees what waits on them and answers a question with one of its options, as the operator", async () => {
   const { page } = admin;
   const { question } = state().asks;
+  // On Teams, the row's figure goes to them, and leaves the row as it was.
+  await page.goto("/");
+  const shop = page.locator("details#shop");
+  const open = await shop.evaluate((row) => (row as HTMLDetailsElement).open);
+  const figure = shop.locator("summary a", { hasText: "2 waiting on you" });
+  await expect(figure).toHaveAttribute("href", "/t/shop/inbox");
+  await figure.click();
+  await expect(page).toHaveURL(/\/t\/shop\/inbox$/);
+  await page.goBack();
+  await expect(page.locator("details#shop")).toHaveJSProperty("open", open);
   await page.goto("/t/shop");
   // Every page says how much waits; the overview asks for an answer.
   await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: /Waiting on you/ })).toContainText("2");
@@ -1709,6 +1719,90 @@ test("the Teams page folds: its key goes to the team, and what's left open is ke
     localStorage.removeItem("a6g.teams.open");
     localStorage.removeItem("a6g.teams.one");
   });
+});
+
+test("a team no Mac runs is marked and its answers wait; the admin takes it off the site with a code and puts it back; Teams names the Macs' teams it doesn't show", async () => {
+  test.setTimeout(150_000);
+  const { page } = admin;
+  const { graph, accounts } = await databases();
+  const teams = graph.collection<{ _id: string; status?: { at: string } }>("teams");
+  const was = { blog: (await teams.findOne({ _id: "blog" }))?.status?.at, shop: (await teams.findOne({ _id: "shop" }))?.status?.at };
+  // The admin's Mac also leads a team whose tasks are in files.
+  const machines = accounts.collection<{ _id: string; teams?: unknown[] }>("machines");
+  const atticTeams = (await machines.findOne({ name: "attic" }))?.teams ?? [];
+  const notes = {
+    name: "notes",
+    title: "Notes",
+    part: "lead",
+    store: "files",
+    factory: "0.8.1",
+    state: "paused",
+    planner: null,
+    members: {},
+    home: "~/code/notes-a6g",
+  };
+  await machines.updateOne({ name: "attic" }, { $set: { teams: [...atticTeams, notes] } });
+  // Blog's Mac last reported two hours ago; Shop's just now.
+  await teams.updateOne({ _id: "blog" }, { $set: { "status.at": new Date(Date.now() - 2 * 3_600_000).toISOString() } });
+  await teams.updateOne({ _id: "shop" }, { $set: { "status.at": new Date().toISOString() } });
+  try {
+    await page.goto("/");
+    await expect(page.locator("details#blog summary")).toContainText("no Mac runs it");
+    await expect(page.locator("details#shop summary")).not.toContainText("no Mac runs it");
+    // A team a linked Mac runs with its tasks in files is named under the rows, and why it isn't one.
+    await expect(page.locator(".teams-foot")).toContainText(
+      "Notes on attic: its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
+    );
+    await page.goto("/t/blog/inbox");
+    await expect(page.locator(".team-head")).toContainText("no Mac runs it");
+    await expect(page.getByText(/^No Mac runs this team now \(last heard from .*\): an answer waits until one does\.$/)).toBeVisible();
+
+    // Shop's Mac runs it: its overview says to unregister it there, and has no form.
+    await page.goto("/t/shop");
+    const panel = page.getByRole("region", { name: "On the site" });
+    await expect(panel).toContainText("A Mac runs it: it last reported just now.");
+    await expect(panel.getByText("a6g unregister shop")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Take it off the site" })).toHaveCount(0);
+
+    // Blog comes off with a note and a code.
+    await page.goto("/t/blog");
+    await expect(panel).toContainText("No Mac runs it now: it was last heard from 2 h ago.");
+    await panel.locator("summary", { hasText: "Take it off the site" }).click();
+    await panel.getByLabel("Why (optional, for the record)").fill("A trial that's over");
+    await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+    await panel.getByRole("button", { name: "Take it off the site" }).click();
+    await expect(page.getByRole("status")).toContainText("Taken off the site.");
+    await expect(page.locator(".notice.off-site")).toContainText("Taken off the site");
+    await expect(panel).toContainText("by an admin, here (“A trial that's over”)");
+    // Off every list: Teams (named at the foot instead), Waiting on you, the switcher.
+    await page.goto("/");
+    await expect(page.locator("details#blog")).toHaveCount(0);
+    await expect(page.locator(".teams-foot")).toContainText("Taken off the site: Blog. Each one's overview puts it back.");
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "Waiting on you", level: 1 })).toBeVisible();
+    await expect(page.locator("main")).not.toContainText("Blog");
+    const recorded = await graph
+      .collection("controls")
+      .find({ team: "blog", kind: { $in: ["retire", "restore"] } })
+      .toArray();
+    expect(recorded.map((c) => [c.kind, c.by.startsWith("web:"), c.note])).toEqual([["retire", true, "A trial that's over"]]);
+    expect(await accounts.collection("audit").findOne({ team: "blog", action: "team.retired", outcome: "ok" })).toMatchObject({
+      detail: "A trial that's over",
+    });
+
+    // And back on, from its overview.
+    await page.goto("/t/blog");
+    await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
+    await panel.getByRole("button", { name: "Put it back on the site" }).click();
+    await expect(page.getByRole("status")).toContainText("Back on the site");
+    await expect(page.locator(".notice.off-site")).toHaveCount(0);
+    await page.goto("/");
+    await expect(page.locator("details#blog")).toHaveCount(1);
+    await expect(page.locator(".teams-foot")).not.toContainText("Taken off the site");
+  } finally {
+    for (const team of ["blog", "shop"] as const) await teams.updateOne({ _id: team }, { $set: { "status.at": was[team] ?? new Date().toISOString() } });
+    await machines.updateOne({ name: "attic" }, { $set: { teams: atticTeams } });
+  }
 });
 
 test("the admin chooses a team's subscriptions with a code, from what its Mac reports; an older team is told where they're chosen", async () => {

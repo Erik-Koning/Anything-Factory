@@ -13,6 +13,8 @@ Set up and run a team (the operator)
                                       --name --branch --base --checkout <dir> | --in-place --owner --no-interview
                                       --non-technical (the team never asks you about the platform or the stack)
                                       --model <name> (the interview's; fable unless named)
+                                      --store files|mongo (its tasks; mongo, where the web app shows it, on a Mac
+                                      connected to MongoDB, files otherwise)
   a6g check [<checkout>] [--run]      prove the setup: rules, adapters, a guard self-test, prompts; --run also
                                       starts the environment and runs the gate
   a6g register [<checkout>] [--worker]   T3 project, one instance per role, compiled prompts, the registry (alias: sync);
@@ -45,7 +47,8 @@ Set up and run a team (the operator)
                                       how the merged work went: first-time reviews, found after merge, cost per task
   a6g prompt <team> <role>            the text a role works under
   a6g upgrade <team> [<version>] [--force] [--docker <context>]   move a team to another installed factory version
-  a6g unregister <team>               remove its T3 instances and registry entry (keeps its files)
+  a6g unregister <team>               remove its T3 instances and registry entry (keeps its files), and take it off
+                                      the web app (a6g register puts it back)
   a6g watchdog install|remove|run     the one launchd job that looks after every team
   a6g connect [email|whatsapp] [--test]  send you the watchdog's alerts and the planner's outbox: email through
                                       Resend (replies reach the planner), WhatsApp through your business number

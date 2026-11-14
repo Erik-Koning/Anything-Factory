@@ -29,6 +29,9 @@ import { MODEL_ID, modelId } from "../models.ts";
 import { FACTORY_ROOT, PACKAGE, versionDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
+import { mongoStore } from "../tasks/mongo.ts";
+import { hasUri, readUri } from "../tasks/mongoUri.ts";
+import type { Store } from "../tasks/store.ts";
 import { die, git, gitOk, hash, parseArgs, readJson, text as optionText, which, writeJson } from "../util.ts";
 
 const TEMPLATES = join(FACTORY_ROOT, "templates", "team");
@@ -48,9 +51,19 @@ export function teamName(folder: string): string {
   return name.slice(0, 31).replace(/-+$/, "");
 }
 
+// Why a team's name is taken in a store, or null when it's free: its published settings (on the web app, or taken off
+// it: the name stays), a task, or a control other than an ask to start it from the web app and its machine's word on
+// it (lib/tasks/start.ts), which come before the team.
+export async function nameTaken(store: Pick<Store, "team" | "tasks" | "controls">): Promise<string | null> {
+  if (await store.team()) return "a team by that name has published its settings there";
+  if ((await store.tasks.all()).length) return "tasks are filed under it";
+  if ((await store.controls.all()).some((c) => c.kind !== "start" && c.kind !== "starting")) return "a team's controls are recorded under it";
+  return null;
+}
+
 const shellWord = (text: string): string => (/^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
 
-export function init(argv: string[]): number {
+export async function init(argv: string[]): Promise<number> {
   operatorOnly("init");
   const { positional, options } = parseArgs(argv, { booleans: ["in-place", "no-interview", "non-technical"] });
   const model = modelId(optionText(options["model"]) ?? "fable");
@@ -80,8 +93,10 @@ export function init(argv: string[]): number {
   // where the app reads them, and the operator's goal from the form.
   const title = optionText(options["title"]);
   if (title !== undefined) draft.title = title;
-  const store = optionText(options["store"]);
-  if (store !== undefined && store !== "files" && store !== "mongo") die(`--store ${store}: files (in the run folder) or mongo (a6g connect mongo)`);
+  // Its tasks in MongoDB, where the web app shows the team, by default on a Mac connected to it; in files otherwise.
+  const asked = optionText(options["store"]);
+  if (asked !== undefined && asked !== "files" && asked !== "mongo") die(`--store ${asked}: files (in the run folder) or mongo (a6g connect mongo)`);
+  const store = asked ?? (hasUri() ? "mongo" : "files");
   if (store === "mongo") draft.tasks = { store: "mongo" };
   const goalFile = optionText(options["goal-file"]);
   let goal: string | null = null;
@@ -95,8 +110,31 @@ export function init(argv: string[]): number {
   const app = hasApp(found);
   if (app) draft.environment = { ...draft.environment, health: [`http://localhost:${port}/`] };
   // Refuse a draft that couldn't load (a protected integration branch, a bad owner) before making anything.
-  const { problems: draftProblems } = normalize(draft, repo);
+  const { team: drafted, problems: draftProblems } = normalize(draft, repo);
   if (draftProblems.length) die(`the team can't be set up like that:\n  - ${draftProblems.join("\n  - ")}`);
+
+  // A new team whose tasks go in MongoDB mustn't share another's: its name mustn't be taken there, unless the checkout
+  // is that team's own already (init run again).
+  const ownCheckout = options["in-place"] ? repo : resolve(optionText(options["checkout"]) ?? join(dirname(repo), `${basename(repo)}-a6g`));
+  if (store === "mongo" && !existsSync(join(ownCheckout, ".a6g", "team.json"))) {
+    let taken: string | null = null;
+    try {
+      const mongo = await mongoStore({ name, tasks: { store: "mongo", database: drafted.tasks.database, lead: null } }, readUri());
+      try {
+        taken = await nameTaken(mongo);
+      } finally {
+        await mongo.close();
+      }
+    } catch (error) {
+      console.warn(
+        `a6g: couldn't check in MongoDB that the name ${name} is free (${(error as Error).message.split("\n")[0]}); a6g register publishes the team under it`
+      );
+    }
+    if (taken)
+      die(
+        `the name ${name} is taken in MongoDB: ${taken}. Choose another with --name${asked === undefined ? ", or keep its tasks on this Mac with --store files" : ""}`
+      );
+  }
 
   // The team's checkout.
   let checkout: string;
@@ -115,7 +153,7 @@ export function init(argv: string[]): number {
       console.info(`a6g: switched ${repo} to ${exists ? branch : `a new branch ${branch} (from ${base})`}`);
     }
   } else {
-    checkout = resolve(optionText(options["checkout"]) ?? join(dirname(repo), `${basename(repo)}-a6g`));
+    checkout = ownCheckout;
     if (!existsSync(checkout)) {
       const made = gitOk(repo, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`)
         ? spawnSync("git", ["worktree", "add", checkout, branch], { cwd: repo, encoding: "utf8" })
@@ -205,6 +243,12 @@ export function init(argv: string[]): number {
     `\na6g: detected ${found.packageManager ?? "no package manager"}, ${found.ci.length} CI workflow(s), ${found.surfaces.length} way(s) out: ${found.surfaces.map((s) => s.id).join(", ") || "none"}`
   );
   if (found.security.length) console.info(`a6g: it has ${found.security.join(", ")}, so the draft team has a security reviewer`);
+  if (asked === undefined)
+    console.info(
+      store === "mongo"
+        ? "a6g: its tasks go in MongoDB (this Mac is connected: a6g connect mongo), so the web app shows the team; --store files keeps them on this Mac"
+        : "a6g: its tasks stay in files on this Mac, so the web app won't show the team; a6g connect mongo, then --store mongo, puts them where it does"
+    );
   if (draft.operator?.designCheckIn)
     console.info("a6g: nothing is built here yet, so the draft team builds the foundation, then checks its design with you before any feature");
   if (draft.operator?.technical === false)

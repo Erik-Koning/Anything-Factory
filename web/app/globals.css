@@ -1711,6 +1711,15 @@ table.figures td {
   left: 1px;
   top: calc(0.775em - 3px);
 }
+/* A team taken off the site, on each of its pages: laid out like the call to answer, in no tone of its own. */
+.notice.off-site {
+  --tone: var(--ink-3);
+}
+/* Under a team's name in Waiting on you, when no Mac runs it: an answer waits. */
+.quiet-note {
+  margin: 2px 0 10px;
+  color: var(--warn);
+}
 .chip.link {
   color: var(--ink);
   font-family: var(--font-text);
@@ -2468,6 +2477,16 @@ details > * + * {
   gap: 10px;
   margin: 0 0 var(--gap);
 }
+/* Below the rows, for admins: the linked Macs' teams this page doesn't show, and those taken off the site. */
+.teams-foot {
+  display: grid;
+  gap: 6px;
+  max-width: 96ch;
+  margin: 0 0 var(--gap);
+}
+.teams-foot p {
+  margin: 0;
+}
 /* A team's row: a raised part whose top edge is the fold. Its way in sits on that edge, outside the fold itself. */
 .team-row {
   position: relative;
@@ -2523,6 +2542,13 @@ details.team[open] > summary {
 }
 .glance-item {
   white-space: nowrap;
+}
+.glance-item a.chip {
+  text-decoration: none;
+}
+.glance-item a.chip:hover {
+  border-color: color-mix(in srgb, var(--tone) 60%, transparent);
+  text-decoration: underline;
 }
 .glance-item b {
   color: var(--ink);

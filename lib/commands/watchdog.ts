@@ -48,7 +48,7 @@ import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
-import { claimRefusal, FOUNDATION, journeyDue, type Task } from "../tasks/model.ts";
+import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
 import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
@@ -602,7 +602,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   if (existsSync(join(run, "paused"))) return;
 
   // Claims whose lease ran out go back to approved, for another member (lib/tasks/ops.ts); and what's waiting, which
-  // wakes an idle cycles team.
+  // wakes an idle cycles team or a finished one.
   let arrived = "";
   let graph: Task[] | null = null;
   if (entry.tasks)
@@ -611,9 +611,14 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
       try {
         const expired = await expireClaims(store, Date.now(), run);
         if (expired.length) log(`returned tasks whose claims ran out: ${expired.map((id) => `#${id}`).join(" ")}`);
-        // What arrived or changed since the team went idle, so the same waiting work doesn't wake it every run.
-        const idle = join(run, "idle");
-        const since = existsSync(idle) ? new Date(statSync(idle).mtimeMs).toISOString() : "";
+        // What arrived or changed since the team went idle or finished (the newer mark), so the same waiting work (what
+        // was there when it finished, among it) doesn't wake it every run.
+        const marks = ["idle", "complete"].map((flag) => join(run, flag)).filter((file) => existsSync(file));
+        const since = marks.length ? new Date(Math.max(...marks.map((file) => statSync(file).mtimeMs))).toISOString() : "";
+        // A finished team wakes only for work from outside it, the operator's or a stakeholder's: what its own members or
+        // its planner's nightly re-check write waits for that tick.
+        const finished = existsSync(join(run, "complete"));
+        const fromOutside = (t: Task): boolean => [OPERATOR, "stakeholder"].includes(t.history.at(-1)?.by ?? t.by);
         const requests = (await store.requests.all()).filter((r) => r.status === "new" && r.updatedAt > since).length;
         // Anything the planner acts on: a finding or proposal, approved work, a hand-in to review, and a journey whose
         // last task just finished (it's due its verification).
@@ -622,6 +627,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
         const tasks = all.filter(
           (t) =>
             t.updatedAt > since &&
+            (!finished || fromOutside(t)) &&
             (["triage", "proposed", "approved", "review"].includes(t.status) ||
               ((t.status === "done" || t.status === "rejected") && all.some((j) => j.id === t.parent && journeyDue(j, all))))
         ).length;
@@ -812,7 +818,13 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     } else if (oncePer("tick", w.doneTickEveryMin ?? 1440) && t3.threadSend(planner, tickText(", nightly: the team is idle; check for new work")))
       log("nightly tick (idle)");
   } else if (existsSync(join(run, "complete"))) {
-    if (
+    // Work added after the finish (a task from the operator, a request) lifts the mark: the team is at work again until
+    // the planner finishes again (a6g complete). Otherwise it's ticked nightly.
+    if (arrived) {
+      rmSync(join(run, "complete"), { force: true });
+      const said = `, new work since the work was marked complete: ${arrived}. The work isn't marked complete any more: take this through, and once the finish line holds again, run a6g complete (a new Done report only if this round built something)`;
+      if (t3.threadSend(planner, tickText(said))) log(`woke the finished planner: ${arrived}`);
+    } else if (
       oncePer("tick", w.doneTickEveryMin ?? 1440) &&
       t3.threadSend(planner, tickText(", nightly: the work is complete; re-check the finish line and report only if something broke"))
     )

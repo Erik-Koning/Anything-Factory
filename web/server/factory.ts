@@ -17,7 +17,10 @@ import {
   type Limits,
   limitsOf,
   pauseControl,
+  restoreControl,
   resumeControl,
+  retireControl,
+  retiredOf,
   startControl,
   subscriptionsControl,
 } from "../../lib/tasks/controls.ts";
@@ -32,13 +35,14 @@ import { type Store, update } from "../../lib/tasks/store.ts";
 import type { TeamDoc } from "../../lib/tasks/teams.ts";
 import { config } from "./config.ts";
 import { graphDb, mongo } from "./db.ts";
+import { offSite, quietSince } from "./views.ts";
 
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc, TeamSubscriptions } from "../../lib/tasks/teams.ts";
 export type { Control, HoldScope, HoldState, Limits, StartState } from "../../lib/tasks/controls.ts";
 export type { StartAsk } from "../../lib/tasks/start.ts";
-export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf } from "../../lib/tasks/controls.ts";
+export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf, retiredOf } from "../../lib/tasks/controls.ts";
 export type { Agreement } from "../../lib/tasks/agreement.ts";
 export type { DecisionRecord } from "../../lib/tasks/decisions.ts";
 export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
@@ -55,10 +59,40 @@ export function storeFor(team: string): Store {
   return store;
 }
 
-// Every team that has published its settings (a6g register writes them; the lead's watchdog its status).
-export async function allTeams(): Promise<TeamDoc[]> {
-  const rows = await graphDb().collection<{ _id: string }>("teams").find({}).sort({ _id: 1 }).toArray();
-  return rows.map(({ _id, ...doc }) => ({ status: null, name: _id, title: _id, ...doc }) as unknown as TeamDoc);
+// Every team that has published its settings (a6g register writes them; the lead's watchdog its status), but those
+// taken off the site (retirements), unless `retired`: those are only for what keeps a team's name taken.
+export async function allTeams({ retired = false }: { retired?: boolean } = {}): Promise<TeamDoc[]> {
+  const [rows, off] = await Promise.all([
+    graphDb().collection<{ _id: string }>("teams").find({}).sort({ _id: 1 }).toArray(),
+    retired ? Promise.resolve(new Map<string, Control>()) : retirements(),
+  ]);
+  return rows
+    .map(({ _id, ...doc }) => ({ status: null, name: _id, title: _id, ...doc }) as unknown as TeamDoc)
+    .filter((team) => !offSite(team, off.get(team.name) ?? null));
+}
+
+const numbered = (id: string): number => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0);
+
+// The teams taken off the site, each with the control that took it off: the newest of a team's retires and restores is
+// a retire (lib/tasks/controls.ts). An admin (from the overview) or the team's lead (a6g unregister) takes one off; an
+// admin or a6g register puts it back. A report from its lead since puts it back too (views.ts offSite): the pages ask
+// that of each team with its state.
+export async function retirements(): Promise<Map<string, Control>> {
+  const rows = await graphDb()
+    .collection("controls")
+    .find({ kind: { $in: ["retire", "restore"] } })
+    .toArray();
+  const byTeam = new Map<string, Control[]>();
+  for (const { _id: _ignored, ...doc } of rows) {
+    const control = doc as unknown as Control;
+    byTeam.set(control.team, [...(byTeam.get(control.team) ?? []), control]);
+  }
+  const off = new Map<string, Control>();
+  for (const [team, controls] of byTeam) {
+    const retired = retiredOf(controls.sort((a, b) => numbered(a.id) - numbered(b.id)));
+    if (retired) off.set(team, retired);
+  }
+  return off;
 }
 
 export const teamDoc = (team: string): Promise<TeamDoc | null> => storeFor(team).team();
@@ -212,6 +246,33 @@ export async function subscriptionsFromWeb(team: string, ask: { role: string | n
   if (current.length === use.length && current.every((name, i) => name === use[i]))
     throw new Refused(use.length ? "Nothing changed: it runs on those already, in that order." : "Nothing changed: there's no list to clear.");
   return storeFor(team).controls.create(subscriptionsControl(team, `web:${ask.from}`, { role: ask.role, use }));
+}
+
+// An admin takes the team off the site, by their stakeholder id, with a note for the record: only once no Mac runs it
+// (views.ts quietSince), since one that still did would carry on unseen. Its tasks, history and name stay.
+export async function retireFromWeb(team: string, { note, from }: { note: string; from: string }, now = Date.now()): Promise<Control> {
+  const doc = await teamDoc(team);
+  if (!doc) throw new Refused("No such team.");
+  const store = storeFor(team);
+  if (offSite(doc, retiredOf(await store.controls.all()))) throw new Refused("It's off the site already.");
+  if (!quietSince(doc, now)) {
+    const at = doc.status?.at;
+    throw new Refused(
+      at
+        ? `A Mac runs ${doc.title || team}: it reported ${Math.max(1, Math.round((now - Date.parse(at)) / 60_000))} min ago. Unregister it on that Mac (a6g unregister ${team}), which takes it off the site too.`
+        : `${doc.title || team} was published less than 15 minutes ago, so a Mac may be starting it. Unregister it on that Mac (a6g unregister ${team}), or wait.`
+    );
+  }
+  return store.controls.create(retireControl(team, `web:${from}`, note));
+}
+
+// An admin puts a team that's off the site back on it.
+export async function restoreFromWeb(team: string, { from }: { from: string }): Promise<Control> {
+  const doc = await teamDoc(team);
+  if (!doc) throw new Refused("No such team.");
+  const store = storeFor(team);
+  if (!offSite(doc, retiredOf(await store.controls.all()))) throw new Refused("It's on the site already.");
+  return store.controls.create(restoreControl(team, `web:${from}`));
 }
 
 // An ask to start the team `team` (lib/tasks/start.ts), by an admin's stakeholder id on it; null withdraws the one

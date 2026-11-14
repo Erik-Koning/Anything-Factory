@@ -67,7 +67,10 @@ export type Ability =
   // readily it asks the operator): how it runs, the operator's alone, each change with an authenticator code.
   | "team:control"
   // Ask a machine of one's own to start a new team (lib/tasks/start.ts): an admin's alone, with a code.
-  | "projects:start";
+  | "projects:start"
+  // Take a team no Mac runs off the site, and put one back (lib/tasks/controls.ts retiredOf): an admin's alone, with
+  // a code.
+  | "team:retire";
 
 const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
   member: ["team:overview", "team:board", "requests:all", "requests:send", "tasks:suggest", "decisions:read"],

@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TeamInbox } from "../../../../components/inbox.tsx";
-import { Notice, type SearchParams } from "../../../../components/ui.tsx";
+import { Notice, QuietNote, type SearchParams } from "../../../../components/ui.tsx";
 import { can } from "../../../../server/access.ts";
 import { inbox } from "../../../../server/inbox.ts";
+import { quietSince } from "../../../../server/views.ts";
 import { tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Waiting on you" };
@@ -16,6 +17,7 @@ export default async function TeamInboxPage({ params, searchParams }: { params: 
   if (!can(viewer, "proposals:decide", team.name)) notFound();
   const tasks = await tasksOf(team.name);
   const titles = new Map(tasks.map((t) => [t.id, t.title]));
+  const quiet = quietSince(team);
   return (
     <>
       <Notice searchParams={searchParams} />
@@ -24,7 +26,15 @@ export default async function TeamInboxPage({ params, searchParams }: { params: 
         are on <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
         <Link href="/account/notifications">Notifications</Link>.
       </p>
-      <TeamInbox team={team.name} box={inbox(tasks)} back={`/t/${team.name}/inbox`} titles={titles} agreement={can(viewer, "team:control", team.name)} />
+      {quiet ? <QuietNote last={quiet.last} /> : null}
+      <TeamInbox
+        team={team.name}
+        box={inbox(tasks)}
+        back={`/t/${team.name}/inbox`}
+        titles={titles}
+        agreement={can(viewer, "team:control", team.name)}
+        waits={quiet !== null}
+      />
     </>
   );
 }

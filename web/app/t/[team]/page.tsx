@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { SpendPanel } from "../../../components/spend-panel.tsx";
+import { SitePanel } from "../../../components/site-panel.tsx";
 import { SubscriptionsPanel } from "../../../components/subscriptions-panel.tsx";
 import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { controlsOf, limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
+import { controlsOf, limitsOf, retiredOf, storeFor, usageOf } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
-import { journeys, merges, progress } from "../../../server/views.ts";
+import { journeys, merges, offSite, progress } from "../../../server/views.ts";
 import { teamFor } from "./team.ts";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -91,6 +92,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
       ) : null}
       {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
+      {can(viewer, "team:retire", team.name) ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
 
       <div className="grid">
         <section className="panel" aria-labelledby="journeys">

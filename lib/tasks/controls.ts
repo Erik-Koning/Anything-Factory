@@ -60,8 +60,9 @@ export interface SubscriptionsAsk {
 export interface Control extends Doc {
   team: string;
   // `start` and `starting` come before the team does: an ask to start it, and the machine's word on each step
-  // (start.ts). The watchdog of the team they made passes over them.
-  kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting";
+  // (start.ts). The watchdog of the team they made passes over them. `retire` and `restore` take the team off the web
+  // app and put it back (retiredOf); only the app reads them.
+  kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting" | "retire" | "restore";
   // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit), or
   // "machine:<name>" (a machine's word on an ask to start a team).
   by: string;
@@ -242,6 +243,31 @@ export const startingControl = (team: string, machine: string, progress: StartPr
   at,
   starting: progress,
 });
+
+// The team off the web app from now on (`note`: why, for the record), or back on it. Its tasks and history stay; only
+// what the app lists changes.
+export const retireControl = (team: string, by: string, note = "", at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "retire",
+  by,
+  at,
+  note: note.trim(),
+});
+export const restoreControl = (team: string, by: string, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "restore",
+  by,
+  at,
+});
+
+// The control that took the team off the web app, while it's off: the newest of its retires and restores, when that's
+// a retire. Controls come oldest first, as the store lists them.
+export const retiredOf = (controls: readonly Control[]): Control | null => {
+  const last = controls.findLast((c) => c.kind === "retire" || c.kind === "restore");
+  return last?.kind === "retire" ? last : null;
+};
 
 // Where an ask to start a team stands: the newest ask under its name and the machine's newest word on it ("waiting"
 // until it has said anything; "expired" once nothing picked it up in START_EXPIRES_HOURS). Null when there's no ask, or

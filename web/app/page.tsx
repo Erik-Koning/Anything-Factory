@@ -4,15 +4,15 @@ import { Fragment } from "react";
 import { Refresh } from "../components/refresh.tsx";
 import { StartCard } from "../components/start-card.tsx";
 import { TeamFolds } from "../components/team-folds.tsx";
-import { Ago, Chip, Notice, type SearchParams } from "../components/ui.tsx";
-import { machinesRunning, online } from "../../lib/fleet.ts";
+import { Ago, Chip, Notice, QuietMark, type SearchParams } from "../components/ui.tsx";
+import { machinesRunning, type MachineTeam, online } from "../../lib/fleet.ts";
 import { can, roleIn, runsTeam } from "../server/access.ts";
-import { allTeams, controlsOf, limitDollars, type Limits, limitsOf, type Spend, storeFor, type TeamDoc } from "../server/factory.ts";
+import { allTeams, controlsOf, limitDollars, type Limits, limitsOf, retirements, type Spend, storeFor, type TeamDoc } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { linkedMachines, type Machine, ownersOf } from "../server/machines.ts";
 import { type Start, startOpen, starts } from "../server/starts.ts";
 import { requireViewer } from "../server/viewer.ts";
-import { dollars, merges, progress, proposals } from "../server/views.ts";
+import { dollars, merges, offSite, progress, proposals, quietSince } from "../server/views.ts";
 
 export const metadata: Metadata = { title: "Teams" };
 
@@ -21,9 +21,20 @@ const LANES_SHORT = ["Triage", "To decide", "To build", "Building", "In review",
 
 // Every team the person follows, each a row that folds (components/team-folds.tsx): shut, it says how the team is; open,
 // where its work stands and the ways in. Above them, for an admin: the projects their Macs are starting (app/new).
+// Why a team a linked Mac runs isn't on this page: what the site reads is a team's store in MongoDB.
+const unshownWhy = (store: MachineTeam["store"]): string =>
+  store === "files"
+    ? "its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
+    : store === "mongo"
+      ? "not published yet (a6g register publishes it)"
+      : "it keeps no task graph the site reads";
+
 export default async function TeamsPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
-  const teams = (await allTeams()).filter((team) => roleIn(viewer, team.name) !== null);
+  // Every team that published its settings, those taken off the site among them (server/factory.ts retirements).
+  const [every, off] = await Promise.all([allTeams({ retired: true }), retirements()]);
+  const teams = every.filter((team) => !offSite(team, off.get(team.name) ?? null) && roleIn(viewer, team.name) !== null);
+  const offTeams = viewer.admin ? every.filter((team) => offSite(team, off.get(team.name) ?? null)) : [];
   // Only the machines that report a team whose board the viewer sees.
   const machines = await linkedMachines({ teams: teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name) });
   const owners = await ownersOf(machines);
@@ -31,9 +42,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
   const asking = rows.filter((c) => c.asks && can(viewer, "proposals:decide", c.team.name));
   const asks = asking.reduce((n, c) => n + c.asks, 0);
   const mayStart = can(viewer, "projects:start");
-  const asked: Start[] = mayStart ? await starts(new Set(teams.map((team) => team.name))) : [];
-  // Each ask's Mac, to say whether it's there to pick the ask up: every linked one, not only those that run a team.
-  const linked = asked.length ? await linkedMachines() : [];
+  const asked: Start[] = mayStart ? await starts(new Set(every.map((team) => team.name))) : [];
+  // Each ask's Mac, to say whether it's there to pick the ask up: every linked one, not only those that run a team. An
+  // admin's also say which teams they run that this page doesn't show.
+  const linked = asked.length || viewer.admin ? await linkedMachines() : [];
+  const published = new Set(every.map((team) => team.name));
+  const unshown = viewer.admin
+    ? linked.flatMap((machine) => machine.teams.filter((t) => t.part === "lead" && !published.has(t.name)).map((team) => ({ machine, team })))
+    : [];
   const upOf = (id: string): boolean | null => {
     const machine = linked.find((m: Machine) => m.id === id);
     return machine ? online(machine) : null;
@@ -46,7 +62,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
       <div className="page-head">
         <div>
           <h1>Teams</h1>
-          <p className="lede">{viewer.admin ? "Every team that has published its settings." : "The teams you follow."}</p>
+          <p className="lede">{viewer.admin ? "Every team that has published its settings and is on the site." : "The teams you follow."}</p>
         </div>
         {mayStart ? (
           // A raised key, not the solid: the one fill on this page is what waits on the operator.
@@ -103,6 +119,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
               const spend = control ? (status?.spend ?? null) : null;
               const title = team.title || team.name;
               const subs = control ? (status?.subscriptions?.use["*"] ?? null) : null;
+              const quiet = quietSince(team);
               return (
                 <li key={team.name} className="team-row">
                   <details className="team" id={team.name} open={openAtFirst.has(team.name)}>
@@ -110,12 +127,18 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                       <span className="team-name">
                         <span className="title">{title}</span>
                         <Chip>{status?.state ?? "no status yet"}</Chip>
+                        {quiet ? <QuietMark last={quiet.last} /> : null}
                       </span>
                       {/* The same four figures in the same places on every row, a dash where there's nothing to say. */}
                       <span className="glance">
                         <span className="glance-item waits">
                           {decides && teamAsks ? (
-                            <Chip tone="caution">{`${teamAsks} waiting on you`}</Chip>
+                            // The figure is a way to them too: a link in the fold's header goes where it says and leaves
+                            // the fold be. Out of the tab order, so the header stays one key: the open row's foot has the
+                            // same link for the keyboard.
+                            <Link className="chip caution" href={`/t/${team.name}/inbox`} tabIndex={-1}>
+                              {`${teamAsks} waiting on you`}
+                            </Link>
                           ) : (
                             <span className="muted">nothing waiting</span>
                           )}
@@ -262,10 +285,40 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
       ) : (
         <p className="panel empty">
           {viewer.admin
-            ? "No team has published its settings yet: a6g register publishes a team whose tasks are in Mongo."
+            ? offTeams.length
+              ? "No team is on the site now: those taken off it are below."
+              : "No team has published its settings yet: a6g register publishes a team whose tasks are in Mongo."
             : "You're on no team yet. An admin adds you to one; then it shows here."}
         </p>
       )}
+      {unshown.length || offTeams.length ? (
+        <div className="teams-foot small muted">
+          {unshown.length ? (
+            <p>
+              Also on the linked Macs, not shown here:{" "}
+              {unshown.map(({ machine, team }, i) => (
+                <Fragment key={`${machine.id}:${team.name}`}>
+                  {i ? "; " : ""}
+                  <b>{team.title || team.name}</b> on {machine.name}: {unshownWhy(team.store)}
+                </Fragment>
+              ))}
+              . <Link href="/machines">Machines</Link> lists what each runs.
+            </p>
+          ) : null}
+          {offTeams.length ? (
+            <p>
+              Taken off the site:{" "}
+              {offTeams.map((team, i) => (
+                <Fragment key={team.name}>
+                  {i ? ", " : ""}
+                  <Link href={`/t/${team.name}`}>{team.title || team.name}</Link>
+                </Fragment>
+              ))}
+              . Each one&apos;s overview puts it back.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }

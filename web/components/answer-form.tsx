@@ -23,6 +23,7 @@ export function AnswerForm({
   recommendation,
   shown,
   adding = false,
+  waits = false,
 }: {
   team: string;
   id: string;
@@ -31,6 +32,8 @@ export function AnswerForm({
   recommendation: string | null;
   shown?: string;
   adding?: boolean;
+  // No Mac runs the team now (server/views.ts quietSince): the answer waits for one.
+  waits?: boolean;
 }) {
   const [state, action, pending] = useActionState(answerAction, EMPTY);
   const [pick, setPick] = useState(state.pick);
@@ -111,7 +114,9 @@ export function AnswerForm({
         <button type="submit" className="primary" disabled={pending}>
           {pending ? "Sending…" : adding ? `Add to the answer on #${id}` : `Send the answer on #${id}`}
         </button>
-        <span className="hint">The planner gets it within a minute and moves #{id} on.</span>
+        <span className="hint">
+          {waits ? "It reaches the planner once a Mac runs the team again." : `The planner gets it within a minute and moves #${id} on.`}
+        </span>
       </div>
     </form>
   );

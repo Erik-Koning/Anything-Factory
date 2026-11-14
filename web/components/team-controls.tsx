@@ -8,7 +8,7 @@ import { askedBy, controlSaid, controlsView } from "../server/views.ts";
 import { SubmitButton } from "./submit-button.tsx";
 import { Ago, Chip } from "./ui.tsx";
 
-function CodeField({ id }: { id: string }) {
+export function CodeField({ id }: { id: string }) {
   return (
     <label htmlFor={id}>
       Code from your authenticator

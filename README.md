@@ -573,6 +573,20 @@ brief), proves it with `a6g check --run`, registers it with the budget and subsc
 at a time. `a6g projects` shows each ask and where it stands; `a6g projects start <team>` carries on one that stopped,
 and its log is `~/.a6g/orders/<team>.log`. The link itself still only reports: nothing the app answers is acted on.
 
+**Which teams the web app shows.** **Teams** shows a team whose tasks are in MongoDB once its lead publishes it
+(`a6g register`). `a6g init` keeps a new team's tasks there by default on a Mac connected to MongoDB, and in files
+otherwise (`--store` chooses), and refuses a name another team has used there; a team in files moves with
+`a6g task migrate --to mongo`. Teams names, for admins, the
+teams the linked Macs run that it doesn't show. A team no Mac has reported for 15 minutes is marked so, there and in
+**Waiting on you**, where an answer to it waits until a Mac runs it again. `a6g unregister` on its lead takes a team off
+the app: its tasks and history stay, its name stays taken, and `a6g register` puts it back. An admin can take one off
+from its overview too, with their authenticator's code, once no Mac runs it, and put it back from there; a report from
+its lead afterwards puts it back by itself.
+
+A team whose work is complete gets a nightly tick; work from outside it added after that (a task the operator adds or
+approves, a stakeholder's suggestion, a feature request) lifts the mark and wakes its planner within one watchdog run,
+and it finishes again once that's done.
+
 ## The two places you edit
 
 | Where                                                  | What                                                                                                                                                                                                                                                                                                 |

@@ -133,6 +133,8 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     now.push(control.id);
     // The ask that started this team and its machine's word on each step: done with before the team was (start.ts).
     if (control.kind === "start" || control.kind === "starting") continue;
+    // Whether the web app lists the team: the app's to read, nothing for the run folder.
+    if (control.kind === "retire" || control.kind === "restore") continue;
     const hold = control.kind === "pause" ? holdOf([control]) : null;
     const budget = control.by === "budget";
     // The watchdog's own record of a hold that settled: the run folder has it already.

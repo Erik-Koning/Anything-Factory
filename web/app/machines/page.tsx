@@ -5,8 +5,10 @@ import { Command } from "../../components/command.tsx";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
 import { can, roleIn, type Viewer, visibleMachines } from "../../server/access.ts";
+import { allTeams, retirements } from "../../server/factory.ts";
 import { linkedMachines, type Machine, ownersOf } from "../../server/machines.ts";
 import { requireViewer } from "../../server/viewer.ts";
+import { offSite } from "../../server/views.ts";
 import { unlinkMachineAction } from "./actions.ts";
 
 export const metadata: Metadata = { title: "Machines" };
@@ -20,6 +22,9 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
     (a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name)
   );
   const owners = everyone ? await ownersOf(machines) : null;
+  // The teams taken off the site (a Mac that reports one since puts it back: views.ts offSite).
+  const [every, retired] = await Promise.all([allTeams({ retired: true }), retirements()]);
+  const off = new Set(every.filter((team) => offSite(team, retired.get(team.name) ?? null)).map((team) => team.name));
   return (
     <>
       <h1>Machines</h1>
@@ -37,6 +42,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
               viewer={viewer}
               owner={owners ? (owners.get(machine.userId)?.email ?? "a removed account") : null}
               up={online(machine, now)}
+              off={off}
             />
           ))}
         </ul>
@@ -64,7 +70,19 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
   );
 }
 
-function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer: Viewer; owner: string | null; up: boolean }) {
+function MachineCard({
+  machine,
+  viewer,
+  owner,
+  up,
+  off,
+}: {
+  machine: Machine;
+  viewer: Viewer;
+  owner: string | null;
+  up: boolean;
+  off: ReadonlySet<string>;
+}) {
   // Only its own person asks it to start a project, or turns that on at its terminal.
   const mine = machine.userId === viewer.userId;
   return (
@@ -152,7 +170,7 @@ function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer:
       {machine.teams.length ? (
         <ul className="plain rows small">
           {machine.teams.map((team) => (
-            <TeamRow key={team.name} team={team} viewer={viewer} />
+            <TeamRow key={team.name} team={team} viewer={viewer} off={off.has(team.name)} />
           ))}
         </ul>
       ) : (
@@ -166,7 +184,7 @@ function MachineCard({ machine, viewer, owner, up }: { machine: Machine; viewer:
   );
 }
 
-function TeamRow({ team, viewer }: { team: MachineTeam; viewer: Viewer }) {
+function TeamRow({ team, viewer, off }: { team: MachineTeam; viewer: Viewer; off: boolean }) {
   const atWork = Object.entries(team.members).filter(([, n]) => n > 0);
   // Only a team whose tasks are in Mongo has pages here, and only for those who see it.
   const linked = team.store === "mongo" && roleIn(viewer, team.name) !== null;
@@ -181,6 +199,7 @@ function TeamRow({ team, viewer }: { team: MachineTeam; viewer: Viewer }) {
         {team.part === "lead" ? `Planner ${team.planner ?? "not running"} · ` : ""}
         {atWork.length ? atWork.map(([role, n]) => `${n} ${role}${n === 1 ? "" : "s"}`).join(", ") : "nobody"} at work
         {team.store === "files" ? " · tasks in files, on this machine only" : ""}
+        {off ? " · taken off the site" : ""}
       </p>
       <code className="path">{team.home}</code>
     </li>
