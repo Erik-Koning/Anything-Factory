@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.1: Every team where it belongs on the web app, and a finished team that wakes for new work
+
+After 0.8.0 the operator asked whether every way a project starts ends up on the site, and for the logic bugs and UX
+problems along the way. The plan is `docs/plans/teams-on-the-site.md`. The watchdog's change reaches every team on a
+Mac once this version is installed there, whatever version the team pins; the planner's new words reach a team at
+`a6g upgrade` and `a6g rotate`.
+
+- **A finished team wakes for new work.** A team whose work is marked complete only got its nightly tick, so a task
+  added from the site waited up to a day. Now work from outside the team added after it finished (a task the operator
+  adds or approves, a stakeholder's suggestion, a new feature request) lifts the mark and wakes its planner within one
+  watchdog run, as an idle team is woken. It finishes again (`a6g complete`) once that's done, with a new report only
+  if the round built something. What was there when it finished, and what the team itself writes, doesn't wake it.
+- **Taking a team off the site, and putting it back.** `a6g unregister` on a team's lead takes it off the web app, and
+  `a6g register` puts it back. An admin can take off a team no Mac runs from its overview ("On the site"), with their
+  authenticator's code, and put it back from there; for a team a Mac still runs, the panel says to unregister it on
+  that Mac, which stops it too. A team that's off isn't on Teams (a line below the rows names it, for admins), in
+  Waiting on you, the header's count, the emails, the team switcher or the invitations; its pages still open from a
+  link and say it's off. Its tasks, history and name stay. A report from its lead afterwards (a Mac that was asleep, a
+  lead moved to another Mac) puts it back, so a team a Mac runs is never hidden. Both are controls (`retire`,
+  `restore`), which only the app reads: the app's database user needs no new grant.
+- **A team no Mac runs is marked.** No report from its lead for 15 minutes: "no Mac runs it" beside its state on Teams
+  and on its pages, and in Waiting on you, "an answer waits until one does".
+- **Teams set up at the terminal.** `a6g init` keeps a new team's tasks in MongoDB by default on a Mac connected to it
+  (`a6g connect mongo`), so the site shows the team; `--store files` keeps them on the Mac, and a Mac that isn't
+  connected keeps them in files as before. A name another team has used there (its settings, its tasks or its
+  controls) is refused, so a new team never shares an old one's graph. Teams names, for admins, the teams the linked
+  Macs run that it doesn't show, and why: in files on that Mac (`a6g task migrate --to mongo`), or not published yet.
+- **The row's "waiting on you" figure** on Teams is a link to the team's questions. It folded the row shut instead.
+
 ## 0.8.0: Running the factory from the web app, decisions made for you, and a model for each role
 
 Everything built since 0.7.0, newest first. A team moves to it with `a6g upgrade <team>`, and its planner takes the

@@ -1,6 +1,6 @@
 {
   "name": "a6g",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Anything Factory's roles and hooks for agents on an Anything Factory team. Loaded by each team's T3 Code instances with --plugin-dir; inert anywhere else.",
   "author": {
     "name": "Anything Factory"
