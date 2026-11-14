@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.2: Starting a project from GitHub, and the team's rules chosen on the form
+
+The operator asked to start a project on a GitHub repository by its name, cloned when their account owns it or can push
+to it and forked to their account when it can't, and for the settings each step of a start should take. The plan is
+`docs/plans/start-from-github.md`. A Mac takes these once this version is installed there; the site offers them only
+for a Mac whose report says it does.
+
+- **From GitHub.** On the start form, a repository on GitHub by `owner/name` or its address. The Mac asks GitHub, as
+  its own signed-in account (`gh`), what it may do with it: it clones one the account can push to, and forks one it can
+  only read to that account first, then clones the fork, keeping the original as `upstream` and gh's default on the
+  fork. One it can't see, or that's archived, stops the start, saying why. The start card says what happened.
+- **A new repository, on GitHub too**: made as before, then created under the Mac's account, private or public, and
+  pushed.
+- **Someone else's code.** A repository whose owner isn't the Mac's account takes a tick that you trust its code to run
+  on the Mac, which refuses an ask without it, and checks again against the owner GitHub answers with.
+- **The team's rules, chosen on the form**: its base branch, a finish line or cycles, who approves new work (you, or the
+  team's approver up to a medium task), how readily it asks you, and what it may do on GitHub (nothing, push its branch,
+  or push it with a pull request into the base, to the repository it pushes to: a fork's, never the original). The Mac
+  drafts with `a6g init --base --mode --approval --push`, records the working agreement when it registers the team,
+  and the setup agent keeps them. Asked again, a start runs on the new choices.
+- **Set it up, then wait for me.** The Mac records a pause before it registers the team, so nothing runs or spends until
+  you resume it from its overview. A later ask to start at once lifts a wait an earlier try left.
+- **The Mac's GitHub account** shows on Machines and on the form. It's asked of GitHub at most hourly (every five
+  minutes while there's none), and nothing of it but its name leaves the Mac. What a failing command said reaches the
+  site without any token a remote's address held.
+
 ## 0.8.1: Every team where it belongs on the web app, and a finished team that wakes for new work
 
 After 0.8.0 the operator asked whether every way a project starts ends up on the site, and for the logic bugs and UX
