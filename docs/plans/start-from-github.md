@@ -1,6 +1,6 @@
 # Plan: starting a project from a GitHub repository, and the settings each step takes
 
-Status: built, reviewed and released in 0.8.2 (2026-11-14), at the operator's word ("Yes, and also any other settings
+Status: built, reviewed, released in 0.8.2 and deployed to both sites (2026-11-14), at the operator's word ("Yes, and also any other settings
 per step that would be prudent"). No project has been started from GitHub for real yet: that spends, and is the
 operator's to ask for.
 
@@ -147,4 +147,4 @@ Noted and left: a fork GitHub hands back may be behind the original; the team st
 - [x] The form, the card, the Machines page
 - [x] Tests (factory 761 of 762, one skipped as before; web unit and integration 152; browser 56), screenshots and a
       judge, review
-- [ ] Merged, released as 0.8.2, deployed to both sites, installed on the operator's Mac
+- [x] Merged, released as 0.8.2, deployed to both sites, installed on the operator's Mac
