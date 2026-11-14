@@ -132,6 +132,20 @@ function MachineCard({
                   </span>
                 </>
               ) : null}
+              {/* The GitHub account it clones, forks and makes repositories as; an older factory doesn't say. */}
+              {machine.projects.github !== undefined ? (
+                <span className="github-as small muted">
+                  {machine.projects.github ? (
+                    <>
+                      On GitHub as <b>{machine.projects.github}</b>
+                    </>
+                  ) : (
+                    <>
+                      Not signed in to GitHub: on it, <code>gh auth login</code>
+                    </>
+                  )}
+                </span>
+              ) : null}
             </>
           ) : machine.canStart ? (
             <span className="muted">

@@ -3,7 +3,7 @@
 // cleared once it has ended.
 import Link from "next/link";
 import { withdrawStartAction } from "../app/new/actions.ts";
-import { repoOf, STEP_WORDS } from "../../lib/tasks/start.ts";
+import { GITHUB_REPO, repoOf, STEP_WORDS } from "../../lib/tasks/start.ts";
 import type { Start } from "../server/starts.ts";
 import { Command } from "./command.tsx";
 import { MARKS } from "./start-marks.ts";
@@ -11,15 +11,48 @@ import { SubmitButton } from "./submit-button.tsx";
 import { Ago, Chip } from "./ui.tsx";
 
 // A mark's state in a sign as well as a colour, for anyone who can't tell the two bars apart.
-const SIGN = { done: "✓", now: "▸", stopped: "✕", todo: "" } as const;
+const SIGN = { done: "✓", now: "▸", stopped: "✕", held: "‖", todo: "" } as const;
+
+// A note the Mac wrote, its repositories as names (owner/name), each a link to it on GitHub.
+function NoteText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\b[A-Za-z0-9-]+\/[A-Za-z0-9._-]+[A-Za-z0-9_-])/).map((part, index) =>
+        GITHUB_REPO.test(part) ? (
+          <a key={index} className="code" href={`https://github.com/${part}`} rel="noreferrer">
+            {part}
+          </a>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+}
 
 export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
   const { ask, step, team } = start;
   const ended = step === "failed" || step === "refused" || step === "expired";
-  const at = MARKS.findIndex((mark) => mark.step === (step === "failed" ? start.stoppedAt : step));
-  const mark = (index: number): keyof typeof SIGN =>
-    step === "started" ? "done" : at < 0 ? "todo" : index < at ? "done" : index > at ? "todo" : step === "failed" ? "stopped" : "now";
   const { name: folder, create } = repoOf(ask);
+  // Set up and paused, as asked: its last mark waits for the operator instead of saying it started.
+  const waits = step === "started" && ask.hold === true;
+  const at = waits ? MARKS.length - 1 : MARKS.findIndex((mark) => mark.step === (step === "failed" ? start.stoppedAt : step));
+  const mark = (index: number): keyof typeof SIGN =>
+    waits
+      ? index < at
+        ? "done"
+        : "held"
+      : step === "started"
+        ? "done"
+        : at < 0
+          ? "todo"
+          : index < at
+            ? "done"
+            : index > at
+              ? "todo"
+              : step === "failed"
+                ? "stopped"
+                : "now";
   const chip =
     step === "waiting"
       ? { text: "waiting for the Mac", tone: "caution" }
@@ -30,17 +63,27 @@ export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
           : step === "refused"
             ? { text: "refused", tone: "warn" }
             : step === "started"
-              ? { text: "started", tone: "ok" }
+              ? { text: waits ? "set up, waiting for you" : "started", tone: waits ? "caution" : "ok" }
               : { text: STEP_WORDS[step].toLowerCase(), tone: "ok" };
   const current = at >= 0 ? MARKS[at] : undefined;
   return (
-    <li className={`start-card${ended ? " ended" : ""}`} id={`start-${team}`}>
+    <li className={`start-card${ended ? " ended" : waits ? " held" : ""}`} id={`start-${team}`}>
       <div className="head">
         <h3 className="title">{ask.title}</h3>
         <Chip tone={chip.tone}>{chip.text}</Chip>
       </div>
       <p className="muted small where">
-        <span className="code">{team}</span> on <b>{ask.machineName}</b>, {create ? "in a new repository" : "in"} <span className="code">{folder}</span>
+        <span className="code">{team}</span> on <b>{ask.machineName}</b>,{" "}
+        {"github" in ask.repo ? (
+          <>
+            from GitHub <span className="code">{ask.repo.github}</span>
+          </>
+        ) : (
+          <>
+            {create ? ("publish" in ask.repo && ask.repo.publish ? "in a new repository, on GitHub too," : "in a new repository") : "in"}{" "}
+            <span className="code">{folder}</span>
+          </>
+        )}
         {step === "waiting" ? null : (
           <>
             {" "}
@@ -60,17 +103,27 @@ export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
                     {SIGN[state]}{" "}
                   </span>
                 ) : null}
-                {label}
-                <span className="sr">{state === "done" ? ", done" : state === "stopped" ? ", stopped here" : state === "now" ? ", under way" : ""}</span>
+                {state === "held" ? "Waiting" : label}
+                <span className="sr">
+                  {state === "done"
+                    ? ", done"
+                    : state === "stopped"
+                      ? ", stopped here"
+                      : state === "now"
+                        ? ", under way"
+                        : state === "held"
+                          ? ", for you"
+                          : ""}
+                </span>
               </span>
             </li>
           );
         })}
       </ol>
       {/* On a phone the marks are bars alone: the step they've reached is said once, under them. */}
-      {current && step !== "started" ? (
+      {current && (step !== "started" || waits) ? (
         <p className="marks-now" aria-hidden="true">
-          {SIGN[mark(at)]} Step {at + 1} of {MARKS.length}: {current.label}
+          {SIGN[mark(at)]} Step {at + 1} of {MARKS.length}: {waits ? "Waiting for you" : current.label}
         </p>
       ) : null}
       {step === "waiting" ? (
@@ -86,7 +139,16 @@ export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
           <Command>a6g projects</Command>
         </>
       ) : step === "started" ? (
-        <p className="small">The team is started. Its row shows below once it has published its settings, at its next run.</p>
+        waits ? (
+          <div className="start-actions">
+            <span className="small">Set up and checked, and paused as you asked: nothing runs or spends until you resume it.</span>
+            <Link className="button s" href={`/t/${team}`}>
+              Open to resume
+            </Link>
+          </div>
+        ) : (
+          <p className="small">The team is started. Its row shows below once it has published its settings, at its next run.</p>
+        )
       ) : ended ? (
         <>
           {/* Why, in a sentence; then what the command that failed said, in its own words and its own face. */}
@@ -101,10 +163,22 @@ export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
         <p className="small">
           {current?.doing}{" "}
           <span className="muted">
-            Since <Ago at={start.at} />.
+            This step began <Ago at={start.at} />.
           </span>
         </p>
       )}
+      {/* What the Mac's steps did that you should know: the repository cloned or forked, made on GitHub. */}
+      {start.notes.filter((note) => !waits || !note.startsWith("Set up, and waiting")).length ? (
+        <ul className="plain notes small">
+          {start.notes
+            .filter((note) => !waits || !note.startsWith("Set up, and waiting"))
+            .map((note, index) => (
+              <li key={index}>
+                <NoteText text={note} />
+              </li>
+            ))}
+        </ul>
+      ) : null}
       {step === "waiting" || ended ? (
         <div className="start-actions">
           {ended ? (

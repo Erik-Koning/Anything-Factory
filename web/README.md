@@ -48,9 +48,13 @@ request (Article 8).
   "no Mac runs it" (here and on its pages). For an admin, above the rows: the projects their Macs are starting, each
   with how far it has got, and **Start a project**; below them, the teams the linked Macs run that this page doesn't
   show and why (tasks in files on that Mac, or not published yet), and the teams taken off the site.
-- `/new` Start a project (admins): what to build, a Mac of your own that starts projects and a repository in its
-  folder (or a new one), who chooses the platform and the stack, a budget, the subscriptions in order, and your
-  authenticator's code. It records a control of kind `start` under the new team's name (`lib/tasks/start.ts`), which
+- `/new` Start a project (admins): what to build, a Mac of your own that starts projects and where the code comes
+  from (a new repository, on GitHub too when the Mac is signed in there; one in its folder; or one on GitHub by
+  `owner/name`, cloned, or forked to the Mac's account when that can't push to it, with a tick to trust someone
+  else's code), its base branch, who chooses the platform and the stack, its aim (a finish line or cycles), who
+  approves new work, how readily it asks, what it may do on GitHub, a budget, the subscriptions in order, whether it
+  starts once set up or waits for you, and your authenticator's code. A Mac on an older factory is offered only the
+  choices it reads; Machines says which GitHub account a Mac uses. It records a control of kind `start` under the new team's name (`lib/tasks/start.ts`), which
   the Mac picks up at its next full run and answers step by step; the Teams page shows each step, and for one that
   stopped: why, what the failing command said, what to do, and the command to run. With no Mac that starts projects
   yet, the page says how to turn that on at the Mac's terminal (`a6g connect app --projects <dir>`): it can't be
