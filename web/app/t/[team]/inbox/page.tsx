@@ -6,13 +6,14 @@ import { Notice, QuietNote, type SearchParams } from "../../../../components/ui.
 import { can } from "../../../../server/access.ts";
 import { inbox } from "../../../../server/inbox.ts";
 import { quietSince } from "../../../../server/views.ts";
-import { tasksOf, teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Waiting on you" };
 
 // What waits on the operator on this team: questions to answer, blocked work, and what the planner has yet to act on.
 export default async function TeamInboxPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "proposals:decide", team.name)) notFound();
   const tasks = await tasksOf(team.name);
@@ -21,11 +22,15 @@ export default async function TeamInboxPage({ params, searchParams }: { params: 
   return (
     <>
       <Notice searchParams={searchParams} />
-      <p className="lede small">
-        You answer as the operator. The planner gets each answer within a minute, records it in its decisions and moves the task on. Proposals to approve
-        are on <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
-        <Link href="/account/notifications">Notifications</Link>.
-      </p>
+      <p className="lede small">You answer as the operator; the team keeps working on everything else meanwhile.</p>
+      <details className="guide">
+        <summary>How this works</summary>
+        <p>
+          The planner gets each answer within a minute, records it in its decisions and moves the task on. Proposals to approve are on{" "}
+          <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
+          <Link href="/account/notifications">Notifications</Link>.
+        </p>
+      </details>
       {quiet ? <QuietNote last={quiet.last} /> : null}
       <TeamInbox
         team={team.name}

@@ -2,11 +2,11 @@
 // The task graph by level, in BetterDiagrams' editor, read-only: the journeys on the top level, a double-click (or a
 // card's ⊞) to open one, breadcrumbs and Esc to come back out; no minimap, since a level is small, and no legend on a
 // phone. The level it's on goes in the address (?at=), so a reload, a link or going back opens the same one. Light or
-// dark as the system is, like the app.
+// dark as the system is, in the app's paper and ink (its bar and keys are restyled in globals.css, under .level-graph).
 import "@mosphere/better-diagrams/styles.css";
 import type { RegistryExtensions, StudioHandle } from "@mosphere/better-diagrams";
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LEVEL_KINDS, NO_JOURNEY } from "../../lib/tasks/graph.ts";
 
 // The cards that aren't BetterDiagrams' own tasks (lib/tasks/graph.ts): a journey in emerald, a hue no built-in kind
@@ -35,11 +35,42 @@ const LIGHT_ACCENTS: Record<string, string> = {
   [LEVEL_KINDS.waiting]: "#4338ca",
 };
 
+// The app's own colours (globals.css) in place of BetterDiagrams' slate: the canvas is the page's ground, the bar, the
+// legend and the cards the panels' surface. Written out rather than the app's variables, since a picture export takes
+// them out of the page; the type and the corners are the app's own.
+const PAPER = {
+  bg: "#f0eee8",
+  surface: "#fdfcf9",
+  surface2: "#e8e5dd",
+  border: "#d7d4cc",
+  text: "#17191b",
+  textDim: "#565a5c",
+  accent: "#1f4bc6",
+  accentInk: "#ffffff",
+  gridDot: "#d3cfc5",
+  shadowInk: "rgb(84 76 60 / 18%)",
+};
+const NIGHT = {
+  bg: "#131412",
+  surface: "#1c1d1a",
+  surface2: "#0b0c0a",
+  border: "#3a3b36",
+  text: "#ecebe6",
+  textDim: "#9e9d95",
+  accent: "#93b2ff",
+  accentInk: "#131412",
+  gridDot: "#2c2d29",
+  shadowInk: "rgb(0 0 0 / 55%)",
+};
+const TYPE = { font: "var(--font-text)", mono: "var(--font-code)", radius: "8px" };
+
 interface Props {
   diagram: Record<string, unknown>;
   dark: boolean;
   narrow: boolean;
   filename: string;
+  // Called when it opens and on every move to another level, once the editor has fitted the level to the box.
+  onLevel: () => void;
 }
 
 // The editor, and all of the package it needs, load in the browser once the page is there: none of it is drawn on the
@@ -48,8 +79,9 @@ const Studio = dynamic(
   async () => {
     const bd = await import("@mosphere/better-diagrams");
     const validate = bd.registryValidateOptions(bd.createRegistry(REGISTRY));
-    const light = { ...bd.LIGHT_THEME, nodeAccents: { ...bd.LIGHT_THEME.nodeAccents, ...LIGHT_ACCENTS } };
-    return function LevelStudio({ diagram, dark, narrow, filename }: Props) {
+    const light = { ...bd.LIGHT_THEME, ...PAPER, ...TYPE, nodeAccents: { ...bd.LIGHT_THEME.nodeAccents, ...LIGHT_ACCENTS } };
+    const night = { ...bd.DARK_THEME, ...NIGHT, ...TYPE };
+    return function LevelStudio({ diagram, dark, narrow, filename, onLevel }: Props) {
       const doc = useMemo(() => bd.validateTemplate(diagram, validate), [diagram]);
       // Open the level the address asks for once, when the editor is there: inside a card that holds something, or
       // where a task is. With nothing asked for and no journeys, the only card is the work in none: open it.
@@ -69,13 +101,18 @@ const Studio = dynamic(
         [doc]
       );
       // Passing no state lets Next's router follow the address (its own state would make it skip the change).
-      const moved = useCallback((stack: string[]) => {
-        const url = new URL(window.location.href);
-        const level = stack.at(-1);
-        if (level) url.searchParams.set("at", level.replace(/^t/, ""));
-        else url.searchParams.delete("at");
-        window.history.replaceState(null, "", url);
-      }, []);
+      // It reports the level on opening too, so the first level is settled here as well as each one after it.
+      const moved = useCallback(
+        (stack: string[]) => {
+          const url = new URL(window.location.href);
+          const level = stack.at(-1);
+          if (level) url.searchParams.set("at", level.replace(/^t/, ""));
+          else url.searchParams.delete("at");
+          window.history.replaceState(null, "", url);
+          onLevel();
+        },
+        [onLevel]
+      );
       return (
         <bd.ArchitectureStudio
           ref={ready}
@@ -85,7 +122,7 @@ const Studio = dynamic(
           welcome={false}
           minimap={false}
           legend={!narrow}
-          theme={dark ? bd.DARK_THEME : light}
+          theme={dark ? night : light}
           filename={filename}
           onFocusChange={moved}
         />
@@ -114,13 +151,57 @@ function useMedia(query: string): boolean {
   );
 }
 
+// The editor fits a level to the box at up to two and a half times life size, so a level of two cards would fill the
+// window with them. Once the view has been still for a moment after a fit, anything over life size goes back to it with
+// the editor's own 100% key, which keeps the middle where it is; then `done`. Pressed by the script, not the person:
+// their own zooming afterwards is left alone.
+function settle(box: HTMLElement | null, done: () => void) {
+  if (!box) return;
+  let last = "";
+  let still = 0;
+  let polls = 0;
+  const timer = window.setInterval(() => {
+    const reset = box.querySelector<HTMLButtonElement>(".as-zoom");
+    const now = reset?.textContent ?? "";
+    still = now === last ? still + 1 : 0;
+    last = now;
+    polls += 1;
+    // At least 0.6 s, for the fit to start, and still for 0.3 s; never longer than 4 s.
+    if (polls < 6 || (still < 3 && polls < 40)) return;
+    window.clearInterval(timer);
+    if (reset && Number.parseInt(now, 10) > 100) {
+      reset.click();
+      // The key's own move takes 120 ms.
+      window.setTimeout(done, 160);
+    } else done();
+  }, 100);
+}
+
 export function LevelGraph({ diagram, filename }: { diagram: Record<string, unknown>; filename: string }) {
   const dark = useMedia(DARK);
   // On a phone the legend would cover most of the canvas.
   const narrow = useMedia(NARROW);
+  const box = useRef<HTMLDivElement>(null);
+  // The cards show once the first level has settled, so they don't open large and then shrink (globals.css); at the
+  // latest after 5 s, whatever happened.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShown(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const level = useCallback(() => settle(box.current, () => setShown(true)), []);
   return (
-    <div className="level-graph">
-      <Studio diagram={diagram} dark={dark} narrow={narrow} filename={filename} />
+    <div
+      ref={box}
+      className="level-graph"
+      data-shown={shown ? "" : undefined}
+      // The editor's Fit keys fit at up to the same size: settled the same way.
+      onClickCapture={(event) => {
+        const key = (event.target as Element).closest("button");
+        if (key?.matches(".react-flow__controls-fitview") || (key?.matches(".as-toolbar .as-btn") && key.textContent === "Fit")) level();
+      }}
+    >
+      <Studio diagram={diagram} dark={dark} narrow={narrow} filename={filename} onLevel={level} />
     </div>
   );
 }

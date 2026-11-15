@@ -1,0 +1,886 @@
+/*
+ * The Subscriptions page (app/subscriptions): limit cards, a trend chart, share bars and a model table, in the site's
+ * tokens (globals.css). A subscription keeps one colour wherever it shows (c0 to c5, each at least 3:1 on both themes'
+ * surfaces); kinds of tokens and dollars are shades of ink, the darker the costlier (as T3 Code shades them).
+ */
+:root {
+  --sub-0: #c4552f;
+  --sub-1: var(--chart);
+  --sub-2: #7a5cc4;
+  --sub-3: #2f8a73;
+  --sub-4: #a8730a;
+  --sub-5: #6b6f72;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sub-0: #e0866a;
+    --sub-2: #a994e6;
+    --sub-3: #5cc2a6;
+    --sub-4: #e0b04a;
+    --sub-5: #a3a49e;
+  }
+}
+.c0 {
+  --c: var(--sub-0);
+}
+.c1 {
+  --c: var(--sub-1);
+}
+.c2 {
+  --c: var(--sub-2);
+}
+.c3 {
+  --c: var(--sub-3);
+}
+.c4 {
+  --c: var(--sub-4);
+}
+.c5 {
+  --c: var(--sub-5);
+}
+.k-input {
+  --c: color-mix(in oklab, var(--ink) 60%, var(--surface));
+}
+.k-cacheRead {
+  --c: color-mix(in oklab, var(--ink) 30%, var(--surface));
+}
+.k-cacheWrite {
+  --c: color-mix(in oklab, var(--ink) 72%, var(--surface));
+}
+.k-output {
+  --c: var(--ink);
+}
+.k-other {
+  --c: color-mix(in oklab, var(--ink) 44%, var(--surface));
+}
+.k-standard {
+  --c: color-mix(in oklab, var(--ink) 34%, var(--surface));
+}
+.k-fast {
+  --c: color-mix(in oklab, var(--ink) 66%, var(--surface));
+}
+.swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--c, var(--edge));
+  vertical-align: baseline;
+}
+.fig {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+.warn-text {
+  color: var(--warn);
+}
+
+/* --- What's shown: filters on the left, the window and the view on the right ------------------------------------ */
+.usage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 18px 0 4px;
+}
+.usage-bar .spacer {
+  flex: 1;
+}
+.usage-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.usage-filter a,
+.usage-toggle a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--h-s);
+  padding: 0 12px;
+  border-radius: var(--r-ctl);
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 550;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.usage-filter a {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.usage-filter a:hover,
+.usage-toggle a:hover {
+  color: var(--ink);
+}
+.usage-filter a[aria-current="true"],
+.usage-filter a:has(.link-pending) {
+  border-color: var(--edge);
+  color: var(--ink);
+  box-shadow: var(--rim), var(--raise-s);
+}
+.usage-select {
+  display: none;
+}
+.usage-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  box-shadow: var(--sink);
+}
+.usage-toggle a[aria-current="true"],
+.usage-toggle a:has(.link-pending) {
+  background: var(--key);
+  box-shadow:
+    var(--rim),
+    var(--raise-s),
+    0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.usage-toggle:has(.link-pending) a[aria-current="true"]:not(:has(.link-pending)) {
+  background: none;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+.usage-filter a:focus-visible,
+.usage-toggle a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* --- Limits ----------------------------------------------------------------------------------------------------- */
+.limit-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.limit-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.limit-key li > span {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+}
+.key-left {
+  background: color-mix(in srgb, var(--sub-0) 38%, transparent);
+  border-right: 2px solid var(--sub-0);
+}
+.key-used {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink) 20%, transparent) 0 2px, transparent 2px 7px),
+    color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.limit-key .key-pace {
+  width: 2px;
+  margin: 0 8px;
+  border-radius: 0;
+  background: var(--ink);
+}
+.limit-key .key-limit {
+  width: 0;
+  margin: 0 8px;
+  border-radius: 0;
+  border-left: 2px dashed var(--signal);
+}
+.limit-cards {
+  list-style: none;
+  padding: 0;
+  margin: var(--gap) 0;
+  display: grid;
+  gap: 12px;
+}
+.limit-card {
+  display: grid;
+  grid-template-columns: minmax(150px, 13rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px 24px;
+  padding: 16px 20px;
+  background: var(--face);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--raise);
+}
+.limit-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.limit-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  color: var(--ink-2);
+}
+.limit-left b {
+  font-size: 30px;
+  line-height: 1.1;
+  color: var(--ink);
+  font-weight: 650;
+}
+.limit-card.spent .limit-left b {
+  color: var(--signal);
+}
+.pace {
+  display: inline-flex;
+}
+.pace svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pace.ahead {
+  color: var(--warn);
+}
+.pace.on {
+  color: var(--ink-3);
+}
+.pace.under {
+  color: var(--ok);
+}
+.pool {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.pool-part {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 8px;
+}
+.pool-part:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.pool-track {
+  position: relative;
+  display: block;
+  height: 40px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  box-shadow: var(--sink);
+}
+/* What's left, in the subscription's colour. */
+.pool-left {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--c) 38%, transparent);
+  border-right: 2px solid var(--c);
+}
+.pool-left[style*="width: 0%"] {
+  border-right: 0;
+}
+/* What's used, hatched: its reset gives it back. */
+.pool-used {
+  position: absolute;
+  inset: 0 0 0 auto;
+  right: 0;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink) 20%, transparent) 0 2px, transparent 2px 7px);
+}
+/* Where even use would be by now: a line in a gap cut out of the bar. */
+.pool-pace {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  box-shadow:
+    -2px 0 0 var(--surface),
+    2px 0 0 var(--surface);
+}
+/* Where the factory's teams stop on it. */
+.pool-limit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin-left: -1px;
+  border-left: 2px dashed var(--signal);
+}
+.pool-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Over the marks, on a chip of the card's own, so a line through the bar never runs through its words. */
+.pool-text > * {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+.pool-text b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pool-legend {
+  display: none;
+  grid-column: 1 / -1;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pool-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.pool-text .reset {
+  margin-left: auto;
+  color: var(--ink-2);
+}
+.pool-part.spent .pool-text {
+  color: var(--signal);
+}
+.pool-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 3;
+  display: none;
+  min-width: 230px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--float);
+}
+.pool-part:last-child:not(:first-child) .pool-pop {
+  left: auto;
+  right: 0;
+}
+.pool-pop > b {
+  color: var(--ink);
+}
+.pool-pop dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 6px 0 0;
+}
+.pool-pop dt {
+  color: var(--ink-3);
+}
+.pool-pop dd {
+  margin: 0;
+  color: var(--ink);
+}
+.pool-part:hover .pool-pop,
+.pool-part:focus-visible .pool-pop {
+  display: block;
+}
+.sub-facts {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.sub-facts li {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.sub-facts li:first-child {
+  border-top: 0;
+}
+.sub-facts .swatch {
+  margin-top: 5px;
+}
+.sub-facts p {
+  margin: 0;
+}
+.sub-facts p + p {
+  margin-top: 2px;
+}
+
+/* --- Cost and tokens -------------------------------------------------------------------------------------------- */
+.usage-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+  gap: 24px 32px;
+}
+.usage-headline {
+  margin: 0;
+  font-size: 36px;
+  line-height: 1.1;
+  font-weight: 650;
+  color: var(--ink);
+}
+.usage-series {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+}
+.usage-series li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.usage-series-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.usage-series-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-series-share {
+  grid-column: 2 / -1;
+}
+.usage-main h3,
+.share-head h3 {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.usage-stats {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.usage-stats li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-lo);
+  border: 1px solid var(--line);
+}
+.usage-stats span {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.usage-stats b {
+  font-size: 20px;
+  color: var(--ink);
+}
+.usage-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.usage-section-head h2 {
+  margin: 0;
+}
+
+/* The trend chart: axis labels in HTML, so their text keeps its size at any width. */
+.trend {
+  margin: 0;
+}
+.trend-body {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  height: 14rem;
+  /* Room above the top step's label. */
+  margin-top: 12px;
+}
+.trend-axis {
+  position: relative;
+}
+.trend-axis span {
+  position: absolute;
+  right: 8px;
+  white-space: nowrap;
+  transform: translateY(50%);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.trend-plot {
+  position: relative;
+  border-radius: 4px;
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+.trend-plot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+.trend-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+.trend-plot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.trend .series .area {
+  fill: var(--c);
+  fill-opacity: 0.12;
+}
+.trend .series .line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.trend .cursor {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.trend-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: 0 0 -4.5px -4.5px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+.trend-tip {
+  position: absolute;
+  top: 6px;
+  z-index: 2;
+  min-width: 170px;
+  margin-left: 14px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--float);
+  pointer-events: none;
+}
+.trend-tip.left {
+  transform: translateX(calc(-100% - 28px));
+}
+.trend-tip > b {
+  color: var(--ink);
+}
+.trend-tip ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+}
+.trend-tip li,
+.trend-tip p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+}
+.trend-tip li span:nth-child(2),
+.trend-tip p span:first-child {
+  flex: 1;
+}
+.trend-tip p {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 600;
+}
+.trend-tip .fig {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.trend-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+.trend-x {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 3.5rem;
+  padding-top: 6px;
+  font: 500 11px/1.4 var(--font-code);
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+/* Share bars: thin, a sliver at the least for each kind. */
+.share {
+  margin-top: 18px;
+}
+.share-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.share-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+.share-part {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 4px;
+  background: var(--c);
+}
+.share-part:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.share-part:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.share-part:only-child {
+  border-radius: 4px;
+}
+.share-part:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.share-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: none;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--float);
+  padding: 5px 9px;
+  pointer-events: none;
+}
+.share-tip b {
+  color: var(--ink);
+}
+.share-part:hover .share-tip,
+.share-part:focus-visible .share-tip {
+  display: block;
+}
+/* A tip at either end stays inside the bar's width, so it never pushes past a phone's screen. */
+.share-part:first-child .share-tip {
+  left: 0;
+  transform: none;
+}
+.share-part:last-child:not(:first-child) .share-tip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.share-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.share-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.share-legend .fig {
+  color: var(--ink);
+}
+
+/* The model table: the model's id over a bar against the biggest. */
+table.models {
+  width: 100%;
+}
+table.models th.fig,
+table.models td.fig {
+  text-align: right;
+}
+table.models td.fig,
+table.models th.fig {
+  padding-right: 0;
+  padding-left: 16px;
+}
+table.models th.rank,
+table.models td.rank {
+  width: 2.5rem;
+  padding: 5px 12px 5px 0;
+  color: var(--ink-3);
+  text-align: left;
+}
+.model-open {
+  font-size: 13.5px;
+  text-align: left;
+}
+/* The model's share, with a bar against the biggest. */
+.share-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
+.mini-bar {
+  display: block;
+  flex: 1;
+  max-width: 9rem;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+.mini-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--chart);
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.table-scroll table.figures {
+  min-width: 100%;
+}
+.table-scroll th.fig,
+.table-scroll td.fig {
+  text-align: right;
+}
+.table-scroll th .swatch {
+  margin-right: 4px;
+}
+
+/* A model's own figures, over the page. */
+.model-dialog {
+  width: min(48rem, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 20px 22px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--float);
+}
+.model-dialog::backdrop {
+  background: rgb(10 10 8 / 42%);
+}
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.dialog-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.dialog-head p {
+  margin: 2px 0 0;
+}
+.model-dialog .usage-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+@media (max-width: 860px) {
+  .usage-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .usage-stats li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .model-dialog .usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .limit-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pool-legend {
+    display: block;
+  }
+  .pool-text b,
+  .pool:has(.pool-part + .pool-part) .pool-text .reset {
+    display: none;
+  }
+  .usage-bar .spacer {
+    display: none;
+  }
+  .usage-toggle.wide-only {
+    display: none;
+  }
+  .usage-select {
+    display: block;
+    flex: 1 1 40%;
+  }
+  .usage-select select {
+    width: 100%;
+  }
+  .share-col {
+    display: none;
+  }
+  .trend-body {
+    grid-template-columns: 2.8rem minmax(0, 1fr);
+    height: 12rem;
+  }
+  .trend-x {
+    margin-left: 2.8rem;
+  }
+}
+@media (forced-colors: active) {
+  .pool-left,
+  .share-part,
+  .swatch,
+  .mini-bar {
+    forced-color-adjust: none;
+  }
+  .usage-filter a[aria-current="true"],
+  .usage-toggle a[aria-current="true"] {
+    outline: 2px solid CanvasText;
+  }
+}

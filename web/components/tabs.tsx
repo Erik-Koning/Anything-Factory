@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { showCurrent, showFocused } from "./in-view.ts";
+import { LinkPending } from "./link-pending.tsx";
 
 // A team's pages, the current one marked for screen readers too, and how many wait on one (a badge).
 export function Tabs({ links }: { links: { href: string; label: string; exact?: boolean; also?: string[]; count?: number }[] }) {
@@ -19,6 +20,7 @@ export function Tabs({ links }: { links: { href: string; label: string; exact?: 
           return (
             <li key={href}>
               <Link href={href} aria-current={current ? "page" : undefined}>
+                <LinkPending />
                 {label}
                 {count ? (
                   <>

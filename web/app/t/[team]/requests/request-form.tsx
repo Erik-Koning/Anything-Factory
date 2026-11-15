@@ -36,7 +36,7 @@ export function RequestForm({ team }: { team: string }) {
         {length.toLocaleString("en")} of {LIMITS.body.toLocaleString("en")} characters
       </p>
       <div>
-        <button type="submit" className="primary" disabled={pending}>
+        <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Sending…" : "Send the request"}
         </button>
       </div>

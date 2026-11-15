@@ -322,10 +322,13 @@ export async function gate(argv: string[]): Promise<number> {
   return withLock(home, "gate", ["sh", "-c", command], { slots: team.gate.concurrency, waitMin: 60, cwd });
 }
 
-// a6g env up|reset|restart|down|status: the team's environment script, run from the team's checkout.
+// a6g env up|reset|restart|down|status: the team's environment script, run from the team's checkout. All but status
+// start or stop the app, so they hold the app lock, as a merge's restart does: they wait for a check after merges or a
+// run against the app (a6g env use) to finish instead of taking the app away under it.
 // a6g env use [--wait-min M] [--max-min N] -- <command>: anyone's command against the team's app, where it's run,
 // holding the app lock (so a merge doesn't restart the app under it), with PLAYWRIGHT_BASE_URL and an A6G_NAMESPACE of
 // its own. It waits M minutes for the app, and a command that holds it past N is ended, so nothing holds it for good.
+const ENV_WAIT_MIN = 30;
 export async function env(argv: string[]): Promise<number> {
   const sub = argv[0] ?? "status";
   if (sub === "use") return envUse(argv.slice(1));
@@ -335,7 +338,17 @@ export async function env(argv: string[]): Promise<number> {
     console.info("env: the team has no environment script (team.json environment.script)");
     return sub === "status" ? 0 : 2;
   }
-  return runIn(home, team.environment.script, [sub, ...argv.slice(1)]);
+  const args = [sub, ...argv.slice(1)];
+  // Inside something that holds the app already (an after-merge command, a6g env use), the lock is that holder's.
+  if (sub === "status" || process.env.A6G_APP_LOCK === "held") return runIn(home, team.environment.script, args);
+  const status = await withLock(home, "app", ["sh", "-c", `${team.environment.script} "$@"`, "sh", ...args], {
+    waitMin: ENV_WAIT_MIN,
+    cwd: home,
+    env: { A6G_APP_LOCK: "held" },
+  });
+  if (status === TIMED_OUT)
+    console.error(`env: the team's app stayed busy for ${ENV_WAIT_MIN} minutes (a merge, a check after merges, or a6g env use); try again`);
+  return status;
 }
 
 // How long a command may hold the team's app when it doesn't say (--max-min), and the most it may ask for: a check

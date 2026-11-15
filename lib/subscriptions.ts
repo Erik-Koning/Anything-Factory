@@ -18,12 +18,14 @@
 // window. Each team's roles run on the subscriptions the operator listed for them (subscriptions/use.json), in order:
 // the watchdog keeps each role on an open one (lib/steer.ts). Readings and estimates: subscriptions/state.json.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
 import { A6G_HOME } from "./paths.ts";
-import { OWN_LOGIN, round } from "./tasks/spend.ts";
-import { allTranscriptDirs, collectHours } from "./usage.ts";
+import { dayOf, OWN_LOGIN, round } from "./tasks/spend.ts";
+import { type AccountUsage, allTranscriptDirs, collectHours, emptyTally, type Tally, TALLY_FIELDS } from "./usage.ts";
 import { readJson, writeJson } from "./util.ts";
 
 export interface Account {
@@ -47,8 +49,10 @@ export interface Reading {
   resetsAt: string;
   // The five-hour window, when the report has one.
   session?: Window | null;
-  // Limits of one model's own (Fable's), for the record.
-  scoped: { model: string; percent: number }[];
+  // Limits of one model's own (Fable's), for the record, with when each resets (from readings that said).
+  scoped: { model: string; percent: number; resetsAt?: string }[];
+  // Extra usage, paid by the month beyond the plan's limits, when the report says.
+  extra?: { enabled: boolean; limit: number | null; used: number | null; currency: string | null } | null;
   // API-equivalent dollars this machine used since the week began.
   spent: number;
   // The login the folder held (its account id) and its plan, when Claude Code's config said.
@@ -157,12 +161,19 @@ interface ReportLimit {
   resets_at?: string;
   scope?: { model?: { display_name?: string } } | null;
 }
+interface ReportExtra {
+  is_enabled?: boolean;
+  monthly_limit?: number | null;
+  used_credits?: number | null;
+  currency?: string | null;
+}
+const amount = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null);
 
 // The limits in `claude -p /usage --output-format stream-json` output: null when there's no usage report, or it has no
 // rate limits (an API key, or a token without the scope to read them).
-export function parseUsageReport(output: string): Pick<Reading, "percent" | "resetsAt" | "scoped" | "session"> | null {
+export function parseUsageReport(output: string): Pick<Reading, "percent" | "resetsAt" | "scoped" | "session" | "extra"> | null {
   for (const raw of output.split("\n")) {
-    let line: { usage_report?: { rate_limits?: { limits?: ReportLimit[] } | null } };
+    let line: { usage_report?: { rate_limits?: { limits?: ReportLimit[]; extra_usage?: ReportExtra | null } | null } };
     try {
       line = JSON.parse(raw);
     } catch {
@@ -170,6 +181,7 @@ export function parseUsageReport(output: string): Pick<Reading, "percent" | "res
     }
     const limits = line.usage_report?.rate_limits?.limits;
     if (!limits) continue;
+    const extra = line.usage_report?.rate_limits?.extra_usage;
     const all = limits.find((l) => l.kind === "weekly_all");
     if (typeof all?.percent !== "number" || !all.resets_at) return null;
     const session = limits.find((l) => /^(session|five_hour)$/.test(l.kind ?? "") || l.group === "session");
@@ -182,7 +194,20 @@ export function parseUsageReport(output: string): Pick<Reading, "percent" | "res
           : null,
       scoped: limits
         .filter((l) => l.kind === "weekly_scoped" && typeof l.percent === "number")
-        .map((l) => ({ model: l.scope?.model?.display_name ?? "a model", percent: l.percent ?? 0 })),
+        .map((l) => ({
+          model: l.scope?.model?.display_name ?? "a model",
+          percent: l.percent ?? 0,
+          ...(l.resets_at && !Number.isNaN(Date.parse(l.resets_at)) ? { resetsAt: new Date(l.resets_at).toISOString() } : {}),
+        })),
+      extra:
+        extra && typeof extra.is_enabled === "boolean"
+          ? {
+              enabled: extra.is_enabled,
+              limit: amount(extra.monthly_limit),
+              used: amount(extra.used_credits),
+              currency: typeof extra.currency === "string" && /^[A-Z]{3}$/.test(extra.currency) ? extra.currency : null,
+            }
+          : null,
     };
   }
   return null;
@@ -190,7 +215,7 @@ export function parseUsageReport(output: string): Pick<Reading, "percent" | "res
 
 // Asks the account's Claude Code for its usage report, from a folder of the factory's own (its transcript there costs
 // nothing, and belongs to no team). Null when it can't say.
-export function readUsage(account: Account): Pick<Reading, "percent" | "resetsAt" | "scoped" | "session"> | null {
+export function readUsage(account: Account): Pick<Reading, "percent" | "resetsAt" | "scoped" | "session" | "extra"> | null {
   const cwd = join(SUBS, "probe");
   mkdirSync(cwd, { recursive: true });
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -218,7 +243,7 @@ const median = (values: number[]): number | null => {
 export function withReading(
   state: SubscriptionState,
   account: string,
-  report: Pick<Reading, "percent" | "resetsAt" | "scoped"> & Partial<Pick<Reading, "session" | "login" | "plan">>,
+  report: Pick<Reading, "percent" | "resetsAt" | "scoped"> & Partial<Pick<Reading, "session" | "extra" | "login" | "plan">>,
   hours: Record<string, number>,
   now = new Date()
 ): SubscriptionState {
@@ -436,3 +461,102 @@ export function nearLimit(state: SubscriptionState, limits: Record<string, Subsc
 
 // A role's wait, in words: why, and until when.
 export const describeWait = (wait: Wait): string => `${wait.why}${wait.until ? ` (until ${when(wait.until)})` : ""}`;
+
+// --- The web app's Subscriptions page ----------------------------------------------------------------------------
+
+// A model's id as a report may carry it (lib/fleet.ts): any other is "other".
+const MODEL_ID = /^[A-Za-z0-9][\w.:-]{0,79}$/;
+const DAY_MS = 86_400_000;
+
+// What an account's tallies (lib/usage.ts collectAccountUsage, by UTC hour) come to by this machine's day for the last
+// USAGE_DAYS, and by hour for the last USAGE_HOURS, per model, newest first: at most `room` buckets, the oldest days
+// left out first.
+export function usageBuckets(tallies: Record<string, Record<string, Tally>>, now: Date, room: number): { days: UsageBucket[]; hours: UsageBucket[] } {
+  const firstDay = dayOf(new Date(now.getTime() - (USAGE_DAYS - 1) * DAY_MS));
+  const firstHour = new Date(now.getTime() - (USAGE_HOURS - 1) * 3_600_000).toISOString().slice(0, 13);
+  const days = new Map<string, Tally>();
+  const hours = new Map<string, Tally>();
+  const add = (into: Map<string, Tally>, key: string, tally: Tally): void => {
+    const sum = into.get(key) ?? emptyTally();
+    for (const field of TALLY_FIELDS) sum[field] += tally[field];
+    into.set(key, sum);
+  };
+  for (const [hour, models] of Object.entries(tallies)) {
+    const day = dayOf(new Date(`${hour}:00:00Z`));
+    for (const [model, tally] of Object.entries(models)) {
+      const id = MODEL_ID.test(model) ? model : "other";
+      if (day >= firstDay) add(days, `${day} ${id}`, tally);
+      if (hour >= firstHour) add(hours, `${hour} ${id}`, tally);
+    }
+  }
+  // Tokens are whole; dollars to a hundredth of a cent, which is all a page shows and keeps a report small.
+  const bucket = (key: string, tally: Tally): UsageBucket => {
+    const [at = "", model = ""] = key.split(" ");
+    return [at, model, ...USAGE_FIELDS.map((field) => (/^(cost|fast|saved)/.test(field) ? Math.round(tally[field] * 1e4) / 1e4 : tally[field]))];
+  };
+  const newest = (into: Map<string, Tally>) => [...into].sort(([a], [b]) => b.localeCompare(a)).map(([key, tally]) => bucket(key, tally));
+  const byHour = newest(hours).slice(0, Math.max(0, room));
+  return { days: newest(days).slice(0, Math.max(0, room - byHour.length)), hours: byHour };
+}
+
+// How many sessions ran in the last day, 7, 30 and 90, from the hour each last ran in.
+export function sessionCounts(sessions: Record<string, string>, now: Date): MachineSubscription["sessions"] {
+  const last = Object.values(sessions);
+  const since = (days: number): number => {
+    const from = new Date(now.getTime() - days * DAY_MS).toISOString().slice(0, 13);
+    return last.filter((hour) => hour >= from).length;
+  };
+  return [since(1), since(7), since(30), since(90)];
+}
+
+// Every subscription here as the machine's report carries it (lib/fleet.ts): its limits as last read (a window that
+// has reset since says nothing), the operator's limits, whether it's closed to the teams, the roles of each team here
+// that run on it (`on`, by name), and what it used here. Its login goes as a hash only, the same on every machine.
+export function subscriptionsReport(on: Record<string, MachineSubscription["teams"]>, now = new Date()): MachineSubscription[] {
+  const state = subscriptionState();
+  const limits = subscriptionLimits();
+  const list = accounts().slice(0, REPORT_LIMITS.subscriptions);
+  const names = list.map((a) => a.name);
+  const t = now.getTime();
+  const live = (window: Window | null | undefined) =>
+    window && Date.parse(window.resetsAt) > t ? { percent: window.percent, resetsAt: window.resetsAt } : null;
+  let room: number = REPORT_LIMITS.usage;
+  return list.map((account) => {
+    const { name } = account;
+    const reading = state.readings[name];
+    const file = join(SUBS, `${name}.hours.json`);
+    let usage: Partial<AccountUsage> = {};
+    let counted: string | null = null;
+    try {
+      usage = readJson<Partial<AccountUsage>>(file, {});
+      if (usage.tallies) counted = statSync(file).mtime.toISOString();
+    } catch {}
+    const { days, hours } = usageBuckets(usage.tallies ?? {}, now, room);
+    room -= days.length + hours.length;
+    const shut = gate(name, state, limits, names, now);
+    const login = reading?.login ?? loginOf(account)?.login ?? null;
+    const week = weekFor(state, name);
+    return {
+      name,
+      login: login ? createHash("sha256").update(`a6g-login:${login}`).digest("hex").slice(0, 16) : null,
+      plan: reading?.plan?.slice(0, 40) ?? null,
+      at: reading?.at ?? null,
+      weekly: reading ? live(reading) : null,
+      session: live(reading?.session),
+      models: (reading?.scoped ?? [])
+        .filter((m) => !m.resetsAt || Date.parse(m.resetsAt) > t)
+        .slice(0, 10)
+        .map((m) => ({ model: m.model.slice(0, 60), percent: m.percent, resetsAt: m.resetsAt ?? null })),
+      extra: reading?.extra ?? null,
+      week: week === null ? null : Math.round(week * 100) / 100,
+      limits: { weekly: limits[name]?.weekly ?? null, session: limits[name]?.session ?? null },
+      closed: shut.open ? null : { why: (shut.why ?? "closed").slice(0, 300), until: shut.until, exhausted: shut.exhausted },
+      teams: on[name] ?? [],
+      today: dayOf(now),
+      days,
+      hours,
+      sessions: sessionCounts(usage.sessions ?? {}, now),
+      counted,
+    };
+  });
+}

@@ -17,11 +17,12 @@ const clip = (text: string, max: number): string => (text.length > max ? `${text
 // operator, or a task that no longer waits on an answer (the planner moved it on meanwhile).
 // `recommended`: the answer is the team's recommendation as it stood (the web app's choice, a6g task answer
 // --recommended), in the recommendation's words; it takes none of the operator's own. `seen` is that recommendation
-// as the operator read it: one the planner changed since is refused, never taken unread.
+// as the operator read it: one the planner changed since is refused, never taken unread. `read`: the task as the
+// caller read it just now (the web app's action reads it first), so it isn't read again.
 export async function answer(
   store: Store,
   id: string,
-  { who, text, recommended = false, seen }: { who: Actor; text: string; recommended?: boolean; seen?: string | undefined }
+  { who, text, recommended = false, seen, read }: { who: Actor; text: string; recommended?: boolean; seen?: string | undefined; read?: Task | undefined }
 ): Promise<Task> {
   const own = text.trim();
   if (who !== OPERATOR) throw new Refused("only the operator answers what waits on them");
@@ -29,40 +30,46 @@ export async function answer(
   // In the operator's own words it's their answer, whatever it agrees with: only the recommendation as it stands is
   // counted as taken (the hints on the working agreement).
   if (own && recommended) throw new Refused("the team's recommendation is taken as it stands; to change it, say your answer in words instead");
-  const task = await store.tasks.get(id.replace(/^#/, ""));
+  const wanted = id.replace(/^#/, "");
+  const task = read?.id === wanted ? read : await store.tasks.get(wanted);
   if (!task) throw new Refused(`no task ${id}`);
-  return update(store.tasks, task.id, (t) => {
-    if (!waitsOnOperator(t))
-      throw new Refused(
-        t.kind === "design" && t.status !== "done" && t.status !== "rejected"
-          ? `#${t.id}, the design check-in, isn't with you now (it's ${t.status}): the planner raises it once the foundation is built, and again once any changes you asked for are made. To end it yourself: a6g task status ${t.id} done`
-          : `#${t.id} is ${t.status} now and doesn't wait on an answer: the planner moved it on`
-      );
-    // The words are made on every try: when the write is tried again after someone else's, the task is read again.
-    let said = own;
-    if (recommended) {
-      const recommendation = t.ask?.recommendation.trim();
-      if (!recommendation) throw new Refused(`#${t.id} carries no recommendation to go with: say what your answer is`);
-      if (seen !== undefined && seen.trim() !== recommendation)
-        throw new Refused(`the team changed its recommendation on #${t.id} since you read it: read it again, then answer`);
-      said = `Go with your recommendation: ${recommendation}`;
-    }
-    const at = nowIso();
-    const note: Note = {
-      at,
-      by: who,
-      text: said,
-      kind: "answer",
-      ...(recommended ? { took: "recommendation" } : {}),
-      ...(t.ask?.topic ? { topic: t.ask.topic } : {}),
-    };
-    return {
-      ...t,
-      notes: [...t.notes, note],
-      updatedAt: at,
-      history: [...t.history, { at, by: who, what: `answered: ${clip(said.replace(/\s+/g, " "), 120)}` }].slice(-200),
-    };
-  });
+  return update(
+    store.tasks,
+    task.id,
+    (t) => {
+      if (!waitsOnOperator(t))
+        throw new Refused(
+          t.kind === "design" && t.status !== "done" && t.status !== "rejected"
+            ? `#${t.id}, the design check-in, isn't with you now (it's ${t.status}): the planner raises it once the foundation is built, and again once any changes you asked for are made. To end it yourself: a6g task status ${t.id} done`
+            : `#${t.id} is ${t.status} now and doesn't wait on an answer: the planner moved it on`
+        );
+      // The words are made on every try: when the write is tried again after someone else's, the task is read again.
+      let said = own;
+      if (recommended) {
+        const recommendation = t.ask?.recommendation.trim();
+        if (!recommendation) throw new Refused(`#${t.id} carries no recommendation to go with: say what your answer is`);
+        if (seen !== undefined && seen.trim() !== recommendation)
+          throw new Refused(`the team changed its recommendation on #${t.id} since you read it: read it again, then answer`);
+        said = `Go with your recommendation: ${recommendation}`;
+      }
+      const at = nowIso();
+      const note: Note = {
+        at,
+        by: who,
+        text: said,
+        kind: "answer",
+        ...(recommended ? { took: "recommendation" } : {}),
+        ...(t.ask?.topic ? { topic: t.ask.topic } : {}),
+      };
+      return {
+        ...t,
+        notes: [...t.notes, note],
+        updatedAt: at,
+        history: [...t.history, { at, by: who, what: `answered: ${clip(said.replace(/\s+/g, " "), 120)}` }].slice(-200),
+      };
+    },
+    task
+  );
 }
 
 // When `t` last came to wait on the operator, and their answers since (model.ts, which the move rules read too).

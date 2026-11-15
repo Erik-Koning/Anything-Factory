@@ -725,6 +725,11 @@ export function waitOutcome(t: Task, all: Task[]): { to: Status; why: string } |
 // owns the harness (test-infra) and the repository's structure (scaffold), and writes specs where the team has no
 // tester; a tester keeps test-infra where the team has no scaffolder. Builders claim neither, so nobody writes the
 // only spec of a journey they built.
+// A research task in this area asks for ideas: an innovation pass with the task as its focus, which is the innovator's
+// to make, not the planner's to research (a6g task add --kind research --area ideas; the web app's "Ideas" kind).
+export const IDEAS_AREA = "ideas";
+export const asksForIdeas = (t: Pick<Task, "kind" | "area">): boolean => t.kind === "research" && t.area === IDEAS_AREA;
+
 export const CLAIMS: Record<string, Kind[]> = {
   builder: ["feature", "bug", "ux", "chore"],
   tester: ["test", "test-infra"],

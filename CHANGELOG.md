@@ -64,6 +64,163 @@ Found watching the first team started this way at work:
 - **The quick gate runs once a commit.** The stop hook ran it on every stop, so a member told to hand in its task ran
   it again for nothing, and its load fell on everything else running. A pass on the same commit now stands.
 
+## 0.8.6: What waits on you, and a team's keys, on the Teams page
+
+The operator asked to discard what waits on them, and to pause a team and the rest, from the Teams page itself.
+
+- **Waiting on you, on each team's row**: every question and every piece of blocked work waiting on the operator,
+  longest waiting first (five, with a link to the rest): what it is and how long it has waited; **Answer** goes to it
+  on Waiting on you, where its question and choices are; **Discard…** opens under it and rejects it from there, with
+  the words the team reads ("Not needed now." until they're changed). A design check-in is only ever answered.
+- **The team's own keys** beside that heading (or beside Work, when nothing waits): Stop and Pause…, or Resume while
+  it's held, and under ⋯ restarting its planner or its environment, upgrading it, waking it and deleting it, as
+  beside its name on its own pages.
+- **The innovator** weighs each idea against how things are done today, files the constraints an idea lifts as bets,
+  names precedents honestly, and sets stop counts it can reach. Its new words reach a team at `a6g upgrade` and
+  `a6g rotate`.
+
+## 0.8.5: Every subscription's limits and usage on the web app, and every page cleaned up
+
+The operator asked for a tab that shows all their Claude subscriptions and their usage, with the same views as T3
+Code's own Usage page (T3 Code runs the teams' threads), then a pass over every page until each was at least a 7 out
+of 10. A Mac reports its subscriptions once this version is installed there; the site shows them for every Mac that
+does. Version 0.8.4 is held for another branch's work.
+
+### Subscriptions
+
+- **Subscriptions**, beside Machines. **Limits** first: a card for each window the subscriptions report (the five-hour
+  session, the week, a model's own week, extra usage by the month), with how much of the pool is left and whether it's
+  going faster than the window runs, and a bar with each subscription's part: what's left of it, its used part
+  hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams stop on it
+  (`a6g subscriptions limit`). Below, each subscription's plan, Macs, teams and whether it's closed to them.
+- **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's
+  (with sessions), one smoothed line each on a chart that reads with the arrow keys too, processed, cached, uncached
+  and output tokens and what the cache saved, dollars and tokens by type and by speed (fast mode's premium), and a
+  breakdown by model, each opening its own figures (per million tokens, cache hits, its own chart), or by day. Narrowed
+  to one machine or one subscription; what's shown is in the address.
+- **On the Mac**, the watchdog's quarter-hourly read of each subscription now keeps what every session on it used, by
+  hour and model, for 91 days (`lib/usage.ts collectAccountUsage`; the first read goes through the last 91 days of
+  transcripts once, about 9 seconds for 3 GB), its five-hour window, a model's own week with its reset, and extra
+  usage. The report carries each subscription by name, its login only as a hash (one login on two Macs is shown once),
+  never a folder. A report's subscriptions that are wrong are dropped and the rest kept; a report may be 768 KB.
+- A request on a model with no price in `lib/prices.ts` counts its tokens and is said to be unpriced, rather than
+  costing nothing silently. A machine's card on Machines names its subscriptions and links to their limits and usage.
+
+### Every page cleaned up
+
+A reviewer scored every page from screenshots at desktop and phone width (the lowest a 4, most a 6 or 7). Each was
+worked on; a second, stricter review found six still under 7 (the graph, the board, Decisions, a team's overview, sign
+in and Machines), and those were worked on again.
+
+- **On a phone** the site's links are behind a Menu key that carries the Waiting on you count; a team's tabs snap to
+  whole tabs and fade at an edge with more; a team's header is two short lines; no page scrolls sideways, and a
+  command breaks only between its parts.
+- **Sign in** opens on a team already at work, drawn just above the heading, with the way in, its help and its fields
+  together in the bottom bar, each field labelled.
+- **Teams** says what each figure counts, with lighter fold keys; **Start a project** leads with what to do next.
+- **A team's overview** has one How it runs panel (controls, subscriptions, the site), says what starts an idle team,
+  and gives every empty part a next step; the **board's** lanes are one width with a fade where more is off screen;
+  the **graph by level** is in the site's colours and type and opens fitted.
+- **Waiting on you, Decisions and Decided for you**: each question or proposal beside its answer, each field over its
+  own key, one solid key at a time; an approval that needs a score first says so; scores as a small grid. On
+  Decisions, Reject and Research or escalate each open their field once chosen, so one form is in sight at a time.
+- **Agreement**: one line of introduction (the rest under How this works), a form that fills its panel, placeholders
+  that read as examples. **People**: "Ban from signing in…", and each role with its own Save. **Account**,
+  **Notifications**, **Link a machine** and **Machines**: addresses in mono, settings that say what Save covers,
+  a code field the size of a code, cards of one height.
+- **Requests** say why one was turned down; a **task** keeps its id in its heading; **Add a task** says what happens
+  to it.
+
+### The factory
+
+- **`--help` on any command** shows its help and runs nothing (before, `a6g init --help` made a checkout and
+  `a6g e2e try --help` started a run); prettier is a dev dependency, so `npm run format:check` works in a clean
+  checkout.
+- **A planner restart asked from the web app** retires the planner's thread in the watchdog pass that finds it free,
+  then starts a fresh one: a tick could wake the planner in the moments between, and the restart failed after the team
+  had drained for it.
+- **The innovator** starts from the binding constraint and files bets rather than fixes; cites a study only for what
+  it tested and numbers that can be found at their source; covers every side the product serves, with one way to earn
+  where that's still open; ranks by upside; tests what people do rather than what they say they would; and writes the
+  result that would stop a test before running it. Its new words reach a team at `a6g upgrade` and `a6g rotate`.
+
+## 0.8.3: A team's controls on the web app, toasts in place of notices, tasks routed by what they ask, and a site that answers at once
+
+The operator asked that a button complete at once and say so in a toast, not in a notice that moves the page, and for
+deleting, stopping and resuming a team from the web app, with the other things they'd do to a team on its Mac. For
+deleting, stopping and the other controls to reach a Mac, that Mac installs this version (`a6g self-install`); a team
+keeps whatever version it pins, since the watchdog does this work.
+
+- **A toast, and the page stays put.** A button's action does its work in place: the page refreshes where it is and a
+  toast in the lower corner says what happened (`components/toaster.tsx`, `components/action-form.tsx`). A refusal is
+  a toast too, and what was typed stays to put right. Deciding, answering, reviewing, the team's controls, its budget,
+  subscriptions and agreement, an account's sessions, addresses and email settings, a machine's unlinking, and the
+  admins' People page work this way. An action that goes to another page (a request sent, a task added) says so there,
+  in a toast, and the words leave the address.
+- **Stop, pause, resume, beside the team's name** on every one of its pages, for an admin. Stop is a pause now; Pause…
+  opens its choices over the page (after the work under way, after chosen journeys, or now); Resume shows from the
+  moment a stop is asked, and Resume with a note… is under ⋯. No code is asked for any of these any more, nor for the
+  working agreement, taking a team off the site or approving a task as it's added; the budget, the subscriptions and
+  deleting a team still take one.
+- **Under ⋯: restart the planner or the environment, upgrade the factory, wake it, delete it.** A new control,
+  `action` (`lib/tasks/controls.ts` `TEAM_ACTIONS`), asks the team's lead; its watchdog's minute starts each as a job
+  of its own (`a6g act`, `lib/actions.ts`), and the job writes what came of it back (`acted`), which the overview's
+  Controls panel shows. A planner restart waits until the planner is idle with no member running, saying why, and no new
+  member starts meanwhile, so the team drains to it; one its Mac first sees over an hour after it was asked is passed
+  over and says so. An upgrade moves the team to the newest
+  version installed on its Mac and commits the pin under the merge lock. An action already asked isn't offered again
+  until its Mac says how it went.
+- **Deleting a team** takes its name, typed, and a code: it's paused now and off the site at once, whatever its Mac
+  reports in the minute before it's taken off; then its Mac unregisters it (its agents and its place in the watchdog
+  go; its checkout, run folder, tasks and history stay). `a6g register` there, or Put it back on its overview, brings
+  it back.
+- **`a6g env up|down|restart|reset` waits for the app lock**, as a merge's restart does, so a restart doesn't take the
+  app away from a check after merges or a run against it (`a6g env use`); status never waits. A check after merges
+  whose app goes away while its pages are checked files nothing and stays due: on one team on 2026-11-15 a restart in
+  the middle of one filed every page as failing, twice.
+- **The planner routes a task by what it asks, not only its kind.** A kind says who may claim a task; whatever else its
+  words ask for (ideas, a market or growth; how something should feel; how pages look and work; who may reach what; a
+  spec), the planner starts that teammate, briefed with the task, their report on it. Approved research, which no
+  member claims, is listed in its context to route. The web app's Add a task offers **Ideas: an innovation pass**,
+  research in the `ideas` area, which goes to the innovator before a pass for the queue (`a6g task add --kind
+research --area ideas` does the same). An operator's ask for ideas had sat as research the planner never handed on.
+- **The innovator thinks like a founder.** A pass starts from first principles (each kind of user's job, what it costs
+  them, the scarce thing, where a tenfold improvement is), looks at how the product grows and lasts (the loops by
+  which users bring users, what makes it hard to copy, how it sustains itself), and brings at least one bet on growth
+  or on lasting when the research supports one. Every idea is a bet: its riskiest assumption, the cheapest test before
+  building it all, and the measure with the result that means stop. A pass someone asked for puts its report on their
+  task. The planner's and innovator's new words reach a team at `a6g upgrade` and `a6g rotate`.
+- **The watchdog's word on a new budget** says it in the budget's own unit, with its limits on each subscription, as
+  `a6g budget` does: one set only on a subscription read "none a day, none a week, none in all".
+
+### The web app answers at once
+
+The operator found the site slow: a click on a tab or link changed nothing until the next page was all there, and
+sending an answer in Waiting on you took a while. Measured from the operator's Mac against the same database cluster,
+a page made 5 to 12 rounds of database queries one after another, and a click showed nothing for 0.4 to 1.1 s. The
+site runs on AWS in Ohio and the database on Google Cloud in Iowa, so each round crosses between the two. The site
+only: nothing to install on a Mac.
+
+- **A click answers at once.** The tab or menu link clicked shows as the current one as it's pressed (Next's
+  `useLinkStatus`, `components/link-pending.tsx`); the page being left stays up and fades a little after 150 ms, and a
+  line along the top runs while it waits (`components/nav-progress.tsx`). No loading outline in its place: React holds
+  a fallback on screen for at least 300 ms, so one made every page quicker than that wait for it.
+- **A key answers at once.** A key whose action is on its way turns a mark beside its words, and in Waiting on you the
+  question being answered or decided fades while its answer goes.
+- **Fewer rounds of queries.** A session is read with its person in one query (Better Auth's joins), what the layouts
+  and the page each read is read once per request (`server/factory.ts`), and reads that don't wait on each other start
+  together, beside the session: a team's page starts its own there too, since a click from one of its pages to another
+  doesn't render the layout again. The header's count of what waits on you never holds up a page: it shows the count
+  it had until the new one is in.
+- **An answer or a decision** reads its task once, beside the team's settings: the factory's `update` tries the copy
+  just read before reading it again, its version guarding the write as before (`lib/tasks/store.ts`, `answer.ts`,
+  `decide.ts`; `a6g task answer`, `approve`, `reject`, `research` and `escalate` read less too). Its audit entry is
+  written beside the page rendered after, not before it (`after()`). An answer takes 7 rounds with its page, from
+  about 17.
+- Measured on the operator's Mac with each database round trip made 20 ms, against the browser 120 ms away: a tab or
+  menu link shows it's taken in about 10 ms (nothing showed before the page did), and the page is there in 150 to
+  270 ms, from 290 to 740 ms; an answer is sent and shown in about 200 ms, from 540 ms.
+
 ## 0.8.2: Starting a project from GitHub, and the team's rules chosen on the form
 
 The operator asked to start a project on a GitHub repository by its name, cloned when their account owns it or can push

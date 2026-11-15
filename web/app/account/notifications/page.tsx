@@ -22,6 +22,7 @@ import { deliveryOf } from "../../../server/notifier.ts";
 import { requireViewer } from "../../../server/viewer.ts";
 import { saveNotificationsAction, testNotificationAction } from "./actions.ts";
 import { TimeZoneSelect } from "./time-zone-select.tsx";
+import { ActionForm } from "../../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Notifications" };
 
@@ -63,17 +64,33 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         .
       </p>
       <Notice searchParams={searchParams} />
+      {/* What the server does with email, said plainly; the setting by name only to an admin, who may be the one to change it. */}
       {settings.notifyEverySeconds === 0 ? (
-        <p className="notice error">
-          Notifications are turned off on this server (NOTIFY_EVERY_SECONDS=0): nothing is emailed until whoever runs it turns them on.
+        <p className="notice server-mail">
+          This server sends no notification emails at the moment: whoever runs it has switched them off. What you choose here is kept, and applies once
+          they&apos;re back on.
+          {viewer.admin ? (
+            <span className="hint">
+              {" "}
+              The setting is <code>NOTIFY_EVERY_SECONDS</code>, in the server&apos;s environment.
+            </span>
+          ) : null}
         </p>
       ) : mail === "none" ? (
-        <p className="notice error">This server has no email service set up, so nothing can be emailed yet: whoever runs it sets RESEND_API_KEY or SES.</p>
+        <p className="notice server-mail">
+          This server has no way to send email yet, so nothing can reach you by email until whoever runs it sets one up.
+          {viewer.admin ? (
+            <span className="hint">
+              {" "}
+              It takes <code>RESEND_API_KEY</code>, or SES, in the server&apos;s environment.
+            </span>
+          ) : null}
+        </p>
       ) : mail === "console" ? (
         <p className="notice">On this machine, emails go to the server&apos;s console instead of being sent.</p>
       ) : null}
       {kinds.length ? (
-        <form action={saveNotificationsAction} className="stack">
+        <ActionForm action={saveNotificationsAction} className="stack">
           <section className="panel" aria-labelledby="what">
             <h2 id="what">What to email you about</h2>
             <p className="hint">
@@ -141,12 +158,17 @@ export default async function NotificationsPage({ searchParams }: { searchParams
               ))}
             </fieldset>
           </section>
-          <div>
+          {/* The form's own key, at its foot, saying what it saves: the three panels above, not Delivery. */}
+          <div className="save-bar">
             <SubmitButton className="primary">Save notifications</SubmitButton>
+            <span className="hint">Saves what to email you about, your daily digest and your teams.</span>
           </div>
-        </form>
+        </ActionForm>
       ) : (
-        <p className="panel empty">You don&apos;t follow a team yet, so there&apos;s nothing to email you about.</p>
+        <div className="panel empty">
+          <p>You don&apos;t follow a team yet, so there&apos;s nothing to email you about.</p>
+          <p className="hint">Once an admin adds you to a team, you choose here what of it reaches you by email.</p>
+        </div>
       )}
       <section className="panel" aria-labelledby="delivery">
         <h2 id="delivery">Delivery</h2>
@@ -166,10 +188,10 @@ export default async function NotificationsPage({ searchParams }: { searchParams
             </>
           ) : null}
         </dl>
-        <form action={testNotificationAction} className="inline">
+        <ActionForm action={testNotificationAction} className="inline">
           <SubmitButton>Send me a test email</SubmitButton>
           <span className="hint">It says what you&apos;ll get, so you can see that it arrives and isn&apos;t taken for spam.</span>
-        </form>
+        </ActionForm>
       </section>
     </>
   );

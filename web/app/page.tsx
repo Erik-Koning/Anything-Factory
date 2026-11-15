@@ -1,18 +1,33 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
+import { ActionForm } from "../components/action-form.tsx";
 import { Refresh } from "../components/refresh.tsx";
 import { StartCard } from "../components/start-card.tsx";
+import { SubmitButton } from "../components/submit-button.tsx";
+import { TeamActions } from "../components/team-actions.tsx";
 import { TeamFolds } from "../components/team-folds.tsx";
 import { Ago, Chip, Notice, QuietMark, type SearchParams } from "../components/ui.tsx";
 import { machinesRunning, type MachineTeam, online } from "../../lib/fleet.ts";
-import { can, roleIn, runsTeam } from "../server/access.ts";
-import { allTeams, controlsOf, limitDollars, type Limits, limitsOf, retirements, type Spend, storeFor, type TeamDoc } from "../server/factory.ts";
-import { waitingCount } from "../server/inbox.ts";
+import { can, LIMITS, roleIn, runsTeam } from "../server/access.ts";
+import {
+  allTeams,
+  controlsFor,
+  limitDollars,
+  type Limits,
+  limitsOf,
+  retirements,
+  type Spend,
+  storeFor,
+  tasksFor,
+  type TeamDoc,
+} from "../server/factory.ts";
+import { inbox, type Waiting, waitingCount } from "../server/inbox.ts";
 import { linkedMachines, type Machine, ownersOf } from "../server/machines.ts";
 import { type Start, startOpen, starts } from "../server/starts.ts";
 import { requireViewer } from "../server/viewer.ts";
 import { dollars, merges, offSite, progress, proposals, quietSince } from "../server/views.ts";
+import { decideAction } from "./t/[team]/actions.ts";
 
 export const metadata: Metadata = { title: "Teams" };
 
@@ -22,30 +37,39 @@ const LANES_SHORT = ["Triage", "To decide", "To build", "Building", "In review",
 // Every team the person follows, each a row that folds (components/team-folds.tsx): shut, it says how the team is; open,
 // where its work stands and the ways in. Above them, for an admin: the projects their Macs are starting (app/new).
 // Why a team a linked Mac runs isn't on this page: what the site reads is a team's store in MongoDB.
-const unshownWhy = (store: MachineTeam["store"]): string =>
-  store === "files"
-    ? "its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
-    : store === "mongo"
-      ? "not published yet (a6g register publishes it)"
-      : "it keeps no task graph the site reads";
+const unshownWhy = (store: MachineTeam["store"]): ReactNode =>
+  store === "files" ? (
+    <>
+      keeps its tasks in files there (<code>a6g task migrate --to mongo</code> brings them here)
+    </>
+  ) : store === "mongo" ? (
+    <>
+      isn&apos;t published yet (<code>a6g register</code> publishes it)
+    </>
+  ) : (
+    "keeps no task graph the site reads"
+  );
 
 export default async function TeamsPage({ searchParams }: { searchParams: SearchParams }) {
-  const viewer = await requireViewer();
-  // Every team that published its settings, those taken off the site among them (server/factory.ts retirements).
-  const [every, off] = await Promise.all([allTeams({ retired: true }), retirements()]);
+  // Every team that published its settings, those taken off the site among them (server/factory.ts retirements), and
+  // every linked machine: read beside the session, and shown only as the person may see them.
+  const [viewer, every, off, all] = await Promise.all([requireViewer(), allTeams({ retired: true }), retirements(), linkedMachines()]);
   const teams = every.filter((team) => !offSite(team, off.get(team.name) ?? null) && roleIn(viewer, team.name) !== null);
   const offTeams = viewer.admin ? every.filter((team) => offSite(team, off.get(team.name) ?? null)) : [];
   // Only the machines that report a team whose board the viewer sees.
-  const machines = await linkedMachines({ teams: teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name) });
-  const owners = await ownersOf(machines);
-  const rows = await Promise.all(teams.map(async (team) => ({ team, ...(await summary(team, can(viewer, "team:control", team.name))) })));
+  const boards = new Set(teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name));
+  const machines = all.filter((machine) => machine.teams.some((t) => boards.has(t.name)));
+  const mayStart = can(viewer, "projects:start");
+  const [owners, rows, asked] = await Promise.all([
+    ownersOf(machines),
+    Promise.all(teams.map(async (team) => ({ team, ...(await summary(team, can(viewer, "team:control", team.name))) }))),
+    mayStart ? starts(new Set(every.map((team) => team.name))) : Promise.resolve([] as Start[]),
+  ]);
   const asking = rows.filter((c) => c.asks && can(viewer, "proposals:decide", c.team.name));
   const asks = asking.reduce((n, c) => n + c.asks, 0);
-  const mayStart = can(viewer, "projects:start");
-  const asked: Start[] = mayStart ? await starts(new Set(every.map((team) => team.name))) : [];
   // Each ask's Mac, to say whether it's there to pick the ask up: every linked one, not only those that run a team. An
   // admin's also say which teams they run that this page doesn't show.
-  const linked = asked.length || viewer.admin ? await linkedMachines() : [];
+  const linked = asked.length || viewer.admin ? all : [];
   const published = new Set(every.map((team) => team.name));
   const unshown = viewer.admin
     ? linked.flatMap((machine) => machine.teams.filter((t) => t.part === "lead" && !published.has(t.name)).map((team) => ({ machine, team })))
@@ -100,7 +124,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
       {rows.length ? (
         <TeamFolds count={rows.length}>
           <ul className="plain team-rows" aria-labelledby="all-teams">
-            {rows.map(({ team, tasks, waiting, asks: teamAsks, cycles, lastMerge, limits }) => {
+            {rows.map(({ team, tasks, waiting, asks: teamAsks, waits, controls, cycles, lastMerge, limits }) => {
               const role = roleIn(viewer, team.name);
               const status = team.status;
               const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
@@ -129,7 +153,8 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <Chip>{status?.state ?? "no status yet"}</Chip>
                         {quiet ? <QuietMark last={quiet.last} /> : null}
                       </span>
-                      {/* The same four figures in the same places on every row, a dash where there's nothing to say. */}
+                      {/* The same four figures in the same places on every row, each saying what it counts, so a row
+                          needs no column headings. */}
                       <span className="glance">
                         <span className="glance-item waits">
                           {decides && teamAsks ? (
@@ -140,7 +165,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                               {`${teamAsks} waiting on you`}
                             </Link>
                           ) : (
-                            <span className="muted">nothing waiting</span>
+                            <span className="muted">nothing waiting on you</span>
                           )}
                         </span>
                         <span className="glance-item">
@@ -149,10 +174,10 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <span className="glance-item">
                           {spend ? (
                             <>
-                              <b>{dollars(spend.today)}</b> today
+                              <b>{dollars(spend.today)}</b> spent today
                             </>
                           ) : control ? (
-                            <span className="muted">not counted yet</span>
+                            <span className="muted">spend not counted yet</span>
                           ) : null}
                         </span>
                         <span className="glance-item muted">
@@ -167,8 +192,35 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                       </span>
                     </summary>
                     <div className="team-body">
+                      {/* What waits on the operator, each settled from here or on Waiting on you; the team's own keys
+                          (stop, pause, resume, and the rest under ⋯) beside the heading, as beside its name on its pages. */}
+                      {decides && waits.length ? (
+                        <section aria-label={`${title}: waiting on you`}>
+                          <div className="team-body-head">
+                            <h3 className="small">Waiting on you</h3>
+                            {control ? (
+                              <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+                            ) : null}
+                          </div>
+                          <ul className="plain waits">
+                            {waits.slice(0, WAITS_SHOWN).map((w) => (
+                              <WaitingRow key={w.task.id} team={team.name} w={w} />
+                            ))}
+                          </ul>
+                          {waits.length > WAITS_SHOWN ? (
+                            <p className="small">
+                              <Link href={`/t/${team.name}/inbox`}>{`All ${waits.length} on Waiting on you`}</Link>
+                            </p>
+                          ) : null}
+                        </section>
+                      ) : null}
                       <section aria-label={`${title}: where the work stands`}>
-                        <h3 className="small">Work</h3>
+                        <div className="team-body-head">
+                          <h3 className="small">Work</h3>
+                          {control && !(decides && waits.length) ? (
+                            <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+                          ) : null}
+                        </div>
                         <ul className="counts mini">
                           {progress(tasks).map(({ label, count }, index) => (
                             <li key={label} className={count ? undefined : "none"} title={label}>
@@ -258,17 +310,23 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                           </section>
                         ) : null}
                       </div>
-                      {/* The team's pages this person may open, each a small key along the row's foot. */}
+                      {/* The team's pages this person may open, each a small quiet key along the row's foot; the one
+                          with something waiting on the operator carries the same light as the row's figure. What's to
+                          decide is named as its count above is. */}
                       <p className="shortcuts">
                         {can(viewer, "tasks:add", team.name) ? (
                           <Link href={`/t/${team.name}/add`}>Add a task</Link>
                         ) : can(viewer, "tasks:suggest", team.name) ? (
                           <Link href={`/t/${team.name}/add`}>Suggest a task</Link>
                         ) : null}
-                        {decides ? <Link href={`/t/${team.name}/inbox`}>Waiting on you{teamAsks ? ` (${teamAsks})` : ""}</Link> : null}
+                        {decides ? (
+                          <Link className={teamAsks ? "attention" : undefined} href={`/t/${team.name}/inbox`}>
+                            Waiting on you{teamAsks ? ` (${teamAsks})` : ""}
+                          </Link>
+                        ) : null}
                         {board ? <Link href={`/t/${team.name}/board`}>Board</Link> : null}
                         <Link href={`/t/${team.name}/requests`}>Requests</Link>
-                        {decides ? <Link href={`/t/${team.name}/proposals`}>Decisions{waiting ? ` (${waiting})` : ""}</Link> : null}
+                        {decides ? <Link href={`/t/${team.name}/proposals`}>To decide{waiting ? ` (${waiting})` : ""}</Link> : null}
                         {control && status?.subscriptions ? <Link href={`/t/${team.name}#subscriptions`}>Subscriptions</Link> : null}
                       </p>
                     </div>
@@ -295,14 +353,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
         <div className="teams-foot small muted">
           {unshown.length ? (
             <p>
-              Also on the linked Macs, not shown here:{" "}
+              Not shown:{" "}
               {unshown.map(({ machine, team }, i) => (
                 <Fragment key={`${machine.id}:${team.name}`}>
                   {i ? "; " : ""}
-                  <b>{team.title || team.name}</b> on {machine.name}: {unshownWhy(team.store)}
+                  <b>{team.title || team.name}</b> on {machine.name} {unshownWhy(team.store)}
                 </Fragment>
               ))}
-              . <Link href="/machines">Machines</Link> lists what each runs.
+              . <Link href="/machines">Machines</Link> lists what each Mac runs.
             </p>
           ) : null}
           {offTeams.length ? (
@@ -366,17 +424,60 @@ function Spent({
   );
 }
 
+// At most this many waiting things on a row; the rest are on the team's Waiting on you.
+const WAITS_SHOWN = 5;
+
+// One thing waiting on the operator, on its team's row: what it is and how long it's waited; Answer goes to it on
+// Waiting on you, where its question and choices are; Discard rejects it from here, with words the team reads, once
+// it's opened (so one press can't do it). A design check-in is only ever answered (lib/tasks/model.ts).
+function WaitingRow({ team, w }: { team: string; w: Waiting }) {
+  const t = w.task;
+  const field = `discard-${team}-${t.id}`;
+  return (
+    <li className="wait-row">
+      <span className="wait-what">
+        <span className="id">#{t.id}</span> <Link href={`/t/${team}/tasks/${t.id}`}>{t.title}</Link> <Chip>{t.status}</Chip>{" "}
+        <span className="muted small nowrap">
+          waiting <Ago at={w.since} />
+        </span>
+      </span>
+      <span className="wait-do">
+        <Link className="button s" href={`/t/${team}/inbox#task-${t.id}`}>
+          Answer
+        </Link>
+        {t.kind === "design" ? null : (
+          <details className="discard">
+            <summary>Discard…</summary>
+            <ActionForm action={decideAction} className="discard-form">
+              <input type="hidden" name="team" value={team} />
+              <input type="hidden" name="id" value={t.id} />
+              <input type="hidden" name="decision" value="reject" />
+              <input type="hidden" name="seen" value={t.version} />
+              <label htmlFor={field}>Why, for the team</label>
+              <input id={field} name="text" required maxLength={LIMITS.note} defaultValue="Not needed now." autoComplete="off" />
+              <SubmitButton className="reject s">{`Discard #${t.id}`}</SubmitButton>
+            </ActionForm>
+          </details>
+        )}
+      </span>
+    </li>
+  );
+}
+
 async function summary(team: TeamDoc, control: boolean) {
-  const store = storeFor(team.name);
   const [tasks, cycles, controls] = await Promise.all([
-    store.tasks.all(),
-    team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
-    control ? controlsOf(team.name) : Promise.resolve([]),
+    tasksFor(team.name),
+    team.mode === "cycles" ? storeFor(team.name).cycles.all() : Promise.resolve([]),
+    control ? controlsFor(team.name) : Promise.resolve([]),
   ]);
+  const { questions, blocked } = inbox(tasks);
   return {
     tasks,
+    controls,
     waiting: proposals(tasks).length,
     asks: waitingCount(tasks),
+    // What waits on the operator now, longest waiting first: the questions, then blocked work.
+    waits: [...questions, ...blocked],
     cycles: cycles.length,
     lastMerge: merges(tasks, 1)[0]?.at ?? null,
     limits: limitsOf(controls),

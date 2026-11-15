@@ -2,6 +2,7 @@
 import { useActionState, useRef, useState } from "react";
 import { type AnswerFormState, answerAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
+import { toast } from "./toaster.tsx";
 
 export interface AnswerChoice {
   key: string;
@@ -35,12 +36,21 @@ export function AnswerForm({
   // No Mac runs the team now (server/views.ts quietSince): the answer waits for one.
   waits?: boolean;
 }) {
-  const [state, action, pending] = useActionState(answerAction, EMPTY);
+  // Said in a toast once it's sent: the question leaves the page as it refreshes, this form with it.
+  const [state, action, pending] = useActionState(async (previous: AnswerFormState, form: FormData) => {
+    const next = await answerAction(previous, form);
+    if (next.ok) toast(next.ok);
+    return next;
+  }, EMPTY);
   const [pick, setPick] = useState(state.pick);
+  const [typed, setTyped] = useState(state.extra.trim() !== "");
   const words = useRef<HTMLTextAreaElement>(null);
   const offered = !adding && (choices.length > 0 || recommendation !== null);
   const recommendedChoice = choices.some((c) => c.recommended);
   const own = !offered || pick === "other";
+  // The key takes the solid once there's an answer to send: a page of questions has one solid, on the one being
+  // answered, not one under each.
+  const ready = own ? typed : pick !== "";
   const choose = (key: string) => {
     setPick(key);
     if (key === "other") words.current?.focus();
@@ -106,12 +116,14 @@ export function AnswerForm({
         maxLength={LIMITS.note}
         required={own}
         defaultValue={state.extra}
+        onChange={(event) => setTyped(event.target.value.trim() !== "")}
         placeholder={
           own ? "What you decided, and the principle behind it if there is one: the planner records both" : "A condition, a change to it, or why"
         }
       />
       <div className="inline">
-        <button type="submit" className="primary" disabled={pending}>
+        {/* While it's on its way, the question it answers fades (data-pending, globals.css). */}
+        <button type="submit" className={ready ? "primary" : undefined} disabled={pending} data-pending={pending || undefined}>
           {pending ? "Sending…" : adding ? `Add to the answer on #${id}` : `Send the answer on #${id}`}
         </button>
         <span className="hint">

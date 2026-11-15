@@ -48,10 +48,10 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
       </p>
       <Notice searchParams={searchParams} />
       <article className="panel" aria-labelledby="task-title">
+        {/* The id inside the heading, so a long title wraps after it rather than leaving it on a line of its own. */}
         <div className="head">
-          <span className="id">#{task.id}</span>
           <h2 id="task-title" className="title">
-            {task.title}
+            <span className="id">#{task.id}</span> {task.title}
           </h2>
           <Chip>{task.status}</Chip>
           <Chip tone="">{task.kind}</Chip>
@@ -87,11 +87,21 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         ) : null}
       </article>
 
-      <div className="grid">
+      <div className="grid uneven">
         <section className="panel" aria-labelledby="where">
           <h2 id="where">Where it stands</h2>
-          {placed || children.length ? null : <p className="small muted">In no journey, after no other task, and nobody holds it yet.</p>}
-          <dl className="facts small">
+          <dl className="facts small brief">
+            {/* A task on its own: the three things it might have been placed by, each said as none. */}
+            {placed || children.length ? null : (
+              <>
+                <dt>Journey</dt>
+                <dd className="muted">none</dd>
+                <dt>Comes after</dt>
+                <dd className="muted">no other task</dd>
+                <dt>Held by</dt>
+                <dd className="muted">nobody yet</dd>
+              </>
+            )}
             {task.parent ? (
               <>
                 <dt>Journey</dt>
@@ -201,8 +211,13 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
               <dt>Simplest version</dt>
               <dd>{task.gate.simplest}</dd>
             </dl>
+          ) : task.score ? (
+            <p className="small muted">Who asked for it, what could be dropped or made simpler, and its simplest version aren&apos;t written yet.</p>
           ) : (
-            <p className="small muted">No gate yet.</p>
+            // Neither yet: one line for both, saying what the planner writes.
+            <p className="small muted">
+              Not made yet. The planner writes who asked for it and why, what could be dropped or made simpler, and its simplest version, then scores it.
+            </p>
           )}
           {task.score ? (
             <>
@@ -220,9 +235,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                 ))}
               </ul>
             </>
-          ) : (
+          ) : task.gate ? (
             <p className="small muted">Not scored yet.</p>
-          )}
+          ) : null}
         </section>
       </div>
 

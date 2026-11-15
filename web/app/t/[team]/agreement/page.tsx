@@ -23,7 +23,7 @@ import { can } from "../../../../server/access.ts";
 import { agreementHistory, agreementPending, hintSays, messagesFields, readsAgreement, topicRows, toYou } from "../../../../server/decided.ts";
 import { agreementOf } from "../../../../server/factory.ts";
 import { askedBy } from "../../../../server/views.ts";
-import { controlsFor, decisionsFor, tasksOf, teamFor } from "../team.ts";
+import { controlsFor, decisionsFor, readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Agreement" };
 
@@ -75,6 +75,7 @@ function Matrix({ level, inForce }: { level: Level; inForce: boolean }) {
 // earlier version. Admins only.
 export default async function AgreementPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name, "decisions", "controls");
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:control", team.name)) notFound();
   const [controls, decisions, tasks] = await Promise.all([controlsFor(team.name), decisionsFor(team.name), tasksOf(team.name)]);
@@ -94,22 +95,27 @@ export default async function AgreementPage({ params, searchParams }: { params: 
   return (
     <>
       <Notice searchParams={searchParams} />
-      <p className="lede small">
-        How readily the team brings a question to you. By what a wrong call would cost and how sure it is of what you&apos;d choose, it asks you, decides
-        and flags the call for your review, or decides and records it. Change it whenever the check-ins are too many, too few or about the wrong things.
-      </p>
-      <p className="lede small">
-        It routes judgments, so two things stay as they are at every level. What only you know or hold (a key, an account, a fact about your business)
-        still comes to you, as blocked work in Waiting on you. Who approves the planner&apos;s proposals is the team&apos;s own setting (
-        <code>approval</code> in its <code>team.json</code>). How often a message may reach you can be set here too, in place of the team&apos;s own.
-      </p>
+      <p className="lede small">How readily the team brings a question to you, and what it decides in your place instead.</p>
+      <details className="guide">
+        <summary>How this works</summary>
+        <p>
+          By what a wrong call would cost and how sure it is of what you&apos;d choose, the team asks you, decides and flags the call for your review, or
+          decides and records it. Change it whenever the check-ins are too many, too few or about the wrong things.
+        </p>
+        <p>
+          It routes judgments, so two things stay as they are at every level. What only you know or hold (a key, an account, a fact about your business)
+          still comes to you, as blocked work in Waiting on you. Who approves the planner&apos;s proposals is the team&apos;s own setting (
+          <code>approval</code> in its <code>team.json</code>). How often a message may reach you can be set here too, in place of the team&apos;s own.
+        </p>
+      </details>
       {reads ? null : (
         <p className="notice">
           This team&apos;s factory version doesn&apos;t read the agreement yet, and keeps no decision log. Upgrade it (<code>a6g upgrade {team.name}</code>
           , then <code>a6g rotate {team.name}</code>) and it can be set here.
         </p>
       )}
-      <div className="grid">
+      {/* Each as tall as what it holds: the figures are short beside what's in force. */}
+      <div className="grid uneven">
         <section className="panel" aria-labelledby="in-force">
           <h2 id="in-force">In force</h2>
           <dl className="facts">
@@ -211,32 +217,34 @@ export default async function AgreementPage({ params, searchParams }: { params: 
             <Matrix key={level} level={level} inForce={level === agreement.level} />
           ))}
         </div>
-        <div className="grid">
-          <dl className="facts small">
-            {GRADES.map((stakes) => (
-              <Fragment key={stakes}>
-                <dt>{COSTS[stakes]} stakes</dt>
-                <dd>{toYou(STAKES_MEAN[stakes])}</dd>
-              </Fragment>
-            ))}
-          </dl>
-          <dl className="facts small">
-            {ACROSS.map((confidence) => (
-              <Fragment key={confidence}>
-                <dt>{SURE[confidence]}</dt>
-                <dd>{toYou(CONFIDENCE_MEANS[confidence])}</dd>
-              </Fragment>
-            ))}
-          </dl>
-        </div>
+        <details className="more">
+          <summary>What the costs and the sureness mean</summary>
+          <div className="grid">
+            <dl className="facts small">
+              {GRADES.map((stakes) => (
+                <Fragment key={stakes}>
+                  <dt>{COSTS[stakes]} stakes</dt>
+                  <dd>{toYou(STAKES_MEAN[stakes])}</dd>
+                </Fragment>
+              ))}
+            </dl>
+            <dl className="facts small">
+              {ACROSS.map((confidence) => (
+                <Fragment key={confidence}>
+                  <dt>{SURE[confidence]}</dt>
+                  <dd>{toYou(CONFIDENCE_MEANS[confidence])}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          </div>
+        </details>
       </section>
 
       {reads ? (
         <section className="panel" aria-labelledby="change">
           <h2 id="change">Change it</h2>
+          {/* Kept across a change, which it then shows as it stands, so the change is said in a toast. */}
           <AgreementForm
-            // Made again once a change is in force, so it starts from the agreement as it now is.
-            key={control?.id ?? "default"}
             team={team.name}
             initial={{
               level: agreement.level,

@@ -8,11 +8,10 @@
 // (lib/reviews.ts).
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resumesWhen } from "./budget.ts";
+import { describeLimits, resumesWhen } from "./budget.ts";
 import { type Agreement, agreementChanges, agreementLines, normalised } from "./tasks/agreement.ts";
 import { agreementOf, type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
-import { dollars } from "./tasks/spend.ts";
 import { readJson, writeJson } from "./util.ts";
 
 const holdFile = (run: string): string => join(run, "hold.json");
@@ -86,8 +85,6 @@ export function writeLimits(run: string, limits: Limits | null): void {
 }
 
 export const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
-// A limit as it's set: dollars, or a share of one subscription's week.
-const limitOf = (n: number | null, unit: Limits["unit"]): string => (n === null ? "none" : unit === "subscription" ? `${n}%` : dollars(n));
 
 // A message for the planner from a control: one that `wake`s it starts a turn (the rest only matter to a planner in
 // the middle of one), and one to `keep` waits for the resume when the team is paused, since it asks for work.
@@ -131,7 +128,11 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     if (control.kind === "review") continue;
     // The team's subscriptions are the machine's to set, not the run folder's (lib/steer.ts applies them).
     if (control.kind === "subscriptions") continue;
+    // An action runs as a job of its own, marked applied once it starts (lib/actions.ts).
+    if (control.kind === "action") continue;
     now.push(control.id);
+    // The lead's word on an action: the web app's to read.
+    if (control.kind === "acted") continue;
     // The ask that started this team and its machine's word on each step: done with before the team was (start.ts).
     if (control.kind === "start" || control.kind === "starting") continue;
     // Whether the web app lists the team: the app's to read, nothing for the run folder.
@@ -180,11 +181,8 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     } else if (control.kind === "budget") {
       writeLimits(run, control.limits);
       const l = control.limits;
-      log.push(
-        l
-          ? `the budget is now ${limitOf(l.daily, l.unit)} a day, ${limitOf(l.weekly, l.unit)} a week, ${limitOf(l.total, l.unit)} in all${l.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : ""}`
-          : "the budget was cleared"
-      );
+      // In its own unit, with its limits on each subscription: a budget set only on one isn't "none".
+      log.push(l ? `the budget is now ${describeLimits(l)}` : "the budget was cleared");
     } else if (control.kind === "agreement") {
       // Against the one in force before it; several at once are told one by one, so the planner ends on the newest.
       const before = agreementOf(controls.slice(0, index)).agreement;

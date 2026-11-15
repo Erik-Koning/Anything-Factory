@@ -17,6 +17,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { answerCheckInByReply, relayAnswers } from "../answers.ts";
+import { applyActions } from "../actions.ts";
 import { loadTeam } from "../config.ts";
 import { applyReviews } from "../reviews.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
@@ -45,14 +46,24 @@ import { readUri } from "../tasks/mongoUri.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
-import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
+import { type MachineReport, type MachineSubscription, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task, waitsOnlyOnOperator } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
-import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
+import {
+  accounts,
+  describeWait,
+  loginDirs,
+  nearLimit,
+  observeSubscriptions,
+  subscriptionLimits,
+  subscriptionsReport,
+  subscriptionState,
+  weekFor,
+} from "../subscriptions.ts";
 import { collectUsage, transcriptDirsByAccount } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
@@ -501,6 +512,19 @@ async function takeAsksHeld(reach: Channel[], glog: (text: string) => void): Pro
 // the app takes (team.json's has no limit): one that's too long or holds a newline mustn't stop the whole report.
 export function machineReport(): MachineReport {
   const teams: MachineTeam[] = [];
+  // The roles of each team led here, by the subscription each runs on now (none: this Mac's own login).
+  const on: Record<string, MachineSubscription["teams"]> = {};
+  const own = accounts().find((a) => a.configDir === null)?.name ?? null;
+  for (const entry of registered()) {
+    if (entry.worker) continue;
+    for (const [role, sub] of Object.entries(subscriptionsOf(entry)?.roles ?? {})) {
+      const name = sub ?? own;
+      if (!name) continue;
+      const list = (on[name] ??= []);
+      const team = list.find((t) => t.team === entry.name) ?? list[list.push({ team: entry.name, roles: [] }) - 1];
+      team?.roles.push(role);
+    }
+  }
   for (const entry of registered()) {
     const { state, planner, members } = teamState(entry, entry.run);
     const title = plain(entry.title).replace(/\s+/g, " ").trim();
@@ -522,7 +546,12 @@ export function machineReport(): MachineReport {
   try {
     projects = machineProjects();
   } catch {}
-  return { name: machineName(), factory: PACKAGE.version, teams, projects };
+  // Its subscriptions, for the app's Subscriptions page: none said rather than a report that fails.
+  let subscriptions: MachineSubscription[] = [];
+  try {
+    subscriptions = subscriptionsReport(on);
+  } catch {}
+  return { name: machineName(), factory: PACKAGE.version, teams, projects, subscriptions };
 }
 
 const registered = (): RegistryEntry[] =>
@@ -918,6 +947,10 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   // The operator's reviews of decisions are written onto their records while the store is open (lib/reviews.ts); one
   // that can't be written now waits for the next run, and never keeps a pause from applying.
   let reviews: Awaited<ReturnType<typeof applyReviews>> = { log: [], tell: [] };
+  let applied: ReturnType<typeof applyControls>;
+  // The operator's actions (lib/actions.ts), each started as a job of its own; one that can't start now waits for the
+  // next run.
+  let acted: string[] = [];
   try {
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
@@ -927,6 +960,13 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
       } catch (error) {
         problem(`couldn't write the operator's reviews onto the decisions: ${(error as Error).message.split("\n")[0]}`);
       }
+      // The pauses before the actions: deleting a team pauses it now, then takes it off this Mac.
+      applied = applyControls(entry.run, controls, entry.operator);
+      try {
+        acted = await applyActions(entry, store, controls, machineName());
+      } catch (error) {
+        problem(`couldn't start the operator's actions: ${(error as Error).message.split("\n")[0]}`);
+      }
     } finally {
       await store.close();
     }
@@ -934,7 +974,6 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
     problem(`couldn't read the operator's controls: ${(error as Error).message.split("\n")[0]}`);
     return false;
   }
-  const applied = applyControls(entry.run, controls, entry.operator);
   // The run folder's copy of the agreement in force, put right every pass: a folder made anew, or a version from
   // before it was kept, catches up within a minute.
   keepAgreement(entry.run, controls);
@@ -946,7 +985,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   } catch (error) {
     problem(`couldn't set the team's subscriptions: ${(error as Error).message.split("\n")[0]}`);
   }
-  for (const line of [...applied.log, ...moved, ...reviews.log]) log(line);
+  for (const line of [...applied.log, ...moved, ...reviews.log, ...acted]) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
@@ -983,7 +1022,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
           : "no planner yet: the control waits for one"
     );
   }
-  return applied.log.length + moved.length + reviews.log.length > 0;
+  return applied.log.length + moved.length + reviews.log.length + acted.length > 0;
 }
 
 // Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from

@@ -1,7 +1,7 @@
-import { a6g, makeRepo, tmp } from "./helpers.ts";
+import { a6g, baseTeam, makeRepo, tmp } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { acquire, TIMED_OUT, withLock } from "../lib/lock.ts";
@@ -101,5 +101,37 @@ describe("a6g env use", () => {
     assert.equal(much.code, 2);
     assert.match(much.out, /env use: --max-min 121 is more than the 120 minutes anything may hold the team's app/);
     assert.match((await use(home, "--max-min", "soon", "--", "true")).out, /env use: not a duration: soon/);
+  });
+});
+
+describe("a6g env", () => {
+  test("starting or stopping the app waits for whoever holds it, and holds it while it runs; status never waits", async () => {
+    const home = makeRepo(baseTeam({ environment: { script: "sh .a6g/adapters/env.sh" } }), {
+      ".a6g/adapters/env.sh": 'mkdir -p .a6g/run && echo "$1 held=$A6G_APP_LOCK" >> .a6g/run/env-calls\n',
+    });
+    const asPlanner = { cwd: home, env: { A6G_HOME_DIR: home, A6G_TEAM: "fixture", A6G_ROLE: "planner", A6G_RUN: `${home}-run` } };
+    const file = join(home, ".a6g/run/env-calls");
+    const calls = (): string => (existsSync(file) ? readFileSync(file, "utf8") : "");
+
+    // A check after merges holds the app: a restart waits for it, and status doesn't.
+    const held = await acquire(home, "app", { slots: 1, waitMin: 1, holder: "the merge queue's check" });
+    assert.ok(held);
+    const restart = a6g(["env", "restart"], asPlanner);
+    const status = await a6g(["env", "status"], asPlanner);
+    assert.equal(status.code, 0, status.out);
+    await new Promise((next) => setTimeout(next, 1500));
+    assert.equal(calls(), "status held=\n", "the restart waits for the check");
+    held();
+    const restarted = await restart;
+    assert.equal(restarted.code, 0, restarted.out);
+    assert.match(restarted.out, /waiting for a app slot/);
+    assert.equal(calls(), "status held=\nrestart held=held\n", "and holds the app while it runs");
+
+    // Inside something that holds the app (an after-merge command), it doesn't wait for itself.
+    const merge = await acquire(home, "app", { slots: 1, waitMin: 1, holder: "a merge restarting it" });
+    const inside = await a6g(["env", "up"], { ...asPlanner, env: { ...asPlanner.env, A6G_APP_LOCK: "held" } });
+    merge?.();
+    assert.equal(inside.code, 0, inside.out);
+    assert.match(calls(), /up held=held\n$/);
   });
 });

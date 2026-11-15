@@ -299,7 +299,13 @@ describe("the machines the web app lists", () => {
         ]
       );
       assert.equal(report.teams[1]?.planner, null, "a worker runs no planner");
-      assert.deepEqual(Object.keys(report).sort(), ["factory", "name", "projects", "teams"], "nothing about whose it is");
+      assert.deepEqual(Object.keys(report).sort(), ["factory", "name", "projects", "subscriptions", "teams"], "nothing about whose it is");
+      // Its subscriptions by name, never a login's folder: this Mac's own login, not read yet.
+      assert.deepEqual(
+        report.subscriptions?.map((s) => [s.name, s.login, s.weekly, s.days.length]),
+        [["default", null, null, 0]]
+      );
+      assert.ok(!JSON.stringify(report.subscriptions).includes(home), "no path of the machine's");
       // It says it starts no projects for the app, until its operator says it may (a6g connect app --projects).
       assert.equal(report.projects, null);
 

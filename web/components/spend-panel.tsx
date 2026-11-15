@@ -5,6 +5,7 @@ import Link from "next/link";
 import { budgetAction } from "../app/t/[team]/actions.ts";
 import { type Limits, limitDollars, percentOf, spendByWork, type Spend, type Task, type UsageDay } from "../server/factory.ts";
 import { axis, dailySpend, dollars } from "../server/views.ts";
+import { ActionForm } from "./action-form.tsx";
 import { SubmitButton } from "./submit-button.tsx";
 import { Ago } from "./ui.tsx";
 
@@ -240,7 +241,8 @@ export function SpendPanel({
       )}
       <details open={open}>
         <summary>{limits ? "Change the budget" : "Set a budget"}</summary>
-        <form action={budgetAction} className="stack">
+        {/* Drawn again with the budget as it now stands once one is set. */}
+        <ActionForm key={JSON.stringify(limits)} action={budgetAction} className="stack">
           <input type="hidden" name="team" value={team} />
           <fieldset className="choices">
             <legend>In</legend>
@@ -290,7 +292,7 @@ export function SpendPanel({
           <div>
             <SubmitButton>{limits ? "Change the budget" : "Set the budget"}</SubmitButton>
           </div>
-        </form>
+        </ActionForm>
       </details>
     </section>
   );

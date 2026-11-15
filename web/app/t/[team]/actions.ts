@@ -1,10 +1,13 @@
 "use server";
 // A team's writes. Each checks the session and the person's role for the team (an admin's second factor too) before
 // it reads or writes anything, then calls the factory's own code.
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
+import type { ActionResult } from "../../../components/action-result.ts";
 import { clip, withNotice } from "../../../components/ui.tsx";
 import { agreementFrom, isReserved, sameAgreement, TOPICS } from "../../../../lib/tasks/agreement.ts";
+import { IDEAS_AREA } from "../../../../lib/tasks/model.ts";
 import {
   can,
   DECISION_ID,
@@ -21,6 +24,8 @@ import {
 } from "../../../server/access.ts";
 import { contactOfForm, readsAgreement } from "../../../server/decided.ts";
 import {
+  ACTION_WORDS,
+  actionFromWeb,
   addTaskFromWeb,
   agreementFromWeb,
   agreementOf,
@@ -30,7 +35,9 @@ import {
   decideAsOperator,
   decisionsOf,
   describeHold,
+  type HoldScope,
   isHoldScope,
+  isTeamAction,
   pauseFromWeb,
   Refused,
   restoreFromWeb,
@@ -53,6 +60,10 @@ const text = (form: FormData, key: string): string => {
   const value = form.get(key);
   return typeof value === "string" ? value : "";
 };
+
+// What an action did, into the audit log beside the page it renders rather than before it: the write starts at once,
+// and after() holds the request open until it's in (audit() logs one that fails, as before).
+const logged = (...entry: Parameters<typeof record>): void => after(record(...entry));
 
 // A refusal in words; anything else is logged and said plainly.
 function reasonOf(error: unknown): string {
@@ -85,7 +96,7 @@ export async function sendRequestAction(_previous: RequestFormState, form: FormD
     const label = viewer.admin ? "operator" : ((await memberships({ userId: viewer.userId, team }))[0]?.label ?? "stakeholder");
     const from = await stakeholderOf(team, viewer, label);
     id = (await sendRequest(team, { title, body, from: from.id, admin: viewer.admin })).id;
-    await record(viewer, { action: "request.sent", outcome: "ok", team, target: `${id} ${title.trim()}` });
+    logged(viewer, { action: "request.sent", outcome: "ok", team, target: `${id} ${title.trim()}` });
   } catch (error) {
     return again(reasonOf(error));
   }
@@ -134,22 +145,20 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
       const missing = after.filter((id) => !known.has(id));
       if (missing.length) return again(`There's no task ${missing.map((id) => `#${id}`).join(", ")} on this team.`);
     }
-    // Approved as it's added, it goes straight to the builders: like a pause, it takes a code from the authenticator.
-    if (admin && fields.approved) {
-      const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
-      if (wrong) return again(wrong);
-    }
     if (!admin && !(await takeRequestAllowance(viewer.userId, LIMITS.requestsPerDay)))
       return again(`You've sent ${LIMITS.requestsPerDay} requests and suggestions today, the most a day; send this one tomorrow.`);
     // Whoever adds it, admin or member, is on the task as their stakeholder record, as a request's sender is.
     const label = admin ? "operator" : ((await memberships({ userId: viewer.userId, team }))[0]?.label ?? "stakeholder");
     const from = (await stakeholderOf(team, viewer, label)).id;
+    // An innovation pass the admin asks for: research in the ideas area, which the planner hands to the innovator.
+    const ideas = admin && fields.kind === "ideas";
     task = await addTaskFromWeb(
       team,
       {
         title: fields.title,
         body: fields.body,
-        kind: isKind(fields.kind, !admin) ? fields.kind : "feature",
+        ...(ideas ? { area: IDEAS_AREA } : {}),
+        kind: ideas ? "research" : isKind(fields.kind, !admin) ? fields.kind : "feature",
         severity: isSeverity(fields.severity) && (admin || fields.kind === "bug" || fields.kind === "ux") ? fields.severity : null,
         parent: admin ? fields.parent || null : null,
         after,
@@ -157,7 +166,7 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
       },
       { admin, from }
     );
-    await record(viewer, {
+    logged(viewer, {
       action: admin ? "task.added" : "task.suggested",
       outcome: "ok",
       team,
@@ -176,22 +185,15 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
 
 const DONE: Record<string, string> = { approve: "approved", reject: "rejected", research: "sent back for research", escalate: "escalated" };
 
-// Where a decision or an answer goes back to: the page it was made on, of those that make them.
-function backTo(form: FormData, team: string): string {
-  const pages = [`/t/${team}/proposals`, `/t/${team}/inbox`, "/inbox"];
-  const asked = text(form, "back");
-  return pages.includes(asked) ? asked : (pages[0] ?? "/");
-}
-
-// An admin decides on a proposal, as the operator, by the factory's move table and the team's approval rules.
-export async function decideAction(form: FormData): Promise<void> {
+// An admin decides on a proposal, as the operator, by the factory's move table and the team's approval rules. The page
+// stays where it is, refreshed, and says what happened in a toast.
+export async function decideAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
   const id = text(form, "id");
   const decision = text(form, "decision");
   const note = text(form, "text");
-  if (!TEAM_PARAM.test(team)) redirect("/");
-  const back = backTo(form, team);
-  let notice: { ok?: string; error?: string };
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
+  let result: ActionResult;
   let viewer = null;
   try {
     viewer = await allowed("proposals:decide", team);
@@ -199,13 +201,15 @@ export async function decideAction(form: FormData): Promise<void> {
     const problem = decisionProblem(decision, note);
     if (problem) throw new Refused(problem);
     // The page's own copy of the task (its version, in the form): the planner can edit a proposal while the page is
-    // open, and a decision is on what was read. The page comes back with the task as it stands.
+    // open, and a decision is on what was read. The page comes back with the task as it stands. The task is read
+    // beside the team's approval rules.
     const seen = text(form, "seen");
-    if (seen && String((await storeFor(team).tasks.get(id))?.version) !== seen)
+    const [current, settings] = await Promise.all([seen ? storeFor(team).tasks.get(id) : Promise.resolve(null), teamDoc(team)]);
+    if (seen && String(current?.version) !== seen)
       throw new Refused(`#${id} changed after this page was loaded. It's shown as it stands now: read it again, then decide.`);
-    const task = await decideAsOperator(team, id, decision, note);
-    notice = { ok: `#${task.id} ${DONE[decision]}.` };
-    await record(viewer, {
+    const task = await decideAsOperator(team, id, decision, note, settings);
+    result = { ok: `#${task.id} ${DONE[decision]}.` };
+    logged(viewer, {
       action: "task.decided",
       outcome: "ok",
       team,
@@ -213,25 +217,28 @@ export async function decideAction(form: FormData): Promise<void> {
       detail: `${decision}${note.trim() ? `: ${note.trim()}` : ""}`,
     });
   } catch (error) {
-    notice = { error: reasonOf(error) };
+    result = { error: reasonOf(error) };
     // A refusal to someone allowed to decide is worth keeping (the move table said no); one to anyone else, too.
-    await record(viewer ?? (await getViewer()), {
+    logged(viewer ?? (await getViewer()), {
       action: "task.decided",
       outcome: "refused",
       team,
       target: TASK_ID.test(id) ? `#${id}` : null,
-      detail: `${decision}: ${notice.error}`,
+      detail: `${decision}: ${result.error}`,
     });
   }
   // What waits on the operator changed: the header's and the tab's counts with it.
   revalidatePath("/", "layout");
-  redirect(withNotice(back, notice));
+  refresh();
+  return result;
 }
 
 export interface AnswerFormState {
   error: string | null;
   pick: string;
   extra: string;
+  // Said once it's sent (components/answer-form.tsx shows it in a toast).
+  ok?: string;
 }
 
 // An admin answers what waits on them (a question, or blocked work), as the operator: the option they chose and what
@@ -243,21 +250,24 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
   const extra = text(form, "extra");
   const again = (error: string): AnswerFormState => ({ error, pick, extra });
   if (!TEAM_PARAM.test(team)) return again("No such team.");
-  const back = backTo(form, team);
   let viewer = null;
+  // A team no Mac runs gets it once one does (server/views.ts quietSince).
+  let waits = false;
   try {
     viewer = await allowed("proposals:decide", team);
     if (!TASK_ID.test(id)) return again("That isn't a task.");
     if (extra.length > LIMITS.note) return again(`Keep it to ${LIMITS.note.toLocaleString("en")} characters.`);
-    const task = await storeFor(team).tasks.get(id);
+    // The task, and the team's settings for what the page says after, read together.
+    const [task, doc] = await Promise.all([storeFor(team).tasks.get(id), teamDoc(team).catch(() => null)]);
     if (!task) return again(`There's no task #${id} on this team.`);
+    waits = doc ? quietSince(doc) !== null : false;
     const waiting = waitingOf(task, [task]);
     // The form answers the question it was drawn with (its token; the form for adding to an answer offers nothing
     // and sends none). One the team changed since comes back as it stands, with nothing chosen: the options an answer
     // is read against here would otherwise be ones the operator never saw.
     const shown = text(form, "shown");
     if ((pick || shown) && shown !== shownAs(waiting)) {
-      await record(viewer, {
+      logged(viewer, {
         action: "task.answered",
         outcome: "refused",
         team,
@@ -273,8 +283,8 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     // words; the recommendation, or the option it names, with nothing added) is answered as that: the factory writes
     // its words and marks the answer so. Anything else is the operator's own answer, in the form's words.
     const recommended = waiting.recommendationFrom === "asked" && asRecommended(pick, extra, waiting);
-    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended, waiting.recommendation ?? undefined);
-    await record(viewer, {
+    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended, waiting.recommendation ?? undefined, task);
+    logged(viewer, {
       action: "task.answered",
       outcome: "ok",
       team,
@@ -283,7 +293,7 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     });
   } catch (error) {
     const reason = reasonOf(error);
-    await record(viewer ?? (await getViewer()), {
+    logged(viewer ?? (await getViewer()), {
       action: "task.answered",
       outcome: "refused",
       team,
@@ -293,98 +303,143 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     return again(reason);
   }
   revalidatePath("/", "layout");
-  // A team no Mac runs gets it once one does (server/views.ts quietSince).
-  const doc = await teamDoc(team).catch(() => null);
-  const waits = doc ? quietSince(doc) !== null : false;
-  redirect(
-    withNotice(back, {
-      ok: waits
-        ? `Answer sent on #${id}. No Mac runs the team now: the planner gets it once one does.`
-        : `Answer sent on #${id}. The planner gets it within a minute and moves #${id} on.`,
-    })
-  );
+  refresh();
+  return {
+    error: null,
+    pick: "",
+    extra: "",
+    ok: waits
+      ? `Answer sent on #${id}. No Mac runs the team now: the planner gets it once one does.`
+      : `Answer sent on #${id}. The planner gets it within a minute and moves #${id} on.`,
+  };
 }
 
-// An admin pauses or resumes the team, as the operator, with a code from their authenticator: how a team runs changes
-// only for someone holding their second factor at that moment. The lead's watchdog applies it within a minute.
-export async function controlAction(form: FormData): Promise<void> {
+// What a pause, a stop or a resume asked for, in words.
+function controlWords(control: { kind: string; scope: HoldScope | null; tasks: string[]; journeys: string[] }): string {
+  if (control.kind === "resume") return "resume";
+  if (control.scope === "now" || !control.scope) return "stop";
+  return `pause after ${describeHold({ scope: control.scope, tasks: control.tasks, journeys: control.journeys })}`;
+}
+
+// When the team's Mac applies what was asked: within a minute, or once one runs it.
+async function applies(team: string): Promise<string> {
+  const doc = await teamDoc(team).catch(() => null);
+  return doc && quietSince(doc) !== null ? "No Mac runs the team now: it applies once one does." : "The team's Mac applies it within a minute.";
+}
+
+// An admin stops, pauses or resumes the team, as the operator: "stop" is a pause now (nothing starts or merges;
+// members finish their turn), "pause" waits for the work or journeys under way. The lead's watchdog applies it within a
+// minute; the page refreshes in place and says so in a toast.
+export async function controlAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
   const kind = text(form, "kind");
-  const scope = text(form, "scope");
+  const scope = kind === "stop" ? "now" : text(form, "scope");
   const note = text(form, "note").trim();
   const journeys = form.getAll("journey").filter((value): value is string => typeof value === "string" && TASK_ID.test(value));
-  if (!TEAM_PARAM.test(team)) redirect("/");
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
   const action = kind === "resume" ? "team.resumed" : "team.paused";
-  let notice: { ok?: string; error?: string };
+  let result: ActionResult;
   let viewer = null;
   try {
     viewer = await allowed("team:control", team);
-    if (kind !== "pause" && kind !== "resume") throw new Refused("That isn't a pause or a resume.");
-    if (kind === "pause" && !isHoldScope(scope)) throw new Refused("Choose when the team pauses.");
+    if (kind !== "pause" && kind !== "stop" && kind !== "resume") throw new Refused("That isn't a stop, a pause or a resume.");
+    if (kind !== "resume" && !isHoldScope(scope)) throw new Refused("Choose when the team pauses.");
     if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
     if (!(await teamDoc(team))) throw new Refused("No such team.");
-    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
-    if (wrong) throw new Refused(wrong);
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const control =
-      kind === "pause" && isHoldScope(scope) ? await pauseFromWeb(team, { scope, journeys, note, from }) : await resumeFromWeb(team, { note, from });
-    const what =
-      control.kind === "resume"
-        ? "resume"
-        : control.scope === "now"
-          ? "pause now"
-          : `pause after ${describeHold({ scope: control.scope ?? "now", tasks: control.tasks, journeys: control.journeys })}`;
-    notice = { ok: `Asked to ${what}. The team's Mac applies it within a minute; this page shows when it has.` };
-    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });
+      kind !== "resume" && isHoldScope(scope) ? await pauseFromWeb(team, { scope, journeys, note, from }) : await resumeFromWeb(team, { note, from });
+    const what = controlWords(control);
+    result = { ok: `Asked to ${what}. ${await applies(team)}` };
+    logged(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });
   } catch (error) {
-    notice = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${notice.error}`.trim() });
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${result.error}`.trim() });
   }
-  // A refused pause opens its form again (open=…, beside the signed notice), so it's there to correct.
-  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error && kind !== "resume" ? "&open=pause" : ""}`);
+  revalidatePath("/", "layout");
+  refresh();
+  return result;
 }
 
-// An admin takes a team no Mac runs off the site, or puts one back, as the operator, with a code from their
-// authenticator. Nothing on any Mac changes: the site stops listing it, or lists it again (server/factory.ts).
-export async function siteAction(form: FormData): Promise<void> {
+// An admin asks the team's lead to do something at once (lib/tasks/controls.ts TEAM_ACTIONS): restart the planner or
+// the environment, upgrade the factory, wake the team, or delete it. Deleting takes the team's name, typed, and a code
+// from the authenticator; the rest complete at once. The lead's watchdog starts each within a minute and says what came
+// of it, which the overview shows.
+export async function teamAction(form: FormData): Promise<ActionResult> {
+  const team = text(form, "team");
+  const action = text(form, "action");
+  const note = text(form, "note").trim();
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
+  const audit = isTeamAction(action) ? (`team.${action}` as const) : "team.action";
+  let result: ActionResult;
+  let viewer = null;
+  try {
+    viewer = await allowed(action === "unregister" ? "team:retire" : "team:control", team);
+    if (!isTeamAction(action)) throw new Refused("That isn't something the team's Mac can do.");
+    if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
+    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    if (action === "unregister") {
+      if (text(form, "confirm").trim() !== team) throw new Refused(`Type the team's name, ${team}, to delete it.`);
+      const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
+      if (wrong) throw new Refused(wrong);
+    }
+    const from = (await stakeholderOf(team, viewer, "operator")).id;
+    const control = await actionFromWeb(team, { action, note, from });
+    result = {
+      ok:
+        action === "unregister"
+          ? `Deleted from the site, and stopped. ${await applies(team)} It's taken off its Mac then, its files and history kept.`
+          : `${ACTION_WORDS[action].asked}. ${await applies(team)}`,
+    };
+    logged(viewer, { action: audit, outcome: "ok", team, target: control.id, detail: note || ACTION_WORDS[action].asked });
+  } catch (error) {
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), { action: audit, outcome: "refused", team, target: null, detail: result.error ?? "" });
+  }
+  revalidatePath("/", "layout");
+  refresh();
+  return result;
+}
+
+// An admin takes a team off the site, or puts one back, as the operator. Nothing on any Mac changes: the site stops
+// listing it, or lists it again (server/factory.ts).
+export async function siteAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
   const kind = text(form, "kind");
   const note = text(form, "note").trim();
-  if (!TEAM_PARAM.test(team)) redirect("/");
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
   const action = kind === "restore" ? "team.restored" : "team.retired";
-  let notice: { ok?: string; error?: string };
+  let result: ActionResult;
   let viewer = null;
   try {
     viewer = await allowed("team:retire", team);
     if (kind !== "retire" && kind !== "restore") throw new Refused("That isn't taking the team off the site or putting it back.");
     if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
     if (!(await teamDoc(team))) throw new Refused("No such team.");
-    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
-    if (wrong) throw new Refused(wrong);
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const control = kind === "retire" ? await retireFromWeb(team, { note, from }) : await restoreFromWeb(team, { from });
-    notice = {
+    result = {
       ok:
         kind === "retire"
           ? "Taken off the site. Its pages still open from a link, and you can put it back from here."
           : "Back on the site: on Teams, and in Waiting on you when it asks.",
     };
-    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: kind === "retire" ? note || "taken off the site" : "put back" });
+    logged(viewer, { action, outcome: "ok", team, target: control.id, detail: kind === "retire" ? note || "taken off the site" : "put back" });
   } catch (error) {
-    notice = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind}: ${notice.error}` });
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind}: ${result.error}` });
   }
   revalidatePath("/", "layout");
-  // A refused one opens its form again (open=site), so it's there to correct.
-  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error && kind === "retire" ? "&open=site" : ""}`);
+  refresh();
+  return result;
 }
 
 // An admin sets the team's budget, as the operator, with a code from their authenticator. Each limit is dollars
 // (API-equivalent), blank for none; the lead's watchdog holds the team to it from its next run.
-export async function budgetAction(form: FormData): Promise<void> {
+export async function budgetAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
-  if (!TEAM_PARAM.test(team)) redirect("/");
-  let notice: { ok?: string; error?: string };
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
+  let result: ActionResult;
   let viewer = null;
   const amounts = { daily: text(form, "daily").trim(), weekly: text(form, "weekly").trim(), total: text(form, "total").trim() };
   try {
@@ -418,25 +473,26 @@ export async function budgetAction(form: FormData): Promise<void> {
     const said = control.limits
       ? `${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all${unit === "subscription" ? " of a subscription's week" : ""}`
       : "no budget";
-    notice = { ok: `The budget is ${said}. The team's Mac holds it to that from its next run.` };
-    await record(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
+    result = { ok: `The budget is ${said}. The team's Mac holds it to that from its next run.` };
+    logged(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
-    notice = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: notice.error });
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: result.error ?? "" });
   }
-  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=budget" : ""}`);
+  refresh();
+  return result;
 }
 
 // An admin chooses the Claude subscriptions the team runs on, as the operator, with a code from their authenticator:
 // every role's list, or one role's own, in order (none clears it). Which login a team's agents use, and so whose limits
 // they spend, changes only for someone holding their second factor at that moment. The lead's watchdog writes the list
 // and moves the roles within a minute (lib/steer.ts).
-export async function subscriptionsAction(form: FormData): Promise<void> {
+export async function subscriptionsAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
-  if (!TEAM_PARAM.test(team)) redirect("/");
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
   const role = text(form, "role").trim() || null;
   const use = form.getAll("use").filter((value): value is string => typeof value === "string");
-  let notice: { ok?: string; error?: string };
+  let result: ActionResult;
   let viewer = null;
   try {
     viewer = await allowed("team:control", team);
@@ -454,25 +510,26 @@ export async function subscriptionsAction(form: FormData): Promise<void> {
       : role
         ? `${whose} ${role === "planner" ? "follows" : "follow"} the team's list`
         : "The team runs on its Mac's own login";
-    notice = { ok: `${said}. The team's Mac applies it within a minute, and moves each role once nothing of it is at work.` };
-    await record(viewer, { action: "team.subscriptions", outcome: "ok", team, target: control.id, detail: said });
+    result = { ok: `${said}. The team's Mac applies it within a minute, and moves each role once nothing of it is at work.` };
+    logged(viewer, { action: "team.subscriptions", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
-    notice = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action: "team.subscriptions", outcome: "refused", team, target: null, detail: notice.error });
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), { action: "team.subscriptions", outcome: "refused", team, target: null, detail: result.error ?? "" });
   }
-  redirect(`${withNotice(`/t/${team}`, notice)}${notice.error ? "&open=subscriptions" : ""}#subscriptions`);
+  refresh();
+  return result;
 }
 
 // An admin reviews what the team decided in the operator's place: agrees with it, or overturns it and says what to do
 // instead. A control, like a pause: the lead's watchdog writes it onto the record and passes an overturn to the planner
-// within a minute. It decides nothing new about how the team runs, so it takes no code, as an answer doesn't.
-export async function reviewAction(form: FormData): Promise<void> {
+// within a minute.
+export async function reviewAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
   const id = text(form, "id");
   const verdict = text(form, "verdict");
   const note = text(form, "note").trim();
-  if (!TEAM_PARAM.test(team)) redirect("/");
-  let notice: { ok?: string; error?: string };
+  if (!TEAM_PARAM.test(team)) return { error: "No such team." };
+  let result: ActionResult;
   let viewer = null;
   try {
     viewer = await allowed("proposals:decide", team);
@@ -484,10 +541,10 @@ export async function reviewAction(form: FormData): Promise<void> {
     if (!decision) throw new Refused(`There's no decision ${id} on this team.`);
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     await reviewFromWeb(team, { id, verdict, note, from });
-    notice = {
+    result = {
       ok: verdict === "agreed" ? `Agreed with ${id}.` : `Overturned ${id}. The planner gets what you wrote within a minute, and undoes it.`,
     };
-    await record(viewer, {
+    logged(viewer, {
       action: "decision.reviewed",
       outcome: "ok",
       team,
@@ -495,18 +552,19 @@ export async function reviewAction(form: FormData): Promise<void> {
       detail: `${verdict}${note ? `: ${clip(note, 300)}` : ""}`,
     });
   } catch (error) {
-    notice = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), {
+    result = { error: reasonOf(error) };
+    logged(viewer ?? (await getViewer()), {
       action: "decision.reviewed",
       outcome: "refused",
       team,
       target: DECISION_ID.test(id) ? id : null,
-      detail: `${verdict}: ${notice.error}`,
+      detail: `${verdict}: ${result.error}`,
     });
   }
   // What's left to review changed: the tab's count with it.
   revalidatePath("/", "layout");
-  redirect(withNotice(`/t/${team}/decided`, notice));
+  refresh();
+  return result;
 }
 
 export interface AgreementFormState {
@@ -519,12 +577,13 @@ export interface AgreementFormState {
   // digest's window, in hours.
   messages: string;
   every: string;
+  // Said once it's changed (components/agreement-form.tsx shows it in a toast).
+  ok?: string;
 }
 
-// An admin changes the team's working agreement, as the operator, with a code from their authenticator: how readily
-// the team asks them changes only for someone holding their second factor at that moment. The commands that ask the
-// operator or decide for them read the newest agreement, and the lead's watchdog tells the planner within a minute.
-// What was chosen and typed comes back with a refusal, so a wrong code doesn't lose the instructions.
+// An admin changes the team's working agreement, as the operator. The commands that ask the operator or decide for
+// them read the newest agreement, and the lead's watchdog tells the planner within a minute. What was chosen and typed
+// comes back with a refusal, so nothing is lost.
 export async function agreementAction(_previous: AgreementFormState, form: FormData): Promise<AgreementFormState> {
   const team = text(form, "team");
   const level = text(form, "level");
@@ -541,23 +600,21 @@ export async function agreementAction(_previous: AgreementFormState, form: FormD
     const doc = await teamDoc(team);
     if (!doc) throw new Refused("No such team.");
     if (!readsAgreement(doc)) throw new Refused("This team's factory version doesn't read the agreement yet: upgrade it first (a6g upgrade).");
-    // Everything that could be wrong with it is said before the code is asked of the authenticator: a code works once.
     const often = contactOfForm(messages, every);
     if ("problem" in often) throw new Refused(often.problem);
     const made = agreementFrom({ level, topics, notes, contact: often.contact });
     if ("problem" in made) throw new Refused(made.problem);
     if (sameAgreement(agreementOf(await controlsOf(team)).agreement, made)) throw new Refused("Nothing changed: the agreement says that already.");
-    const wrong = await checkCode(viewer.userId, text(form, "code").replace(/\s+/g, ""), await authHeaders());
-    if (wrong) throw new Refused(wrong);
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const { control, changes } = await agreementFromWeb(team, { level, topics, notes, contact: often.contact, from });
     said = changes.join("; ");
-    await record(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
+    logged(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
     const reason = reasonOf(error);
-    await record(viewer ?? (await getViewer()), { action: "team.agreement", outcome: "refused", team, target: null, detail: reason });
+    logged(viewer ?? (await getViewer()), { action: "team.agreement", outcome: "refused", team, target: null, detail: reason });
     return again(reason);
   }
   revalidatePath("/", "layout");
-  redirect(withNotice(`/t/${team}/agreement`, { ok: `The agreement changed: ${clip(said, 200)}. The team follows it from now on.` }));
+  refresh();
+  return { error: null, level, topics, notes, messages, every, ok: `The agreement changed: ${clip(said, 200)}. The team follows it from now on.` };
 }

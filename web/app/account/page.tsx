@@ -20,6 +20,7 @@ import {
   turnOnIpCheckAction,
 } from "./actions.ts";
 import { AuthenticatorSetup } from "./authenticator.tsx";
+import { ActionForm } from "../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Account" };
 
@@ -74,29 +75,29 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </p>
           {viewer.admin ? (
             <>
-              <p className="hint">
-                Admins always sign in with one. Yours was set up by create-admin; running it again replaces it. Backup codes sign you in once each when the
-                authenticator isn&apos;t at hand.
-              </p>
+              <p className="hint">Admins always sign in with one. Yours was set up by create-admin; running it again replaces it.</p>
               <BackupCodes password />
             </>
           ) : (
             <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
               <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
               <BackupCodes password={password} />
-              <form action={turnOffAuthenticatorAction} className="inline">
-                {password ? (
+              <div className="sub-form" role="group" aria-labelledby="turn-off">
+                <h3 id="turn-off">Turn it off</h3>
+                <ActionForm action={turnOffAuthenticatorAction} className="inline">
+                  {password ? (
+                    <label>
+                      Password, to turn it off
+                      <input name="password" type="password" required autoComplete="current-password" />
+                    </label>
+                  ) : null}
                   <label>
-                    Password, to turn it off
-                    <input name="password" type="password" required autoComplete="current-password" />
+                    A code from it, to turn it off
+                    <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
                   </label>
-                ) : null}
-                <label>
-                  A code from it, to turn it off
-                  <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
-                </label>
-                <SubmitButton className="danger">Turn it off</SubmitButton>
-              </form>
+                  <SubmitButton className="danger">Turn it off</SubmitButton>
+                </ActionForm>
+              </div>
             </AuthenticatorSetup>
           )}
         </section>
@@ -108,24 +109,29 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             <li key={s.id} className="head">
               <span className="title">{deviceOf(s.userAgent)}</span>
               <span className="muted small">
-                {s.ipAddress ? `${s.ipAddress} · ` : ""}signed in <Ago at={new Date(s.createdAt).toISOString()} />
+                {s.ipAddress ? (
+                  <>
+                    <span className="ip">{s.ipAddress}</span> ·{" "}
+                  </>
+                ) : null}
+                signed in <Ago at={new Date(s.createdAt).toISOString()} />
               </span>
               {s.id === viewer.sessionId ? (
                 <Chip tone="ok">this one</Chip>
               ) : (
-                <form action={revokeSessionAction}>
+                <ActionForm action={revokeSessionAction}>
                   <input type="hidden" name="id" value={s.id} />
                   <SubmitButton className="danger">{`End the session on ${deviceOf(s.userAgent)}`}</SubmitButton>
-                </form>
+                </ActionForm>
               )}
             </li>
           ))}
         </ul>
         <div className="inline">
           {sessions.length > 1 ? (
-            <form action={revokeOtherSessionsAction}>
+            <ActionForm action={revokeOtherSessionsAction}>
               <SubmitButton>End every other session</SubmitButton>
-            </form>
+            </ActionForm>
           ) : null}
           <SignOutButton label="Sign out" className="button" />
         </div>
@@ -145,17 +151,17 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             <ul className="plain rows">
               {addresses.map((a) => (
                 <li key={a.ip} className="head">
-                  <code>{a.ip}</code>
+                  <span className="title ip">{a.ip}</span>
                   <span className="muted small">
                     {a.via} · last used <Ago at={a.lastSeenAt.toISOString()} />
                   </span>
                   {a.ip === viewer.ip ? (
                     <Chip tone="ok">this one</Chip>
                   ) : (
-                    <form action={forgetIpAction}>
+                    <ActionForm action={forgetIpAction}>
                       <input type="hidden" name="ip" value={a.ip} />
                       <SubmitButton className="quiet s">{`Forget ${a.ip}`}</SubmitButton>
-                    </form>
+                    </ActionForm>
                   )}
                 </li>
               ))}
@@ -166,7 +172,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           {viewer.admin ? null : viewer.ipCheck ? (
             <details>
               <summary>Turn the check off</summary>
-              <form action={turnOffIpCheckAction} className="stack">
+              <ActionForm action={turnOffIpCheckAction} className="stack">
                 <p className="hint">
                   Then a sign-in from anywhere goes ahead without an email to you. It takes a sign-in from the last ten minutes
                   {viewer.twoFactor ? " and a code from your authenticator" : ""}, and we email you that it was turned off.
@@ -180,30 +186,48 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 <div>
                   <SubmitButton className="danger">Stop checking new addresses</SubmitButton>
                 </div>
-              </form>
+              </ActionForm>
             </details>
           ) : (
-            <form action={turnOnIpCheckAction}>
+            <ActionForm action={turnOnIpCheckAction}>
               <SubmitButton>Check new addresses again</SubmitButton>
-            </form>
+            </ActionForm>
           )}
         </section>
         <section className="panel" aria-labelledby="activity">
           <h2 id="activity">Recent activity</h2>
           {activity.length ? (
-            <ul className="plain rows small">
-              {activity.map((e) => (
-                <li key={e.id}>
-                  <div className="head">
-                    <span className="title">{ACTION_LABEL[e.action]}</span>
-                    {e.outcome === "ok" ? null : <Chip tone="warn">{e.outcome}</Chip>}
+            // A line each, when first: what the audit log keeps of it, in short (Audit has the whole of it, for an admin).
+            <ul className="plain rows small activity">
+              {activity.map((e) => {
+                const device = deviceOf(e.userAgent);
+                return (
+                  <li key={e.id}>
                     <span className="muted">
                       <Ago at={e.at.toISOString()} />
                     </span>
-                  </div>
-                  <div className="muted">{[e.detail, e.ip, deviceOf(e.userAgent)].filter(Boolean).join(" · ")}</div>
-                </li>
-              ))}
+                    <span>
+                      <span className="title">{ACTION_LABEL[e.action]}</span>
+                      {e.outcome === "ok" ? null : (
+                        <>
+                          {" "}
+                          <Chip tone="warn">{e.outcome}</Chip>
+                        </>
+                      )}
+                      <span className="muted">
+                        {e.detail ? ` · ${e.detail}` : ""}
+                        {e.ip ? (
+                          <>
+                            {" · "}
+                            <span className="ip">{e.ip}</span>
+                          </>
+                        ) : null}
+                        {device ? ` · ${device}` : ""}
+                      </span>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="empty">Nothing yet.</p>

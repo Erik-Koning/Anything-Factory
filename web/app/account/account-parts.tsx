@@ -63,12 +63,14 @@ export function Passkeys({ passkeys }: { passkeys: { id: string; name: string; c
   );
 }
 
-// New backup codes: a current code from the authenticator, and the password of an account that has one. The codes show
-// once.
+// New backup codes: a current code from the authenticator, and the password of an account that has one, in a group of
+// their own under a heading, so the fields read as this key's. The codes show once.
 export function BackupCodes({ password }: { password: boolean }) {
   const [state, action, pending] = useActionState<BackupCodesState, FormData>(backupCodesAction, { error: null, codes: [] });
   return (
-    <>
+    <div className="sub-form" role="group" aria-labelledby="backup-codes">
+      <h3 id="backup-codes">New backup codes</h3>
+      <p className="hint">Each signs you in once when the authenticator isn&apos;t at hand. New ones replace the old.</p>
       {state.error ? (
         <p className="notice error" role="alert">
           {state.error}
@@ -99,6 +101,6 @@ export function BackupCodes({ password }: { password: boolean }) {
           {pending ? "Making them…" : "Make new backup codes"}
         </button>
       </form>
-    </>
+    </div>
   );
 }

@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { MainNav } from "../components/main-nav.tsx";
+import { NavProgress } from "../components/nav-progress.tsx";
+import { Toaster } from "../components/toaster.tsx";
 import { blocked, can } from "../server/access.ts";
-import { allTeams, storeFor } from "../server/factory.ts";
+import { allTeams, tasksFor } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { getViewer, type Person } from "../server/viewer.ts";
 import { RememberName } from "./remember-name.tsx";
@@ -40,10 +42,11 @@ export const viewport: Viewport = {
 };
 
 // What waits on an admin, on every team they decide for: the header says how much on every page, and never fails one.
+// Streamed in (components/main-nav.tsx): no page waits for it.
 async function waitingFor(viewer: Person): Promise<number> {
   try {
     const teams = (await allTeams()).filter((team) => can(viewer, "proposals:decide", team.name));
-    const counts = await Promise.all(teams.map(async (team) => waitingCount(await storeFor(team.name).tasks.all())));
+    const counts = await Promise.all(teams.map(async (team) => waitingCount(await tasksFor(team.name))));
     return counts.reduce((n, count) => n + count, 0);
   } catch {
     return 0;
@@ -60,13 +63,27 @@ function Mark() {
   );
 }
 
+// Who is signed in, and the way out: at the right of the top bar, or under the links in a narrow window's menu.
+function Who({ viewer }: { viewer: Person }) {
+  return (
+    <>
+      <span>{viewer.name || viewer.email}</span>
+      {viewer.admin ? <span className="chip">admin</span> : null}
+      <SignOutButton className="quiet s" />
+    </>
+  );
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
   const signedIn = viewer !== null && !blocked(viewer);
-  const waiting = signedIn && viewer.admin ? await waitingFor(viewer) : 0;
+  const waiting = signedIn && viewer.admin ? waitingFor(viewer) : 0;
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
+        <Suspense fallback={null}>
+          <NavProgress />
+        </Suspense>
         <a className="skip" href="#main">
           Skip to the content
         </a>
@@ -82,6 +99,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   { href: "/", label: "Teams" },
                   ...(viewer.admin ? [{ href: "/inbox", label: "Waiting on you", count: waiting }] : []),
                   { href: "/machines", label: "Machines" },
+                  { href: "/subscriptions", label: "Subscriptions" },
                   ...(viewer.admin
                     ? [
                         { href: "/admin/people", label: "People" },
@@ -90,15 +108,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     : []),
                   { href: "/account", label: "Account" },
                 ]}
+                who={<Who viewer={viewer} />}
               />
             ) : (
               <span className="spacer" />
             )}
             {viewer ? (
               <span className="who">
-                <span>{viewer.name || viewer.email}</span>
-                {viewer.admin ? <span className="chip">admin</span> : null}
-                <SignOutButton className="quiet s" />
+                <Who viewer={viewer} />
               </span>
             ) : null}
           </div>
@@ -107,6 +124,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           {children}
         </main>
         {signedIn ? <RememberName name={viewer.name} /> : null}
+        <Toaster />
       </body>
     </html>
   );

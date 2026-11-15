@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { LevelGraph } from "../../../../components/level-graph.tsx";
 import { levelDiagram } from "../../../../../lib/tasks/graph.ts";
 import { can } from "../../../../server/access.ts";
-import { tasksOf, teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Graph" };
 
@@ -11,6 +11,7 @@ export const metadata: Metadata = { title: "Graph" };
 // further down. ?at=<id> opens the level inside that card, or the one a task is on (components/level-graph.tsx).
 export default async function GraphPage({ params }: { params: Promise<{ team: string }> }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:board", team.name)) notFound();
   const tasks = await tasksOf(team.name);
@@ -20,9 +21,13 @@ export default async function GraphPage({ params }: { params: Promise<{ team: st
       {tasks.some((t) => t.status !== "rejected") ? (
         <>
           <p className="small muted">
-            The journeys, with each one&apos;s tasks a level down. Open a card with a double-click or its ⊞ count; the breadcrumbs or Esc come back out,
-            and ↗ opens a task&apos;s page. Task cards are work a member can take once what comes before is done; the other kinds say what they wait for.
+            The journeys, each with its tasks a level down. Double-click a card or press its ⊞ count to open it; Esc or the breadcrumbs come back out, and
+            ↗ opens a task&apos;s page.
           </p>
+          <details className="small graph-how">
+            <summary>What the cards mean</summary>
+            <p className="muted">Task cards are work a member can take once what comes before is done; the other kinds say what they wait for.</p>
+          </details>
           <LevelGraph
             diagram={levelDiagram(tasks, { title: team.title || team.name, href: (t) => `/t/${team.name}/tasks/${t.id}` })}
             filename={`${team.name}-task-graph`}

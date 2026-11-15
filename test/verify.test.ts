@@ -492,6 +492,38 @@ describe("the check after merges, in a real browser", { skip: noBrowser ?? false
     assert.equal(woken.length, 3);
   });
 
+  test("an app that goes away while its pages are checked files nothing, and the check stays due", async () => {
+    // Up when the check asks first (its health address), gone by the time the pages load (nothing listens there).
+    const gone = createServer();
+    await new Promise<void>((done) => gone.listen(0, "127.0.0.1", done));
+    const address = gone.address();
+    await new Promise<void>((done) => gone.close(() => done()));
+    const dead = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+    const home = makeRepo(
+      { ...baseTeam({ board: "tasks", roles: plain }), environment: { health: [`${url}/`] }, pages: { ...pages(), appUrl: dead } } as RawTeam,
+      {
+        ".a6g/harness.json": {
+          pages: [
+            { id: "home", path: "/" },
+            { id: "account", path: "/account" },
+          ],
+        },
+      }
+    );
+    const run = tmp("a6g-run-");
+    const woken: string[] = [];
+    await verifyAfterMerge(home, loadTeam(home), run, "a6g/b1-restarted", { wake: (text) => woken.push(text), healthWaitMs: 1 });
+
+    assert.deepEqual(await filedBy(fileStore(run, "fixture")), [], "no page is filed for the app going away");
+    assert.equal(woken.length, 1);
+    assert.match(
+      woken[0] ?? "",
+      /^verify: at [0-9a-f]{9}, the team's app went away during the check after merges \(it refused connections during the page checks\), so nothing was filed/
+    );
+    assert.match(logOf(home), /the app went away during the check .*; nothing was filed, and the check stays due\n$/);
+    assert.equal(checkDue(home)?.after, "a6g/b1-restarted", "still due");
+  });
+
   test("a suite that didn't run is one finding with what it said, and proves nothing: no gap is filed from it", async () => {
     const home = makeRepo({ ...baseTeam({ board: "tasks", roles }), pages: pages() } as RawTeam, {
       ".a6g/harness.json": { e2e: { config: "playwright.config.mjs", timeoutMin: 3 } },

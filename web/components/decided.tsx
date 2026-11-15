@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { reviewAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
 import { type Decided, underAgreement } from "../server/decided.ts";
+import { ActionForm } from "./action-form.tsx";
 import { SubmitButton } from "./submit-button.tsx";
 import { Ago, Chip } from "./ui.tsx";
 
@@ -14,16 +15,16 @@ function Review({ team, id, verdict }: { team: string; id: string; verdict: "agr
   const input = `${verdict}-${id}`;
   const overturn = verdict === "overturned";
   return (
-    <form action={reviewAction}>
+    <ActionForm action={reviewAction}>
       <input type="hidden" name="team" value={team} />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="verdict" value={verdict} />
       <label htmlFor={input}>{overturn ? "What to do instead" : "Note (optional)"}</label>
       <input id={input} name="note" required={overturn} maxLength={LIMITS.note} autoComplete="off" />
       <div>
-        <SubmitButton className={overturn ? "reject" : "approve"}>{overturn ? `Overturn ${id}` : `Agree with ${id}`}</SubmitButton>
+        <SubmitButton className={overturn ? "reject" : undefined}>{overturn ? `Overturn ${id}` : `Agree with ${id}`}</SubmitButton>
       </div>
-    </form>
+    </ActionForm>
   );
 }
 
@@ -73,8 +74,10 @@ export function DecidedItem({
         <Review team={team} id={r.id} verdict="overturned" />
       </div>
     );
+  // How it was reviewed, what's become of that, and the forms: beside the decision where there's room.
+  const reviewed = Boolean(d.review || d.withPlanner || r.notes.length || forms);
   return (
-    <li id={r.id} className="decided">
+    <li id={r.id} className="decided to-decide">
       <div className="head">
         <span className="id">{r.id}</span>
         <h3 className="title">{r.question}</h3>
@@ -82,90 +85,96 @@ export function DecidedItem({
         {d.flagged ? <Chip tone="caution">flagged</Chip> : null}
         {d.review ? <Chip tone={overturned ? "warn" : "ok"}>{d.review.verdict}</Chip> : null}
       </div>
-      <p className="small muted">
-        Decided by the {r.by} <Ago at={r.at} /> · {r.stakes} stakes, {r.confidence} confidence
-      </p>
-      <dl className="raised ruling">
-        <div className="chose">
-          <dt>The team decided</dt>
-          <dd>{r.decision}</dd>
-        </div>
-        <div className="because">
-          <dt>Because</dt>
-          <dd>{r.because}</dd>
-        </div>
-      </dl>
-      <dl className="facts small">
-        {r.options.length ? (
-          <>
-            <dt>Weighed</dt>
-            <dd>
-              <ul className="weighed">
-                {r.options.map((option) => (
-                  <li key={option}>{option}</li>
+      <div className="about">
+        <p className="small muted">
+          Decided by the {r.by} <Ago at={r.at} /> · {r.stakes} stakes, {r.confidence} confidence
+        </p>
+        <dl className="raised ruling">
+          <div className="chose">
+            <dt>The team decided</dt>
+            <dd>{r.decision}</dd>
+          </div>
+          <div className="because">
+            <dt>Because</dt>
+            <dd>{r.because}</dd>
+          </div>
+        </dl>
+        <dl className="facts small">
+          {r.options.length ? (
+            <>
+              <dt>Weighed</dt>
+              <dd>
+                <ul className="weighed">
+                  {r.options.map((option) => (
+                    <li key={option}>{option}</li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          ) : null}
+          {r.undo ? (
+            <>
+              <dt>To undo</dt>
+              <dd>{r.undo}</dd>
+            </>
+          ) : null}
+          {r.tasks.length ? (
+            <>
+              <dt>Tasks</dt>
+              <dd>
+                {r.tasks.map((id, i) => (
+                  <span key={id}>
+                    {i ? ", " : ""}
+                    <Link href={`${base}/tasks/${id}`}>
+                      #{id}
+                      {titles.has(id) ? ` ${titles.get(id)}` : ""}
+                    </Link>
+                  </span>
                 ))}
-              </ul>
-            </dd>
-          </>
-        ) : null}
-        {r.undo ? (
-          <>
-            <dt>To undo</dt>
-            <dd>{r.undo}</dd>
-          </>
-        ) : null}
-        {r.tasks.length ? (
-          <>
-            <dt>Tasks</dt>
-            <dd>
-              {r.tasks.map((id, i) => (
-                <span key={id}>
-                  {i ? ", " : ""}
-                  <Link href={`${base}/tasks/${id}`}>
-                    #{id}
-                    {titles.has(id) ? ` ${titles.get(id)}` : ""}
-                  </Link>
-                </span>
+              </dd>
+            </>
+          ) : null}
+          <dt>{review ? "Why you weren't asked" : "Why it wasn't asked"}</dt>
+          <dd>
+            {r.rule}, under {agreement ? <Link href={`${base}/agreement${r.agreement ? `#${r.agreement}` : ""}`}>{under}</Link> : under}
+          </dd>
+        </dl>
+      </div>
+      {reviewed ? (
+        <div className="decide">
+          {d.review ? (
+            <div className={`answered ${d.review.verdict}`}>
+              <p className="small muted">
+                {who} {overturned ? "overturned it" : "agreed"}, <Ago at={d.review.at} />
+              </p>
+              {d.review.note ? <p className="text">{d.review.note}</p> : null}
+            </div>
+          ) : null}
+          {d.review?.pending ? (
+            <p className="small">
+              <Chip tone="caution">waiting for the team&apos;s Mac</Chip>{" "}
+              {overturned ? "It writes this onto the record and tells the planner within a minute." : "It writes this onto the record within a minute."}
+            </p>
+          ) : d.withPlanner ? (
+            <p className="small">
+              <Chip tone="caution">with the planner</Chip> It undoes this as {review ? "you" : "the operator"} said, and notes here what it did.
+            </p>
+          ) : null}
+          {r.notes.length ? (
+            <ul className="plain rows small noted">
+              {r.notes.map((n) => (
+                <li key={`${n.by}-${n.at}`}>
+                  <p className="muted">
+                    The {n.by}, <Ago at={n.at} />
+                  </p>
+                  <p className="text">{n.text}</p>
+                </li>
               ))}
-            </dd>
-          </>
-        ) : null}
-        <dt>{review ? "Why you weren't asked" : "Why it wasn't asked"}</dt>
-        <dd>
-          {r.rule}, under {agreement ? <Link href={`${base}/agreement${r.agreement ? `#${r.agreement}` : ""}`}>{under}</Link> : under}
-        </dd>
-      </dl>
-      {d.review ? (
-        <div className={`answered ${d.review.verdict}`}>
-          <p className="small muted">
-            {who} {overturned ? "overturned it" : "agreed"}, <Ago at={d.review.at} />
-          </p>
-          {d.review.note ? <p className="text">{d.review.note}</p> : null}
+            </ul>
+          ) : null}
+          {forms}
         </div>
       ) : null}
-      {d.review?.pending ? (
-        <p className="small">
-          <Chip tone="caution">waiting for the team&apos;s Mac</Chip>{" "}
-          {overturned ? "It writes this onto the record and tells the planner within a minute." : "It writes this onto the record within a minute."}
-        </p>
-      ) : d.withPlanner ? (
-        <p className="small">
-          <Chip tone="caution">with the planner</Chip> It undoes this as {review ? "you" : "the operator"} said, and notes here what it did.
-        </p>
-      ) : null}
-      {r.notes.length ? (
-        <ul className="plain rows small noted">
-          {r.notes.map((n) => (
-            <li key={`${n.by}-${n.at}`}>
-              <p className="muted">
-                The {n.by}, <Ago at={n.at} />
-              </p>
-              <p className="text">{n.text}</p>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {forms}
     </li>
   );
 }

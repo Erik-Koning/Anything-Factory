@@ -116,6 +116,66 @@ export interface MachineProjects {
   github?: string | null;
 }
 
+// A window of a subscription's limits: how much of it is used, 0 to 100, and when it resets.
+export interface LimitWindow {
+  percent: number;
+  resetsAt: string | null;
+}
+
+// What a subscription used in one hour or day, on one model: [when, model, ...USAGE_FIELDS], when being the UTC hour
+// ("2026-11-15T14") or the machine's own day ("2026-11-15"). A tuple, as a report carries many.
+export const USAGE_FIELDS = [
+  "requests",
+  "input",
+  "output",
+  "cacheRead",
+  "cacheWrite",
+  "cost",
+  "costInput",
+  "costOutput",
+  "costCacheRead",
+  "costCacheWrite",
+  "fast",
+  "saved",
+  "unpriced",
+] as const;
+export type UsageField = (typeof USAGE_FIELDS)[number];
+export type UsageBucket = [string, string, ...number[]];
+
+// A Claude subscription on a machine, for the web app's Subscriptions page: its limits as last read, the operator's
+// limits for the factory's teams on it, the teams on it now, and what it used on this machine, every session's (the
+// operator's own too), in the API-equivalent dollars of lib/prices.ts.
+export interface MachineSubscription {
+  name: string;
+  // Its login, as a hash: the same login on two machines is one subscription on the page. Null when it's signed out.
+  login: string | null;
+  plan: string | null;
+  // When its limits were last read (null: never), and those that haven't reset since.
+  at: string | null;
+  weekly: LimitWindow | null;
+  session: LimitWindow | null;
+  models: (LimitWindow & { model: string })[];
+  // Extra usage, paid by the month beyond the plan's limits: whether it's on, its cap and what's used of it.
+  extra: { enabled: boolean; limit: number | null; used: number | null; currency: string | null } | null;
+  // One week of it in API-equivalent dollars, as estimated from its readings (null before there's one).
+  week: number | null;
+  // The share of its windows the factory's teams may take here (a6g subscriptions limit), and why it's closed to them
+  // now, until when, and whether because it's used up.
+  limits: { weekly: number | null; session: number | null };
+  closed: { why: string; until: string | null; exhausted: boolean } | null;
+  // The roles of each team on this machine that run on it now.
+  teams: { team: string; roles: string[] }[];
+  // What it used: each of the last USAGE_DAYS days (`today` is the machine's own day as it reported), the last
+  // USAGE_HOURS hours, and how many sessions ran in the last day, 7, 30 and 90; when that was last counted.
+  today: string;
+  days: UsageBucket[];
+  hours: UsageBucket[];
+  sessions: [number, number, number, number];
+  counted: string | null;
+}
+export const USAGE_DAYS = 90;
+export const USAGE_HOURS = 25;
+
 // What a machine sends: the app adds when it came, and from which account's link.
 export interface MachineReport {
   name: string;
@@ -125,10 +185,21 @@ export interface MachineReport {
   // Null from a machine whose factory version starts projects but whose operator hasn't said it may; absent from one
   // whose version doesn't know how.
   projects?: MachineProjects | null;
+  // Its Claude subscriptions; absent from a version that doesn't report them.
+  subscriptions?: MachineSubscription[];
 }
 
-// The most a report may hold; the app refuses a bigger one whole.
-export const REPORT_LIMITS = { bytes: 256 * 1024, teams: 100, members: 30, text: 200, home: 1024, repos: 200, subscriptions: 20 } as const;
+// The most a report may hold; the app refuses a bigger one whole. `usage`: buckets across all its subscriptions.
+export const REPORT_LIMITS = {
+  bytes: 768 * 1024,
+  teams: 100,
+  members: 30,
+  text: 200,
+  home: 1024,
+  repos: 200,
+  subscriptions: 20,
+  usage: 4000,
+} as const;
 
 const STATES: readonly TeamState["state"][] = ["active", "pausing", "paused", "idle", "complete"];
 // A team's name as a report may give it: the shape of one in the app's URLs, which every name team.json allows fits.
@@ -188,10 +259,129 @@ function parseProjects(value: unknown): MachineProjects | undefined {
   return { dir, repos: repos as string[], subscriptions: listed, ...(github === undefined ? {} : { github }) };
 }
 
-// The report in `body`, rebuilt from the fields it may have (anything else is dropped), or null when any is wrong.
+// A model's id as a transcript names it (lib/prices.ts modelKey), a login's hash, a plan's name and a currency.
+const MODEL = /^[A-Za-z0-9][\w.:-]{0,79}$/;
+const LOGIN = /^[a-f0-9]{16}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
+const isTime = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
+const isAmount = (value: unknown, max = 1e12): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max;
+const orNull = <T>(value: unknown, check: (v: unknown) => v is T): T | null | undefined => (value === null ? null : check(value) ? value : undefined);
+
+function parseWindow(value: unknown): LimitWindow | null | undefined {
+  if (value === null) return null;
+  if (!isObject(value) || !isAmount(value["percent"], 1000)) return undefined;
+  const resetsAt = orNull(value["resetsAt"], isTime);
+  return resetsAt === undefined ? undefined : { percent: value["percent"], resetsAt };
+}
+
+function parseBuckets(value: unknown, when: RegExp): UsageBucket[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const buckets: UsageBucket[] = [];
+  for (const row of value) {
+    if (!Array.isArray(row) || row.length !== USAGE_FIELDS.length + 2) return undefined;
+    const [at, model, ...figures] = row as unknown[];
+    if (typeof at !== "string" || !when.test(at) || typeof model !== "string" || !MODEL.test(model)) return undefined;
+    if (!figures.every((n) => isAmount(n))) return undefined;
+    buckets.push([at, model, ...(figures as number[])]);
+  }
+  return buckets;
+}
+
+// A machine's subscriptions: undefined when any is wrong.
+function parseSubscriptions(value: unknown): MachineSubscription[] | undefined {
+  if (!Array.isArray(value) || value.length > REPORT_LIMITS.subscriptions) return undefined;
+  const parsed: MachineSubscription[] = [];
+  let usage = 0;
+  for (const sub of value) {
+    if (!isObject(sub)) return undefined;
+    const { name, login, plan, at, weekly, session, models, extra, week, limits, closed, teams, today, days, hours, sessions, counted } = sub;
+    if (typeof name !== "string" || !SUBSCRIPTION.test(name)) return undefined;
+    const ownLogin = orNull(login, (v): v is string => typeof v === "string" && LOGIN.test(v));
+    const ownPlan = orNull(plan, (v): v is string => isText(v, 40));
+    const readAt = orNull(at, isTime);
+    const week7 = parseWindow(weekly);
+    const five = parseWindow(session);
+    if (ownLogin === undefined || ownPlan === undefined || readAt === undefined || week7 === undefined || five === undefined) return undefined;
+    if (!Array.isArray(models) || models.length > 10) return undefined;
+    const scoped: MachineSubscription["models"] = [];
+    for (const m of models) {
+      const window = isObject(m) ? parseWindow(m) : undefined;
+      if (!window || !isObject(m) || !isText(m["model"], 60)) return undefined;
+      scoped.push({ model: m["model"], ...window });
+    }
+    let paid: MachineSubscription["extra"] = null;
+    if (extra !== null) {
+      if (!isObject(extra) || typeof extra["enabled"] !== "boolean") return undefined;
+      const limit = orNull(extra["limit"], isAmount);
+      const used = orNull(extra["used"], isAmount);
+      const currency = orNull(extra["currency"], (v): v is string => typeof v === "string" && /^[A-Z]{3}$/.test(v));
+      if (limit === undefined || used === undefined || currency === undefined) return undefined;
+      paid = { enabled: extra["enabled"], limit, used, currency };
+    }
+    const dollars = orNull(week, isAmount);
+    if (dollars === undefined || !isObject(limits)) return undefined;
+    const capWeekly = orNull(limits["weekly"], (v): v is number => isAmount(v, 100));
+    const capSession = orNull(limits["session"], (v): v is number => isAmount(v, 100));
+    if (capWeekly === undefined || capSession === undefined) return undefined;
+    let shut: MachineSubscription["closed"] = null;
+    if (closed !== null) {
+      if (!isObject(closed) || !isText(closed["why"], 300) || typeof closed["exhausted"] !== "boolean") return undefined;
+      const until = orNull(closed["until"], isTime);
+      if (until === undefined) return undefined;
+      shut = { why: closed["why"], until, exhausted: closed["exhausted"] };
+    }
+    if (!Array.isArray(teams) || teams.length > REPORT_LIMITS.teams) return undefined;
+    const on: MachineSubscription["teams"] = [];
+    for (const t of teams) {
+      if (
+        !isObject(t) ||
+        typeof t["team"] !== "string" ||
+        !TEAM.test(t["team"]) ||
+        !Array.isArray(t["roles"]) ||
+        t["roles"].length > REPORT_LIMITS.members
+      )
+        return undefined;
+      if (!t["roles"].every((role) => typeof role === "string" && ROLE.test(role))) return undefined;
+      on.push({ team: t["team"], roles: t["roles"] as string[] });
+    }
+    if (typeof today !== "string" || !DAY.test(today)) return undefined;
+    const byDay = parseBuckets(days, DAY);
+    const byHour = parseBuckets(hours, HOUR);
+    if (!byDay || !byHour) return undefined;
+    usage += byDay.length + byHour.length;
+    if (usage > REPORT_LIMITS.usage) return undefined;
+    if (!Array.isArray(sessions) || sessions.length !== 4 || !sessions.every((n) => Number.isInteger(n) && isAmount(n, 1e7))) return undefined;
+    const countedAt = orNull(counted, isTime);
+    if (countedAt === undefined) return undefined;
+    parsed.push({
+      name,
+      login: ownLogin,
+      plan: ownPlan,
+      at: readAt,
+      weekly: week7,
+      session: five,
+      models: scoped,
+      extra: paid,
+      week: dollars,
+      limits: { weekly: capWeekly, session: capSession },
+      closed: shut,
+      teams: on,
+      today,
+      days: byDay,
+      hours: byHour,
+      sessions: sessions as MachineSubscription["sessions"],
+      counted: countedAt,
+    });
+  }
+  return parsed;
+}
+
+// The report in `body`, rebuilt from the fields it may have (anything else is dropped), or null when any is wrong. Its
+// subscriptions only are dropped when they're wrong: they're for one page, and the rest still says the machine is up.
 export function parseReport(body: unknown): MachineReport | null {
   if (!isObject(body)) return null;
-  const { name, factory, teams, projects } = body;
+  const { name, factory, teams, projects, subscriptions } = body;
   if (typeof name !== "string" || !MACHINE_NAME.test(name)) return null;
   if (typeof factory !== "string" || !VERSION.test(factory)) return null;
   if (!Array.isArray(teams) || teams.length > REPORT_LIMITS.teams) return null;
@@ -199,7 +389,14 @@ export function parseReport(body: unknown): MachineReport | null {
   if (parsed.some((team) => team === null)) return null;
   const offered = projects === undefined || projects === null ? null : parseProjects(projects);
   if (offered === undefined) return null;
-  return { name, factory, teams: parsed as MachineTeam[], ...(projects === undefined ? {} : { projects: offered }) };
+  const subs = subscriptions === undefined ? undefined : parseSubscriptions(subscriptions);
+  return {
+    name,
+    factory,
+    teams: parsed as MachineTeam[],
+    ...(projects === undefined ? {} : { projects: offered }),
+    ...(subs === undefined ? {} : { subscriptions: subs }),
+  };
 }
 
 // --- Reading reports ------------------------------------------------------------------------------------------------

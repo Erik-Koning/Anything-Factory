@@ -1,10 +1,11 @@
 import { decideAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
+import { ActionForm } from "./action-form.tsx";
 import { SubmitButton } from "./submit-button.tsx";
 
-// One decision on a task, as the operator (approve, reject, research, escalate), with its note; back is the page to
-// return to (the Decisions page, or the inbox it was made from). `seen` is the task's version as the page shows it: a
-// task the team changed since is shown again, not decided unread.
+// One decision on a task, as the operator (approve, reject, research, escalate), with its note, made in place: the page
+// refreshes and a toast says what happened. `seen` is the task's version as the page shows it: a task the team changed
+// since is shown again, not decided unread. `back` is kept for the pages that pass it.
 export function Verdict(props: {
   team: string;
   id: string;
@@ -19,7 +20,7 @@ export function Verdict(props: {
   const { team, id, decision, label, field, required, className, back, seen } = props;
   const input = `${decision}-${id}`;
   return (
-    <form action={decideAction}>
+    <ActionForm action={decideAction}>
       <input type="hidden" name="team" value={team} />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="decision" value={decision} />
@@ -30,6 +31,6 @@ export function Verdict(props: {
       <div>
         <SubmitButton className={className}>{`${label} #${id}`}</SubmitButton>
       </div>
-    </form>
+    </ActionForm>
   );
 }

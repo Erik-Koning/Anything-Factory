@@ -1,9 +1,11 @@
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Tabs } from "../../../components/tabs.tsx";
+import { TeamActions } from "../../../components/team-actions.tsx";
 import { type SwitchTo, TeamSwitcher } from "../../../components/team-switcher.tsx";
 import Link from "next/link";
 import { Ago, Chip, QuietMark } from "../../../components/ui.tsx";
-import { can, roleIn, type Viewer } from "../../../server/access.ts";
+import { can, roleIn, TEAM_PARAM, type Viewer } from "../../../server/access.ts";
 import { allTeams, retiredOf } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
 import { offSite, quietSince } from "../../../server/views.ts";
@@ -27,17 +29,24 @@ const sectionsFor = (viewer: Viewer, team: string): string[] => SECTIONS.filter(
 
 export default async function TeamLayout({ children, params }: { children: ReactNode; params: Promise<{ team: string }> }) {
   const { team: name } = await params;
+  // What this layout and most of the team's pages read, started beside the session and the team's settings rather than
+  // after them (each is read once per request); none of it is shown before teamFor says the person may see the team.
+  const reads = TEAM_PARAM.test(name) ? Promise.all([tasksOf(name), decisionsFor(name), controlsFor(name), allTeams()]) : null;
+  // Awaited below, unless teamFor turns the person away first.
+  reads?.catch(() => {});
   const { viewer, team, role } = await teamFor(name);
+  // teamFor turns away a name that isn't a team's, so the reads were started.
+  const [tasks, decisions, controls, teams] = (await reads) ?? notFound();
   const base = `/t/${team.name}`;
   const open = sectionsFor(viewer, team.name);
-  const waiting = open.includes("inbox") ? waitingCount(await tasksOf(team.name)) : 0;
+  const waiting = open.includes("inbox") ? waitingCount(tasks) : 0;
   // What the team decided and flagged, for those who review it: how many they haven't yet.
   const reviews = can(viewer, "proposals:decide", team.name);
-  const unreviewed = reviews && open.includes("decided") ? toReview(...(await Promise.all([decisionsFor(team.name), controlsFor(team.name)]))).length : 0;
+  const unreviewed = reviews && open.includes("decided") ? toReview(decisions, controls).length : 0;
   // Off the site: its pages still open from a link, and say so (components/site-panel.tsx puts it back).
-  const retired = offSite(team, retiredOf(await controlsFor(team.name)));
+  const retired = offSite(team, retiredOf(controls));
   const quiet = retired ? null : quietSince(team);
-  const switchTo: SwitchTo[] = (await allTeams())
+  const switchTo: SwitchTo[] = teams
     .filter((t) => roleIn(viewer, t.name) !== null)
     .map((t) => ({ name: t.name, title: t.title, state: t.status?.state ?? "no status yet", sections: sectionsFor(viewer, t.name) }));
   const LABELS: Record<string, string> = {
@@ -58,7 +67,14 @@ export default async function TeamLayout({ children, params }: { children: React
         <Chip>{team.status?.state ?? "no status yet"}</Chip>
         {quiet ? <QuietMark last={quiet.last} /> : null}
         <span className="muted small">you: {role}</span>
-        <TeamSwitcher current={team.name} teams={switchTo} />
+        {/* The controls and the switcher: at the right of the name, or on a line of their own under it on a phone. */}
+        <div className="team-tools">
+          {/* A deleted team's own controls are gone with it: it's put back from its overview, or by a6g register. */}
+          {can(viewer, "team:control", team.name) && retired?.kind !== "action" ? (
+            <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+          ) : null}
+          <TeamSwitcher current={team.name} teams={switchTo} />
+        </div>
       </div>
       {retired ? (
         <p className="notice attention off-site">

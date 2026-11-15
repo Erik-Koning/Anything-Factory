@@ -64,14 +64,30 @@ request (Article 8).
   and the teams registered on it: lead or worker, state, planner, members at work and checkout (a team whose tasks
   are in files is named, with no pages here); and Unlink. `/machines/link`: where `a6g connect app` sends you to look
   up its code, check it, and approve or refuse it.
-- `/t/<team>/add`, as an admin, **Approve it now** takes a code from your authenticator, as a pause does: the task goes
-  straight to the builders.
+- `/subscriptions` Subscriptions: the Claude subscriptions on the machines you see (an admin, every linked one's), one
+  per login however many Macs report it, as T3 Code's Usage page shows them. **Limits** (the default): a card per
+  window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of the pool is
+  left, whether it's going faster than the window runs, and a bar with each subscription's part: what's left of it,
+  its used part hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams
+  stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed to them.
+  **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's,
+  a chart (read with the arrow keys too), processed, cached, uncached and output tokens and what the cache saved,
+  dollars and tokens by type and by speed, and a breakdown by model (each opens its own figures) or by day. Narrowed
+  to one machine or one subscription; what's shown is in the address. Usage is every session on the Mac (the
+  operator's own too) at `lib/prices.ts`'s prices: a model with no price there counts its tokens and says so.
+- `/t/<team>/add`, as an admin, **Approve it now**: the task goes straight to the builders.
+- Beside a team's name on each of its pages, for admins: **Stop** (a pause now), **Pause…** (its choices in a dialog:
+  after the work under way, after chosen journeys, or now) and, once either is asked, **Resume**; and **⋯**: Resume
+  with a note, restart the planner or the environment, upgrade the factory, wake the team, and delete it (its name
+  typed and an authenticator code: paused now and off the site at once, then unregistered by its Mac, its files and
+  history kept). Each completes at once and says so in a toast; the actions record a control of kind `action` that
+  the lead's watchdog starts within a minute (`a6g act`), whose word on it (`acted`) the overview shows. Every in-place
+  button on the site works this way: the page refreshes where it is, and a toast says what happened.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
-  graph (the factory's own `layout`, as SVG) and recent merges. For admins, **Pause and resume**: pause the team now,
-  after the work under way, or after chosen journeys (they finish, verification and polish included, and nothing else
-  starts); while it's pausing, what's still going and what can't move without you; once paused, the report of where it
-  stands; and Resume, with feedback for the planner. Each asks for an authenticator code and goes in the audit log; the
-  lead's watchdog applies it within a minute (until then the panel says it's waiting for the team's Mac). Then
+  graph (the factory's own `layout`, as SVG) and recent merges. For admins, **Controls**: while it's pausing, what's
+  still going and what can't move without you; once paused, the report of where it stands; what came of each action;
+  and what was asked lately. Each control goes in the audit log; the lead's watchdog applies it within a minute (until
+  then the panel says it's waiting for the team's Mac). Then
   **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
   is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
   week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause,
@@ -82,9 +98,8 @@ request (Article 8).
   each role runs on now, and a form that changes the order for every role or for one, with an authenticator code. It
   records a control the lead's watchdog applies within a minute, as `a6g subscriptions use` does at the terminal; a
   team whose Mac doesn't report its subscriptions (an older factory version) is told where they're chosen instead.
-  Then **On the site** (admins): a team no Mac runs can be taken off the site, with an optional note and an
-  authenticator code, and put back the same way; for one a Mac runs, the command that unregisters it there, which
-  takes it off too. A team that's off isn't on Teams, in Waiting on you, the header's count, the emails, the team
+  Then **On the site** (admins): a team no Mac runs can be taken off the site, with an optional note, and put back
+  the same way; for one a Mac runs, deleting it (⋯) or the command that unregisters it there, which takes it off too. A team that's off isn't on Teams, in Waiting on you, the header's count, the emails, the team
   switcher or the invitations; its pages still open from a link, each saying it's off. It records a control of kind
   `retire` or `restore` (and `a6g unregister` and `register` record them too); only the app reads them.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
@@ -151,7 +166,7 @@ request (Article 8).
   and the change it points to, and nothing is changed for them; each level's table of what happens to a question, by
   what a wrong call costs and how sure the team is; the form that changes it (the level, each topic as follows the
   level, always ask or never ask, how often a message may reach them, and standing instructions in the operator's
-  words), with a code from the authenticator, like a pause; and every version, with what it changed and who made it.
+  words), at once; and every version, with what it changed and who made it.
   How often a message may reach the operator is the team's own setting (`contact` in its `team.json`) until the
   agreement sets it: a digest with its window in hours, or each message as soon as it's needed. Privacy and the
   team's own rules are always the operator's and aren't offered; nor are the platform and the stack on a team whose
@@ -209,7 +224,8 @@ handles the machine's token. Admins and the members of a team link machines, at 
    unlink it.
 4. The watchdog reports with it (`POST /api/machines/report`, `Authorization: Bearer …`): the report is rebuilt from
    the fields it may have (`lib/fleet.ts parseReport`: no control or format characters, checkouts as absolute or
-   `~/` paths) and refused whole otherwise (400), over 256 KB (413), or sooner than 20 seconds after the last (429). It
+   `~/` paths) and refused whole otherwise (400; wrong subscriptions only are dropped, the rest kept), over 768 KB
+   (413), or sooner than 20 seconds after the last (429). It
    doesn't rename the machine. When the token is a week old, the answer carries the next one (200); the old one keeps
    working for a day, for a CLI that missed it, until the new one is used, and if it's used after that, the link ends
    (RFC 9700's refresh token rotation). An old one that comes back while its successor is unused gets another in the
@@ -394,7 +410,7 @@ downloaded), seed it with the factory's own functions (`tests/e2e/seed.ts`), run
 backup code; an invitation; a contributor's magic link, request and what they can and can't see; a member's board,
 graph by level and requests (senders by role); approving and rejecting (checked in the task documents); the decision
 log as a member reads it and as an admin reviews it (the review a control, applied with the factory's own code), the
-working agreement changed with a code (and a wrong one refused), a digest's window set in it, a question and an
+working agreement changed (and the same again refused), a digest's window set in it, a question and an
 escalation that each say why they were asked, an answer that takes the recommendation marked so, and the hint that
 follows from three of them; a contributor and an admin
 session without its second factor calling admin server actions directly (refused, nothing changes); passkeys with and

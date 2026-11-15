@@ -9,11 +9,14 @@ import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
 import { agreementChanges, agreementFrom, sameAgreement } from "../../lib/tasks/agreement.ts";
 import { answer } from "../../lib/tasks/answer.ts";
 import {
+  actionControl,
+  actionsOf,
   agreementControl,
   agreementOf,
   budgetControl,
   type Control,
   type HoldScope,
+  holdOf,
   type Limits,
   limitsOf,
   pauseControl,
@@ -23,6 +26,7 @@ import {
   retiredOf,
   startControl,
   subscriptionsControl,
+  type TeamAction,
 } from "../../lib/tasks/controls.ts";
 import type { StartAsk } from "../../lib/tasks/start.ts";
 import { type DecisionRecord, requestReview } from "../../lib/tasks/decisions.ts";
@@ -33,6 +37,7 @@ import { type MongoClientLike, storeOver } from "../../lib/tasks/mongo.ts";
 import { addRequest, stakeholderFor } from "../../lib/tasks/requests.ts";
 import { type Store, update } from "../../lib/tasks/store.ts";
 import type { TeamDoc } from "../../lib/tasks/teams.ts";
+import { cache } from "react";
 import { config } from "./config.ts";
 import { graphDb, mongo } from "./db.ts";
 import { offSite, quietSince } from "./views.ts";
@@ -42,7 +47,19 @@ export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/m
 export type { TeamDoc, TeamSubscriptions } from "../../lib/tasks/teams.ts";
 export type { Control, HoldScope, HoldState, Limits, StartState } from "../../lib/tasks/controls.ts";
 export type { StartAsk } from "../../lib/tasks/start.ts";
-export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf, retiredOf } from "../../lib/tasks/controls.ts";
+export {
+  ACTION_WORDS,
+  actionsOf,
+  agreementOf,
+  describeHold,
+  holdOf,
+  isHoldScope,
+  isTeamAction,
+  journeysUnderWay,
+  limitsOf,
+  retiredOf,
+} from "../../lib/tasks/controls.ts";
+export type { ActionState, TeamAction } from "../../lib/tasks/controls.ts";
 export type { Agreement } from "../../lib/tasks/agreement.ts";
 export type { DecisionRecord } from "../../lib/tasks/decisions.ts";
 export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
@@ -59,13 +76,14 @@ export function storeFor(team: string): Store {
   return store;
 }
 
+// What a page reads more than once (its layouts and the page itself, each rendered at once), read once per request
+// (React's cache: a server action reads afresh, and the page it renders after reads again).
+const teamRows = cache(() => graphDb().collection<{ _id: string }>("teams").find({}).sort({ _id: 1 }).toArray());
+
 // Every team that has published its settings (a6g register writes them; the lead's watchdog its status), but those
 // taken off the site (retirements), unless `retired`: those are only for what keeps a team's name taken.
 export async function allTeams({ retired = false }: { retired?: boolean } = {}): Promise<TeamDoc[]> {
-  const [rows, off] = await Promise.all([
-    graphDb().collection<{ _id: string }>("teams").find({}).sort({ _id: 1 }).toArray(),
-    retired ? Promise.resolve(new Map<string, Control>()) : retirements(),
-  ]);
+  const [rows, off] = await Promise.all([teamRows(), retired ? Promise.resolve(new Map<string, Control>()) : retirements()]);
   return rows
     .map(({ _id, ...doc }) => ({ status: null, name: _id, title: _id, ...doc }) as unknown as TeamDoc)
     .filter((team) => !offSite(team, off.get(team.name) ?? null));
@@ -73,14 +91,19 @@ export async function allTeams({ retired = false }: { retired?: boolean } = {}):
 
 const numbered = (id: string): number => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0);
 
+// A team's tasks, its controls and what it decided for the operator, each read once per request.
+export const tasksFor = cache((team: string): Promise<Task[]> => storeFor(team).tasks.all());
+export const controlsFor = cache((team: string): Promise<Control[]> => storeFor(team).controls.all());
+export const decisionsFor = cache((team: string): Promise<DecisionRecord[]> => storeFor(team).decisions.all());
+
 // The teams taken off the site, each with the control that took it off: the newest of a team's retires and restores is
 // a retire (lib/tasks/controls.ts). An admin (from the overview) or the team's lead (a6g unregister) takes one off; an
 // admin or a6g register puts it back. A report from its lead since puts it back too (views.ts offSite): the pages ask
 // that of each team with its state.
-export async function retirements(): Promise<Map<string, Control>> {
+export const retirements = cache(async (): Promise<Map<string, Control>> => {
   const rows = await graphDb()
     .collection("controls")
-    .find({ kind: { $in: ["retire", "restore"] } })
+    .find({ $or: [{ kind: { $in: ["retire", "restore"] } }, { kind: "action", action: "unregister" }] })
     .toArray();
   const byTeam = new Map<string, Control[]>();
   for (const { _id: _ignored, ...doc } of rows) {
@@ -93,7 +116,7 @@ export async function retirements(): Promise<Map<string, Control>> {
     if (retired) off.set(team, retired);
   }
   return off;
-}
+});
 
 export const teamDoc = (team: string): Promise<TeamDoc | null> => storeFor(team).team();
 
@@ -128,9 +151,10 @@ export function sendRequest(
   return addRequest(storeFor(team), team, { title: title.trim(), body: body.trim(), from, by: admin ? OPERATOR : "stakeholder" });
 }
 
-// An admin's decision, as the operator, with the team's approval rules from its published settings.
-export async function decideAsOperator(team: string, id: string, decision: Decision, text: string): Promise<Task> {
-  const settings = await teamDoc(team);
+// An admin's decision, as the operator, with the team's approval rules from its published settings (`read`, when the
+// action read them already).
+export async function decideAsOperator(team: string, id: string, decision: Decision, text: string, read?: TeamDoc | null): Promise<Task> {
+  const settings = read === undefined ? await teamDoc(team) : read;
   if (!settings?.approval) throw new Refused(`${team} hasn't published its approval rules (a6g register publishes them)`);
   return decide(storeFor(team), id, decision, { who: OPERATOR, approval: settings.approval, text: text.trim() });
 }
@@ -139,9 +163,10 @@ export async function decideAsOperator(team: string, id: string, decision: Decis
 // which the lead's watchdog passes to the planner within a minute.
 // `recommended`: the answer is the team's recommendation as it stood, with no words of the operator's (`text` empty):
 // the factory writes the recommendation's and marks the note so (the hints on the working agreement count those).
-// `seen`: that recommendation as the page showed it, which the factory holds the answer to.
-export const answerAsOperator = (team: string, id: string, text: string, recommended = false, seen?: string): Promise<Task> =>
-  answer(storeFor(team), id, { who: OPERATOR, text, recommended, seen: recommended ? seen : undefined });
+// `seen`: that recommendation as the page showed it, which the factory holds the answer to. `read`: the task as the
+// action read it just now, so it isn't read again.
+export const answerAsOperator = (team: string, id: string, text: string, recommended = false, seen?: string, read?: Task): Promise<Task> =>
+  answer(storeFor(team), id, { who: OPERATOR, text, recommended, seen: recommended ? seen : undefined, read });
 
 // A task from the web, through the factory's addTask: an admin's as the operator (a proposal, or approved as it's
 // added), anyone else's by "stakeholder", which goes to triage for the planner. Either way it records who it came from,
@@ -167,6 +192,22 @@ export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journe
 // A resume from the web; the note goes to the planner as the operator's feedback.
 export const resumeFromWeb = (team: string, { note, from }: { note: string; from: string }): Promise<Control> =>
   storeFor(team).controls.create(resumeControl(team, `web:${from}`, note));
+
+// An action for the team's lead to do at once (lib/tasks/controls.ts TEAM_ACTIONS), by an admin's stakeholder id. One
+// of the same kind that its lead hasn't finished yet is refused, so a second press doesn't run it twice. Deleting the
+// team pauses it now first, so nothing starts or merges in the minute before its lead takes it off: from the moment
+// it's asked, it's off the web app too (retiredOf).
+export async function actionFromWeb(team: string, ask: { action: TeamAction; note: string; from: string }): Promise<Control> {
+  const store = storeFor(team);
+  const controls = await store.controls.all();
+  const open = actionsOf(controls).find((s) => s.action === ask.action && (s.outcome === "asked" || s.outcome === "started" || s.outcome === "waiting"));
+  if (open)
+    throw new Refused(`That was asked already, ${open.outcome === "waiting" ? "and waits" : "and its Mac is on it"}: it shows here when it's done.`);
+  const by = `web:${ask.from}`;
+  if (ask.action === "unregister" && !holdOf(controls))
+    await store.controls.create(pauseControl([], team, { scope: "now", by, note: ask.note || "Deleted from the web app" }));
+  return store.controls.create(actionControl(team, by, ask.action, ask.note));
+}
 
 // What the team used, day by day and machine by machine, from `from` (YYYY-MM-DD) on (lib/usage.ts publishes it).
 export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);

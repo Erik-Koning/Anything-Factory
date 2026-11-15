@@ -29,10 +29,10 @@ export default async function RequestPage({ params, searchParams }: { params: Pr
       </p>
       <Notice searchParams={searchParams} />
       <article className="panel" aria-labelledby="request-title">
+        {/* The id inside the heading, so a long title wraps after it rather than leaving it on a line of its own. */}
         <div className="head">
-          <span className="id">{request.id}</span>
           <h2 id="request-title" className="title">
-            {request.title}
+            <span className="id">{request.id}</span> {request.title}
           </h2>
           <Chip>{requestState(request, byId)}</Chip>
         </div>
@@ -40,36 +40,39 @@ export default async function RequestPage({ params, searchParams }: { params: Pr
           from {senderLabel(viewer, team.name, sender, ownId)} · sent <Ago at={request.createdAt} /> · updated <Ago at={request.updatedAt} />
         </p>
         {request.body ? <p className="text">{request.body}</p> : <p className="empty">No description.</p>}
+        {/* Why the planner turned it down, under what was asked. */}
+        {rejection ? (
+          <section className="turned-down" aria-labelledby="rejected">
+            <h3 id="rejected">Why it was turned down</h3>
+            <p className="text">{rejection}</p>
+          </section>
+        ) : null}
       </article>
 
-      {rejection ? (
-        <section className="panel" aria-labelledby="rejected">
-          <h2 id="rejected">Why it was turned down</h2>
-          <p className="text">{rejection}</p>
-        </section>
-      ) : null}
-
-      <div className="grid">
-        <section className="panel" aria-labelledby="tasks">
-          <h2 id="tasks">The tasks it became</h2>
-          {became.length ? (
-            <ul className="plain rows">
-              {became.map(({ id: tid, task }) => (
-                <li key={tid}>
-                  <span className="id">#{tid}</span>{" "}
-                  {task && can(viewer, "team:board", team.name) ? (
-                    <Link href={`/t/${team.name}/tasks/${tid}`}>{task.title}</Link>
-                  ) : (
-                    (task?.title ?? "(gone)")
-                  )}{" "}
-                  {task ? <Chip>{task.status}</Chip> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="empty">{request.status === "rejected" ? "None." : "None yet: the planner turns a request into tasks once it's researched."}</p>
-          )}
-        </section>
+      <div className="grid uneven">
+        {/* A request turned down became nothing: its notes and history have the room. */}
+        {rejection && !became.length ? null : (
+          <section className="panel" aria-labelledby="tasks">
+            <h2 id="tasks">The tasks it became</h2>
+            {became.length ? (
+              <ul className="plain rows">
+                {became.map(({ id: tid, task }) => (
+                  <li key={tid} className="head">
+                    <span className="id">#{tid}</span>
+                    {task && can(viewer, "team:board", team.name) ? (
+                      <Link href={`/t/${team.name}/tasks/${tid}`}>{task.title}</Link>
+                    ) : (
+                      <span>{task?.title ?? "(gone)"}</span>
+                    )}
+                    {task ? <Chip>{task.status}</Chip> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="empty">{request.status === "rejected" ? "None." : "None yet: the planner turns a request into tasks once it's researched."}</p>
+            )}
+          </section>
+        )}
         <section className="panel" aria-labelledby="notes">
           <h2 id="notes">Notes and history</h2>
           {request.notes.length ? (
@@ -84,7 +87,8 @@ export default async function RequestPage({ params, searchParams }: { params: Pr
               ))}
             </ul>
           ) : null}
-          <details>
+          {/* Open when there are no notes above it: then it's all the panel holds. */}
+          <details open={!request.notes.length}>
             <summary>History</summary>
             <ul className="plain small">
               {request.history.map((e, i) => (
