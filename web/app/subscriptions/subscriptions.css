@@ -120,6 +120,9 @@
   color: var(--ink);
   box-shadow: var(--rim), var(--raise-s);
 }
+.usage-select {
+  display: none;
+}
 .usage-toggle {
   display: inline-flex;
   gap: 2px;
@@ -150,6 +153,48 @@
 }
 
 /* --- Limits ----------------------------------------------------------------------------------------------------- */
+.limit-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.limit-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.limit-key li > span {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+}
+.key-left {
+  background: color-mix(in srgb, var(--sub-0) 38%, transparent);
+  border-right: 2px solid var(--sub-0);
+}
+.key-used {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink) 20%, transparent) 0 2px, transparent 2px 7px),
+    color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.limit-key .key-pace {
+  width: 2px;
+  margin: 0 8px;
+  border-radius: 0;
+  background: var(--ink);
+}
+.limit-key .key-limit {
+  width: 0;
+  margin: 0 8px;
+  border-radius: 0;
+  border-left: 2px dashed var(--signal);
+}
 .limit-cards {
   list-style: none;
   padding: 0;
@@ -308,7 +353,7 @@
   gap: 8px;
   padding: 2px 0;
 }
-.pool-text span:last-child {
+.pool-text .reset {
   margin-left: auto;
   color: var(--ink-2);
 }
@@ -320,7 +365,7 @@
   top: calc(100% + 8px);
   left: 0;
   z-index: 3;
-  visibility: hidden;
+  display: none;
   min-width: 230px;
   padding: 10px 12px;
   font-size: 12.5px;
@@ -352,7 +397,7 @@
 }
 .pool-part:hover .pool-pop,
 .pool-part:focus-visible .pool-pop {
-  visibility: visible;
+  display: block;
 }
 .sub-facts {
   list-style: none;
@@ -467,6 +512,8 @@
   display: grid;
   grid-template-columns: 3.5rem minmax(0, 1fr);
   height: 14rem;
+  /* Room above the top step's label. */
+  margin-top: 12px;
 }
 .trend-axis {
   position: relative;
@@ -474,6 +521,7 @@
 .trend-axis span {
   position: absolute;
   right: 8px;
+  white-space: nowrap;
   transform: translateY(50%);
   font-size: 11.5px;
   color: var(--ink-3);
@@ -635,7 +683,7 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
-  visibility: hidden;
+  display: none;
   white-space: nowrap;
   font-size: 12.5px;
   color: var(--ink-2);
@@ -651,7 +699,17 @@
 }
 .share-part:hover .share-tip,
 .share-part:focus-visible .share-tip {
-  visibility: visible;
+  display: block;
+}
+/* A tip at either end stays inside the bar's width, so it never pushes past a phone's screen. */
+.share-part:first-child .share-tip {
+  left: 0;
+  transform: none;
+}
+.share-part:last-child:not(:first-child) .share-tip {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 .share-legend {
   display: flex;
@@ -696,12 +754,27 @@ table.models td.rank {
   font-size: 13.5px;
   text-align: left;
 }
+/* The model's share, with a bar against the biggest. */
+.share-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
 .mini-bar {
   display: block;
-  max-width: 12rem;
-  height: 2px;
-  margin-top: 4px;
-  border-radius: 1px;
+  flex: 1;
+  max-width: 9rem;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+.mini-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
   background: var(--chart);
 }
 .table-scroll {
@@ -757,6 +830,9 @@ table.models td.rank {
   .usage-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .usage-stats li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
   .model-dialog .usage-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -769,11 +845,21 @@ table.models td.rank {
     display: block;
   }
   .pool-text b,
-  .pool-text span:last-child:not(:first-child) {
+  .pool:has(.pool-part + .pool-part) .pool-text .reset {
     display: none;
   }
   .usage-bar .spacer {
     display: none;
+  }
+  .usage-toggle.wide-only {
+    display: none;
+  }
+  .usage-select {
+    display: block;
+    flex: 1 1 40%;
+  }
+  .usage-select select {
+    width: 100%;
   }
   .share-col {
     display: none;

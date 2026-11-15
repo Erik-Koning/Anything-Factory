@@ -1,6 +1,6 @@
 "use client";
-// The models used in the window, biggest first by what's shown (cost or tokens): each one's share, a bar against the
-// biggest, and a row that opens the model's own figures: what it cost per million tokens, how much of its prompts came
+// The models used in the window, biggest first by what's shown (cost or tokens): each one's share, with a bar against
+// the biggest, and a row that opens the model's own figures: what it cost per million tokens, how much of its prompts came
 // from the cache, its use over the window by subscription, and what its tokens and dollars went on.
 import { useRef, useState } from "react";
 import { cacheHit, costSegments, perMillion, processed, speedSegments, tokenSegments, type Totals } from "../../server/usage-view.ts";
@@ -71,10 +71,18 @@ export function ModelTable({
                   <button type="button" className="linkish model-open code" onClick={() => show(row)} aria-haspopup="dialog">
                     {row.model}
                   </button>
-                  <span className="mini-bar" style={{ width: `max(0.5rem, ${peak ? (v / peak) * 100 : 0}%)` }} aria-hidden="true" />
                 </td>
                 <td className="fig">{unpricedOnly(row.totals) ? <span className="muted">Unpriced</span> : formatUsd(row.totals.cost)}</td>
-                <td className="fig share-col">{metric === "cost" && unpricedOnly(row.totals) ? "" : sum ? formatPercent(v / sum) : ""}</td>
+                <td className="fig share-col">
+                  {metric === "cost" && unpricedOnly(row.totals) ? null : (
+                    <span className="share-cell">
+                      <span className="mini-bar" aria-hidden="true">
+                        <span style={{ width: `max(3px, ${peak ? (v / peak) * 100 : 0}%)` }} />
+                      </span>
+                      {sum ? formatPercent(v / sum) : ""}
+                    </span>
+                  )}
+                </td>
                 <td className="fig">{formatTokens(processed(row.totals))}</td>
               </tr>
             );

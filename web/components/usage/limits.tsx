@@ -77,8 +77,8 @@ function Part({ part, pool, now, many }: { part: PoolPart; pool: Pool; now: numb
         {part.limit !== null && part.limit < 100 ? <span className="pool-limit" style={{ left: `${100 - part.limit}%` }} /> : null}
         <span className="pool-text">
           {many ? <b>{sub.name}</b> : null}
-          {many ? <span className="fig">{left}%</span> : null}
-          {reset && part.resetsAt ? <span className="fig">↻ {span(Date.parse(part.resetsAt) - now)}</span> : null}
+          <span className="fig">{left}% left</span>
+          {reset && part.resetsAt ? <span className="fig reset">↻ {span(Date.parse(part.resetsAt) - now)}</span> : null}
         </span>
       </span>
       <span className="pool-pop" aria-hidden="true">
@@ -129,6 +129,26 @@ function Part({ part, pool, now, many }: { part: PoolPart; pool: Pool; now: numb
         </dl>
       </span>
     </span>
+  );
+}
+
+// What the marks in a limit bar mean, once above the cards.
+export function LimitKey() {
+  return (
+    <ul className="limit-key" aria-label="How to read the bars">
+      <li>
+        <span className="key-left" aria-hidden="true" /> left
+      </li>
+      <li>
+        <span className="key-used" aria-hidden="true" /> used, back when it resets
+      </li>
+      <li>
+        <span className="key-pace" aria-hidden="true" /> even pace by now
+      </li>
+      <li>
+        <span className="key-limit" aria-hidden="true" /> where the teams stop
+      </li>
+    </ul>
   );
 }
 

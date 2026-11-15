@@ -5,7 +5,7 @@
 // A table with the same figures is there for a screen reader.
 import { type KeyboardEvent, type PointerEvent, useEffect, useId, useRef, useState } from "react";
 import { monotonePath, niceScale } from "./chart-math.ts";
-import { formatDay, formatHour, formatTokens, formatUsd, hourLabel } from "./format.ts";
+import { formatCount, formatDay, formatHour, formatTokens, formatUsd, hourLabel } from "./format.ts";
 
 export interface TrendSeries {
   name: string;
@@ -38,6 +38,8 @@ export function TrendChart({
   const [zone, setZone] = useState("UTC");
   useEffect(() => setZone(Intl.DateTimeFormat().resolvedOptions().timeZone), []);
   const format = metric === "cost" ? formatUsd : formatTokens;
+  // The axis's steps are round, so whole dollars say them in less room: "$20", not "$20.00".
+  const axisFormat = (t: number) => (metric === "cost" ? (Number.isInteger(t) ? `$${formatCount(t)}` : formatUsd(t)) : formatTokens(t));
   const shown = series.filter((s) => s.values.some((v) => v > 0));
   const peak = Math.max(0, ...shown.flatMap((s) => s.values));
   const { top, ticks } = niceScale(peak);
@@ -76,7 +78,7 @@ export function TrendChart({
         <div className="trend-axis" aria-hidden="true">
           {ticks.map((t) => (
             <span key={t} style={{ bottom: `${(t / top) * 100}%` }}>
-              {t === 0 ? "0" : format(t)}
+              {t === 0 ? "0" : axisFormat(t)}
             </span>
           ))}
         </div>

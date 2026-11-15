@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LinkPending } from "../../components/link-pending.tsx";
 import { formatCount, formatDay, formatPercent, formatTokens, formatUsd } from "../../components/usage/format.ts";
-import { LimitCard, SubscriptionFacts } from "../../components/usage/limits.tsx";
+import { LimitCard, LimitKey, SubscriptionFacts } from "../../components/usage/limits.tsx";
 import { LocalHour } from "../../components/usage/local-hour.tsx";
 import { ModelTable, type ModelRow } from "../../components/usage/model-table.tsx";
 import { ShareBar } from "../../components/usage/share-bar.tsx";
 import { TrendChart } from "../../components/usage/trend-chart.tsx";
+import { ViewSelect } from "../../components/usage/view-select.tsx";
 import { param, type SearchParams } from "../../components/ui.tsx";
 import { visibleMachines } from "../../server/access.ts";
 import { linkedMachines, machineSubscriptions } from "../../server/machines.ts";
@@ -65,12 +66,14 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
     return `/subscriptions${query ? `?${query}` : ""}`;
   };
 
+  const periods = PERIODS.map((p) => ({ label: p.label, href: href({ period: p.days === 30 ? null : String(p.days) }), on: p.days === days }));
+  const views = METRICS.map((m) => ({ label: m.label, href: href({ view: m.value === "limits" ? null : m.value }), on: m.value === metric }));
   return (
     <>
       <h1>Subscriptions</h1>
       <p className="lede">
-        {viewer.admin ? "The Claude subscriptions on every linked machine" : "The Claude subscriptions on your machines"}: how much of each one&apos;s
-        limits is left, and what they used, every session on the machine counted (yours too), at the Claude API&apos;s prices.
+        The Claude subscriptions on {viewer.admin ? "every linked machine" : "your machines"}: what&apos;s left of their limits, and what they&apos;ve
+        used.
       </p>
       {!machines.length ? (
         <p className="panel empty">
@@ -100,16 +103,10 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
               href={(value) => href({ sub: value })}
             />
             <span className="spacer" />
-            {metric !== "limits" ? (
-              <Toggle
-                label="Period"
-                items={PERIODS.map((p) => ({ label: p.label, href: href({ period: p.days === 30 ? null : String(p.days) }), on: p.days === days }))}
-              />
-            ) : null}
-            <Toggle
-              label="Show"
-              items={METRICS.map((m) => ({ label: m.label, href: href({ view: m.value === "limits" ? null : m.value }), on: m.value === metric }))}
-            />
+            {metric !== "limits" ? <Toggle label="Period" items={periods} wide /> : null}
+            <Toggle label="Show" items={views} wide />
+            {metric !== "limits" ? <ViewSelect label="Period" items={periods} /> : null}
+            <ViewSelect label="Show" items={views} />
           </div>
           {metric === "limits" ? (
             <LimitsView subs={subs} now={now} />
@@ -154,10 +151,10 @@ function Filters({
   );
 }
 
-// Segmented links: the view or the window shown, the current one pressed in.
-function Toggle({ label, items }: { label: string; items: { label: string; href: string; on: boolean }[] }) {
+// Segmented links: the view or the window shown, the current one pressed in. `wide`: on a phone a menu takes its place.
+function Toggle({ label, items, wide = false }: { label: string; items: { label: string; href: string; on: boolean }[]; wide?: boolean }) {
   return (
-    <nav className="usage-toggle" aria-label={label}>
+    <nav className={`usage-toggle${wide ? " wide-only" : ""}`} aria-label={label}>
       {items.map((item) => (
         <Link key={item.label} href={item.href} aria-current={item.on ? "true" : undefined} scroll={false}>
           <LinkPending />
@@ -172,6 +169,7 @@ function LimitsView({ subs, now }: { subs: ReturnType<typeof subscriptionsOf>; n
   const pools = poolsOf(subs, now);
   return (
     <>
+      {pools.length ? <LimitKey /> : null}
       {pools.length ? (
         <ul className="limit-cards">
           {pools.map((pool) => (
@@ -185,8 +183,8 @@ function LimitsView({ subs, now }: { subs: ReturnType<typeof subscriptionsOf>; n
         <h2 id="subs-h">{subs.length === 1 ? "The subscription" : "The subscriptions"}</h2>
         <SubscriptionFacts subs={subs} />
         <p className="hint">
-          The line in each bar is where even use would be by now; a dashed mark is where the factory&apos;s teams stop on that subscription, set on its
-          machine with <code>a6g subscriptions limit</code>. Teams move to their next subscription at a limit, and wait when none is open.
+          Where the teams stop on a subscription is set on its machine with <code>a6g subscriptions limit</code>. Teams move to their next subscription at
+          a limit, and wait when none is open.
         </p>
       </section>
     </>
@@ -284,6 +282,9 @@ function UsageView({
           <Stat label="Output" value={formatTokens(usage.totals.output)} />
           <Stat label="Cache savings" value={formatUsd(usage.totals.saved)} />
         </ul>
+        <p className="hint">
+          Every session on the machine counts, yours too, at the Claude API&apos;s prices: on a subscription that&apos;s how fast it uses its limits.
+        </p>
         {processed(usage.totals) > 0 ? (
           metric === "tokens" ? (
             <ShareBar title="Tokens by type" segments={tokenSegments(usage.totals)} format={formatTokens} />
