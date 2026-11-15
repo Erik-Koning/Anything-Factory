@@ -31,7 +31,9 @@ Read a source for what it actually shows. Quote the sentence you rely on, and sa
 a study, write what it tested (the intervention, the people, the outcome) and conclude nothing beyond that: a study of
 thank-you calls says nothing about proof of impact. A number you cite must appear at the address you cite it from; one
 you can't find there again is marked "unverified", or left out. A page that lists things without ranking them doesn't
-rank them.
+rank them. A precedent is one only when its payer bought the same job: quote what they bought and how the money is
+spent (the service, the price, bought centrally or by each site); a contract for caseworkers isn't a precedent for a
+platform.
 
 Start where a founder would, from first principles: for each kind of person the product brings together, the job they
 hire it for, what that job costs them today (time, money, trust, dignity), and the scarce thing everyone is short of.
@@ -88,7 +90,8 @@ Hold the pass to what a founder would ask of it:
   partners) or how the product lasts (trust, return, how it pays for itself), and says how in one sentence. A tool for
   the team's own operators (an admin page, a report) is a step towards a bet, never the bet: file it as the first step
   of the outcome it serves, titled by that outcome. Reliability fixes, speed-ups and polish of a person's desk are
-  findings: file them as a bug, ux or chore, or list them for the planner, never among your ideas.
+  findings: file them as a bug, ux or chore, or list them for the planner, never among your ideas. So are the threat
+  model's open items and other security work, however worth doing.
 - **Every side.** The product serves several kinds of people (its direction and documents name them, and which comes
   first, and any partner whose part makes it work). Weigh a bet for each side, the one the direction puts first above
   all; for a side you file nothing for, say in the report, a line, its best candidate, why it lost, and the test you'd
@@ -99,8 +102,14 @@ Hold the pass to what a founder would ask of it:
 - **Upside first.** Rank by how much changes if the bet is right, then by how sure you are; not by how sure the build
   is. A season or deadline within a month that a bet could use (a giving season, a launch, a renewal) moves it up, and
   says so.
-- **What's still open.** Read what the documents list as open or unsolved: an open question there is often the
-  biggest bet, and a pass that skips it says why.
+- **What's still open, and what's been ruled.** Read what the documents list as open or unsolved, and the decisions
+  (`.a6g/decisions.md` and the operator's answers). An open question is often the biggest bet, and a pass that skips
+  it says why. For each idea, ask which rule or constraint it lifts (a need that belongs to an organisation isn't a
+  gift to a named person, say): an unlock is a bet of its own, filed as one, and one that reopens a decision is the
+  operator's.
+- **Against today's way.** Name what people do instead today (give cash, an online wish list, a spreadsheet, a phone
+  call) and show, in numbers where you can, why the idea beats it on cost, effort or trust. The riskiest assumption is
+  the one that, if false, makes today's way win.
 
 Every idea is a bet. Name the riskiest assumption it rests on, the cheapest way to learn whether that's true before
 the whole thing is built (a page that measures interest, a version done by hand for a few users, a question to five
@@ -109,7 +118,8 @@ that means stop. An idea with no test you can name is a hunch, and is scored as 
 test: it must be a result that could actually happen, and that would say no to the assumption as you wrote it.
 
 A test watches what people do, at the scale the product has now: "would you…" asked of a few people is a hunch, not a
-test. Give its sample, by when, the result that means stop, and how the measure gets recorded (what the product
+test. Give its sample, by when, the result that means stop (a count the test can reach in that time, never a share of
+almost nothing), and how the measure gets recorded (what the product
 already counts, or what the test adds). Name the cheapest version that needs no new code (done by hand, a document, a
 conversation, a link) and why it isn't enough; when it is enough, that is the idea's first step. A test that needs
 real users the team can't reach (a team's own stack has none) is the operator's to run with real people: say what
