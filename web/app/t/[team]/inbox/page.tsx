@@ -22,11 +22,15 @@ export default async function TeamInboxPage({ params, searchParams }: { params: 
   return (
     <>
       <Notice searchParams={searchParams} />
-      <p className="lede small">
-        You answer as the operator. The planner gets each answer within a minute, records it in its decisions and moves the task on. Proposals to approve
-        are on <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
-        <Link href="/account/notifications">Notifications</Link>.
-      </p>
+      <p className="lede small">You answer as the operator; the team keeps working on everything else meanwhile.</p>
+      <details className="guide">
+        <summary>How this works</summary>
+        <p>
+          The planner gets each answer within a minute, records it in its decisions and moves the task on. Proposals to approve are on{" "}
+          <Link href={`/t/${team.name}/proposals`}>Decisions</Link>; how you hear about new ones is in{" "}
+          <Link href="/account/notifications">Notifications</Link>.
+        </p>
+      </details>
       {quiet ? <QuietNote last={quiet.last} /> : null}
       <TeamInbox
         team={team.name}

@@ -111,7 +111,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                       {theirs.map((m) => (
                         <li key={m.team}>
                           <span className="on-team">{m.team}</span>
-                          <ActionForm action={changeRoleAction}>
+                          {/* The role and the key that saves it, joined: each team's own. */}
+                          <ActionForm action={changeRoleAction} className="role-pick">
                             <input type="hidden" name="userId" value={u.id} />
                             <input type="hidden" name="team" value={m.team} />
                             <label className="sr" htmlFor={`role-${u.id}-${m.team}`}>{`${u.email}'s role on ${m.team}`}</label>
@@ -139,6 +140,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                   ) : (
                     <p className="small muted">{admin ? "Sees every team." : "On no team."}</p>
                   )}
+                </div>
+                <div className="their-access">
                   {!admin && u.id !== viewer.userId ? (
                     u.banned ? (
                       <ActionForm action={unbanAction}>
@@ -150,15 +153,18 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                     ) : (
                       // Asked for first: a ban ends every session the person has. The row says whose it is; a screen reader
                       // hears the address too.
-                      <details className="more">
-                        <summary aria-label={`Ban ${u.email}`}>Ban…</summary>
-                        <ActionForm action={banAction} className="inline">
+                      <details className="more ban">
+                        <summary aria-label={`Ban from signing in: ${u.email}`}>Ban from signing in…</summary>
+                        <ActionForm action={banAction} className="stack">
                           <input type="hidden" name="userId" value={u.id} />
+                          <p className="hint">It signs them out everywhere and unlinks their machines; Unban lets them in again.</p>
                           <label>
                             {`Why ban ${u.email} (optional)`}
                             <input name="reason" maxLength={LIMITS.label} autoComplete="off" />
                           </label>
-                          <SubmitButton className="danger">Ban and sign out</SubmitButton>
+                          <div>
+                            <SubmitButton className="danger">Ban and sign out</SubmitButton>
+                          </div>
                         </ActionForm>
                       </details>
                     )

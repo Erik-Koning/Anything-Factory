@@ -13,8 +13,9 @@ export const metadata: Metadata = { title: "Link a machine" };
 export default async function LinkMachinePage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
   const code = normalUserCode(param((await searchParams)["code"]));
+  // One step, so one column, as signing in is: a code as wide as itself, and the key beside it.
   return (
-    <>
+    <div className="narrow stack">
       <h1>Link a machine</h1>
       <Notice searchParams={searchParams} />
       {mayLinkMachines(viewer) ? (
@@ -22,6 +23,6 @@ export default async function LinkMachinePage({ searchParams }: { searchParams: 
       ) : (
         <p className="panel empty">Only a team&apos;s members and admins link machines: the teams you follow run on theirs.</p>
       )}
-    </>
+    </div>
   );
 }
