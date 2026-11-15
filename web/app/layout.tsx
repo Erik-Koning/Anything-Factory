@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { MainNav } from "../components/main-nav.tsx";
+import { Toaster } from "../components/toaster.tsx";
 import { blocked, can } from "../server/access.ts";
 import { allTeams, storeFor } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
@@ -107,6 +108,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           {children}
         </main>
         {signedIn ? <RememberName name={viewer.name} /> : null}
+        <Toaster />
       </body>
     </html>
   );

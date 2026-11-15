@@ -2,6 +2,7 @@
 import { useActionState, useRef, useState } from "react";
 import { type AnswerFormState, answerAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
+import { toast } from "./toaster.tsx";
 
 export interface AnswerChoice {
   key: string;
@@ -35,7 +36,12 @@ export function AnswerForm({
   // No Mac runs the team now (server/views.ts quietSince): the answer waits for one.
   waits?: boolean;
 }) {
-  const [state, action, pending] = useActionState(answerAction, EMPTY);
+  // Said in a toast once it's sent: the question leaves the page as it refreshes, this form with it.
+  const [state, action, pending] = useActionState(async (previous: AnswerFormState, form: FormData) => {
+    const next = await answerAction(previous, form);
+    if (next.ok) toast(next.ok);
+    return next;
+  }, EMPTY);
   const [pick, setPick] = useState(state.pick);
   const words = useRef<HTMLTextAreaElement>(null);
   const offered = !adding && (choices.length > 0 || recommendation !== null);

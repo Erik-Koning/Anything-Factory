@@ -117,10 +117,6 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
             <input type="checkbox" name="approved" value="yes" defaultChecked={state.approved} />
             Approve it now, without a score or the approver
           </label>
-          <label>
-            Code from your authenticator, to approve it now
-            <input name="code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" />
-          </label>
         </>
       ) : null}
       <div>

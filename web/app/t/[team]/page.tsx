@@ -87,7 +87,7 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </section>
       </div>
 
-      {control ? <TeamControls team={team} controls={controls} tasks={tasks} expanded={open === "pause"} /> : null}
+      {control ? <TeamControls team={team} controls={controls} /> : null}
       {control ? (
         <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
       ) : null}

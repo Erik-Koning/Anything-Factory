@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { subscriptionsAction } from "../app/t/[team]/actions.ts";
+import { ActionForm } from "./action-form.tsx";
 import { SubmitButton } from "./submit-button.tsx";
 import { SubscriptionOrder } from "./subscription-order.tsx";
 import type { SubscriptionOption } from "./subscription-words.ts";
@@ -28,7 +29,7 @@ export function SubscriptionsForm({
   const own = roles.filter((r) => use[r]?.length);
   const followers = roles.filter((r) => !own.includes(r));
   return (
-    <form action={subscriptionsAction} className="stack">
+    <ActionForm action={subscriptionsAction} className="stack">
       <input type="hidden" name="team" value={team} />
       <div className="field">
         <label htmlFor="subscriptions-role">Whose order</label>
@@ -91,6 +92,6 @@ export function SubscriptionsForm({
           <SubmitButton className="primary">Save this order</SubmitButton>
         </div>
       </div>
-    </form>
+    </ActionForm>
   );
 }
