@@ -219,7 +219,7 @@ that build it and check it on Opus:
 
 | Role                                                                  | Default            |
 | --------------------------------------------------------------------- | ------------------ |
-| planner, innovator, scaffolder                                        | `claude-fable-5-1` |
+| planner, innovator, scaffolder                                        | `claude-fable-5-2` |
 | builder, tester, reviewer, security-reviewer, ux-specialist, approver | `claude-opus-5-5`  |
 
 A wrong plan or a wrong foundation costs every task built on it, so the dearer model goes where a mistake travels

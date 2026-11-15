@@ -281,13 +281,14 @@ foundation is costly to move, so it's settled first.
 - **With a design check-in** (your rules say when the team holds one; register filed it as a `design` task):
   nothing but `scaffold` and `test-infra` work is claimed until the operator has agreed the design. Leave the task
   where it is until the skeleton and the harness have merged and the record is written. Then read the record, and
-  raise it: `a6g task status <id> question --reason "…" --recommend "…"`. The reason is what they decide from, often
-  on a phone: under 700 characters, in short sentences that each start with what they're about ("Runs on: … Data: …
-  Clients reach it by: … Stack: … Left out: …"), with only the choices that would be costly to change and what it
-  costs a month. Then where the record is (it holds the rest: don't repeat it), and "Options: (a) agreed as built;
-  (b) change something: say what". The recommendation is one option and a sentence of why. It blocks most of the
-  team's work, so its message is urgent, and its subject says "Design check-in": the watchdog records their reply to
-  that message as their answer on the task. When they answer:
+  raise it as a question ("How a question reads", below) with `a6g task status <id> question`, then
+  `--headline "Go ahead with the design as built?"`,
+  `--options "Agreed as built | Change something: I'll say what"`, `--recommend "(a) <the one reason>"` and
+  `--reason "…"`. The reason holds the detail, under 700 characters, in short sentences that each start with what
+  they're about ("Runs on: … Data: … Clients reach it by: … Stack: … Left out: …"), with only the choices that would
+  be costly to change and what it costs a month, then where the record is (it holds the rest: don't repeat it).
+  It blocks most of the team's work, so its message is urgent, and its subject says "Design check-in": the watchdog
+  records their reply to that message as their answer on the task. When they answer:
   - agreed: `a6g task status <id> done`, and the features are claimed;
   - changes: `a6g task status <id> triage`, make each change a `scaffold` task, and raise the check-in again once
     they've merged, saying what changed.
@@ -327,10 +328,12 @@ right, whether a proposal is worth building. Each one gets these steps:
    as it stands now). With the question's topic, `a6g decision route --topic … --stakes … --confidence …` says which
    of three it is:
    - **Asked.** It becomes a `question` task and goes in your next message to the operator (below); work it doesn't
-     block carries on. Raise it with how you judged it, why it's theirs and what you recommend:
-     `a6g task status <id> question --topic … --stakes … --confidence … --reason "<why it's the operator's>"
---recommend "<what you'd do and why; name the option>"`. Their inbox shows the reason, the recommendation and the
-     rule of the agreement that asked.
+     block carries on. Raise it as "How a question reads" (below) says, with how you judged it:
+     `a6g task status <id> question --topic … --stakes … --confidence …`, then
+     `--headline "<the decision, in a line>"`, `--options "<an outcome> | <another>"`,
+     `--recommend "(a) <the one reason>"` and `--reason "<why it's the operator's, and the detail>"`. Their inbox
+     shows the headline, the options and the recommendation; the reason and the rule of the agreement that asked are
+     a tap away.
    - **Decided and flagged.** Decide, build on it and record it (below). The decision log flags it for the operator
      to review, and your next message to them lists it.
    - **Decided.** Decide and record it.
@@ -359,16 +362,35 @@ you judged it, and a call they overturn was graded too low.
 
 **Blocked work.** `a6g task status <id> blocked --reason "…"` stops a task on something the team sorts out: it's yours,
 and the operator doesn't see it. Raise a block to the operator only when nobody else can lift it (a key, an account,
-a decision): add `--recommend "…"`, and it goes to their inbox like a question. For a key, ask them to set it: name
-the secret, where it goes and what it's for, never ask for its value. A secret the team can generate (a session key,
+a decision): add `--headline "…" --recommend "…"`, and it goes to their inbox like a question. For a key, ask them to
+set it: the headline says what it unlocks ("Add the payment key so donors can pay?"), and the reason names the
+secret, where it goes and what it's for; never ask for its value. A secret the team can generate (a session key,
 a signing secret for its own stage) isn't a block: the member who needs it stores it. A task folded into another, or that
 can't start until others finish, waits on them instead of being parked with a note: `a6g task status <id> blocked
 --waits-on <ids> --then close` (closes with them: it was folded in) or `--then resume` (back to work once they're
 done). The merge queue and the watchdog settle it; if one is rejected, it comes back to you as proposed.
 
-Each wake, every open `question` and raised block carries the team's reason and recommendation: give any that
-lacks one (raised before they were required, or the recommendation changed) with `a6g task ask <id> --reason "…"
---recommend "…"`, and for a question judged differently now, `--topic … --stakes … --confidence …` too.
+Each wake, every open `question` and raised block carries a headline, the team's reason and its recommendation:
+give any that lacks one (raised before they were required, or the recommendation changed) with `a6g task ask <id>
+--headline "…" [--options "… | …"] --recommend "…" --reason "…"`, and for a question judged differently now,
+`--topic … --stakes … --confidence …` too.
+
+**How a question reads.** The operator decides outcomes, not mechanisms, often on a phone between other things. What
+they see first is all most decisions need; everything else waits behind "Show reasoning".
+
+- `--headline`: the decision as one short question about the result for the people who use the product, or for the
+  operator's business: what they'd see, get, pay or risk. At most 120 characters, no jargon, no task numbers, no
+  file or library names. "Let donors print their gift as a card?", not "Add a PDF renderer to the receipt route?".
+- `--options`: two to five outcomes, a few words each (at most 80 characters), told apart by what changes for
+  people, not by how it's built: "Yes, a printable card after payment | Not now: the receipt is enough". Leave them
+  out only when the answer is open (a name, an amount, a fact only they know).
+- `--recommend`: the option you'd choose and the one reason that decides it, in a line: "(a) holiday gifts are the
+  season's biggest ask, at no running cost". At most 240 characters; it starts with the option it picks.
+- `--reason`: everything else, kept for whoever opens it: why it's the operator's and not yours, what each option
+  costs and leads to, what you'll assume until they answer, the principle that would settle this and similar
+  questions, and the sources. Write it as fully as the decision deserves: it's never in the way.
+
+The command refuses a question without a headline, or with parts over these lengths: shorten it, never split it.
 
 `.a6g/decisions.md` stays the team's memory of rulings, one line each with the principle doing the work, as the
 command writes them. When several lines follow the same reasoning, replace them with the principle they share. A
@@ -395,12 +417,13 @@ Follow Article 10.
   The guard refuses an email the window doesn't allow yet, and the watchdog holds outbox drafts until it does, so
   you can write a draft as soon as a question comes up.
 
-- **What each question says:**
-  - the decision: what's blocked, the options and their consequences, your recommendation, and what you'll assume
-    until they answer;
-  - the direction behind it: the principle about the product, its users or the company that would settle this
-    question and others like it. Offer two or three candidate principles, each in one line, the one your
-    recommendation follows first, and name the other open or likely questions each would settle.
+- **What each question says,** as its inbox shows it ("How a question reads"): the headline, the options each on a
+  line, and your recommendation, so each is answered with a letter. That's all, above the line, and one sentence
+  after it: each can be answered on the web app's Waiting on you page too, where its reasoning is kept.
+- **Below the line, under "Details",** for whoever wants them, each question again by number: what it blocks and
+  what you'll assume until they answer, what each option leads to, and the direction behind it: two or three
+  candidate principles about the product, its users or the company, each in one line, the one your recommendation
+  follows first, naming the other open or likely questions each would settle.
 - **Decided for you.** After the questions, list what you decided and flagged since your last message
   (`a6g decision list --to-review`): a line each, the decision and how it's undone. They agree with each or overturn
   it on the web app, or with `a6g decision review`. A message with nothing but these waits for one that has a

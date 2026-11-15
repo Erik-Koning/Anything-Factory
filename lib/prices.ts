@@ -1,12 +1,12 @@
 // What a model request would cost on the Claude API, in US dollars: the API-equivalent price of what a team used. A
 // team on a Claude subscription isn't billed per token, but its usage limits weigh models roughly as these prices do,
 // so the same figure serves budgets either way. Prices per million tokens, from Anthropic's model price list as of
-// 2026-10-06 (platform.claude.com/docs/en/about-claude/pricing); when it changes, change PRICES and PRICED_AT.
+// 2026-11-15 (platform.claude.com/docs/en/about-claude/pricing); when it changes, change PRICES and PRICED_AT.
 //
 // A cache read costs 0.1× input unless the model says otherwise; a cache write 1.25× input for the 5-minute TTL and 2×
 // for the 1-hour one. Fast mode costs twice the standard rate.
 
-export const PRICED_AT = "2026-10-06";
+export const PRICED_AT = "2026-11-15";
 
 interface Price {
   input: number;
@@ -18,6 +18,8 @@ interface Price {
 }
 
 const PRICES: Record<string, Price> = {
+  "claude-fable-5-2": { input: 8, output: 40, cacheRead: 0.2 },
+  "claude-mythos-5-2": { input: 8, output: 40, cacheRead: 0.2 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-mythos-5-1": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-fable-5": { input: 10, output: 50 },
@@ -27,9 +29,14 @@ const PRICES: Record<string, Price> = {
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-opus-4-6": { input: 5, output: 25 },
-  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2 },
+  "claude-opus-4-5": { input: 5, output: 25 },
+  "claude-opus-4-1": { input: 15, output: 75 },
+  "claude-opus-4": { input: 15, output: 75 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1 },
   "claude-sonnet-5": { input: 2, output: 10 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-4-5": { input: 3, output: 15 },
+  "claude-sonnet-4": { input: 3, output: 15 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, tier: { over: 100_000, input: 0.5, output: 2.5 } },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };

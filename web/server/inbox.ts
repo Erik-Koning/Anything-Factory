@@ -23,8 +23,11 @@ export interface Waiting {
   // ("inferred"), or nowhere (null).
   whyFrom: "asked" | "inferred" | null;
   recommendationFrom: "asked" | "inferred" | null;
+  // The decision in a line, as the team put it (asks from 0.8.9 on); null for older ones, which lead with the title.
+  headline: string | null;
   // The text that puts the question: the newest note by the team with options or a recommendation in it, otherwise
-  // the task's description; what it found there; and the text without them, to show above the answer form's choices.
+  // the task's description; what it found there; and the text without them, to show with the reasoning. The answer
+  // form's choices are the ask's own options when it gives them, else the ones found here.
   question: { text: string; by: string | null; at: string | null; shown: string };
   choices: Choice[];
   recommendation: string | null;
@@ -133,9 +136,9 @@ function questionOf(task: Task): Waiting["question"] & { choices: Choice[]; reco
 // text, its options and the recommendation. The team can change any of them while the page is open (a note with new
 // options, a recommendation set again), and an answer is read against the task as it is then: one whose token no
 // longer matches is shown again instead of being recorded in words the operator never saw.
-export const shownAs = (w: Pick<Waiting, "since" | "why" | "question" | "choices" | "recommendation">): string =>
+export const shownAs = (w: Pick<Waiting, "since" | "why" | "headline" | "question" | "choices" | "recommendation">): string =>
   createHash("sha256")
-    .update(JSON.stringify([w.since, w.why, w.question.shown, w.choices.map((c) => [c.key, c.text]), w.recommendation]))
+    .update(JSON.stringify([w.since, w.why, w.headline, w.question.shown, w.choices.map((c) => [c.key, c.text]), w.recommendation]))
     .digest("hex")
     .slice(0, 16);
 
@@ -151,6 +154,8 @@ export function waitingOf(task: Task, all: Task[]): Waiting {
   const asked = task.ask ?? null;
   const why = asked?.reason.trim() || movedWhy;
   const recommendation = asked?.recommendation.trim() || written;
+  // The ask's own options, keyed in order, over any found in the text.
+  const listed = asked?.options?.length ? asked.options.map((text, i) => ({ key: String.fromCharCode(97 + i), text, recommended: false })) : null;
   // The option the recommendation names, whichever said it.
   const key = recommendedKey(recommendation);
   const text = [task.body, ...task.notes.map((n) => n.text)].join("\n");
@@ -161,8 +166,9 @@ export function waitingOf(task: Task, all: Task[]): Waiting {
     why,
     whyFrom: asked?.reason.trim() ? "asked" : why ? "inferred" : null,
     recommendationFrom: asked?.recommendation.trim() ? "asked" : recommendation ? "inferred" : null,
+    headline: asked?.headline?.trim() || null,
     question,
-    choices: offered.map((c) => ({ ...c, recommended: key !== null && c.key === key })),
+    choices: (listed ?? offered).map((c) => ({ ...c, recommended: key !== null && c.key === key })),
     recommendation,
     answers: answersOn(task),
     holds: all.filter((t) => t.after.includes(task.id) && t.status !== "done" && t.status !== "rejected"),

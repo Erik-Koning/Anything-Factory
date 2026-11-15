@@ -47,8 +47,18 @@ export async function decide(
     approval,
     text = "",
     recommendation = "",
+    headline,
+    options,
     topic,
-  }: { who: Actor; approval: ApprovalRules; text?: string; recommendation?: string; topic?: string | undefined }
+  }: {
+    who: Actor;
+    approval: ApprovalRules;
+    text?: string;
+    recommendation?: string;
+    headline?: string | undefined;
+    options?: string[] | undefined;
+    topic?: string | undefined;
+  }
 ): Promise<Task> {
   // The move rules read the whole graph, the task among it: one read, and the write tries that copy first.
   const all = await store.tasks.all();
@@ -80,6 +90,8 @@ export async function decide(
                     ask: {
                       reason: text.trim(),
                       recommendation: recommendation.trim(),
+                      ...(headline?.trim() ? { headline: headline.trim() } : {}),
+                      ...(options?.length ? { options } : {}),
                       by: who,
                       at: nowIso(),
                       ...about,

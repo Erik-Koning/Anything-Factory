@@ -319,7 +319,7 @@ button[data-pending]::before {
 }
 /* A question being answered or decided, in Waiting on you: all but the form that's sending fades. */
 li.waiting:has(button[data-pending]) > :not(:has(button[data-pending])),
-li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pending])) {
+li.waiting:has(button[data-pending]) .decide > :not(:has(button[data-pending])) {
   opacity: 0.55;
   transition: opacity 160ms ease;
 }
@@ -340,7 +340,9 @@ li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pen
 }
 
 /* --- Over the page ---------------------------------------------------------------------------------------------- */
-/* What a button did (components/toaster.tsx): a toast in the lower corner, over the page, so nothing on it moves. */
+/* What a button did (components/toaster.tsx): a toast over the page, so nothing on it moves. In the lower right corner
+   on a wide screen; on a phone it drops in from the top, across the screen, where the thumb and the keyboard aren't.
+   Its width comes from the screen's edges, never from 100vw, so a long word wraps inside it instead of widening it. */
 .toasts {
   position: fixed;
   right: 16px;
@@ -348,7 +350,8 @@ li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pen
   z-index: 40;
   display: grid;
   justify-items: end;
-  max-width: min(440px, calc(100vw - 32px));
+  width: max-content;
+  max-width: min(440px, calc(100% - 32px));
   pointer-events: none;
 }
 .toast {
@@ -356,6 +359,9 @@ li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pen
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 10px 8px 10px 14px;
   background: color-mix(in srgb, var(--tone) 6%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line));
@@ -369,8 +375,11 @@ li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pen
   animation: toast-in 180ms var(--ease);
 }
 .toast > span {
+  flex: 1 1 auto;
+  min-width: 0;
   padding-top: 5px;
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .toast.error {
   --tone: var(--signal);
@@ -382,6 +391,27 @@ li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pen
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+@media (max-width: 720px) {
+  .toasts {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
+    max-width: none;
+    justify-items: stretch;
+  }
+  .toast {
+    animation-name: toast-down;
+    animation-duration: 220ms;
+  }
+}
+@keyframes toast-down {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - 12px));
   }
 }
 
@@ -2576,31 +2606,53 @@ li.waiting > p,
 li.waiting > dl {
   margin: 0;
 }
-/* A question: what it is, then the answer to it; side by side where the panel is wide enough for both, so each is a
-   column you can follow and the panel has no empty band beside them. */
-.waiting-about,
-.waiting-answer {
+/* A question as a decision (components/inbox.tsx): the headline, the team's recommendation in a line, the answer, and
+   the reasoning folded under them. One column, at a width a line can be followed, however wide the panel. */
+.decide {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-content: start;
+  max-width: 46rem;
   min-width: 0;
 }
-.waiting-about > *,
-.waiting-answer > * {
+.decide > * {
   margin: 0;
 }
 .rows > li.waiting > * + * {
   margin-top: 0;
 }
-@media (min-width: 1000px) {
-  li.waiting {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 32px;
-  }
-  li.waiting > .head {
-    grid-column: 1 / -1;
-  }
+.decide > .headline {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.decide > .headline + p.small {
+  margin-top: -6px;
+}
+.recommend-line {
+  font-size: 14.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.recommend-line > .chip {
+  margin-right: 2px;
+}
+.reasoning-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  min-width: 0;
+}
+.reasoning-body > * {
+  margin: 0;
+}
+/* An answer form's note beside a chosen option: a line to open, since the option is the answer. */
+.answer .add-note {
+  justify-self: start;
 }
 /* The operator's own words: what's shown before they write reads as a prompt, not as words already there. */
 .answer textarea::placeholder {

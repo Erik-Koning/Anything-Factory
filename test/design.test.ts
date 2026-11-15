@@ -275,6 +275,8 @@ describe("a6g task and the design check-in", () => {
         "question",
         "--reason",
         "The skeleton runs end to end; docs/architecture.md has each choice. (a) agreed as built (b) change something",
+        "--headline",
+        "Decide it?",
         "--recommend",
         "(a) agreed as built",
       ],
@@ -315,7 +317,18 @@ describe("a6g task and the design check-in", () => {
     assert.equal((await a6g(["task", "status", "1", "triage"], as("planner"))).code, 0);
     assert.match((await a6g(["task", "claim", "3"], as("builder", tree))).out, /waits for the operator to agree the design \(#1, triage\)/);
     await a6g(
-      ["task", "status", "1", "question", "--reason", "Now on the managed database. (a) agreed (b) change", "--recommend", "(a) agreed"],
+      [
+        "task",
+        "status",
+        "1",
+        "question",
+        "--reason",
+        "Now on the managed database. (a) agreed (b) change",
+        "--headline",
+        "Decide it?",
+        "--recommend",
+        "(a) agreed",
+      ],
       as("planner")
     );
     assert.match(
@@ -336,7 +349,18 @@ describe("a6g task and the design check-in", () => {
 });
 
 describe("what the operator says is taken whole", () => {
-  const RAISE = ["task", "status", "1", "question", "--reason", "The skeleton runs. (a) agreed (b) change something", "--recommend", "(a) agreed"];
+  const RAISE = [
+    "task",
+    "status",
+    "1",
+    "question",
+    "--reason",
+    "The skeleton runs. (a) agreed (b) change something",
+    "--headline",
+    "Decide it?",
+    "--recommend",
+    "(a) agreed",
+  ];
   function setup() {
     const home = makeRepo(baseTeam({ roles: ROLES, operator: { designCheckIn: true } }));
     const run = tmp("a6g-run-");
@@ -547,7 +571,7 @@ describe("a6g init and who the team works for", { concurrency: true }, () => {
       return readFileSync(args, "utf8").trimEnd().split("\n");
     };
     const fresh = await started(gitRepo(join(tmp("a6g-new-"), "greenhouse"), NEW));
-    assert.equal(fresh[fresh.indexOf("--model") + 1], "claude-fable-5-1");
+    assert.equal(fresh[fresh.indexOf("--model") + 1], "claude-fable-5-2");
     assert.equal(fresh[fresh.indexOf("--agent") + 1], "a6g:setup");
     assert.match(fresh.at(-1) ?? "", /Nothing is built here yet: this is a new project, and its foundation is yours to propose\./);
     assert.doesNotMatch(fresh.at(-1) ?? "", /isn't technical/);

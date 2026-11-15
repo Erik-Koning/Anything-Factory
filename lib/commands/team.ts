@@ -332,7 +332,7 @@ function registerTeam(
   return 0;
 }
 
-// Each model and the roles on it, in a line: "claude-fable-5-1 for the planner and scaffolder; claude-opus-5-5 for …".
+// Each model and the roles on it, in a line: "claude-fable-5-2 for the planner and scaffolder; claude-opus-5-5 for …".
 export function describeModels(models: Record<string, string>): string {
   const on = new Map<string, string[]>();
   for (const [role, model] of Object.entries(models)) on.set(model, [...(on.get(model) ?? []), role]);

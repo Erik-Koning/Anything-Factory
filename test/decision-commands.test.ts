@@ -135,8 +135,24 @@ describe("a6g decision", () => {
     // And is never asked it, whatever the grades.
     await a6g(["task", "add", "Pick a database"], as("planner"));
     assert.match(
-      (await a6g(["task", "status", "1", "question", "--reason", "r", "--recommend", "Postgres", ...JUDGED("technical", "high", "low")], as("planner")))
-        .out,
+      (
+        await a6g(
+          [
+            "task",
+            "status",
+            "1",
+            "question",
+            "--reason",
+            "r",
+            "--headline",
+            "Decide it?",
+            "--recommend",
+            "Postgres",
+            ...JUDGED("technical", "high", "low"),
+          ],
+          as("planner")
+        )
+      ).out,
       /yours to decide \(the operator isn't technical/
     );
   });
@@ -231,7 +247,17 @@ describe("what the review of this work found", () => {
     const at = "2026-11-01T00:00:00.000Z";
     // Imported from an old board as a question: no ask at all.
     const imported = await store().tasks.create(newTask({ team: "fixture", title: "Which carrier?", kind: "research", status: "question", by: "import" }));
-    const again = ["task", "ask", imported.id, "--reason", "carriers differ by country", "--recommend", "(a) the national post"];
+    const again = [
+      "task",
+      "ask",
+      imported.id,
+      "--reason",
+      "carriers differ by country",
+      "--headline",
+      "Decide it?",
+      "--recommend",
+      "(a) the national post",
+    ];
     assert.match((await a6g(again, as("planner"))).out, /say what the question is about: --topic product\|scope/);
     assert.match((await a6g([...again, ...JUDGED("product", "low", "low")], as("planner"))).out, /yours to decide/);
     assert.equal((await store().tasks.get(imported.id))?.ask ?? null, null, "refused, nothing raised");
@@ -248,10 +274,18 @@ describe("what the review of this work found", () => {
         ask: { reason: "over the size", recommendation: "build it", by: "approver", at },
       })
     );
-    assert.equal((await a6g(["task", "ask", escalated.id, "--reason", "over the size", "--recommend", "split it first"], as("planner"))).code, 0);
+    assert.equal(
+      (await a6g(["task", "ask", escalated.id, "--reason", "over the size", "--headline", "Decide it?", "--recommend", "split it first"], as("planner")))
+        .code,
+      0
+    );
     assert.equal((await store().tasks.get(escalated.id))?.ask?.rule, "the approver sent it up to the operator");
     // The approver re-raising the planner's judged question keeps how it was judged.
-    assert.equal((await a6g(["task", "ask", imported.id, "--reason", "carriers differ", "--recommend", "(b) a courier"], as("approver"))).code, 0);
+    assert.equal(
+      (await a6g(["task", "ask", imported.id, "--reason", "carriers differ", "--headline", "Decide it?", "--recommend", "(b) a courier"], as("approver")))
+        .code,
+      0
+    );
     assert.deepEqual(
       [(await store().tasks.get(imported.id))?.ask?.by, (await store().tasks.get(imported.id))?.ask?.rule],
       ["approver", "balanced: high stakes with low confidence is asked"]
@@ -280,7 +314,7 @@ describe("what the review of this work found", () => {
       refused,
       /rejecting it is the operator's call: raise it, as a matter of checking less \(a6g task status 1 question --topic rules --stakes … --confidence …/
     );
-    const raise = ["task", "status", journey.id, "question", "--reason", "its tests are owed", "--recommend", "keep it"];
+    const raise = ["task", "status", journey.id, "question", "--reason", "its tests are owed", "--headline", "Decide it?", "--recommend", "keep it"];
     assert.match((await a6g([...raise, ...JUDGED("scope", "high", "high")], as("planner"))).out, /yours to decide \(the agreement never asks about scope/);
     assert.equal((await a6g([...raise, ...JUDGED("rules", "medium", "high")], as("planner"))).code, 0);
     assert.match((await store().tasks.get(journey.id))?.ask?.rule ?? "", /rules is always the operator's/);
@@ -688,7 +722,8 @@ describe("what the third review found", () => {
           ask: { reason: "two plans fit", recommendation: "(a) the smaller", by, at },
         })
       );
-      const again = (recommend: string) => a6g(["task", "ask", task.id, "--reason", "two plans still fit", "--recommend", recommend], as("planner"));
+      const again = (recommend: string) =>
+        a6g(["task", "ask", task.id, "--reason", "two plans still fit", "--headline", "Decide it?", "--recommend", recommend], as("planner"));
       assert.equal((await again("(a) the smaller, as before")).code, 0);
       const second = await again("(b) the larger, on reflection");
       assert.equal(second.code, 0, second.out);

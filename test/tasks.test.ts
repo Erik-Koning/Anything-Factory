@@ -479,12 +479,18 @@ describe("a6g task, from proposal to merge", () => {
       "raised without a recommendation"
     );
     assert.equal(
-      (await a6g(["task", "escalate", "2", "--reason", "it changes scope", "--recommend", "approve it: it's the launch"], as("approver"))).code,
+      (
+        await a6g(
+          ["task", "escalate", "2", "--reason", "it changes scope", "--headline", "Decide it?", "--recommend", "approve it: it's the launch"],
+          as("approver")
+        )
+      ).code,
       0
     );
     assert.deepEqual((await store().tasks.get("2"))?.ask, {
       reason: "it changes scope",
       recommendation: "approve it: it's the launch",
+      headline: "Decide it?",
       by: "approver",
       at: (await store().tasks.get("2"))?.ask?.at,
       // Which approval rule sent it up: the operator's inbox says so.
@@ -662,8 +668,43 @@ describe("raising to the operator, and waiting on other tasks", () => {
     assert.match((await a6g(["task", "status", "1", "question"], as("planner"))).out, /--reason/);
     assert.match((await a6g(["task", "status", "1", "question", "--reason", "consent wording is the operator's"], as("planner"))).out, /--recommend/);
     assert.equal((await store().tasks.get("1"))?.status, "proposed", "refused, nothing moved");
+    // It leads with the decision in a line, its options as outcomes and a short recommendation that picks one.
+    const lead = ["task", "status", "1", "question", "--reason", "consent wording is the operator's", "--recommend", "(b) the plain draft"];
+    const judged = ["--topic", "product", "--stakes", "high", "--confidence", "low"];
+    assert.match((await a6g([...lead, ...judged], as("planner"))).out, /lead with the decision, in one line .*--headline/);
+    assert.match((await a6g([...lead, ...judged, "--headline", `Which words ${"very ".repeat(30)}?`], as("planner"))).out, /keep it to 120/);
+    const headed = [...lead, "--headline", "Which consent words do people see?"];
+    assert.match((await a6g([...headed, ...judged, "--options", "The plain draft"], as("planner"))).out, /two options or more/);
+    assert.match(
+      (await a6g([...headed, ...judged, "--options", `The plain draft | ${"A long one ".repeat(10)}`], as("planner"))).out,
+      /each option is an outcome in a few words, at most 80 characters/
+    );
+    assert.match(
+      (
+        await a6g(
+          [
+            "task",
+            "status",
+            "1",
+            "question",
+            "--reason",
+            "r",
+            "--headline",
+            "Which words?",
+            "--options",
+            "a | b",
+            "--recommend",
+            "the plain one",
+            ...judged,
+          ],
+          as("planner")
+        )
+      ).out,
+      /start the recommendation with the option it picks, \(a\) to \(b\)/
+    );
+    assert.equal((await store().tasks.get("1"))?.status, "proposed", "refused, nothing moved");
     // The planner's own question says how it judged it, and the working agreement says whether it's asked.
-    const question = ["task", "status", "1", "question", "--reason", "consent wording is the operator's", "--recommend", "(b) the plain draft"];
+    const question = [...headed, "--options", "(a) The operator's own words | (b) The plain draft"];
     assert.match((await a6g(question, as("planner"))).out, /say what the question is about: --topic product\|scope/);
     assert.match((await a6g([...question, "--topic", "product", "--stakes", "high"], as("planner"))).out, /--confidence low\|medium\|high/);
     const theirs = await a6g([...question, "--topic", "product", "--stakes", "low", "--confidence", "low"], as("planner"));
@@ -678,6 +719,8 @@ describe("raising to the operator, and waiting on other tasks", () => {
     assert.deepEqual((({ at: _at, ...ask }) => ask)((await store().tasks.get("1"))?.ask ?? { at: "" }), {
       reason: "consent wording is the operator's",
       recommendation: "(b) the plain draft",
+      headline: "Which consent words do people see?",
+      options: ["The operator's own words", "The plain draft"],
       by: "planner",
       topic: "product",
       stakes: "high",
@@ -686,6 +729,7 @@ describe("raising to the operator, and waiting on other tasks", () => {
       agreement: null,
     });
     const shown = (await a6g(["task", "show", "1"], as("planner"))).out;
+    assert.match(shown, /decide: Which consent words do people see\?\n {2}\(a\) The operator's own words\n {2}\(b\) The plain draft/);
     assert.match(shown, /the team recommends: \(b\) the plain draft/);
     assert.match(
       shown,
@@ -693,19 +737,40 @@ describe("raising to the operator, and waiting on other tasks", () => {
     );
     // A recommendation that changed, or one added to a question raised before they were required.
     assert.equal(
-      (await a6g(["task", "ask", "1", "--reason", "consent wording is the operator's", "--recommend", "(a) the operator's words"], as("planner"))).code,
+      (
+        await a6g(
+          ["task", "ask", "1", "--reason", "consent wording is the operator's", "--headline", "Decide it?", "--recommend", "(a) the operator's words"],
+          as("planner")
+        )
+      ).code,
       0
     );
     assert.equal((await store().tasks.get("1"))?.ask?.recommendation, "(a) the operator's words");
     assert.equal((await store().tasks.get("1"))?.ask?.rule, "balanced: high stakes with low confidence is asked", "how it was judged stays");
     // Judged again, it's routed again: asked still, or the planner's to decide.
-    const again = ["task", "ask", "1", "--reason", "consent wording is the operator's", "--recommend", "(a) the operator's words"];
+    const again = [
+      "task",
+      "ask",
+      "1",
+      "--reason",
+      "consent wording is the operator's",
+      "--headline",
+      "Decide it?",
+      "--recommend",
+      "(a) the operator's words",
+    ];
     assert.match((await a6g([...again, "--topic", "product", "--stakes", "medium", "--confidence", "medium"], as("planner"))).out, /yours to decide/);
     assert.match((await a6g([...again, "--topic", "privacy"], as("planner"))).out, /--stakes low\|medium\|high/);
     assert.equal((await a6g([...again, "--topic", "privacy", "--stakes", "low", "--confidence", "high"], as("planner"))).code, 0);
     assert.match((await store().tasks.get("1"))?.ask?.rule ?? "", /privacy is always the operator's/);
-    assert.match((await a6g(["task", "ask", "2", "--reason", "x", "--recommend", "y"], as("planner"))).out, /only a question or a blocked task/);
-    assert.match((await a6g(["task", "ask", "1", "--reason", "x", "--recommend", "y"], as("builder"))).out, /the planner and the approver raise/);
+    assert.match(
+      (await a6g(["task", "ask", "2", "--reason", "x", "--headline", "Decide it?", "--recommend", "y"], as("planner"))).out,
+      /only a question or a blocked task/
+    );
+    assert.match(
+      (await a6g(["task", "ask", "1", "--reason", "x", "--headline", "Decide it?", "--recommend", "y"], as("builder"))).out,
+      /the planner and the approver raise/
+    );
     // The operator raising one to themselves needn't recommend.
     assert.equal((await a6g(["task", "status", "3", "question", "--reason", "I want to think about it"], as(null))).code, 0);
     // Moving on clears the ask.
@@ -721,8 +786,23 @@ describe("raising to the operator, and waiting on other tasks", () => {
     assert.equal((await store().tasks.get("1"))?.ask, null, "the planner's to sort, not raised");
     assert.equal((await a6g(["task", "status", "1", "proposed"], as("planner"))).code, 0);
     assert.equal(
-      (await a6g(["task", "status", "1", "blocked", "--reason", "only the operator holds the key", "--recommend", "add it to the vault"], as("planner")))
-        .code,
+      (
+        await a6g(
+          [
+            "task",
+            "status",
+            "1",
+            "blocked",
+            "--reason",
+            "only the operator holds the key",
+            "--headline",
+            "Decide it?",
+            "--recommend",
+            "add it to the vault",
+          ],
+          as("planner")
+        )
+      ).code,
       0
     );
     assert.equal((await store().tasks.get("1"))?.ask?.recommendation, "add it to the vault");
@@ -1279,7 +1359,7 @@ describe("the audit's findings stay fixed", () => {
     await a6g(["task", "add", "Thing"], as("planner"));
     assert.match(
       (await a6g(["task", "status", "1", "rejected", "--sev", "minor"], as("planner"))).out,
-      /takes --reason, --recommend, --waits-on, --then, --topic, --stakes, --confidence, not --sev/
+      /takes --reason, --recommend, --headline, --options, --waits-on, --then, --topic, --stakes, --confidence, not --sev/
     );
     assert.match((await a6g(["task", "graph", "--out", join(home, ".a6g/team.json")], as("reviewer"))).out, /run folder or \/tmp/);
     assert.equal((await a6g(["task", "graph", "--out", join(tmp(), "g.json")], as("reviewer"))).code, 0);

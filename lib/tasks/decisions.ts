@@ -128,7 +128,7 @@ export async function recordDecision(
   const routed = route(agreement, call, operator);
   if (routed.route === "ask")
     throw new Refused(
-      `this one is the operator's to decide (${routed.rule}): raise it instead: a6g task status <id> question --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence} --reason "…" --recommend "…"`
+      `this one is the operator's to decide (${routed.rule}): raise it instead: a6g task status <id> question --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence} --headline "…" --recommend "…" --reason "…"`
     );
   const at = nowIso();
   return store.decisions.create({

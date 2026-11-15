@@ -699,8 +699,12 @@ test("the admin sees what waits on them and answers a question with one of its o
   await expect(page).toHaveURL(/\/t\/shop\/inbox$/);
   await expect(page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: /Waiting on you/ })).toHaveAttribute("aria-current", "page");
 
-  // The question as the planner put it: why it's the operator's, what the team recommends, its options.
+  // The question as the planner put it: what the team recommends, in a line, and its options; why it's the operator's
+  // is a tap away, with the rest of the reasoning.
   const item = page.locator(`#task-${question}`);
+  await expect(item.locator(".recommend-line")).toContainText("(b), behind the same sign-in as checkout.");
+  await expect(item.getByText("who sees an order is the operator's")).toBeHidden();
+  await item.getByText("Show reasoning").click();
   await expect(item.getByText("who sees an order is the operator's")).toBeVisible();
   await expect(item.getByRole("definition").filter({ hasText: "(b), behind the same sign-in as checkout." })).toBeVisible();
   await expect(item.getByRole("radio")).toHaveCount(4);
@@ -713,6 +717,9 @@ test("the admin sees what waits on them and answers a question with one of its o
   await item.getByRole("radio", { name: /^Something else/ }).check();
   await expect(item.getByLabel("Your answer", { exact: true })).toHaveAttribute("required", "");
   await item.getByRole("radio", { name: /^\(b\) open them to signed-in customers/ }).check();
+  // Words beside an option are a line to open.
+  await expect(item.getByLabel("Anything to add (optional)")).toHaveCount(0);
+  await item.getByRole("button", { name: "Add a note" }).click();
   await item.getByLabel("Anything to add (optional)").fill("Show the totals too.");
   await item.getByRole("button", { name: `Send the answer on #${question}` }).click();
   await expect(page.getByRole("status")).toContainText(`Answer sent on #${question}.`);
@@ -748,7 +755,10 @@ test("the admin approves blocked work again from the inbox, and comes back to it
   await expect(page.getByRole("heading", { name: "Waiting on you", level: 1 })).toBeVisible();
   await expect(page.getByText("1 waiting for your answer.")).toBeVisible();
   const item = page.locator(`#task-${blocked}`);
-  // Why it's the operator's, and what the team recommends, always.
+  // The decision in a line and what the team recommends, first; why it's the operator's behind Show reasoning.
+  await expect(item.getByText("Add the carrier's key so customers in Canada can order?")).toBeVisible();
+  await expect(item.locator(".recommend-line")).toContainText("add the key to the vault, then approve it again");
+  await item.getByText("Show reasoning").click();
   await expect(item.getByText("needs the carrier's API key")).toBeVisible();
   await expect(item.getByRole("definition").filter({ hasText: "add the key to the vault, then approve it again" })).toBeVisible();
   await item.getByText(`Or decide #${blocked} yourself`).click();
@@ -1519,6 +1529,7 @@ test("a question says which rule of the agreement made it the operator's; a team
   try {
     await page.goto("/t/shop/inbox");
     const item = page.locator("#task-900");
+    await item.getByText("Show reasoning").click();
     await expect(item.getByText("Asked because: the agreement always asks about scope (scope: medium stakes, low confidence).")).toBeVisible();
     await expect(item.getByRole("link", { name: "Change what the team asks you" })).toHaveAttribute("href", "/t/shop/agreement");
     // A question from before the agreement says nothing of the kind.
@@ -1616,11 +1627,13 @@ test("the admin sets how often a message may reach them; answers that take the r
     await page.goto("/t/shop/inbox");
     // An escalation says the approval rule that sent it up: the team's own setting, so nothing here changes it.
     const escalated = page.locator("#task-904");
+    await escalated.getByText("Show reasoning").click();
     await expect(escalated.getByText("Asked because: the approval rules: size L is over this team's M (team.json approval).")).toBeVisible();
     await expect(escalated.getByRole("link", { name: "Change what the team asks you" })).toHaveCount(0);
     // The third: the option the recommendation names, with nothing added, is the recommendation as it stood, and is
     // recorded in the recommendation's own words.
     const item = page.locator("#task-903");
+    await item.getByText("Show reasoning").click();
     await expect(item.getByRole("link", { name: "Change what the team asks you" })).toBeVisible();
     await item.getByRole("radio", { name: /^\(a\) the smaller plan, 20 dollars a month/ }).check();
     await item.getByRole("button", { name: "Send the answer on #903" }).click();
