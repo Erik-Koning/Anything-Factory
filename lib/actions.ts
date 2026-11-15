@@ -2,7 +2,9 @@
 // minute starts each new one as a job of its own (a6g act, lib/commands/act.ts), so it never waits on a restart or an
 // upgrade, and marks it applied so it starts once; the job writes what came of it to the store (acted), which the web
 // app shows. A planner restart waits until the planner is idle with no member running, saying why once per reason;
-// while it waits, no new member starts (restartAsked, the guard), so the team drains to it. One this Mac first sees
+// while it waits, no new member starts (restartAsked, the guard), so the team drains to it. Once it's free, its thread
+// is retired here, in the pass that found it free and holds the team's lock, not by a job: a job started for it found
+// the planner woken again by a tick in the seconds between. A fresh planner starts at once (a6g start). One this Mac first sees
 // more than ACTION_EXPIRES_MIN after it was asked (this Mac asleep, or the team run nowhere meanwhile) isn't acted on,
 // and says so: a restart then would surprise whoever is at work now. Deleting the team is the exception: it still
 // holds. One that has waited here that long, saying why, goes on waiting.
@@ -11,7 +13,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, write
 import { join } from "node:path";
 import { applied, markApplied, whoAsked } from "./holds.ts";
 import { entryOf, FACTORY_ROOT, type RegistryEntry } from "./paths.ts";
-import { plannerBusy } from "./steer.ts";
+import { plannerBusy, retirePlanner } from "./steer.ts";
 import { type Acted, actedControl, ACTION_WORDS, type ActedOutcome, type Control, type TeamAction } from "./tasks/controls.ts";
 import type { Store } from "./tasks/store.ts";
 
@@ -42,10 +44,19 @@ export function restartAsked(run: string): string | null {
 
 // Starts `a6g act <team> <control>` as a job of its own, on this version of the factory, its output in actions.log.
 export function startJob(entry: RegistryEntry, control: Control): void {
+  run(entry, ["act", entry.name, control.id]);
+}
+
+// Starts the watchdog for the team now (a6g start), as a job of its own: what starts a fresh planner at once.
+export function wakeTeam(entry: RegistryEntry): void {
+  run(entry, ["start", entry.name]);
+}
+
+function run(entry: RegistryEntry, args: string[]): void {
   mkdirSync(entry.run, { recursive: true });
   const out = openSync(actionsLog(entry.run), "a");
   try {
-    spawn(process.execPath, [entryOf(FACTORY_ROOT), "act", entry.name, control.id], {
+    spawn(process.execPath, [entryOf(FACTORY_ROOT), ...args], {
       cwd: entry.home,
       detached: true,
       stdio: ["ignore", out, out],
@@ -62,8 +73,8 @@ const sentence = (text: string): string => {
   return /[.!?]$/.test(said) ? said : `${said}.`;
 };
 
-// Starts the actions not applied yet, oldest first. Resolves to lines for the team's log. `start`, `now` and `busy`
-// (why the planner can't be restarted now) are for tests.
+// Starts the actions not applied yet, oldest first. Resolves to lines for the team's log. `start`, `now`, `busy` (why
+// the planner can't be restarted now), `retire` and `wake` are for tests.
 export async function applyActions(
   entry: RegistryEntry,
   store: Store,
@@ -73,7 +84,15 @@ export async function applyActions(
     start = startJob,
     now = Date.now(),
     busy = (run: string) => plannerBusy(run, "it restarts"),
-  }: { start?: (entry: RegistryEntry, control: Control) => void; now?: number; busy?: (run: string) => string | null } = {}
+    retire = retirePlanner,
+    wake = wakeTeam,
+  }: {
+    start?: (entry: RegistryEntry, control: Control) => void;
+    now?: number;
+    busy?: (run: string) => string | null;
+    retire?: (run: string) => string;
+    wake?: (entry: RegistryEntry) => void;
+  } = {}
 ): Promise<string[]> {
   const done = applied(entry.run);
   const words = new Map<string, Acted>();
@@ -111,6 +130,17 @@ export async function applyActions(
         waiting ??= control.id;
         continue;
       }
+      // Free: retired now, in this pass, so nothing wakes it between the look and the restart.
+      const old = retire(entry.run);
+      markApplied(entry.run, [control.id]);
+      await say(control, "done", `The planner's thread${old ? ` (${old})` : ""} was retired; a fresh one starts now and carries on from the log.`);
+      log.push(`${whoAsked(control.by)} ${what} (${control.id}): done, ${old || "no thread"} retired`);
+      try {
+        wake(entry);
+      } catch (error) {
+        log.push(`couldn't start the watchdog for a fresh planner now (${(error as Error).message.split("\n")[0]}); its next run does`);
+      }
+      continue;
     }
     // Said before the job starts, so its own word (done, failed) is always the newer.
     await say(control, "started", STARTED[action]);
