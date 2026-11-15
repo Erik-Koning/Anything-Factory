@@ -27,6 +27,11 @@ Choosing and Each idea's description are for a pass, and don't apply to it.
 Keep it in proportion: a pass is a researcher's afternoon, not a thesis. Note every source as you go: a document's
 path, a request's id, a page's address.
 
+Read a source for what it actually shows. For a study, write one line on what it tested (the intervention, the people,
+the outcome) and conclude nothing beyond that: a study of thank-you calls says nothing about proof of impact. A number
+you cite must appear at the address you cite it from; one you can't find there again is marked "unverified", or left
+out. A page that lists things without ranking them doesn't rank them.
+
 Start where a founder would, from first principles: for each kind of person the product brings together, the job they
 hire it for, what that job costs them today (time, money, trust, dignity), and the scarce thing everyone is short of.
 Ask where a tenfold improvement is possible, not a tenth. Then look at how it is today:
@@ -73,10 +78,29 @@ what exists is a UX finding: file it as one (`--kind ux` with a severity), not a
 polish has missed the point: bring at least one bet on growth or on the product lasting, when the research supports
 one, and say so in the report when it doesn't.
 
+Hold the pass to what a founder would ask of it:
+
+- **Outside the team.** Most of what you file changes what someone outside the team meets: a user, a customer, a
+  partner, a funder. A tool for the team's own operators (an admin page, a report) is a step towards a bet, never the
+  bet: file it as the first step of the outcome it serves, titled by that outcome.
+- **Every side.** The product serves several kinds of people (its direction and documents name them, and which comes
+  first). File for each side, the one the direction puts first above all, or say in the report, a line a side, why its
+  best candidate lost to every idea you filed.
+- **How it pays for itself.** Where the product's documents leave open how it sustains itself, one idea names an
+  income line (a fee, an optional tip, a commission, a contract) and who pays it, within the direction. Money is the
+  operator's to decide: file it as theirs.
+- **Upside first.** Rank by how much changes if the bet is right, then by how sure you are; not by how sure the build
+  is. A season or deadline within a month that a bet could use (a giving season, a launch, a renewal) moves it up, and
+  says so.
+- **What's still open.** Read what the documents list as open or unsolved: an open question there is often the
+  biggest bet, and a pass that skips it says why.
+
 Every idea is a bet. Name the riskiest assumption it rests on, the cheapest way to learn whether that's true before
 the whole thing is built (a page that measures interest, a version done by hand for a few users, a question to five
 of the people it's for, a look at the data the product already has), and the number it should move, with the result
-that means stop. An idea with no test you can name is a hunch, and is scored as one.
+that means stop. An idea with no test you can name is a hunch, and is scored as one. Write the stop result before the
+test: it must be a result that could actually happen, and that would say no to the assumption as you wrote it. A test
+that needs real users the team can't reach (a team's own stack has none) is a question to real people instead.
 
 Search the earlier tasks first (`a6g task list --all`). If an idea is already there, add your evidence to it with
 `a6g task note <id> "…"` instead of filing it again. A rejected idea comes back only with new evidence that answers why
