@@ -9,11 +9,14 @@ import { addTask, type TaskInput } from "../../lib/tasks/add.ts";
 import { agreementChanges, agreementFrom, sameAgreement } from "../../lib/tasks/agreement.ts";
 import { answer } from "../../lib/tasks/answer.ts";
 import {
+  actionControl,
+  actionsOf,
   agreementControl,
   agreementOf,
   budgetControl,
   type Control,
   type HoldScope,
+  holdOf,
   type Limits,
   limitsOf,
   pauseControl,
@@ -23,6 +26,7 @@ import {
   retiredOf,
   startControl,
   subscriptionsControl,
+  type TeamAction,
 } from "../../lib/tasks/controls.ts";
 import type { StartAsk } from "../../lib/tasks/start.ts";
 import { type DecisionRecord, requestReview } from "../../lib/tasks/decisions.ts";
@@ -43,7 +47,19 @@ export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/m
 export type { TeamDoc, TeamSubscriptions } from "../../lib/tasks/teams.ts";
 export type { Control, HoldScope, HoldState, Limits, StartState } from "../../lib/tasks/controls.ts";
 export type { StartAsk } from "../../lib/tasks/start.ts";
-export { agreementOf, describeHold, isHoldScope, journeysUnderWay, limitsOf, retiredOf } from "../../lib/tasks/controls.ts";
+export {
+  ACTION_WORDS,
+  actionsOf,
+  agreementOf,
+  describeHold,
+  holdOf,
+  isHoldScope,
+  isTeamAction,
+  journeysUnderWay,
+  limitsOf,
+  retiredOf,
+} from "../../lib/tasks/controls.ts";
+export type { ActionState, TeamAction } from "../../lib/tasks/controls.ts";
 export type { Agreement } from "../../lib/tasks/agreement.ts";
 export type { DecisionRecord } from "../../lib/tasks/decisions.ts";
 export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from "../../lib/tasks/spend.ts";
@@ -87,7 +103,7 @@ export const decisionsFor = cache((team: string): Promise<DecisionRecord[]> => s
 export const retirements = cache(async (): Promise<Map<string, Control>> => {
   const rows = await graphDb()
     .collection("controls")
-    .find({ kind: { $in: ["retire", "restore"] } })
+    .find({ $or: [{ kind: { $in: ["retire", "restore"] } }, { kind: "action", action: "unregister" }] })
     .toArray();
   const byTeam = new Map<string, Control[]>();
   for (const { _id: _ignored, ...doc } of rows) {
@@ -176,6 +192,22 @@ export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journe
 // A resume from the web; the note goes to the planner as the operator's feedback.
 export const resumeFromWeb = (team: string, { note, from }: { note: string; from: string }): Promise<Control> =>
   storeFor(team).controls.create(resumeControl(team, `web:${from}`, note));
+
+// An action for the team's lead to do at once (lib/tasks/controls.ts TEAM_ACTIONS), by an admin's stakeholder id. One
+// of the same kind that its lead hasn't finished yet is refused, so a second press doesn't run it twice. Deleting the
+// team pauses it now first, so nothing starts or merges in the minute before its lead takes it off: from the moment
+// it's asked, it's off the web app too (retiredOf).
+export async function actionFromWeb(team: string, ask: { action: TeamAction; note: string; from: string }): Promise<Control> {
+  const store = storeFor(team);
+  const controls = await store.controls.all();
+  const open = actionsOf(controls).find((s) => s.action === ask.action && (s.outcome === "asked" || s.outcome === "started" || s.outcome === "waiting"));
+  if (open)
+    throw new Refused(`That was asked already, ${open.outcome === "waiting" ? "and waits" : "and its Mac is on it"}: it shows here when it's done.`);
+  const by = `web:${ask.from}`;
+  if (ask.action === "unregister" && !holdOf(controls))
+    await store.controls.create(pauseControl([], team, { scope: "now", by, note: ask.note || "Deleted from the web app" }));
+  return store.controls.create(actionControl(team, by, ask.action, ask.note));
+}
 
 // What the team used, day by day and machine by machine, from `from` (YYYY-MM-DD) on (lib/usage.ts publishes it).
 export const usageOf = (team: string, from: string): Promise<UsageDay[]> => storeFor(team).usage.since(from);

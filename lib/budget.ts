@@ -9,6 +9,17 @@ import { type Control, holdOf, type Limits, pauseControl, resumeControl } from "
 import type { Task } from "./tasks/model.ts";
 import { type AccountSpend, dollars, limitDollars, percentOf, type Spend, weekOf } from "./tasks/spend.ts";
 
+// A budget in words, in its own unit (dollars, or percent of a subscription's week), with its limits on each
+// subscription: what a6g budget says, and the watchdog's log when one is set.
+export function describeLimits(limits: Limits): string {
+  const one = (n: number | null) => (n === null ? "none" : limits.unit === "subscription" ? `${n}%` : `$${n}`);
+  const shares = limits.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : "";
+  const each = Object.entries(limits.accounts ?? {}).map(
+    ([name, own]) => `; on ${name}: ${one(own.daily)} a day, ${one(own.weekly)} a week, ${one(own.total)} in all`
+  );
+  return `${one(limits.daily)} a day, ${one(limits.weekly)} a week, ${one(limits.total)} in all since ${limits.since.slice(0, 10)}${shares}${each.join("")}`;
+}
+
 export const WARN_AT = 0.8;
 export const HARD_AT = 1.1;
 const LIMITS = [

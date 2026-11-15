@@ -17,6 +17,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { answerCheckInByReply, relayAnswers } from "../answers.ts";
+import { applyActions } from "../actions.ts";
 import { applyReviews } from "../reviews.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
@@ -903,6 +904,10 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   // The operator's reviews of decisions are written onto their records while the store is open (lib/reviews.ts); one
   // that can't be written now waits for the next run, and never keeps a pause from applying.
   let reviews: Awaited<ReturnType<typeof applyReviews>> = { log: [], tell: [] };
+  let applied: ReturnType<typeof applyControls>;
+  // The operator's actions (lib/actions.ts), each started as a job of its own; one that can't start now waits for the
+  // next run.
+  let acted: string[] = [];
   try {
     const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
     try {
@@ -912,6 +917,13 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
       } catch (error) {
         problem(`couldn't write the operator's reviews onto the decisions: ${(error as Error).message.split("\n")[0]}`);
       }
+      // The pauses before the actions: deleting a team pauses it now, then takes it off this Mac.
+      applied = applyControls(entry.run, controls, entry.operator);
+      try {
+        acted = await applyActions(entry, store, controls, machineName());
+      } catch (error) {
+        problem(`couldn't start the operator's actions: ${(error as Error).message.split("\n")[0]}`);
+      }
     } finally {
       await store.close();
     }
@@ -919,7 +931,6 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
     problem(`couldn't read the operator's controls: ${(error as Error).message.split("\n")[0]}`);
     return false;
   }
-  const applied = applyControls(entry.run, controls, entry.operator);
   // The run folder's copy of the agreement in force, put right every pass: a folder made anew, or a version from
   // before it was kept, catches up within a minute.
   keepAgreement(entry.run, controls);
@@ -931,7 +942,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
   } catch (error) {
     problem(`couldn't set the team's subscriptions: ${(error as Error).message.split("\n")[0]}`);
   }
-  for (const line of [...applied.log, ...moved, ...reviews.log]) log(line);
+  for (const line of [...applied.log, ...moved, ...reviews.log, ...acted]) log(line);
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
@@ -968,7 +979,7 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
           : "no planner yet: the control waits for one"
     );
   }
-  return applied.log.length + moved.length + reviews.log.length > 0;
+  return applied.log.length + moved.length + reviews.log.length + acted.length > 0;
 }
 
 // Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from

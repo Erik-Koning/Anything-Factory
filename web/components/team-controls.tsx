@@ -1,11 +1,8 @@
-// The operator's pause and resume, on a team's overview (admins only): where the team stands as its Mac last reported,
-// what was asked since, and the forms. A pause stops the team now, or once the work or journeys under way are merged;
-// a resume starts it again and takes the operator's feedback to the planner. Each asks for an authenticator code.
-import { controlAction } from "../app/t/[team]/actions.ts";
-import { LIMITS } from "../server/access.ts";
-import { type Control, describeHold, journeysUnderWay, type Task, type TeamDoc } from "../server/factory.ts";
-import { askedBy, controlSaid, controlsView } from "../server/views.ts";
-import { SubmitButton } from "./submit-button.tsx";
+// Where the operator's controls stand, on a team's overview (admins only): what was asked that its Mac hasn't applied
+// yet, a pause under way or in force (with its report), and what came of each action (a planner or environment
+// restart, an upgrade, a wake). The buttons themselves are beside the team's name (components/team-actions.tsx).
+import { type ActionState, actionsOf, type Control, describeHold, type TeamDoc } from "../server/factory.ts";
+import { actionSaid, askedBy, controlSaid, controlsView } from "../server/views.ts";
 import { Ago, Chip } from "./ui.tsx";
 
 export function CodeField({ id }: { id: string }) {
@@ -17,21 +14,22 @@ export function CodeField({ id }: { id: string }) {
   );
 }
 
-// `expanded`: the pause form, reopened after a refusal.
-export function TeamControls({ team, controls, tasks, expanded = false }: { team: TeamDoc; controls: Control[]; tasks: Task[]; expanded?: boolean }) {
+const OUTCOME_TONE: Record<ActionState["outcome"], string> = { asked: "caution", started: "caution", waiting: "caution", done: "ok", failed: "warn" };
+
+export function TeamControls({ team, controls }: { team: TeamDoc; controls: Control[] }) {
   const status = team.status;
   const hold = status?.hold ?? null;
   const { pending, recent } = controlsView(status, controls);
   const pausing = status?.state === "pausing" && hold !== null;
   const paused = status?.state === "paused";
-  const open = tasks.filter((t) => t.kind === "journey" && t.status !== "done" && t.status !== "rejected");
-  const underWay = new Set(journeysUnderWay(tasks).map((j) => j.id));
+  const actions = actionsOf(controls).slice(0, 6);
   return (
     <section className="panel" aria-labelledby="controls">
-      <h2 id="controls">Pause and resume</h2>
+      <h2 id="controls">Controls</h2>
+      <p className="small muted">Stop, pause and resume are beside the team&apos;s name; restarting, upgrading, waking and deleting it, under ⋯.</p>
       {pending ? (
         <p className="small">
-          <Chip tone="caution">waiting for the team's Mac</Chip> {controlSaid(pending)} <Ago at={pending.at} />; it applies within a minute.
+          <Chip tone="caution">waiting for the team&apos;s Mac</Chip> {controlSaid(pending)} <Ago at={pending.at} />; it applies within a minute.
         </p>
       ) : null}
 
@@ -53,7 +51,7 @@ export function TeamControls({ team, controls, tasks, expanded = false }: { team
           ) : null}
           {hold.stuck.length ? (
             <>
-              <p className="small muted">Can't move without you (it pauses anyway):</p>
+              <p className="small muted">Can&apos;t move without you (it pauses anyway):</p>
               <ul className="small">
                 {hold.stuck.map((line) => (
                   <li key={line}>{line}</li>
@@ -85,69 +83,21 @@ export function TeamControls({ team, controls, tasks, expanded = false }: { team
         </div>
       ) : null}
 
-      {paused || pausing ? (
-        <form action={controlAction} className="stack">
-          <input type="hidden" name="team" value={team.name} />
-          <input type="hidden" name="kind" value="resume" />
-          <label htmlFor="resume-note">
-            Feedback for the planner (optional)
-            <textarea id="resume-note" name="note" rows={3} maxLength={LIMITS.note} />
-          </label>
-          <CodeField id="resume-code" />
-          <div>
-            <SubmitButton className="primary">Resume</SubmitButton>
-          </div>
-        </form>
-      ) : null}
-
-      {!paused ? (
-        <details open={expanded}>
-          <summary>{pausing ? "Pause now instead" : "Pause the team"}</summary>
-          <form action={controlAction} className="stack">
-            <input type="hidden" name="team" value={team.name} />
-            <input type="hidden" name="kind" value="pause" />
-            <fieldset className="choices">
-              <legend>When does it stop?</legend>
-              {pausing ? null : (
-                <>
-                  <label className="check">
-                    <input type="radio" name="scope" value="tasks" defaultChecked />
-                    <span>After the work under way: what's being built or reviewed finishes and merges; nothing new starts.</span>
-                  </label>
-                  <label className="check">
-                    <input type="radio" name="scope" value="journeys" disabled={!open.length} />
-                    <span>After these journeys are done, their verification and polish included:</span>
-                  </label>
-                  {open.length ? (
-                    <div className="choices nested">
-                      {open.map((j) => (
-                        <label key={j.id} className="check">
-                          <input type="checkbox" name="journey" value={j.id} defaultChecked={underWay.has(j.id)} />
-                          <span>
-                            #{j.id} {j.title}
-                            {underWay.has(j.id) ? null : <span className="muted"> (not begun)</span>}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  ) : null}
-                </>
-              )}
-              <label className="check">
-                <input type="radio" name="scope" value="now" defaultChecked={pausing} />
-                <span>Now: nothing starts or merges; members finish their current turn.</span>
-              </label>
-            </fieldset>
-            <label htmlFor="pause-note">
-              Note (optional, for the record and the report)
-              <textarea id="pause-note" name="note" rows={2} maxLength={LIMITS.note} />
-            </label>
-            <CodeField id="pause-code" />
-            <div>
-              <SubmitButton className="danger">{pausing ? "Pause now" : "Pause"}</SubmitButton>
-            </div>
-          </form>
-        </details>
+      {actions.length ? (
+        <ul className="plain rows small actions-done">
+          {actions.map((s) => (
+            <li key={s.control.id}>
+              <div className="head">
+                <span>{actionSaid(s.control)}</span>
+                <Chip tone={OUTCOME_TONE[s.outcome]}>{s.outcome}</Chip>
+                <span className="muted">
+                  {askedBy(s.control.by)} · <Ago at={s.at} />
+                </span>
+              </div>
+              {s.said ? <p className="said">{s.said}</p> : null}
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       {recent.length ? (

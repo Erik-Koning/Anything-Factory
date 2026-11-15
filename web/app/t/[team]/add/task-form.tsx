@@ -60,6 +60,8 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
                 {KIND_LABEL[k]}
               </option>
             ))}
+            {/* A research task in the ideas area, which the planner hands to the innovator (lib/tasks/ops.ts). */}
+            {admin ? <option value="ideas">Ideas: an innovation pass, for the innovator</option> : null}
           </select>
         </label>
         {admin || finding ? (
@@ -116,10 +118,6 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
           <label className="check">
             <input type="checkbox" name="approved" value="yes" defaultChecked={state.approved} />
             Approve it now, without a score or the approver
-          </label>
-          <label>
-            Code from your authenticator, to approve it now
-            <input name="code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" />
           </label>
         </>
       ) : null}

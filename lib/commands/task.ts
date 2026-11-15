@@ -76,6 +76,8 @@ export const USAGE = `usage: a6g task <command>
       (a member's finding goes to triage; the planner's work is proposed; yours may be --approved)
       --kind design: the design check-in, which the planner raises to you once the foundation is built; until you've
       agreed it (answer it, or a6g task status <id> done), only scaffold and test-infra work is claimed
+      the planner routes each task by what it asks, not only its kind: research that asks for ideas, an audit or a
+      security sweep goes to the teammate for it (--area ideas marks an innovation pass for the innovator outright)
   list [--status s,t] [--kind k] [--all] [--claimable] [--json]   ·   show <id> [--json]   ·   graph [--out <file>] [--all]
   note <id> "<text>"   ·   screen <id> clear|risky --note "…" (the planner: a stakeholder's words, before they're a proposal)
   stream <id> want --why "…"   ·   stream <id> concept --move "…" --record <file>   ·   stream <id> build concept|retreat [--note "…"]

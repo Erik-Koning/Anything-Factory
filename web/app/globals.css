@@ -338,6 +338,187 @@ li.waiting:has(button[data-pending]) > :not(:has(button[data-pending])) {
   }
 }
 
+/* --- Over the page ---------------------------------------------------------------------------------------------- */
+/* What a button did (components/toaster.tsx): a toast in the lower corner, over the page, so nothing on it moves. */
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: grid;
+  justify-items: end;
+  max-width: min(440px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  --tone: var(--ok);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 8px 10px 14px;
+  background: color-mix(in srgb, var(--tone) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line));
+  border-left: 3px solid var(--tone);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--rim), var(--float);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: toast-in 180ms var(--ease);
+}
+.toast > span {
+  padding-top: 5px;
+  white-space: pre-line;
+}
+.toast.error {
+  --tone: var(--signal);
+}
+.toast > button {
+  flex: none;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* A team's controls, beside its name (components/team-actions.tsx): stop or pause, resume, and ⋯ for the rest. */
+.team-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.team-actions form {
+  display: contents;
+}
+/* A menu behind ⋯ (components/overlays.tsx): a key like the switcher's; open, its items lie over the page. */
+.menu {
+  position: relative;
+}
+.menu > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--h-s);
+  min-height: var(--h-s);
+  padding: 0 8px;
+  list-style: none;
+  background: var(--key);
+  border: 1px solid color-mix(in srgb, var(--edge) 55%, var(--line));
+  border-radius: var(--r-ctl);
+  box-shadow: var(--rim), var(--raise-s);
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+.menu > summary::before {
+  content: none;
+}
+.menu[open] > summary {
+  margin-bottom: 0;
+  background: var(--well);
+  box-shadow: var(--sink);
+}
+.menu-items {
+  position: absolute;
+  right: 0;
+  z-index: 25;
+  display: grid;
+  min-width: 240px;
+  max-width: calc(100vw - 32px);
+  margin-top: 6px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--float);
+}
+.menu-items form {
+  display: block;
+}
+.menu-items hr {
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+button.menu-item {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+}
+button.menu-item:hover,
+button.menu-item:focus-visible {
+  background: var(--well);
+  border-color: transparent;
+  box-shadow: none;
+  filter: none;
+}
+button.menu-item.danger {
+  color: var(--signal);
+}
+button.menu-item:disabled {
+  background: none;
+  color: var(--ink-3);
+}
+/* A dialog over the page (components/overlays.tsx): the page dims behind it and stays where it was. */
+.dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--float);
+  color: var(--ink);
+}
+.dialog::backdrop {
+  background: rgb(23 25 27 / 38%);
+}
+.dialog-body {
+  padding: 16px 20px 20px;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dialog-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+/* What came of each action, in the overview's Controls panel. */
+.actions-done .head {
+  gap: 8px;
+}
+.actions-done .said {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  white-space: pre-line;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 /* --- The frame -------------------------------------------------------------------------------------------------- */
 .top:where(:not(.level-graph *)) {
   position: sticky;
@@ -3641,4 +3822,11 @@ ol.setup > li > * {
   .tabs:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending)) {
     outline: none;
   }
+}
+/* A team's controls sit at the right of its heading, the switcher after them. */
+.team-head .team-actions {
+  margin-left: auto;
+}
+.team-head .team-actions + .switcher {
+  margin-left: 0;
 }

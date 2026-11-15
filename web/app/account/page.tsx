@@ -20,6 +20,7 @@ import {
   turnOnIpCheckAction,
 } from "./actions.ts";
 import { AuthenticatorSetup } from "./authenticator.tsx";
+import { ActionForm } from "../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Account" };
 
@@ -84,7 +85,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
               <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
               <BackupCodes password={password} />
-              <form action={turnOffAuthenticatorAction} className="inline">
+              <ActionForm action={turnOffAuthenticatorAction} className="inline">
                 {password ? (
                   <label>
                     Password, to turn it off
@@ -96,7 +97,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                   <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
                 </label>
                 <SubmitButton className="danger">Turn it off</SubmitButton>
-              </form>
+              </ActionForm>
             </AuthenticatorSetup>
           )}
         </section>
@@ -113,19 +114,19 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
               {s.id === viewer.sessionId ? (
                 <Chip tone="ok">this one</Chip>
               ) : (
-                <form action={revokeSessionAction}>
+                <ActionForm action={revokeSessionAction}>
                   <input type="hidden" name="id" value={s.id} />
                   <SubmitButton className="danger">{`End the session on ${deviceOf(s.userAgent)}`}</SubmitButton>
-                </form>
+                </ActionForm>
               )}
             </li>
           ))}
         </ul>
         <div className="inline">
           {sessions.length > 1 ? (
-            <form action={revokeOtherSessionsAction}>
+            <ActionForm action={revokeOtherSessionsAction}>
               <SubmitButton>End every other session</SubmitButton>
-            </form>
+            </ActionForm>
           ) : null}
           <SignOutButton label="Sign out" className="button" />
         </div>
@@ -152,10 +153,10 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                   {a.ip === viewer.ip ? (
                     <Chip tone="ok">this one</Chip>
                   ) : (
-                    <form action={forgetIpAction}>
+                    <ActionForm action={forgetIpAction}>
                       <input type="hidden" name="ip" value={a.ip} />
                       <SubmitButton className="quiet s">{`Forget ${a.ip}`}</SubmitButton>
-                    </form>
+                    </ActionForm>
                   )}
                 </li>
               ))}
@@ -166,7 +167,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           {viewer.admin ? null : viewer.ipCheck ? (
             <details>
               <summary>Turn the check off</summary>
-              <form action={turnOffIpCheckAction} className="stack">
+              <ActionForm action={turnOffIpCheckAction} className="stack">
                 <p className="hint">
                   Then a sign-in from anywhere goes ahead without an email to you. It takes a sign-in from the last ten minutes
                   {viewer.twoFactor ? " and a code from your authenticator" : ""}, and we email you that it was turned off.
@@ -180,12 +181,12 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 <div>
                   <SubmitButton className="danger">Stop checking new addresses</SubmitButton>
                 </div>
-              </form>
+              </ActionForm>
             </details>
           ) : (
-            <form action={turnOnIpCheckAction}>
+            <ActionForm action={turnOnIpCheckAction}>
               <SubmitButton>Check new addresses again</SubmitButton>
-            </form>
+            </ActionForm>
           )}
         </section>
         <section className="panel" aria-labelledby="activity">

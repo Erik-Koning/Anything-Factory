@@ -2,21 +2,25 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { CONTACT_EVERY, isReserved, LEVEL_MEANS, LEVELS, type Level, NOTES_MAX, type Topic, TOPIC_MEANS, TOPICS } from "../../lib/tasks/agreement.ts";
 import { type AgreementFormState, agreementAction } from "../app/t/[team]/actions.ts";
+import { toast } from "./toaster.tsx";
 
 const LEVEL_NAME: Record<Level, string> = { "hands-on": "Hands-on", balanced: "Balanced", "hands-off": "Hands-off" };
 const named = (topic: Topic): string => `${topic.charAt(0).toUpperCase()}${topic.slice(1)}`;
 
 // The working agreement, to change: the level, each topic the agreement may set, how often a message may reach the
-// operator, their standing instructions, and a code from their authenticator. `never` are topics this team never
+// operator, and their standing instructions; a change is said in a toast. `never` are topics this team never
 // asks its operator about whatever the agreement says (the platform and the stack, of one who isn't technical): said,
 // not offered.
 export function AgreementForm({ team, initial, never }: { team: string; initial: Omit<AgreementFormState, "error">; never: Topic[] }) {
+  // The server action itself, so the form also posts without scripts (React names it in a hidden field).
   const [state, action, pending] = useActionState(agreementAction, { error: null, ...initial });
   const [length, setLength] = useState(state.notes.length);
   const alert = useRef<HTMLParagraphElement>(null);
-  // After a refusal the form is made again, so focus goes to what went wrong rather than nowhere.
+  // After a refusal the form is made again, so focus goes to what went wrong rather than nowhere; a change is said in a
+  // toast (the form stays, so its effect runs).
   useEffect(() => {
     if (state.error) alert.current?.focus();
+    if (state.ok) toast(state.ok);
   }, [state]);
   const topics = TOPICS.filter((topic) => !isReserved(topic) && !never.includes(topic));
   return (
@@ -128,10 +132,6 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
       <p id="agreement-notes-count" className="hint">
         {length.toLocaleString("en")} of {NOTES_MAX.toLocaleString("en")} characters
       </p>
-      <label htmlFor="agreement-code">
-        Code from your authenticator
-        <input id="agreement-code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required />
-      </label>
       <div className="inline">
         <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Saving…" : "Change the agreement"}

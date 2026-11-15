@@ -139,7 +139,7 @@ test("from then on the password asks for the authenticator's code; new backup co
   await authenticator.getByLabel("Password, to turn it off").fill(PASSWORD);
   await authenticator.getByLabel("A code from it, to turn it off").fill(await freshCode(page, samsAuthenticator));
   await authenticator.getByRole("button", { name: "Turn it off" }).click();
-  await expect(page.getByRole("status")).toContainText("The authenticator is off.");
+  await expect(page.locator(".toast")).toContainText("The authenticator is off.");
   await expect(authenticator.getByText("off", { exact: true })).toBeVisible();
   // Off by their own choice: nothing is due again.
   await page.goto("/");
@@ -178,14 +178,15 @@ test("the authenticator can wait: “Set it up later” goes on to Teams; the ac
   expect((await sessions.updateOne({ userId: user?._id }, { $set: { createdAt: new Date(Date.now() - 11 * 60_000) } })).modifiedCount).toBe(1);
   await addresses.getByText("Turn the check off").click();
   await addresses.getByRole("button", { name: "Stop checking new addresses" }).click();
-  await expect(home.page.locator("main").getByRole("alert")).toContainText("Sign out and in again, then do this within 10 minutes.");
+  // Refused in place, in a toast: the page stays as it was.
+  await expect(home.page.locator(".toast.error")).toContainText("Sign out and in again, then do this within 10 minutes.");
   await expect(addresses.getByText("new ones are checked")).toBeVisible();
   expect((await users.findOne({ email: LEE }))?.ipCheck).toBe(true);
 
   // A fresh one does, and they're emailed that it was turned off.
   await sessions.updateOne({ userId: user?._id }, { $set: { createdAt: new Date() } });
   const before = mailsTo(LEE).length;
-  await addresses.getByText("Turn the check off").click();
+  // The form is still open from the refusal, as it was left.
   await addresses.getByRole("button", { name: "Stop checking new addresses" }).click();
   await expect(home.page.getByRole("status")).toContainText("New IP addresses are no longer checked.");
   await expect(addresses.getByText("new ones aren't checked")).toBeVisible();

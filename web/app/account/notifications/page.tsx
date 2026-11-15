@@ -22,6 +22,7 @@ import { deliveryOf } from "../../../server/notifier.ts";
 import { requireViewer } from "../../../server/viewer.ts";
 import { saveNotificationsAction, testNotificationAction } from "./actions.ts";
 import { TimeZoneSelect } from "./time-zone-select.tsx";
+import { ActionForm } from "../../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Notifications" };
 
@@ -73,7 +74,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         <p className="notice">On this machine, emails go to the server&apos;s console instead of being sent.</p>
       ) : null}
       {kinds.length ? (
-        <form action={saveNotificationsAction} className="stack">
+        <ActionForm action={saveNotificationsAction} className="stack">
           <section className="panel" aria-labelledby="what">
             <h2 id="what">What to email you about</h2>
             <p className="hint">
@@ -144,7 +145,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           <div>
             <SubmitButton className="primary">Save notifications</SubmitButton>
           </div>
-        </form>
+        </ActionForm>
       ) : (
         <p className="panel empty">You don&apos;t follow a team yet, so there&apos;s nothing to email you about.</p>
       )}
@@ -166,10 +167,10 @@ export default async function NotificationsPage({ searchParams }: { searchParams
             </>
           ) : null}
         </dl>
-        <form action={testNotificationAction} className="inline">
+        <ActionForm action={testNotificationAction} className="inline">
           <SubmitButton>Send me a test email</SubmitButton>
           <span className="hint">It says what you&apos;ll get, so you can see that it arrives and isn&apos;t taken for spam.</span>
-        </form>
+        </ActionForm>
       </section>
     </>
   );

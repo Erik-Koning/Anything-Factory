@@ -10,6 +10,7 @@ import { linkedMachines, type Machine, ownersOf } from "../../server/machines.ts
 import { requireViewer } from "../../server/viewer.ts";
 import { offSite } from "../../server/views.ts";
 import { unlinkMachineAction } from "./actions.ts";
+import { ActionForm } from "../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Machines" };
 
@@ -188,10 +189,10 @@ function MachineCard({
       ) : (
         <p className="empty small">{machine.at ? "No team is registered on it." : "It hasn't reported yet."}</p>
       )}
-      <form action={unlinkMachineAction}>
+      <ActionForm action={unlinkMachineAction}>
         <input type="hidden" name="id" value={machine.id} />
         <SubmitButton className="quiet danger s">{`Unlink ${machine.name}`}</SubmitButton>
-      </form>
+      </ActionForm>
     </li>
   );
 }

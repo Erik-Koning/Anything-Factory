@@ -2,9 +2,10 @@
 // One's own account: sessions (ended by id, so session tokens never reach the page), the IP addresses one has
 // confirmed and whether new ones are checked, and an authenticator for anyone who isn't an admin (an admin's comes
 // from create-admin and stays on, and an admin's addresses are always checked).
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
-import { withNotice } from "../../components/ui.tsx";
+import type { ActionResult } from "../../components/action-result.ts";
 import { pendingStep } from "../../server/access.ts";
 import { hasPassword, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
 import { auth } from "../../server/auth.ts";
@@ -17,6 +18,12 @@ import { checkCode } from "../../server/step-up.ts";
 import { authHeaders as headers, getViewer, record, STEP_PAGE } from "../../server/viewer.ts";
 
 const BACK = "/account";
+
+// What an in-place action says, with the page refreshed where it is (components/action-form.tsx shows it as a toast).
+const done = (result: ActionResult): ActionResult => {
+  refresh();
+  return result;
+};
 // How recent a sign-in must be to stop checking new IP addresses.
 const FRESH_MINUTES = 10;
 
@@ -30,52 +37,52 @@ async function self(onboarding = false) {
   return viewer;
 }
 
-export async function revokeSessionAction(form: FormData): Promise<void> {
+export async function revokeSessionAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
   const id = form.get("id");
   const sessions = await auth().api.listSessions({ headers: await headers() });
   const target = sessions.find((s) => s.id === id);
-  if (!target) redirect(withNotice(BACK, { error: "That session has ended already." }));
-  if (target.id === viewer.sessionId) redirect(withNotice(BACK, { error: "That's this session: sign out instead." }));
+  if (!target) return done({ error: "That session has ended already." });
+  if (target.id === viewer.sessionId) return done({ error: "That's this session: sign out instead." });
   await auth().api.revokeSession({ body: { token: target.token }, headers: await headers() });
-  redirect(withNotice(BACK, { ok: "That session has ended." }));
+  return done({ ok: "That session has ended." });
 }
 
-export async function revokeOtherSessionsAction(): Promise<void> {
+export async function revokeOtherSessionsAction(): Promise<ActionResult> {
   await self();
   await auth().api.revokeOtherSessions({ headers: await headers() });
-  redirect(withNotice(BACK, { ok: "Every other session has ended." }));
+  return done({ ok: "Every other session has ended." });
 }
 
 // Forgets a confirmed address: the next session from it asks by email again. Not the one this request comes from.
-export async function forgetIpAction(form: FormData): Promise<void> {
+export async function forgetIpAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
   const ip = String(form.get("ip") ?? "");
-  if (ip === viewer.ip) redirect(withNotice(BACK, { error: "That's the address you're using now." }));
-  if (!(await forgetIp(viewer.userId, ip))) redirect(withNotice(BACK, { error: "That address isn't on your list." }));
+  if (ip === viewer.ip) return done({ error: "That's the address you're using now." });
+  if (!(await forgetIp(viewer.userId, ip))) return done({ error: "That address isn't on your list." });
   await record(viewer, { action: "ip.forgotten", outcome: "ok", target: ip });
-  redirect(withNotice(BACK, { ok: `${ip} is forgotten: a sign-in from it will ask by email again.` }));
+  return done({ ok: `${ip} is forgotten: a sign-in from it will ask by email again.` });
 }
 
 // Stops checking new IP addresses, for one's own account; never an admin's. It takes a sign-in from the last ten
 // minutes, and a code from the authenticator when one is on, so a session left open somewhere can't quietly drop the
 // check; and the person is told by email first, so if the email can't go the check stays.
-export async function turnOffIpCheckAction(form: FormData): Promise<void> {
+export async function turnOffIpCheckAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
-  if (viewer.admin) redirect(withNotice(BACK, { error: "An admin's IP addresses are always checked." }));
-  if (!viewer.ipCheck) redirect(BACK);
+  if (viewer.admin) return done({ error: "An admin's IP addresses are always checked." });
+  if (!viewer.ipCheck) return done({});
   const requestHeaders = await headers();
   const current = await auth().api.getSession({ headers: requestHeaders });
   if (!current) redirect("/sign-in");
   if (Date.now() - new Date(current.session.createdAt).getTime() > FRESH_MINUTES * 60_000) {
     await record(viewer, { action: "ip-check.off", outcome: "refused", detail: `the sign-in is older than ${FRESH_MINUTES} minutes` });
-    redirect(withNotice(BACK, { error: `Sign out and in again, then do this within ${FRESH_MINUTES} minutes. New IP addresses are still checked.` }));
+    return done({ error: `Sign out and in again, then do this within ${FRESH_MINUTES} minutes. New IP addresses are still checked.` });
   }
   if (viewer.twoFactor) {
     const wrong = await checkCode(viewer.userId, String(form.get("code") ?? "").replace(/\s+/g, ""), requestHeaders);
     if (wrong) {
       await record(viewer, { action: "ip-check.off", outcome: "failed", detail: wrong });
-      redirect(withNotice(BACK, { error: `${wrong} New IP addresses are still checked.` }));
+      return done({ error: `${wrong} New IP addresses are still checked.` });
     }
   }
   const { baseURL } = config();
@@ -87,17 +94,17 @@ export async function turnOffIpCheckAction(form: FormData): Promise<void> {
   });
   await setIpCheck(viewer.userId, false);
   await record(viewer, { action: "ip-check.off", outcome: "ok" });
-  redirect(withNotice(BACK, { ok: "New IP addresses are no longer checked. We've emailed you that this was turned off." }));
+  return done({ ok: "New IP addresses are no longer checked. We've emailed you that this was turned off." });
 }
 
 // Checks new IP addresses again. The address it's turned on from is remembered as one of theirs, or the very next page
 // would ask them to confirm it.
-export async function turnOnIpCheckAction(): Promise<void> {
+export async function turnOnIpCheckAction(): Promise<ActionResult> {
   const viewer = await self();
   await rememberIp(viewer.userId, viewer.ip, "check turned on");
   await setIpCheck(viewer.userId, true);
   await record(viewer, { action: "ip-check.on", outcome: "ok" });
-  redirect(withNotice(BACK, { ok: "New IP addresses are checked again: a sign-in from one you haven't used asks you by email first." }));
+  return done({ ok: "New IP addresses are checked again: a sign-in from one you haven't used asks you by email first." });
 }
 
 export interface AuthenticatorState {
@@ -158,14 +165,14 @@ export async function authenticatorAction(previous: AuthenticatorState, form: Fo
 
 // Turning it off takes a code from it (and the password of an account that has one), so a session left open somewhere
 // can't quietly remove it.
-export async function turnOffAuthenticatorAction(form: FormData): Promise<void> {
+export async function turnOffAuthenticatorAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
-  if (viewer.admin) redirect(withNotice(BACK, { error: "An admin's authenticator stays on." }));
+  if (viewer.admin) return done({ error: "An admin's authenticator stays on." });
   const requestHeaders = await headers();
   const wrong = await checkCode(viewer.userId, String(form.get("code") ?? "").replace(/\s+/g, ""), requestHeaders);
   if (wrong) {
     await record(viewer, { action: "authenticator.off", outcome: "failed", detail: wrong });
-    redirect(withNotice(BACK, { error: `${wrong} The authenticator is still on.` }));
+    return done({ error: `${wrong} The authenticator is still on.` });
   }
   const password = String(form.get("password") ?? "");
   const off = await auth()
@@ -176,10 +183,10 @@ export async function turnOffAuthenticatorAction(form: FormData): Promise<void> 
     );
   if (!off) {
     await record(viewer, { action: "authenticator.off", outcome: "failed", detail: "password" });
-    redirect(withNotice(BACK, { error: "That password isn't right. The authenticator is still on." }));
+    return done({ error: "That password isn't right. The authenticator is still on." });
   }
   await record(viewer, { action: "authenticator.off", outcome: "ok" });
-  redirect(withNotice(BACK, { ok: "The authenticator is off. Sign-ins no longer ask for its code." }));
+  return done({ ok: "The authenticator is off. Sign-ins no longer ask for its code." });
 }
 
 export interface BackupCodesState {

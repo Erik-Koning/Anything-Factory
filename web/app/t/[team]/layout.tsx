@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Tabs } from "../../../components/tabs.tsx";
+import { TeamActions } from "../../../components/team-actions.tsx";
 import { type SwitchTo, TeamSwitcher } from "../../../components/team-switcher.tsx";
 import Link from "next/link";
 import { Ago, Chip, QuietMark } from "../../../components/ui.tsx";
@@ -66,6 +67,10 @@ export default async function TeamLayout({ children, params }: { children: React
         <Chip>{team.status?.state ?? "no status yet"}</Chip>
         {quiet ? <QuietMark last={quiet.last} /> : null}
         <span className="muted small">you: {role}</span>
+        {/* A deleted team's own controls are gone with it: it's put back from its overview, or by a6g register. */}
+        {can(viewer, "team:control", team.name) && retired?.kind !== "action" ? (
+          <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+        ) : null}
         <TeamSwitcher current={team.name} teams={switchTo} />
       </div>
       {retired ? (
