@@ -8,11 +8,10 @@
 // (lib/reviews.ts).
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resumesWhen } from "./budget.ts";
+import { describeLimits, resumesWhen } from "./budget.ts";
 import { type Agreement, agreementChanges, agreementLines, normalised } from "./tasks/agreement.ts";
 import { agreementOf, type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
-import { dollars } from "./tasks/spend.ts";
 import { readJson, writeJson } from "./util.ts";
 
 const holdFile = (run: string): string => join(run, "hold.json");
@@ -86,7 +85,6 @@ export function writeLimits(run: string, limits: Limits | null): void {
 }
 
 export const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
-const money = (n: number | null): string => (n === null ? "none" : dollars(n));
 
 // A message for the planner from a control: one that `wake`s it starts a turn (the rest only matter to a planner in
 // the middle of one), and one to `keep` waits for the resume when the team is paused, since it asks for work.
@@ -183,7 +181,8 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     } else if (control.kind === "budget") {
       writeLimits(run, control.limits);
       const l = control.limits;
-      log.push(l ? `the budget is now ${money(l.daily)} a day, ${money(l.weekly)} a week, ${money(l.total)} in all` : "the budget was cleared");
+      // In its own unit, with its limits on each subscription: a budget set only on one isn't "none".
+      log.push(l ? `the budget is now ${describeLimits(l)}` : "the budget was cleared");
     } else if (control.kind === "agreement") {
       // Against the one in force before it; several at once are told one by one, so the planner ends on the newest.
       const before = agreementOf(controls.slice(0, index)).agreement;

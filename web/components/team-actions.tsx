@@ -179,8 +179,8 @@ export function TeamActions({ team, controls, tasks, mayDelete }: { team: TeamDo
             <input type="hidden" name="team" value={name} />
             <input type="hidden" name="action" value="unregister" />
             <p>
-              It stops now and leaves Teams and Waiting on you at once. Within a minute its Mac takes it off: its agents and its place in the watchdog
-              go. Its checkout, branch, run folder, tasks and history are kept, and <code>a6g register</code> on its Mac brings it back.
+              It stops now and leaves Teams and Waiting on you at once. Within a minute its Mac takes it off: its agents and its place in the watchdog go.
+              Its checkout, branch, run folder, tasks and history are kept, and <code>a6g register</code> on its Mac brings it back.
             </p>
             <label htmlFor={dialog("delete-name")}>
               Type <b>{name}</b> to confirm

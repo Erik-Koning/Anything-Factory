@@ -57,7 +57,15 @@ export function ActionForm({
   };
   return (
     <Pending value={pending}>
-      <form onSubmit={submit} className={className} aria-label={label} aria-busy={pending || undefined}>
+      {/* The action as the form's own too: a browser without scripts posts it as a plain form (the page comes back as it
+          stands), and React's hidden field names it. With scripts, submit() above runs it and React leaves it be. */}
+      <form
+        action={action as unknown as (form: FormData) => Promise<void>}
+        onSubmit={submit}
+        className={className}
+        aria-label={label}
+        aria-busy={pending || undefined}
+      >
         {children}
       </form>
     </Pending>

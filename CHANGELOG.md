@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased: a team's controls on the web app, and what a button did said in a toast
+
+The operator asked that a button complete at once and say so in a toast, not in a notice that moves the page, and for
+deleting, stopping and resuming a team from the web app, with the other things they'd do to a team on its Mac. For
+deleting, stopping and the other controls to reach a Mac, that Mac installs this version (`a6g self-install`); a team
+keeps whatever version it pins, since the watchdog does this work.
+
+- **A toast, and the page stays put.** A button's action does its work in place: the page refreshes where it is and a
+  toast in the lower corner says what happened (`components/toaster.tsx`, `components/action-form.tsx`). A refusal is
+  a toast too, and what was typed stays to put right. Deciding, answering, reviewing, the team's controls, its budget,
+  subscriptions and agreement, an account's sessions, addresses and email settings, a machine's unlinking, and the
+  admins' People page work this way. An action that goes to another page (a request sent, a task added) says so there,
+  in a toast, and the words leave the address.
+- **Stop, pause, resume, beside the team's name** on every one of its pages, for an admin. Stop is a pause now; Pause…
+  opens its choices over the page (after the work under way, after chosen journeys, or now); Resume shows from the
+  moment a stop is asked, and Resume with a note… is under ⋯. No code is asked for any of these any more, nor for the
+  working agreement, taking a team off the site or approving a task as it's added; the budget, the subscriptions and
+  deleting a team still take one.
+- **Under ⋯: restart the planner or the environment, upgrade the factory, wake it, delete it.** A new control,
+  `action` (`lib/tasks/controls.ts` `TEAM_ACTIONS`), asks the team's lead; its watchdog's minute starts each as a job
+  of its own (`a6g act`, `lib/actions.ts`), and the job writes what came of it back (`acted`), which the overview's
+  Controls panel shows. A planner restart waits until the planner is idle with no member running, saying why; one
+  asked over an hour before its Mac picked it up is passed over and says so. An upgrade moves the team to the newest
+  version installed on its Mac and commits the pin under the merge lock. An action already asked isn't offered again
+  until its Mac says how it went.
+- **Deleting a team** takes its name, typed, and a code: it's paused now and off the site at once, whatever its Mac
+  reports in the minute before it's taken off; then its Mac unregisters it (its agents and its place in the watchdog
+  go; its checkout, run folder, tasks and history stay). `a6g register` there, or Put it back on its overview, brings
+  it back.
+- **`a6g env up|down|restart|reset` waits for the app lock**, as a merge's restart does, so a restart doesn't take the
+  app away from a check after merges or a run against it (`a6g env use`); status never waits. A check after merges
+  whose app goes away while its pages are checked files nothing and stays due: on GiveNet on 2026-11-15 a restart in
+  the middle of one filed every page as failing, twice.
+- **The watchdog's word on a new budget** says it in the budget's own unit, with its limits on each subscription, as
+  `a6g budget` does: one set only on a subscription read "none a day, none a week, none in all".
+
 ## Unreleased: the web app answers at once
 
 The operator found the site slow: a click on a tab or link changed nothing until the next page was all there, and

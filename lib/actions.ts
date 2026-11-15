@@ -71,7 +71,11 @@ export async function applyActions(
     const minutes = Math.round((now - Date.parse(control.at)) / 60_000);
     if (action !== "unregister" && minutes > ACTION_EXPIRES_MIN) {
       markApplied(entry.run, [control.id]);
-      await say(control, "failed", `It was asked ${minutes} minutes before this Mac picked it up, too long ago to act on now. Ask again if it's still wanted.`);
+      await say(
+        control,
+        "failed",
+        `It was asked ${minutes} minutes before this Mac picked it up, too long ago to act on now. Ask again if it's still wanted.`
+      );
       log.push(`${whoAsked(control.by)} ${what} (${control.id}), ${minutes} minutes ago: too old to act on now, passed over`);
       continue;
     }

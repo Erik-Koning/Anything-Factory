@@ -468,9 +468,17 @@ describe("the check after merges, in a real browser", { skip: noBrowser ?? false
     const address = gone.address();
     await new Promise<void>((done) => gone.close(() => done()));
     const dead = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
-    const home = makeRepo({ ...baseTeam({ board: "tasks", roles: plain }), environment: { health: [`${url}/`] }, pages: { ...pages(), appUrl: dead } } as RawTeam, {
-      ".a6g/harness.json": { pages: [{ id: "home", path: "/" }, { id: "account", path: "/account" }] },
-    });
+    const home = makeRepo(
+      { ...baseTeam({ board: "tasks", roles: plain }), environment: { health: [`${url}/`] }, pages: { ...pages(), appUrl: dead } } as RawTeam,
+      {
+        ".a6g/harness.json": {
+          pages: [
+            { id: "home", path: "/" },
+            { id: "account", path: "/account" },
+          ],
+        },
+      }
+    );
     const run = tmp("a6g-run-");
     const woken: string[] = [];
     await verifyAfterMerge(home, loadTeam(home), run, "a6g/b1-restarted", { wake: (text) => woken.push(text), healthWaitMs: 1 });

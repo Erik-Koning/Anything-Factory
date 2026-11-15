@@ -51,7 +51,10 @@ const changed = (entry: RegistryEntry, path: string): boolean =>
   (spawnSync("git", ["status", "--porcelain", "--", path], { cwd: entry.home, encoding: "utf8" }).stdout ?? "").trim() !== "";
 
 // Runs one action. Resolves to what came of it, in the words the app shows.
-export async function runAction(entry: RegistryEntry, action: TeamAction): Promise<{ outcome: Exclude<ActedOutcome, "started" | "waiting">; said: string }> {
+export async function runAction(
+  entry: RegistryEntry,
+  action: TeamAction
+): Promise<{ outcome: Exclude<ActedOutcome, "started" | "waiting">; said: string }> {
   if (action === "rotate") {
     const { refused, now } = await rotateTeam(entry);
     return refused
@@ -62,7 +65,10 @@ export async function runAction(entry: RegistryEntry, action: TeamAction): Promi
     const why = await watchOnce(entry.name);
     if (why) return { outcome: "failed", said: `The watchdog didn't run: ${why}.` };
     const paused = existsSync(join(entry.run, "paused"));
-    return { outcome: "done", said: paused ? "The watchdog ran for the team. It's paused, and stays paused until it's resumed." : "The watchdog ran for the team." };
+    return {
+      outcome: "done",
+      said: paused ? "The watchdog ran for the team. It's paused, and stays paused until it's resumed." : "The watchdog ran for the team.",
+    };
   }
   if (action === "env") {
     const { status, out } = a6g(entry, ["env", "restart"]);

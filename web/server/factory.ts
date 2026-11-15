@@ -201,7 +201,8 @@ export async function actionFromWeb(team: string, ask: { action: TeamAction; not
   const store = storeFor(team);
   const controls = await store.controls.all();
   const open = actionsOf(controls).find((s) => s.action === ask.action && (s.outcome === "asked" || s.outcome === "started" || s.outcome === "waiting"));
-  if (open) throw new Refused(`That was asked already, ${open.outcome === "waiting" ? "and waits" : "and its Mac is on it"}: it shows here when it's done.`);
+  if (open)
+    throw new Refused(`That was asked already, ${open.outcome === "waiting" ? "and waits" : "and its Mac is on it"}: it shows here when it's done.`);
   const by = `web:${ask.from}`;
   if (ask.action === "unregister" && !holdOf(controls))
     await store.controls.create(pauseControl([], team, { scope: "now", by, note: ask.note || "Deleted from the web app" }));

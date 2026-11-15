@@ -68,8 +68,8 @@ export function SitePanel({ team, retired, expanded = false }: { team: TeamDoc; 
             ) : (
               "It was published less than 15 minutes ago, so a Mac may be starting it."
             )}{" "}
-            To take it off the site, delete it from the team&apos;s menu (⋯ beside its name), which takes it off that Mac too (its files and
-            history stay), or unregister it there:
+            To take it off the site, delete it from the team&apos;s menu (⋯ beside its name), which takes it off that Mac too (its files and history stay),
+            or unregister it there:
           </p>
           <Command>{`a6g unregister ${team.name}`}</Command>
         </div>

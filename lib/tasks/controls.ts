@@ -85,19 +85,7 @@ export interface Control extends Doc {
   // (start.ts). The watchdog of the team they made passes over them. `retire` and `restore` take the team off the web
   // app and put it back (retiredOf); only the app reads them. `action` asks the team's lead to do something at once
   // (TEAM_ACTIONS), and `acted` is the lead's word on it.
-  kind:
-    | "pause"
-    | "resume"
-    | "budget"
-    | "agreement"
-    | "review"
-    | "subscriptions"
-    | "start"
-    | "starting"
-    | "retire"
-    | "restore"
-    | "action"
-    | "acted";
+  kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting" | "retire" | "restore" | "action" | "acted";
   // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit), or
   // "machine:<name>" (a machine's word on an ask to start a team).
   by: string;

@@ -22,7 +22,7 @@ import {
   teamsDir,
   versionDir,
 } from "../paths.ts";
-import { pausedUntil } from "../budget.ts";
+import { describeLimits, pausedUntil } from "../budget.ts";
 import { readHold, readLimits } from "../holds.ts";
 import {
   accounts,
@@ -581,14 +581,7 @@ export async function budget(argv: string[]): Promise<number> {
       );
     return n === 0 ? null : Math.round(n * 100) / 100;
   };
-  const words = (limits: Limits): string => {
-    const one = (n: number | null) => (n === null ? "none" : limits.unit === "subscription" ? `${n}%` : `$${n}`);
-    const shares = limits.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : "";
-    const each = Object.entries(limits.accounts ?? {}).map(
-      ([name, own]) => `; on ${name}: ${one(own.daily)} a day, ${one(own.weekly)} a week, ${one(own.total)} in all`
-    );
-    return `${one(limits.daily)} a day, ${one(limits.weekly)} a week, ${one(limits.total)} in all since ${limits.since.slice(0, 10)}${shares}${each.join("")}`;
-  };
+  const words = describeLimits;
   const asked = ["daily", "weekly", "total", "auto-resume", "no-auto-resume", "restart", "clear"].some((key) => options[key] !== undefined);
   if (!asked) {
     const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);

@@ -138,4 +138,12 @@ export async function actionIdOn(page: Page, path: string): Promise<string> {
 }
 
 // What a server action's redirect says went wrong (?error=…), or "" when it went to no error.
+// What the newest refusal of `action` in the audit log says: what a browser without scripts posting an in-place action
+// was refused for (the action says it in a toast, not in the address). Written once the response has gone, so it's
+// polled for.
+export async function refusalOf(action: string): Promise<string> {
+  const { accounts } = await databases();
+  const [entry] = await accounts.collection("audit").find({ action, outcome: "refused" }).sort({ at: -1 }).limit(1).toArray();
+  return String(entry?.detail ?? "");
+}
 export const errorOf = (response: APIResponse): string => new URL(response.headers()["location"] ?? "/", state().baseURL).searchParams.get("error") ?? "";

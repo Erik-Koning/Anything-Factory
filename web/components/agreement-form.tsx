@@ -12,11 +12,14 @@ const named = (topic: Topic): string => `${topic.charAt(0).toUpperCase()}${topic
 // asks its operator about whatever the agreement says (the platform and the stack, of one who isn't technical): said,
 // not offered.
 export function AgreementForm({ team, initial, never }: { team: string; initial: Omit<AgreementFormState, "error">; never: Topic[] }) {
-  const [state, action, pending] = useActionState(async (previous: AgreementFormState, form: FormData) => {
-    const next = await agreementAction(previous, form);
-    if (next.ok) toast(next.ok);
-    return next;
-  }, { error: null, ...initial });
+  const [state, action, pending] = useActionState(
+    async (previous: AgreementFormState, form: FormData) => {
+      const next = await agreementAction(previous, form);
+      if (next.ok) toast(next.ok);
+      return next;
+    },
+    { error: null, ...initial }
+  );
   const [length, setLength] = useState(state.notes.length);
   const alert = useRef<HTMLParagraphElement>(null);
   // After a refusal the form is made again, so focus goes to what went wrong rather than nowhere.

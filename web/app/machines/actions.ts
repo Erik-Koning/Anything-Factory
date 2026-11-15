@@ -1,8 +1,10 @@
 "use server";
 // Linking a machine to one's account (looking up the code its terminal shows, then approving or refusing it,
 // link/link-machine.tsx) and unlinking one. Each is recorded in the audit log, a code that was gone too.
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { MAX_MACHINES, normalUserCode } from "../../../lib/fleet.ts";
+import type { ActionResult } from "../../components/action-result.ts";
 import { withNotice } from "../../components/ui.tsx";
 import { can, mayLinkMachines } from "../../server/access.ts";
 import { decideLink, LOOKS_PER_PERSON, lookUpLink, unlinkMachine, type WaitingLink } from "../../server/machines.ts";
@@ -87,16 +89,22 @@ export async function decideLinkAction(_before: DecideState, form: FormData): Pr
   );
 }
 
+// What an in-place action says, with the page refreshed where it is (components/action-form.tsx shows it as a toast).
+const done = (result: ActionResult): ActionResult => {
+  refresh();
+  return result;
+};
+
 // Unlinks one of one's own machines, or, for an admin, anyone's: its token stops working at once.
-export async function unlinkMachineAction(form: FormData): Promise<void> {
+export async function unlinkMachineAction(form: FormData): Promise<ActionResult> {
   const viewer = await requireViewer();
   const machine = await unlinkMachine(String(form.get("id") ?? ""), can(viewer, "machines:all") ? null : viewer.userId);
-  if (!machine) redirect(withNotice("/machines", { error: "That machine isn't linked any more." }));
+  if (!machine) return done({ error: "That machine isn't linked any more." });
   await record(viewer, {
     action: "machine.unlinked",
     outcome: "ok",
     target: machine.name,
     detail: machine.userId === viewer.userId ? "from the Machines page" : "another person's, by an admin",
   });
-  redirect(withNotice("/machines", { ok: `${machine.name} is unlinked: its token no longer works, and it reports nothing more.` }));
+  return done({ ok: `${machine.name} is unlinked: its token no longer works, and it reports nothing more.` });
 }
