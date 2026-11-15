@@ -1,5 +1,5 @@
 // The Subscriptions tab, after the main story, on the seed's machines: the operator's attic reports two subscriptions
-// (one used up for the week), the member's studio none (its factory is older).
+// (one used up for the week); the member has no machine linked by then.
 import { expect, test } from "@playwright/test";
 import { closeDatabases, databases, signInAsAdmin, signInByLink, state } from "./helpers.ts";
 
@@ -65,10 +65,12 @@ test("cost over the window: by subscription, a chart read with the keyboard, tot
   await expect(page).toHaveURL(/period=1/);
 });
 
-test("someone whose machine runs an older factory is told how its subscriptions come to show", async ({ page }) => {
+test("someone with no machine reporting its subscriptions is told how they come to show", async ({ page }) => {
   // The main story sent the member a link a moment ago: the one-a-minute limit is cleared.
   await (await databases()).accounts.collection("magic_link_sends").deleteMany({ _id: state().member as never });
   await signInByLink(page, state().member);
   await page.goto("/subscriptions");
-  await expect(page.getByText("None of your machines reports its subscriptions yet")).toBeVisible();
+  // The member's studio was unlinked in the main story; while it was linked, its older factory reported none.
+  await expect(page.getByText("None of your machines is linked yet.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Machines" }).last()).toHaveAttribute("href", "/machines");
 });

@@ -74,7 +74,8 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
       </p>
       {!machines.length ? (
         <p className="panel empty">
-          No machine is linked yet. <Link href="/machines">Machines</Link> says how to link one.
+          {viewer.admin ? "No machine is linked yet." : "None of your machines is linked yet."} <Link href="/machines">Machines</Link> says how to link
+          one.
         </p>
       ) : !reporting.length ? (
         <p className="panel empty">
