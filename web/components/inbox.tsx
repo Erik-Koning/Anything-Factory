@@ -159,16 +159,6 @@ function WaitingItem({
         <details className="more reasoning">
           <summary>Show reasoning</summary>
           <div className="reasoning-body">
-            {t.status === "question" && t.ask?.rule ? (
-              /* A question the planner raised says which rule of the working agreement made it the operator's, and how
-                it judged it; one the approver escalated says the approval rule, which is the team's own setting and not
-                the agreement's to change. */
-              <p className="small muted asked-because">
-                Asked because: {t.ask.rule}
-                {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
-                {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
-              </p>
-            ) : null}
             <dl className="raised">
               <div className="why">
                 <dt>Why it&apos;s yours</dt>
@@ -199,6 +189,16 @@ function WaitingItem({
                 </dd>
               </div>
             </dl>
+            {t.status === "question" && t.ask?.rule ? (
+              /* A question the planner raised says which rule of the working agreement made it the operator's, and how
+                it judged it; one the approver escalated says the approval rule, which is the team's own setting and not
+                the agreement's to change. */
+              <p className="small muted asked-because">
+                Asked because: {t.ask.rule}
+                {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
+                {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
+              </p>
+            ) : null}
             {shown ? (
               <div className="ask">
                 {fromNote && !repeats ? (

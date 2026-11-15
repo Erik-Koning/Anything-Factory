@@ -2621,6 +2621,15 @@ li.waiting > dl {
 .rows > li.waiting > * + * {
   margin-top: 0;
 }
+/* With a headline, the task's own title is the context above it, not a second heading. */
+li.waiting:has(> .decide > .headline) > .head .title {
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 550;
+}
+li.waiting:has(> .decide > .headline) > .head .title a {
+  color: inherit;
+}
 .decide > .headline {
   color: var(--ink);
   font-size: 19px;

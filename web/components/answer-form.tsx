@@ -127,7 +127,7 @@ export function AnswerForm({
           />
         </>
       ) : (
-        <button type="button" className="quiet s add-note" onClick={() => setNoting(true)}>
+        <button type="button" className="linkish add-note" onClick={() => setNoting(true)}>
           Add a note
         </button>
       )}
