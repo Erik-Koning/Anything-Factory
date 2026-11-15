@@ -1,10 +1,13 @@
 # Changelog
 
-## Unreleased: every subscription's limits and usage on the web app
+## 0.8.5: Every subscription's limits and usage on the web app, and every page cleaned up
 
 The operator asked for a tab that shows all their Claude subscriptions and their usage, with the same views as T3
-Code's own Usage page (T3 Code runs the teams' threads). A Mac reports its subscriptions once this version is installed
-there; the site shows them for every Mac that does.
+Code's own Usage page (T3 Code runs the teams' threads), then a pass over every page until each was at least a 7 out
+of 10. A Mac reports its subscriptions once this version is installed there; the site shows them for every Mac that
+does. Version 0.8.4 is held for another branch's work.
+
+### Subscriptions
 
 - **Subscriptions**, beside Machines. **Limits** first: a card for each window the subscriptions report (the five-hour
   session, the week, a model's own week, extra usage by the month), with how much of the pool is left and whether it's
@@ -22,7 +25,45 @@ there; the site shows them for every Mac that does.
   usage. The report carries each subscription by name, its login only as a hash (one login on two Macs is shown once),
   never a folder. A report's subscriptions that are wrong are dropped and the rest kept; a report may be 768 KB.
 - A request on a model with no price in `lib/prices.ts` counts its tokens and is said to be unpriced, rather than
-  costing nothing silently.
+  costing nothing silently. A machine's card on Machines names its subscriptions and links to their limits and usage.
+
+### Every page cleaned up
+
+A reviewer scored every page from screenshots at desktop and phone width (the lowest a 4, most a 6 or 7). Each was
+worked on; a second, stricter review found six still under 7 (the graph, the board, Decisions, a team's overview, sign
+in and Machines), and those were worked on again.
+
+- **On a phone** the site's links are behind a Menu key that carries the Waiting on you count; a team's tabs snap to
+  whole tabs and fade at an edge with more; a team's header is two short lines; no page scrolls sideways, and a
+  command breaks only between its parts.
+- **Sign in** opens on a team already at work, drawn just above the heading, with the way in, its help and its fields
+  together in the bottom bar, each field labelled.
+- **Teams** says what each figure counts, with lighter fold keys; **Start a project** leads with what to do next.
+- **A team's overview** has one How it runs panel (controls, subscriptions, the site), says what starts an idle team,
+  and gives every empty part a next step; the **board's** lanes are one width with a fade where more is off screen;
+  the **graph by level** is in the site's colours and type and opens fitted.
+- **Waiting on you, Decisions and Decided for you**: each question or proposal beside its answer, each field over its
+  own key, one solid key at a time; an approval that needs a score first says so; scores as a small grid. On
+  Decisions, Reject and Research or escalate each open their field once chosen, so one form is in sight at a time.
+- **Agreement**: one line of introduction (the rest under How this works), a form that fills its panel, placeholders
+  that read as examples. **People**: "Ban from signing in…", and each role with its own Save. **Account**,
+  **Notifications**, **Link a machine** and **Machines**: addresses in mono, settings that say what Save covers,
+  a code field the size of a code, cards of one height.
+- **Requests** say why one was turned down; a **task** keeps its id in its heading; **Add a task** says what happens
+  to it.
+
+### The factory
+
+- **`--help` on any command** shows its help and runs nothing (before, `a6g init --help` made a checkout and
+  `a6g e2e try --help` started a run); prettier is a dev dependency, so `npm run format:check` works in a clean
+  checkout.
+- **A planner restart asked from the web app** retires the planner's thread in the watchdog pass that finds it free,
+  then starts a fresh one: a tick could wake the planner in the moments between, and the restart failed after the team
+  had drained for it.
+- **The innovator** starts from the binding constraint and files bets rather than fixes; cites a study only for what
+  it tested and numbers that can be found at their source; covers every side the product serves, with one way to earn
+  where that's still open; ranks by upside; tests what people do rather than what they say they would; and writes the
+  result that would stop a test before running it. Its new words reach a team at `a6g upgrade` and `a6g rotate`.
 
 ## 0.8.3: A team's controls on the web app, toasts in place of notices, tasks routed by what they ask, and a site that answers at once
 
