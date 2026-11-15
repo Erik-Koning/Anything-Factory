@@ -51,6 +51,8 @@ Set up and run a team (the operator)
   a6g upgrade <team> [<version>] [--force] [--docker <context>]   move a team to another installed factory version
   a6g unregister <team>               remove its T3 instances and registry entry (keeps its files), and take it off
                                       the web app (a6g register puts it back)
+  a6g act <team> <control>            run an action asked for on the web app (restart the planner or the environment,
+                                      upgrade, wake, delete): the watchdog starts each as a job of its own
   a6g watchdog install|remove|run     the one launchd job that looks after every team
   a6g connect [email|whatsapp] [--test]  send you the watchdog's alerts and the planner's outbox: email through
                                       Resend (replies reach the planner), WhatsApp through your business number
@@ -119,6 +121,8 @@ function handOver(): void {
       "projects",
       "init",
       "upgrade",
+      // The watchdog starts it on its own version, whatever the team pins (lib/actions.ts).
+      "act",
       "connect",
       "disconnect",
       "--version",
@@ -174,6 +178,7 @@ const COMMANDS: Record<string, () => Promise<number | void>> = {
   agreement: () => import("../lib/commands/agreement.ts").then((m) => m.agreement(args)),
   subscriptions: () => import("../lib/commands/subscriptions.ts").then((m) => m.subscriptions(args)),
   rotate: () => import("../lib/commands/team.ts").then((m) => m.rotate(args)),
+  act: () => import("../lib/commands/act.ts").then((m) => m.act(args)),
   status: () => import("../lib/commands/team.ts").then((m) => m.status(args)),
   teams: () => import("../lib/commands/team.ts").then((m) => m.teams()),
   prompt: () => import("../lib/commands/team.ts").then((m) => m.prompt(args)),

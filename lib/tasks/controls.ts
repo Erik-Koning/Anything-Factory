@@ -57,12 +57,47 @@ export interface SubscriptionsAsk {
   use: string[];
 }
 
+// What the operator may ask a team's lead to do at once, from the web app; the lead's watchdog runs each as a job of its
+// own (a6g act), so its minute never waits on one:
+//   rotate      a fresh planner thread, once the planner is idle with no member running (a6g rotate)
+//   env         its environment restarted, the app and its stack (a6g env restart), once nothing holds the app
+//   upgrade     the team moved to the newest factory version installed on its lead (a6g upgrade), the pin committed
+//   wake        the watchdog run for it now (a6g start), not at its next run; a paused team stays paused
+//   unregister  the team taken off its lead (a6g unregister: its T3 instances and registry entry; its checkout, run
+//               folder and history stay, and a6g register brings it back), and off the web app with it (retiredOf)
+export const TEAM_ACTIONS = ["rotate", "env", "upgrade", "wake", "unregister"] as const;
+export type TeamAction = (typeof TEAM_ACTIONS)[number];
+export const isTeamAction = (value: unknown): value is TeamAction => typeof value === "string" && (TEAM_ACTIONS as readonly string[]).includes(value);
+
+// The lead's word on an action: a job runs it (started), it can't yet and why (waiting), or what came of it (done,
+// failed), with what the job said.
+export const ACTED_OUTCOMES = ["started", "waiting", "done", "failed"] as const;
+export type ActedOutcome = (typeof ACTED_OUTCOMES)[number];
+export interface Acted {
+  of: string;
+  outcome: ActedOutcome;
+  said: string;
+}
+
 export interface Control extends Doc {
   team: string;
   // `start` and `starting` come before the team does: an ask to start it, and the machine's word on each step
   // (start.ts). The watchdog of the team they made passes over them. `retire` and `restore` take the team off the web
-  // app and put it back (retiredOf); only the app reads them.
-  kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting" | "retire" | "restore";
+  // app and put it back (retiredOf); only the app reads them. `action` asks the team's lead to do something at once
+  // (TEAM_ACTIONS), and `acted` is the lead's word on it.
+  kind:
+    | "pause"
+    | "resume"
+    | "budget"
+    | "agreement"
+    | "review"
+    | "subscriptions"
+    | "start"
+    | "starting"
+    | "retire"
+    | "restore"
+    | "action"
+    | "acted";
   // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit), or
   // "machine:<name>" (a machine's word on an ask to start a team).
   by: string;
@@ -88,6 +123,10 @@ export interface Control extends Doc {
   start?: StartAsk | null;
   // Starting: where the machine has got with an ask.
   starting?: StartProgress | null;
+  // An action: what the lead is asked to do.
+  action?: TeamAction | null;
+  // Acted: the lead's word on an action.
+  acted?: Acted | null;
 }
 
 // The pause in force, from the latest pause or resume.
@@ -262,11 +301,69 @@ export const restoreControl = (team: string, by: string, at = nowIso()): Omit<Co
   at,
 });
 
-// The control that took the team off the web app, while it's off: the newest of its retires and restores, when that's
-// a retire. Controls come oldest first, as the store lists them.
+// The control that took the team off the web app, while it's off: the newest of its retires, restores and asks to
+// unregister it (deleting it, on the web app), when that isn't a restore. Controls come oldest first, as the store
+// lists them.
+const offOrOn = (c: Control): boolean => c.kind === "retire" || c.kind === "restore" || (c.kind === "action" && c.action === "unregister");
 export const retiredOf = (controls: readonly Control[]): Control | null => {
-  const last = controls.findLast((c) => c.kind === "retire" || c.kind === "restore");
-  return last?.kind === "retire" ? last : null;
+  const last = controls.findLast(offOrOn);
+  return last && last.kind !== "restore" ? last : null;
+};
+
+// An ask for the team's lead to do something at once (TEAM_ACTIONS); `note` is the operator's, for the record.
+export const actionControl = (team: string, by: string, action: TeamAction, note = "", at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "action",
+  by,
+  at,
+  note: note.trim(),
+  action,
+});
+
+// The lead's word on an action: what came of it, or how far it has got.
+export const actedControl = (team: string, machine: string, acted: Acted, at = nowIso()): Omit<Control, "id" | "version"> => ({
+  ...blank,
+  team,
+  kind: "acted",
+  by: `machine:${machine}`,
+  at,
+  acted,
+});
+
+// Each action and where it stands: the lead's newest word on it, or "asked" while it has said nothing. Newest first.
+export interface ActionState {
+  control: Control;
+  action: TeamAction;
+  outcome: ActedOutcome | "asked";
+  said: string;
+  at: string;
+}
+export function actionsOf(controls: readonly Control[]): ActionState[] {
+  const words = new Map<string, Control>();
+  for (const c of controls) if (c.kind === "acted" && c.acted) words.set(c.acted.of, c);
+  return controls
+    .filter((c) => c.kind === "action" && isTeamAction(c.action))
+    .map((control): ActionState => {
+      const word = words.get(control.id);
+      return {
+        control,
+        action: control.action as TeamAction,
+        outcome: word?.acted?.outcome ?? "asked",
+        said: word?.acted?.said ?? "",
+        at: word?.at ?? control.at,
+      };
+    })
+    .reverse();
+}
+
+// What each action is, as a button names it and as a line of a list begins.
+export const ACTION_WORDS: Record<TeamAction, { button: string; asked: string }> = {
+  rotate: { button: "Restart the planner", asked: "Asked to restart the planner" },
+  env: { button: "Restart the environment", asked: "Asked to restart the environment" },
+  upgrade: { button: "Upgrade the factory", asked: "Asked to upgrade the factory" },
+  wake: { button: "Wake it now", asked: "Asked to wake the team now" },
+  unregister: { button: "Delete the team", asked: "Asked to delete the team" },
 };
 
 // Where an ask to start a team stands: the newest ask under its name and the machine's newest word on it ("waiting"

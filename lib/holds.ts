@@ -130,7 +130,11 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     if (control.kind === "review") continue;
     // The team's subscriptions are the machine's to set, not the run folder's (lib/steer.ts applies them).
     if (control.kind === "subscriptions") continue;
+    // An action runs as a job of its own, marked applied once it starts (lib/actions.ts).
+    if (control.kind === "action") continue;
     now.push(control.id);
+    // The lead's word on an action: the web app's to read.
+    if (control.kind === "acted") continue;
     // The ask that started this team and its machine's word on each step: done with before the team was (start.ts).
     if (control.kind === "start" || control.kind === "starting") continue;
     // Whether the web app lists the team: the app's to read, nothing for the run folder.

@@ -678,6 +678,15 @@ export async function resume(argv: string[]): Promise<number> {
 export async function rotate(argv: string[]): Promise<number> {
   operatorOnly("rotate");
   const entry = entryFor(argv[0] ?? die("usage: a6g rotate <team>"));
+  const { refused, old, now } = await rotateTeam(entry);
+  if (refused) die(`rotate: ${refused}`);
+  console.info(`a6g: ${entry.name}'s planner was ${old || "none"}, now ${now}`);
+  return 0;
+}
+
+// The rotation itself, for a6g rotate and the web app's restart of the planner (a6g act): why it didn't happen, or the
+// planner's thread before and after.
+export async function rotateTeam(entry: RegistryEntry): Promise<{ refused: string | null; old: string; now: string }> {
   const file = join(entry.run, "planner-thread");
   let old = "";
   const refused = await watchOnce(entry.name, () => {
@@ -688,10 +697,8 @@ export async function rotate(argv: string[]): Promise<number> {
     retirePlanner(entry.run);
     return null;
   });
-  if (refused) die(`rotate: ${refused}`);
   const now = existsSync(file) ? readFileSync(file, "utf8").trim() : "not started (see the watchdog log)";
-  console.info(`a6g: ${entry.name}'s planner was ${old || "none"}, now ${now}`);
-  return 0;
+  return { refused, old, now };
 }
 
 // Where each team stands: paused or active, its planner and the members running, whether its environment answers
