@@ -653,6 +653,8 @@ test("the admin approves one proposal with a note and rejects another with a rea
   await page.getByRole("button", { name: `Approve #${approve}` }).click();
   await expect(page.getByRole("status")).toContainText(`#${approve} approved.`);
 
+  // Rejecting takes a reason, so its field opens once it's chosen.
+  await page.locator(`#task-${reject}`).getByText("Reject…", { exact: true }).click();
   await page.locator(`#reject-${reject}`).fill("Not this quarter");
   await page.getByRole("button", { name: `Reject #${reject}` }).click();
   await expect(page.getByRole("status")).toContainText(`#${reject} rejected.`);
@@ -946,6 +948,7 @@ test("the admin adds a proposal, and a task approved under a journey after anoth
   await page.goto("/t/shop/proposals");
   await expect(page.getByRole("heading", { name: /^In triage/ })).toBeVisible();
   const triaged = String((await graph.collection("tasks").findOne({ team: "shop", title: "Search orders by email" }))?.id);
+  await page.locator(`#task-${triaged}`).getByText("Reject…", { exact: true }).click();
   await expect(page.getByRole("button", { name: `Reject #${triaged}` })).toBeVisible();
   await page.goto(`/t/shop/tasks/${triaged}`);
   await expect(page.getByRole("link", { name: `Decide on #${triaged}` })).toBeVisible();
@@ -1701,6 +1704,7 @@ test("an answer or a decision on a task the team changed after the page was load
 
     // A proposal the planner edits while the Decisions page is open: the decision is on what was read.
     await page.goto("/t/shop/proposals");
+    await page.locator("#task-912").getByText("Reject…", { exact: true }).click();
     await expect(page.getByRole("button", { name: "Reject #912" })).toBeVisible();
     await tasks.updateOne({ _id: "shop:912" as never }, { $set: { body: "Wrap every order, at no charge.", updatedAt: changed }, $inc: { version: 1 } });
     await page.locator("#reject-912").fill("Not this quarter");
@@ -1710,6 +1714,8 @@ test("an answer or a decision on a task the team changed after the page was load
       "#912 changed after this page was loaded. It's shown as it stands now: read it again, then decide."
     );
     expect(await stored("912")).toMatchObject({ status: "proposed" });
+    // The page shown again keeps the reason's field open where it can; it's opened again where it isn't.
+    if (!(await page.locator("#reject-912").isVisible())) await page.locator("#task-912").getByText("Reject…", { exact: true }).click();
     await page.locator("#reject-912").fill("Not this quarter");
     await page.getByRole("button", { name: "Reject #912" }).click();
     await expect(page.getByRole("status")).toContainText("#912 rejected.");

@@ -366,7 +366,8 @@ function lay(random: Random, width: number, height: number, above: number, now: 
   // above and below the drawing rather than a band on one side of it.
   const reach = Math.max(...plan.tasks.map((task) => Math.abs(task.slot))) * unit + h / 2;
   const lowest = height - reach - drop - 10;
-  const halfway = Math.min(lowest, Math.max(reach + 56, (height - drop) / 2));
+  // On a phone the room is the drawing's own size (globals.css), so it stands at the foot of it, just over the words.
+  const halfway = width > 720 ? Math.min(lowest, Math.max(reach + 56, (height - drop) / 2)) : lowest;
   const mid = Math.min(Math.floor((above + lowest) / rule), Math.round((above + halfway) / rule)) * rule - above;
   const parts: Part[] = plan.tasks.map((task) => ({
     ...task,

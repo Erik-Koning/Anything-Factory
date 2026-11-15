@@ -1765,6 +1765,18 @@ code.path {
   margin-top: 10px;
   font-size: 13.5px;
 }
+/* The decisions that take words, side by side under the approval while shut; one opened takes the row's width. */
+.other-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+}
+.other-ways > .more {
+  margin-top: 0;
+}
+.other-ways > .more[open] {
+  flex-basis: 100%;
+}
 /* A decision: what goes with it over the field, then the field and the key that makes it, on one line. */
 .verdicts form {
   display: grid;
@@ -4459,6 +4471,14 @@ ol.setup > li > * {
   .sign-in-context {
     padding: 16px 16px 22px;
   }
+  /* On a phone the drawing has a room of its own size, just over the words, and the page's spare height goes round the
+     whole rather than into a band above the drawing. */
+  .sign-in {
+    justify-content: center;
+  }
+  .team-at-work {
+    flex: 0 0 clamp(190px, 30vh, 270px);
+  }
   .sign-in-bar {
     position: static;
   }
@@ -4490,6 +4510,10 @@ ol.setup > li > * {
   .lane {
     flex: 0 0 min(300px, calc(100vw - 92px));
     max-width: none;
+  }
+  /* An empty lane's rail goes after the lanes with cards, so the board opens on work. */
+  .lane:has(> .empty) {
+    order: 1;
   }
   /* A rail of choices too wide for the screen stands its options one above the other. */
   .segmented {

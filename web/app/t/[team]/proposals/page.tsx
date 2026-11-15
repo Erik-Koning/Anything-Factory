@@ -150,20 +150,28 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
           ) : (
             <Verdict team={team} id={t.id} seen={t.version} decision="approve" label="Approve" field="Note (optional)" required={false} />
           )}
-          <Verdict team={team} id={t.id} seen={t.version} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
         </div>
-        {/* A proposal is one of question, proposed and researching, so one of these is always open to it. */}
-        <details className="more">
-          <summary>{`Research or escalate #${t.id} instead`}</summary>
-          <div className="verdicts">
-            {t.status !== "researching" ? (
-              <Verdict team={team} id={t.id} seen={t.version} decision="research" label="Research it" field="What to find out" required />
-            ) : null}
-            {t.status !== "question" ? (
-              <Verdict team={team} id={t.id} seen={t.version} decision="escalate" label="Escalate" field="What has to be decided" required />
-            ) : null}
-          </div>
-        </details>
+        {/* The other decisions each take words, so each opens its field only once chosen: one form in sight at a time.
+            A proposal is one of question, proposed and researching, so research or escalate is always open to it. */}
+        <div className="other-ways">
+          <details className="more">
+            <summary>Reject…</summary>
+            <div className="verdicts">
+              <Verdict team={team} id={t.id} seen={t.version} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
+            </div>
+          </details>
+          <details className="more">
+            <summary>Research or escalate…</summary>
+            <div className="verdicts">
+              {t.status !== "researching" ? (
+                <Verdict team={team} id={t.id} seen={t.version} decision="research" label="Research it" field="What to find out" required />
+              ) : null}
+              {t.status !== "question" ? (
+                <Verdict team={team} id={t.id} seen={t.version} decision="escalate" label="Escalate" field="What has to be decided" required />
+              ) : null}
+            </div>
+          </details>
+        </div>
       </div>
     </li>
   );
