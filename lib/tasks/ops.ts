@@ -9,29 +9,30 @@ import { acquireSlot } from "../lock.ts";
 import { hash, localTime, readJson, writeJson } from "../util.ts";
 import {
   type Actor,
+  asksForIdeas,
   awaitsStream,
   CLAIMS,
   type FeatureRequest,
   heldHere,
   ideasQueued,
   journeyDue,
-  KINDS,
   type Kind,
+  KINDS,
   MERGE,
   move,
   type MoveContext,
   moveRefusal,
   needsSecurity,
-  nowIso,
   newTask,
+  nowIso,
+  Refused,
   SEVERITIES,
   type Severity,
   type Status,
   type Task,
-  Refused,
   theirWords,
-  WATCHDOG,
   waitOutcome,
+  WATCHDOG,
 } from "./model.ts";
 import { quoted } from "../untrusted.ts";
 import { instancesOf, type Team } from "../config.ts";
@@ -431,6 +432,25 @@ export function summary(
         .map((t) => `#${t.id}`)
         .join(", ")} (a6g task edit <id> --files …).`
     );
+  // Approved research no member claims: the planner's to route by what it asks, to a teammate or to itself. A pass
+  // someone asked for (the ideas area) is the innovator's, and goes first, whatever the queue holds.
+  const research = by("approved").filter((t) => t.kind === "research");
+  if (research.length) {
+    const asked = ideas ? research.filter(asksForIdeas) : [];
+    const first = asked[0];
+    const innovator = !ideas
+      ? ""
+      : first
+        ? ideas.running
+          ? ` An innovator is at work; if it isn't on #${first.id}, start one on it once it's done.`
+          : ideas.budgetBound
+            ? ` #${first.id} asks for ideas, but the budget has room only for the work under way.`
+            : ` #${first.id} asks for ideas: start the innovator on it now, briefed "an innovation pass on task ${first.id}".`
+        : "";
+    parts.push(
+      `Approved research for you to route by what it asks: ${research.map(line).join("; ")}. Start the teammate its words call for, briefed "on task <id>": the innovator for ideas, a market or growth; the UX specialist for how pages look and work; the security reviewer for who may reach what; a tester for a spec. Or research it yourself. Each is done once their report is on it and you've acted on it (a6g task status <id> done).${innovator}`
+    );
+  }
   if (ideas) {
     const queued = ideasQueued(all);
     const shown = `${queued

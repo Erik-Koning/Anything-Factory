@@ -7,6 +7,7 @@ import { after } from "next/server";
 import type { ActionResult } from "../../../components/action-result.ts";
 import { clip, withNotice } from "../../../components/ui.tsx";
 import { agreementFrom, isReserved, sameAgreement, TOPICS } from "../../../../lib/tasks/agreement.ts";
+import { IDEAS_AREA } from "../../../../lib/tasks/model.ts";
 import {
   can,
   DECISION_ID,
@@ -149,12 +150,15 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
     // Whoever adds it, admin or member, is on the task as their stakeholder record, as a request's sender is.
     const label = admin ? "operator" : ((await memberships({ userId: viewer.userId, team }))[0]?.label ?? "stakeholder");
     const from = (await stakeholderOf(team, viewer, label)).id;
+    // An innovation pass the admin asks for: research in the ideas area, which the planner hands to the innovator.
+    const ideas = admin && fields.kind === "ideas";
     task = await addTaskFromWeb(
       team,
       {
         title: fields.title,
         body: fields.body,
-        kind: isKind(fields.kind, !admin) ? fields.kind : "feature",
+        ...(ideas ? { area: IDEAS_AREA } : {}),
+        kind: ideas ? "research" : isKind(fields.kind, !admin) ? fields.kind : "feature",
         severity: isSeverity(fields.severity) && (admin || fields.kind === "bug" || fields.kind === "ux") ? fields.severity : null,
         parent: admin ? fields.parent || null : null,
         after,

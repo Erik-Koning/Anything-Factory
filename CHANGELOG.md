@@ -31,8 +31,20 @@ keeps whatever version it pins, since the watchdog does this work.
   it back.
 - **`a6g env up|down|restart|reset` waits for the app lock**, as a merge's restart does, so a restart doesn't take the
   app away from a check after merges or a run against it (`a6g env use`); status never waits. A check after merges
-  whose app goes away while its pages are checked files nothing and stays due: on GiveNet on 2026-11-15 a restart in
+  whose app goes away while its pages are checked files nothing and stays due: on one team on 2026-11-15 a restart in
   the middle of one filed every page as failing, twice.
+- **The planner routes a task by what it asks, not only its kind.** A kind says who may claim a task; whatever else its
+  words ask for (ideas, a market or growth; how something should feel; how pages look and work; who may reach what; a
+  spec), the planner starts that teammate, briefed with the task, their report on it. Approved research, which no
+  member claims, is listed in its context to route. The web app's Add a task offers **Ideas: an innovation pass**,
+  research in the `ideas` area, which goes to the innovator before a pass for the queue (`a6g task add --kind
+research --area ideas` does the same). An operator's ask for ideas had sat as research the planner never handed on.
+- **The innovator thinks like a founder.** A pass starts from first principles (each kind of user's job, what it costs
+  them, the scarce thing, where a tenfold improvement is), looks at how the product grows and lasts (the loops by
+  which users bring users, what makes it hard to copy, how it sustains itself), and brings at least one bet on growth
+  or on lasting when the research supports one. Every idea is a bet: its riskiest assumption, the cheapest test before
+  building it all, and the measure with the result that means stop. A pass someone asked for puts its report on their
+  task. The planner's and innovator's new words reach a team at `a6g upgrade` and `a6g rotate`.
 - **The watchdog's word on a new budget** says it in the budget's own unit, with its limits on each subscription, as
   `a6g budget` does: one set only on a subscription read "none a day, none a week, none in all".
 

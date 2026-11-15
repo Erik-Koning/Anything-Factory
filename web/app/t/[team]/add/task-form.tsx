@@ -60,6 +60,8 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
                 {KIND_LABEL[k]}
               </option>
             ))}
+            {/* A research task in the ideas area, which the planner hands to the innovator (lib/tasks/ops.ts). */}
+            {admin ? <option value="ideas">Ideas: an innovation pass, for the innovator</option> : null}
           </select>
         </label>
         {admin || finding ? (
