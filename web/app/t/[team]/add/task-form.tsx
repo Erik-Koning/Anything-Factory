@@ -33,7 +33,7 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
   return (
     // Made again from each answer, so the lists keep what was chosen too (React resets a form after its action, and a
     // select goes back to the default it was made with).
-    <form key={JSON.stringify(state)} action={action} className="stack" aria-describedby="task-hint">
+    <form key={JSON.stringify(state)} action={action} className="stack" aria-describedby={admin ? undefined : "task-hint"}>
       {state.error ? (
         <p className="notice error" role="alert" tabIndex={-1} ref={alert}>
           {state.error}
@@ -117,7 +117,7 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
           </div>
           <label className="check">
             <input type="checkbox" name="approved" value="yes" defaultChecked={state.approved} />
-            Approve it now, without a score or the approver
+            <span>Approve it now, so it&apos;s ready to build without waiting to be scored and decided on</span>
           </label>
         </>
       ) : null}
@@ -126,11 +126,12 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
           {pending ? "Adding…" : admin ? "Add the task" : "Suggest the task"}
         </button>
       </div>
-      <p id="task-hint" className="hint">
-        {admin
-          ? "You add it as the operator, like a6g task add: a proposal for the planner to score and the approver (or you) to decide, unless you approve it now."
-          : `It goes to triage: the planner reads it, then proposes it, folds it into other work or turns it down. The team's agents see your role, never your name or email. At most ${LIMITS.requestsPerDay} requests and suggestions a day.`}
-      </p>
+      {/* What happens to it is beside the form (add/page.tsx); a suggestion's sender is told what the agents see of them. */}
+      {admin ? null : (
+        <p id="task-hint" className="hint">
+          The team&apos;s agents see your role, never your name or email. At most {LIMITS.requestsPerDay} requests and suggestions a day.
+        </p>
+      )}
     </form>
   );
 }
