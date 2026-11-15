@@ -27,10 +27,11 @@ Choosing and Each idea's description are for a pass, and don't apply to it.
 Keep it in proportion: a pass is a researcher's afternoon, not a thesis. Note every source as you go: a document's
 path, a request's id, a page's address.
 
-Read a source for what it actually shows. For a study, write one line on what it tested (the intervention, the people,
-the outcome) and conclude nothing beyond that: a study of thank-you calls says nothing about proof of impact. A number
-you cite must appear at the address you cite it from; one you can't find there again is marked "unverified", or left
-out. A page that lists things without ranking them doesn't rank them.
+Read a source for what it actually shows. Quote the sentence you rely on, and say in a line what it doesn't show. For
+a study, write what it tested (the intervention, the people, the outcome) and conclude nothing beyond that: a study of
+thank-you calls says nothing about proof of impact. A number you cite must appear at the address you cite it from; one
+you can't find there again is marked "unverified", or left out. A page that lists things without ranking them doesn't
+rank them.
 
 Start where a founder would, from first principles: for each kind of person the product brings together, the job they
 hire it for, what that job costs them today (time, money, trust, dignity), and the scarce thing everyone is short of.
@@ -80,12 +81,18 @@ one, and say so in the report when it doesn't.
 
 Hold the pass to what a founder would ask of it:
 
-- **Outside the team.** Most of what you file changes what someone outside the team meets: a user, a customer, a
-  partner, a funder. A tool for the team's own operators (an admin page, a report) is a step towards a bet, never the
-  bet: file it as the first step of the outcome it serves, titled by that outcome.
+- **The binding constraint.** Name the one thing that limits the product's growth now (from the board, the documents
+  and the last pass: too few organisations on it, too little to give to, too few people who come back), and file at
+  least two bets that loosen it. An idea that adds demand where the constraint isn't says why now.
+- **Bets, not fixes.** Each idea you file moves a loop by which people bring people (users, customers, organisations,
+  partners) or how the product lasts (trust, return, how it pays for itself), and says how in one sentence. A tool for
+  the team's own operators (an admin page, a report) is a step towards a bet, never the bet: file it as the first step
+  of the outcome it serves, titled by that outcome. Reliability fixes, speed-ups and polish of a person's desk are
+  findings: file them as a bug, ux or chore, or list them for the planner, never among your ideas.
 - **Every side.** The product serves several kinds of people (its direction and documents name them, and which comes
-  first). File for each side, the one the direction puts first above all, or say in the report, a line a side, why its
-  best candidate lost to every idea you filed.
+  first, and any partner whose part makes it work). Weigh a bet for each side, the one the direction puts first above
+  all; for a side you file nothing for, say in the report, a line, its best candidate, why it lost, and the test you'd
+  run there.
 - **How it pays for itself.** Where the product's documents leave open how it sustains itself, one idea names an
   income line (a fee, an optional tip, a commission, a contract) and who pays it, within the direction. Money is the
   operator's to decide: file it as theirs.
@@ -99,8 +106,14 @@ Every idea is a bet. Name the riskiest assumption it rests on, the cheapest way 
 the whole thing is built (a page that measures interest, a version done by hand for a few users, a question to five
 of the people it's for, a look at the data the product already has), and the number it should move, with the result
 that means stop. An idea with no test you can name is a hunch, and is scored as one. Write the stop result before the
-test: it must be a result that could actually happen, and that would say no to the assumption as you wrote it. A test
-that needs real users the team can't reach (a team's own stack has none) is a question to real people instead.
+test: it must be a result that could actually happen, and that would say no to the assumption as you wrote it.
+
+A test watches what people do, at the scale the product has now: "would you…" asked of a few people is a hunch, not a
+test. Give its sample, by when, the result that means stop, and how the measure gets recorded (what the product
+already counts, or what the test adds). Name the cheapest version that needs no new code (done by hand, a document, a
+conversation, a link) and why it isn't enough; when it is enough, that is the idea's first step. A test that needs
+real users the team can't reach (a team's own stack has none) is the operator's to run with real people: say what
+they'd do and what they'd count.
 
 Search the earlier tasks first (`a6g task list --all`). If an idea is already there, add your evidence to it with
 `a6g task note <id> "…"` instead of filing it again. A rejected idea comes back only with new evidence that answers why
