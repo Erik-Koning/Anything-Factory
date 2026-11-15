@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.10: An innovator whose bets carry their upside in numbers, and ask before undoing a ruling
+
+A sixth judged innovation pass scored 6.5 of 10, the best so far: its argument with a subagent visibly changed it, and
+it filed for every side. What held it back:
+
+- **The upside is a number.** Every bet now gives what it changes a year out, from a stated base ("if right, by <date>:
+  40 donors a month, of 120"), and ideas are ranked by it. The pass had said "compounds" where a number belonged.
+- **A ruling undone is asked, not built around.** Two ideas added a tracking parameter that an approved task had ruled
+  out, without saying so. The innovator now reads the decisions and approved tasks in an idea's area, and an idea
+  that undoes one quotes the ruling and asks the operator.
+- **Going live first.** Both lead tests needed a live organisation while none was live. A test now says what it needs
+  of the product today, and while nothing is live one bet attacks going live directly.
+- **Income is a price put to a payer.** A list of funding rounds whose money goes to the organisations isn't an income
+  bet. One now names who pays and puts a price or a question to them, with the answer that means stop.
+
+The innovator's new words reach a team at `a6g upgrade` and `a6g rotate`.
+
 ## 0.8.9: Questions you answer at a glance, and both protections on for every sign-up
 
 A question from the team read like a brief: the reason, the options with what each led to, and a recommendation with
