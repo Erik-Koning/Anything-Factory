@@ -58,8 +58,11 @@ test("cost over the window: by subscription, a chart read with the keyboard, tot
   await page.getByRole("navigation", { name: "Breakdown by" }).getByRole("link", { name: "Day" }).click();
   await expect(page.getByRole("columnheader", { name: "Total" })).toBeVisible();
   await page.getByRole("navigation", { name: "Subscription" }).getByRole("link", { name: "refdocs" }).click();
+  await expect(page).toHaveURL(/sub=/);
   await expect(page.locator(".usage-series li")).toHaveCount(1);
+  // Each choice once the page before it is in: a link's address carries what's shown.
   await page.getByRole("navigation", { name: "Show" }).getByRole("link", { name: "Tokens" }).click();
+  await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
   await page.getByRole("navigation", { name: "Period" }).getByRole("link", { name: "Past 24h" }).click();
   await expect(page.getByRole("heading", { name: "Hourly processed tokens" })).toBeVisible();
   await expect(page).toHaveURL(/period=1/);
