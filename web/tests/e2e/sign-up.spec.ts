@@ -1,7 +1,8 @@
 // Signing up end to end, after the main story and the security one on the same server and database: the sign-up page
-// and its two choices, the emailed confirmation, the authenticator set up on the way in (or put off), the IP check
-// turned off and on from the account page, and an admin adding someone who signed up to a team. Each person comes from
-// addresses of their own, so the limit on sign-ups (three a minute from one address) is never met.
+// and its two protections (on for everyone, whatever the request asks), the emailed confirmation, the authenticator set
+// up on the way in (or put off), the IP check turned off and on from the account page, and an admin adding someone who
+// signed up to a team. Each person comes from addresses of their own, so the limit on sign-ups (three a minute from one
+// address) is never met.
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { closeDatabases, databases, freshCode, mailsTo, newPage, nextLink, nextLinkLike, signInAsAdmin, signInWith, state } from "./helpers.ts";
 
@@ -47,14 +48,21 @@ async function fitsAPhone(page: Page, what: string): Promise<void> {
   await page.setViewportSize(size);
 }
 
-test("anyone creates an account: both choices ticked, the email confirmed, the authenticator set up on the way in", async ({ browser }) => {
+test("anyone creates an account: both protections on, the email confirmed, the authenticator set up on the way in", async ({ browser }) => {
   const { context, page } = await newPage(browser, { ip: "203.0.113.61" });
   await page.goto("/sign-in");
   await fitsAPhone(page, "/sign-in");
   await page.getByRole("link", { name: "Create one" }).click();
   await expect(page.getByRole("heading", { name: "Create an account" })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: "Two-factor authentication" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Check new IP addresses" })).toBeChecked();
+  // The two protections are stated, not offered: there is nothing to untick.
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByRole("list", { name: "Keeping your account safe" }).getByRole("listitem")).toHaveText([
+    /^Two-factor authentication/,
+    /^Check new IP addresses/,
+  ]);
+  await expect(
+    page.getByText("Both are on for every new account. You can turn either off from your account page once your email is confirmed.")
+  ).toBeVisible();
   await fitsAPhone(page, "/sign-up");
   const seen = mailsTo(SAM).length;
   await signUp(page, "Sam Signup", SAM);
@@ -68,7 +76,7 @@ test("anyone creates an account: both choices ticked, the email confirmed, the a
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in/);
 
-  // The emailed link signs in, and the authenticator they chose comes first: nothing else opens.
+  // The emailed link signs in, and the authenticator every sign-up starts with comes first: nothing else opens.
   await page.goto(await nextLinkLike(SAM, seen, CONFIRM_EMAIL));
   await expect(page).toHaveURL(/\/welcome$/);
   await expect(page.getByRole("heading", { name: "Set up two-factor authentication" })).toBeVisible();
@@ -211,18 +219,26 @@ test("the authenticator can wait: “Set it up later” goes on to Teams; the ac
   for (const { context } of [home, away, elsewhere]) await context.close();
 });
 
-test("with both boxes unticked, the confirmed email goes straight to Teams and no new address is asked about", async ({ browser }) => {
+test("nothing sent with a sign-up turns a protection off: the account starts with both on, whoever asked for what", async ({ browser }) => {
   const first = await newPage(browser, { ip: "203.0.113.63" });
   await first.page.goto("/sign-up");
-  await first.page.getByRole("checkbox", { name: "Two-factor authentication" }).uncheck();
-  await first.page.getByRole("checkbox", { name: "Check new IP addresses" }).uncheck();
+  // The page has no boxes to untick, and a request that asks anyway is made like any other.
+  await expect(first.page.getByRole("checkbox")).toHaveCount(0);
   const seen = mailsTo(UMA).length;
-  await signUp(first.page, "Uma Unticked", UMA);
+  const asked = await first.page.request.post("/api/auth/sign-up/email", {
+    data: { name: "Uma Unticked", email: UMA, password: PASSWORD, setUpAuthenticator: false, checkNewIps: false },
+    headers: { origin: state().baseURL },
+  });
+  expect(asked.status()).toBe(200);
+  const { accounts } = await databases();
+  expect(await accounts.collection("user").findOne({ email: UMA })).toMatchObject({ emailVerified: false, authenticatorDue: true, ipCheck: true });
+  // The emailed link signs her in, and the authenticator comes first, as for anyone; she puts it off.
   const link = await nextLinkLike(UMA, seen, CONFIRM_EMAIL);
   await first.page.goto(link);
+  await expect(first.page).toHaveURL(/\/welcome$/);
+  await first.page.getByRole("button", { name: "Set it up later" }).click();
   await expect(first.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
-  const { accounts } = await databases();
-  expect(await accounts.collection("user").findOne({ email: UMA })).toMatchObject({ emailVerified: true, authenticatorDue: false, ipCheck: false });
+  expect(await accounts.collection("user").findOne({ email: UMA })).toMatchObject({ emailVerified: true, authenticatorDue: false, ipCheck: true });
   umasSession = await first.context.storageState();
 
   // The link confirms once: opened again, somewhere else, it signs nobody in.
@@ -230,13 +246,11 @@ test("with both boxes unticked, the confirmed email goes straight to Teams and n
   await second.page.goto(link);
   await expect(second.page.getByRole("heading", { name: "Confirm your email" })).toBeVisible();
   await expect(second.page.getByText("That link has done its work")).toBeVisible();
-  // The password signs in from there, an address never used, with nothing to confirm and no email about it.
+  // The password signs in from there, an address never used: it waits for her to confirm it from her email, as any
+  // new address does, since nothing she was signed up with turned that off.
   await signInWithPassword(second.page, UMA);
-  await expect(second.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
-  await second.page.goto("/account");
-  await expect(second.page.getByRole("region", { name: "Your IP addresses" }).getByText("new ones aren't checked")).toBeVisible();
-  await expect(second.page.getByRole("region", { name: "Authenticator" }).getByText("off", { exact: true })).toBeVisible();
-  expect(mailsTo(UMA).length).toBe(seen + 1);
+  await expect(second.page.getByRole("heading", { name: "Confirm it's you" })).toBeVisible();
+  await expect.poll(() => mailsTo(UMA).length).toBe(seen + 2);
   for (const { context } of [first, second]) await context.close();
 });
 

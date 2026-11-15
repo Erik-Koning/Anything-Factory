@@ -1,6 +1,6 @@
 // Who's asking: the session's person, their roles per team, whether the session has its second factor, whether the
 // request comes from an IP address they've confirmed (and whether they have that checked), and whether they still owe
-// the authenticator they asked for as they signed up. Every page and server action starts here; access.ts says what
+// the authenticator every sign-up starts with. Every page and server action starts here; access.ts says what
 // they may do.
 import "server-only";
 import { cookies, headers } from "next/headers";

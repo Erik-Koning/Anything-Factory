@@ -1,7 +1,7 @@
-// The two choices a person makes as they sign up, kept on their account (auth.ts): whether the authenticator they
-// asked for is still due (set up at /welcome, or put off there), and whether a sign-in from an IP address they haven't
-// used asks them by email first. Changed only from here, by the app's own server actions after their checks: no
-// endpoint of Better Auth's takes either.
+// The two protections every sign-up starts with, kept on the account (auth.ts): whether its authenticator is still
+// due (set up at /welcome, or put off there), and whether a sign-in from an IP address the person hasn't used asks
+// them by email first. Changed only from here, by the app's own server actions after their checks, for someone signed
+// in to a confirmed account: no endpoint of Better Auth's takes either, and no sign-up can.
 import { auth } from "./auth.ts";
 
 const adapter = async () => (await auth().$context).internalAdapter;

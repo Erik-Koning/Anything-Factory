@@ -298,7 +298,7 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep(adminAway), "confirm-ip");
     assert.equal(checksIp(member), true);
   });
-  test("who chose two-factor authentication as they signed up sets up the authenticator, or puts it off, before anything opens", () => {
+  test("who signed up sets up the authenticator, or puts it off, before anything opens", () => {
     const due = { ...member, authenticatorDue: true };
     assert.equal(pendingStep(due), "set-up-authenticator");
     assert.equal(blocked(due), true);

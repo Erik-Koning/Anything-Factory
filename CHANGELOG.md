@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased: both protections on for every sign-up
+
+The sign-up page had two boxes, ticked, for two-factor authentication and the check of new IP addresses, and whoever
+filled the page in could untick them. Someone signing up with another person's address could so leave that account
+with no check on where it was signed in from.
+
+- **Nothing sent with a sign-up turns a protection off.** Every account that signs up starts with its authenticator
+  due and its new IP addresses checked. The page states both and has no box to untick; a request that asks anyway
+  is made like any other.
+- **Only the person turns one off**, signed in to the confirmed account: the authenticator put off at `/welcome` or
+  turned off from the account page, the IP check from the account page with a sign-in from the last ten minutes.
+- Accounts made before keep what they chose.
+
 ## 0.8.8: An innovator that brings someone new, bets on value, and has its pass argued with
 
 Two more judged innovation passes scored 5 and 6 of 10. Their research held up, but they brought no one new to the

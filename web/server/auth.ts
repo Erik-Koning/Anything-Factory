@@ -4,16 +4,18 @@
 // is confirmed: the sign-up emails a link, good for an hour, and opening it confirms the address and signs the person
 // in, once. A password sign-in before that is refused and sends the link again. A sign-up for an address that already
 // has an account answers exactly as a new one does, in the same time, and tells the address's owner by email instead.
-// What a sign-up may set is a name, an address, a password and the two choices below: never a role, a ban, a second
-// factor or "confirmed". An admin can also invite someone to a team (admin/people): an account with no password, which
-// signs in by link. A new account is on no team until an admin puts it on one.
+// What a sign-up may set is a name, an address and a password: never a role, a ban, a second factor, "confirmed", or
+// either of the two protections below. An admin can also invite someone to a team (admin/people): an account with no
+// password, which signs in by link. A new account is on no team until an admin puts it on one.
 //
-// The two choices on the sign-up page, both on unless unticked, are kept on the account (authenticatorDue, ipCheck).
-// They're read from the sign-up's body here, as the account is made, and changed afterwards only by the app's own
-// server actions (account-choices.ts): no endpoint takes either.
+// Two protections are on for every account that signs up, whatever the request says (authenticatorDue, ipCheck).
+// Whoever fills in a sign-up hasn't proven the address is theirs, so nothing they send turns either off. Only the
+// person can, afterwards, signed in to the confirmed account: from the app's own server actions
+// (account-choices.ts), since no endpoint takes either.
 //   - Two-factor authentication: the person sets up an authenticator app as soon as their address is confirmed
-//     (/welcome), or puts it off there.
-//   - Check new IP addresses: a sign-in from an address they haven't used asks them by email first (below).
+//     (/welcome), or puts it off there; the account page turns one off.
+//   - Check new IP addresses: a sign-in from an address they haven't used asks them by email first (below); the
+//     account page turns it off.
 // An account whose address is first proven by a sign-in link, not its confirmation link, loses the password it was
 // signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on.
 //
@@ -25,8 +27,8 @@
 //     know or are). A passkey that didn't verify them gives no second factor.
 //   - never a link by email: no sign-in link is sent to an admin, and a session from one, or from a confirmation link,
 //     is refused for an admin. Nobody becomes an admin by signing up.
-// Anyone else may turn on an authenticator too (as they sign up, or from the account page); from then on their
-// sessions need its code as well, whichever way they signed in.
+// Anyone else may turn on an authenticator too (at /welcome once their sign-up is confirmed, or from the account page);
+// from then on their sessions need its code as well, whichever way they signed in.
 // A forgotten password is set again from a link by email (password-reset.ts): the link signs nobody in, an account
 // with an authenticator gives its code as well, so an admin's inbox alone changes nothing, and every session of the
 // account ends. Asking answers the same for every address; the app's own page sets the password, never an endpoint here.
@@ -200,8 +202,8 @@ function makeAuth() {
       expiresIn: 60 * 60,
       sendVerificationEmail: async ({ user, token }) => sendConfirmation(user, token),
     },
-    // The two choices made on the sign-up page. Not input: no endpoint's body sets them (the hook below reads the
-    // sign-up's own two keys), and the app's server actions change them (account-choices.ts).
+    // The two protections every sign-up starts with. Not input: no endpoint's body sets them (the hook below turns
+    // both on), and the app's server actions change them (account-choices.ts).
     user: {
       additionalFields: {
         authenticatorDue: { type: "boolean", required: false, defaultValue: false, input: false },
@@ -234,12 +236,12 @@ function makeAuth() {
     databaseHooks: {
       user: {
         create: {
-          // The sign-up page's two choices, on unless its box was unticked. Only a sign-up's: an account an admin
-          // invites, or create-admin makes, has the defaults (the IP check on, no authenticator due).
+          // Both protections on for an account that signs up, and nothing in the request changes that: the person
+          // turns one off themselves once the address is confirmed. Only a sign-up's: an account an admin invites,
+          // or create-admin makes, has the defaults (the IP check on, no authenticator due).
           before: async (user, ctx) => {
             if (ctx?.path !== SIGN_UP) return;
-            const body = (ctx.body ?? {}) as { setUpAuthenticator?: unknown; checkNewIps?: unknown };
-            return { data: { ...user, authenticatorDue: body.setUpAuthenticator !== false, ipCheck: body.checkNewIps !== false } };
+            return { data: { ...user, authenticatorDue: true, ipCheck: true } };
           },
           after: async (user, ctx) => {
             const mark = ctx?.request ? mailed.get(ctx.request) : undefined;
@@ -248,7 +250,8 @@ function makeAuth() {
         },
         update: {
           // An address first proven by a sign-in link, not its confirmation link: whoever signed up with it hadn't
-          // proven the inbox, so their choice to leave new IP addresses unchecked goes with their password.
+          // proven the inbox, so its IP check goes on with their password gone (it can be off only on an account that
+          // signed up while the page still had its two boxes).
           before: async (changes, ctx) => {
             if (ctx?.path === "/magic-link/verify" && changes.emailVerified === true) return { data: { ...changes, ipCheck: true } };
           },

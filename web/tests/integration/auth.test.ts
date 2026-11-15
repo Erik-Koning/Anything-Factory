@@ -277,7 +277,7 @@ test("anyone signs up with an email address and a password; nothing opens until 
   assert.equal(made?.["emailVerified"], false);
   assert.equal(made?.["role"], "user");
   assert.equal(made?.["name"], "Sam Signup");
-  // The page's two boxes, ticked unless unticked.
+  // Both protections, on for every sign-up.
   assert.equal(made?.["authenticatorDue"], true);
   assert.equal(made?.["ipCheck"], true);
   assert.equal(await sessionsOf(email), 0);
@@ -338,7 +338,7 @@ test("a sign-up answers the same, as slowly, whether or not the address has an a
   const invited = await aPerson("invited");
   const { email: confirmed } = await aSignedUpPerson();
   const waiting = anAddress("waiting");
-  assert.equal((await signUp(new Browser(), waiting, { checkNewIps: false })).status, 200);
+  assert.equal((await signUp(new Browser(), waiting)).status, 200);
   const before = { waiting: await credentialOf(waiting), confirmed: await credentialOf(confirmed) };
   assert.ok(before.waiting?.["password"] && before.confirmed?.["password"]);
   await forgetSends();
@@ -367,7 +367,7 @@ test("a sign-up answers the same, as slowly, whether or not the address has an a
   assert.equal((await credentialOf(confirmed))?.["password"], before.confirmed["password"]);
   assert.equal(await credentialOf(invited), null, "an invited account gets no password this way");
   const still = await accountOf(waiting);
-  assert.deepEqual([still?.["name"], still?.["authenticatorDue"], still?.["ipCheck"], still?.["emailVerified"]], ["Sam Signup", true, false, false]);
+  assert.deepEqual([still?.["name"], still?.["authenticatorDue"], still?.["ipCheck"], still?.["emailVerified"]], ["Sam Signup", true, true, false]);
   // The log says which it was; the answer never does.
   for (const email of [invited, confirmed, waiting]) {
     const entry = (await audited("sign-up", email)).at(-1);
@@ -377,15 +377,17 @@ test("a sign-up answers the same, as slowly, whether or not the address has an a
   assert.equal((await audited("sign-up", fresh)).at(-1)?.["outcome"], "ok");
 });
 
-test("a sign-up sets a name, an address, a password and the two choices: never a role, a ban, a second factor or a confirmed address", async () => {
+test("a sign-up sets a name, an address and a password: never a role, a ban, a second factor, a confirmed address, or a protection off", async () => {
   const tries = [
     { role: "admin" },
     { emailVerified: true },
     { twoFactorEnabled: true },
     { banned: true },
-    // The account's own fields for the two choices aren't the sign-up's to send: only its two boxes are.
+    // Nor the two protections, by the account's own fields or by the names the sign-up page once sent its boxes
+    // under: whoever fills in a sign-up hasn't proven the address is theirs.
     { authenticatorDue: false, ipCheck: false },
     { data: { role: "admin", emailVerified: true } },
+    { setUpAuthenticator: false, checkNewIps: false },
   ];
   const outcomes = await Promise.all(
     tries.map(async (more) => {
@@ -398,7 +400,7 @@ test("a sign-up sets a name, an address, a password and the two choices: never a
     const said = JSON.stringify(more);
     assert.ok(status === 200 || status === 400, `${said} answered ${status}`);
     const made = await accountOf(email);
-    // Refused outright, or made as any other sign-up is: an unconfirmed user with both choices on.
+    // Refused outright, or made as any other sign-up is: an unconfirmed user with both protections on.
     if (status === 400) assert.equal(made, null, said);
     else
       assert.deepEqual(
@@ -417,23 +419,15 @@ test("a sign-up sets a name, an address, a password and the two choices: never a
   // What Better Auth 1.7.20 does with each, so a change in it shows here: a role is refused, the rest are dropped.
   assert.deepEqual(
     outcomes.map((o) => o.status),
-    [400, 200, 200, 200, 200, 200]
+    [400, 200, 200, 200, 200, 200, 200]
   );
 
-  // The two boxes, unticked: stored as that. Anything but a plain false leaves a choice on.
-  const [unticked, odd] = [anAddress("unticked"), anAddress("odd")];
-  await Promise.all([
-    signUp(new Browser(), unticked, { setUpAuthenticator: false, checkNewIps: false }),
-    signUp(new Browser(), odd, { setUpAuthenticator: "false", checkNewIps: 0 }),
-  ]);
-  assert.deepEqual([(await accountOf(unticked))?.["authenticatorDue"], (await accountOf(unticked))?.["ipCheck"]], [false, false]);
-  assert.deepEqual([(await accountOf(odd))?.["authenticatorDue"], (await accountOf(odd))?.["ipCheck"]], [true, true]);
-  // An account the app's invite makes has neither box: nothing due, new addresses checked.
+  // An account the app's invite makes signs in by link: nothing due, new addresses checked.
   const invited = await accountOf(await aPerson());
   assert.deepEqual([invited?.["authenticatorDue"] === true, invited?.["ipCheck"] !== false], [false, true]);
 });
 
-test("the two choices are the account's own: no request changes them or raises the account, only the app's server code does", async () => {
+test("the two protections are the account's own: no request changes them or raises the account, only the app's server code does", async () => {
   const { browser, email, me } = await aSignedUpPerson();
   const fields = async () => {
     const user = await accountOf(email);
@@ -465,8 +459,11 @@ test("the two choices are the account's own: no request changes them or raises t
   assert.equal((await auth().api.getSession({ headers: browser.headers() }))?.user.ipCheck, false, "and the session's person reads as changed");
 });
 
-test("someone who turned the IP check off isn't asked about a new address; someone who left it on is, and an admin always", async () => {
+test("someone who turned the IP check off from their account isn't asked about a new address; someone who left it on is, and an admin always", async () => {
+  // Both signed up with it on, whatever one of them asked for; that one then turns it off, signed in, from their account.
   const [off, on] = await Promise.all([aSignedUpPerson({ checkNewIps: false }), aSignedUpPerson()]);
+  assert.deepEqual([(await accountOf(off.email))?.["ipCheck"], (await accountOf(on.email))?.["ipCheck"]], [true, true]);
+  await setIpCheck(off.me.user.id, false);
   for (const { email, expected } of [
     { email: off.email, expected: false },
     { email: on.email, expected: true },
@@ -562,9 +559,9 @@ test("no sign-up by a sign-in link; one opened before the confirmation proves th
   assert.equal(await accountsNamed(stranger), 0);
   assert.equal(await browser.session(), null);
 
-  // Whoever signed up with this address chose its password and unticked the IP check, and hasn't shown the inbox is theirs.
+  // Whoever signed up with this address chose its password, and hasn't shown the inbox is theirs.
   const email = anAddress("claimed");
-  assert.equal((await signUp(new Browser(), email, { checkNewIps: false })).status, 200);
+  assert.equal((await signUp(new Browser(), email)).status, 200);
   const confirmation = mailFor(email, CONFIRM)?.link ?? "";
   assert.ok(await credentialOf(email));
   // The inbox's owner signs in by a link instead.
@@ -1010,7 +1007,7 @@ async function aResetLink(email: string): Promise<{ token: string; link: URL; as
 }
 
 test("a forgotten password is set again from an emailed link: it signs nobody in, works once, ends every session, and the old password is gone", async () => {
-  const { browser, email, me } = await aSignedUpPerson({ setUpAuthenticator: false });
+  const { browser, email, me } = await aSignedUpPerson();
   const seen = mails.length;
   const { token, link, asker } = await aResetLink(email);
   assert.equal(`${link.origin}${link.pathname}`, `${BASE}/reset-password`, "the app's own page, which asks before it changes anything");
@@ -1113,8 +1110,10 @@ test("links to set a password are held to three asks a minute from one address",
 
 test("the link proves an address nobody had confirmed: whoever signed up with it loses their password, and its new IP addresses are checked", async () => {
   const email = anAddress("unproven");
-  // Signed up by someone, with their own password and the IP check off, and never confirmed.
-  assert.equal((await signUp(new Browser(), email, { checkNewIps: false })).status, 200);
+  // Signed up by someone, with their own password, and never confirmed. Its IP check is off, as an account from
+  // before every sign-up had it on could be.
+  assert.equal((await signUp(new Browser(), email)).status, 200);
+  await setIpCheck(String((await accountOf(email))?._id), false);
   const before = await accountOf(email);
   assert.deepEqual([before?.["emailVerified"], before?.["ipCheck"]], [false, false]);
   const { token } = await aResetLink(email);
