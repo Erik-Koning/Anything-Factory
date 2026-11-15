@@ -85,7 +85,10 @@ Hold the pass to what a founder would ask of it:
 
 - **The binding constraint.** Name the one thing that limits the product's growth now (from the board, the documents
   and the last pass: too few organisations on it, too little to give to, too few people who come back), and file at
-  least two bets that loosen it. An idea that adds demand where the constraint isn't says why now.
+  least two bets that loosen it. An idea that adds demand where the constraint isn't says why now. While no
+  organisation or customer uses the product for real, the constraint is going live: one bet attacks that directly (the
+  first one live by a date, its first users brought by hand, counted each week), since every other bet's test waits on
+  it.
 - **Someone new arrives.** File at least one bet by which a new user, customer or organisation arrives because of it:
   where people already look for this (a directory, a list, a season, a partner's channel) and how the product gets
   there. When none survives, name the best candidate and its test in the report; an idea that keeps people or tidies a
@@ -103,19 +106,23 @@ Hold the pass to what a founder would ask of it:
   than a line of the report. A side named "nothing filed" two passes running has been skipped, not weighed.
 - **How it pays for itself.** Where the product's documents leave open how it sustains itself, every pass files or
   sharpens one income bet: who pays, about how much at the scale of the next year, and a test the operator can run
-  within weeks (a call, a quote, a price on a page). Look first at who already gains from what the product does (a
-  merchant it sends orders to, a partner whose cost it saves, an organisation's own funders). Pointing at an earlier
-  income idea counts only with new evidence or a sharper test noted on it. Money is the operator's to decide: file it
-  as theirs.
+  within weeks that puts a price or a question to the payer, with the answer that means stop. Look first at who
+  already gains from what the product does (a merchant it sends orders to, a partner whose cost it saves, an
+  organisation's own funders). A list of grants or funding rounds isn't an income bet, nor is money that goes to the
+  organisations rather than to the product. Pointing at an earlier income idea counts only with a new payer, price or
+  test noted on it. Money is the operator's to decide: file it as theirs.
 - **Upside first.** Rank by how much changes if the bet is right, then by how sure you are; not by how sure the build
-  is. Say what the bet changes at a scale the next year could reach (the documents' target, or twenty organisations);
-  one whose upside there is a small polish is a UX finding, not a bet. A season or deadline within a month that a bet
-  could use (a giving season, a launch, a renewal) moves it up, and says so.
+  is. Every idea's bet gives its upside as a number a year out, from a stated base ("if right, by <date>: 40 donors a
+  month from shared needs, of 120"), and you rank by it; a word ("compounds", "meaningful") isn't one. One whose upside
+  there is a small polish is a UX finding, not a bet. A season or deadline within a month that a bet could use (a
+  giving season, a launch, a renewal) moves it up, and says so.
 - **What's still open, and what's been ruled.** Read what the documents list as open or unsolved, and the decisions
   (`.a6g/decisions.md` and the operator's answers). An open question is often the biggest bet, and a pass that skips
   it says why. For each idea, ask which rule or constraint it lifts (a need that belongs to an organisation isn't a
   gift to a named person, say): an unlock is a bet of its own, filed as one, and one that reopens a decision is the
-  operator's.
+  operator's. Before you file, read the decisions and the approved and done tasks in the idea's area: an idea that
+  undoes what one ruled (no tracking on a link, a limit, who may see what) quotes the ruling in its Scope and asks the
+  operator for the reversal, never builds around it.
 - **Against today's way.** Name what people do instead today (give cash, an online wish list, a spreadsheet, a phone
   call) and show, in numbers where you can, why the idea beats it on cost, effort or trust. The riskiest assumption is
   the one that, if false, makes today's way win. Find it by a pre-mortem: the bet has failed a year from now; who said
@@ -137,7 +144,8 @@ almost nothing), and how the measure gets recorded (what the product
 already counts, or what the test adds). Name the cheapest version that needs no new code (done by hand, a document, a
 conversation, a link) and why it isn't enough; when it is enough, that is the idea's first step. A test that needs
 real users the team can't reach (a team's own stack has none) is the operator's to run with real people: say what
-they'd do and what they'd count.
+they'd do and what they'd count. A test says what it needs of the product as it is today (a live organisation, real
+users, a merged feature); one that needs what doesn't exist yet names the bet or task it waits on.
 
 Quote or drop: an evidence line that cites a document, the code or the board quotes what it relies on. A claim about a
 task's history must be in that task (`a6g task show <id>`); one that isn't is invented, and the idea goes without it or
@@ -145,9 +153,9 @@ not at all.
 
 Before you file, have the pass argued with. Start one subagent with your drafted ideas and none of your reasoning, and
 ask it to answer, as a hard founder would, for each: whose job it changes and how they do it today; whether the
-evidence says what the idea claims; whether the test could say no to the bet; what it grows or keeps; and which idea a
-strong founder would expect that's missing. Change or drop what doesn't survive, and say in the report what the
-argument changed.
+evidence says what the idea claims; whether the test could say no to the bet, and whether it can run today; what it
+grows or keeps, and whether the upside is a number; what ruling it undoes; and which idea a strong founder would expect
+that's missing. Change or drop what doesn't survive, and say in the report what the argument changed.
 
 Search the earlier tasks first (`a6g task list --all`). If an idea is already there, add your evidence to it with
 `a6g task note <id> "…"` instead of filing it again. A rejected idea comes back only with new evidence that answers why
@@ -174,9 +182,10 @@ can tell where it lands. The planner decides from the description, so keep to th
 
 ## The bet
 
-- The riskiest assumption: <what must be true for this to work>
-- The cheapest test: <how to learn that before building it all, and what it costs>
+- The riskiest assumption: <who says no a year from now, and why>
+- The cheapest test: <how to learn that before building it all, what it costs, and what it needs of the product today>
 - The measure: <the number it should move, and the result that means stop>
+- The upside: <if right, by <a date a year out>: the number, from its base (people, organisations, given, earned)>
 
 ## Scope
 
@@ -408,7 +417,7 @@ keeps it as coming from a secondary source: your reading of them, never their wo
 After a pass, finish with:
 
 - what you filed, in priority order, each with its task number, its suggested priority, one line on why and its bet
-  (the assumption and the cheapest test);
+  (the assumption, the cheapest test and the upside's number);
 - the ideas you held back, a line each;
 - what you researched, and the sources that mattered most;
 - what you looked at and found already covered.
