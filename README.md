@@ -151,7 +151,9 @@ To stop a team gracefully, let what it's doing finish first: `a6g pause my-app -
 the journeys under way (or `--journeys 3,7`) finish, their verification and polish included. Once nothing in it can
 move, the team pauses and you get a report (email, and the web app): what was done, each journey, what waits for you.
 It stays paused until `a6g resume my-app --note "…"`, whose note goes to the planner as your feedback. The web app's
-team page does the same for admins, each time with an authenticator code; the watchdog applies it within a minute.
+team page does the same for admins (Stop, Pause… and Resume beside the team's name), at once; the watchdog applies it
+within a minute. Under ⋯ there: restart the planner or the environment, upgrade the factory, wake the team, or delete it
+(its name typed and an authenticator code): its lead's watchdog runs each as a job of its own (`a6g act`).
 
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 

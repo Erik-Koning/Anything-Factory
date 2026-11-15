@@ -1,6 +1,6 @@
 // What the pages show of a team's graph, worked out from the factory's documents (never stored).
 import { claimRank, type FeatureRequest, journeyDue, MERGE, type Status, type Task } from "../../lib/tasks/model.ts";
-import { type Control, describeHold } from "../../lib/tasks/controls.ts";
+import { ACTION_WORDS, type Control, describeHold, isTeamAction } from "../../lib/tasks/controls.ts";
 import { ONLINE_MIN } from "../../lib/fleet.ts";
 import type { UsageDay } from "../../lib/tasks/spend.ts";
 import type { TeamState } from "../../lib/tasks/teams.ts";
@@ -168,6 +168,8 @@ export function controlsView(status: TeamState | null, controls: Control[], limi
 // What a control asked for or did, as a line of a list begins: every kind in its own words, never one as another.
 export function controlSaid(c: Control): string {
   if (c.kind === "resume") return "Asked to resume";
+  if (c.kind === "action") return actionSaid(c);
+  if (c.kind === "acted") return "Said how an action went";
   if (c.kind === "budget") return "Asked to set the budget";
   if (c.kind === "agreement") return "Changed the working agreement";
   if (c.kind === "review") return `${c.review?.verdict === "overturned" ? "Overturned" : "Agreed with"} ${c.review?.decision ?? "a decision"}`;
@@ -181,6 +183,9 @@ export function controlSaid(c: Control): string {
     : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}`;
 }
 
+// What an action asked for, as a line of a list begins (lib/tasks/controls.ts ACTION_WORDS).
+export const actionSaid = (c: Control): string => (isTeamAction(c.action) ? ACTION_WORDS[c.action].asked : "Asked the team's Mac to do something");
+
 // When no Mac runs the team now: its lead reports its state on every full watchdog run (about every five minutes), so
 // none for ONLINE_MIN minutes, or none at all that long after it was published, means none does. `last` is when it was
 // last heard from (null: never). Null while a Mac runs it, or too soon after it was published to say.
@@ -192,9 +197,11 @@ export function quietSince(team: { status: { at: string } | null; publishedAt?: 
 }
 
 // The control that took the team off the site, while it's off: a report from its lead after that means a Mac runs it
-// again (one that was asleep, or a lead moved to another Mac), and a team a Mac runs is never hidden.
+// again (one that was asleep, or a lead moved to another Mac), and a team a Mac runs is never hidden. A team deleted
+// (an ask to unregister it) stays off whatever its lead reports in the minute before it's taken off: a6g register on
+// its Mac puts it back.
 export const offSite = (team: { status: { at: string } | null }, retired: Control | null): Control | null =>
-  retired && !(team.status?.at && team.status.at > retired.at) ? retired : null;
+  retired && (retired.kind === "action" || !(team.status?.at && team.status.at > retired.at)) ? retired : null;
 
 // Who asked for a control, in words.
 export const askedBy = (by: string): string =>

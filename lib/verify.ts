@@ -5,7 +5,8 @@
 // checkout), then the app lock (nothing restarts the app), then a gate slot, in that order, as every holder of those
 // locks takes them; and it throws a run away if the checkout's commit moved anyway.
 //
-// The app's health comes first: an app that's down is one finding, nothing else runs, and the check stays due. Then
+// The app's health comes first: an app that's down is one finding, nothing else runs, and the check stays due; one
+// that goes away while the checks run files nothing, and the check stays due too. Then
 // what newly fails becomes a finding by the merge queue, naming the merges since it last passed: one per page, one per
 // spec file, one for a suite or page checks that didn't run, one for a suite that checks less than its last run did. A
 // test that passes only on its retry is filed as flaky, for the scaffolder; the harness's gaps are filed once; and the
@@ -517,6 +518,20 @@ async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWa
               },
             });
           }
+        }
+        // An app that went away while the checks ran (something restarted it without the app lock) fails every page
+        // and test that asked it after, which says nothing of the merges: nothing is filed, and the check stays due.
+        const refused = Object.values(pages ?? {}).some((result) =>
+          result.runs.some((run) => run.problems.some((problem) => /CONNECTION_REFUSED|ECONNREFUSED/.test(problem)))
+        );
+        const gone = refused ? "it refused connections during the page checks" : await appDown(team, plan.appUrl, healthWaitMs);
+        if (gone) {
+          if (suite) forgetRun(home, suite);
+          log(`${short} the app went away during the check (${gone}); nothing was filed, and the check stays due`);
+          return {
+            told: `verify: at ${short}, the team's app went away during the check after merges (${gone}), so nothing was filed and the next merge checks again. Restart the app only with a6g env, which waits for the check.`,
+            due: "waiting",
+          };
         }
         if (head(home) !== at) {
           // A run on a checkout that moved under it says nothing of either commit.

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { reviewAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
 import { type Decided, underAgreement } from "../server/decided.ts";
+import { ActionForm } from "./action-form.tsx";
 import { SubmitButton } from "./submit-button.tsx";
 import { Ago, Chip } from "./ui.tsx";
 
@@ -14,7 +15,7 @@ function Review({ team, id, verdict }: { team: string; id: string; verdict: "agr
   const input = `${verdict}-${id}`;
   const overturn = verdict === "overturned";
   return (
-    <form action={reviewAction}>
+    <ActionForm action={reviewAction}>
       <input type="hidden" name="team" value={team} />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="verdict" value={verdict} />
@@ -23,7 +24,7 @@ function Review({ team, id, verdict }: { team: string; id: string; verdict: "agr
       <div>
         <SubmitButton className={overturn ? "reject" : "approve"}>{overturn ? `Overturn ${id}` : `Agree with ${id}`}</SubmitButton>
       </div>
-    </form>
+    </ActionForm>
   );
 }
 

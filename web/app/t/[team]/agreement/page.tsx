@@ -235,9 +235,8 @@ export default async function AgreementPage({ params, searchParams }: { params: 
       {reads ? (
         <section className="panel" aria-labelledby="change">
           <h2 id="change">Change it</h2>
+          {/* Kept across a change, which it then shows as it stands, so the change is said in a toast. */}
           <AgreementForm
-            // Made again once a change is in force, so it starts from the agreement as it now is.
-            key={control?.id ?? "default"}
             team={team.name}
             initial={{
               level: agreement.level,

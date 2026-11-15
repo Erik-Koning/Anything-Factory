@@ -260,6 +260,24 @@ describe("controls in the run folder", () => {
     assert.match(applied.log[1] ?? "", /\$40 a day, none a week, \$500 in all/);
     assert.match(holdNote(run), /pausing the team after the work under way \(#11, #12, #14\)/);
     assert.deepEqual(JSON.parse(readFileSync(join(run, "controls-applied"), "utf8")), [now.id, resume.id, graceful.id, budget.id]);
+
+    // In its own unit, with its limits on each subscription: one set only on a subscription isn't "none".
+    const shares = control(
+      budgetControl("fixture", "operator", {
+        daily: null,
+        weekly: null,
+        total: null,
+        unit: "subscription",
+        accounts: { default: { daily: null, weekly: 100, total: null } },
+        since: "2026-11-14T00:00:00Z",
+        autoResume: true,
+      })
+    );
+    applied = applyControls(run, [now, resume, graceful, budget, shares]);
+    assert.equal(
+      applied.log[0],
+      "the budget is now none a day, none a week, none in all since 2026-11-14 (each a share of one subscription's weekly limit); on default: none a day, 100% a week, none in all"
+    );
   });
 
   test("the budget's pause tells the planner when auto-resume starts the team again", () => {

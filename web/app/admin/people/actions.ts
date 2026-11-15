@@ -3,8 +3,8 @@
 // their second factor first (allowed), then Better Auth's admin plugin, called on the server with the admin's own
 // session, does the account's part.
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { withNotice } from "../../../components/ui.tsx";
+import { refresh } from "next/cache";
+import type { ActionResult } from "../../../components/action-result.ts";
 import { invitationProblem, isTeamRole, LIMITS, TEAM_PARAM } from "../../../server/access.ts";
 import { auth, isAdminRole } from "../../../server/auth.ts";
 import { Refused, teamDoc } from "../../../server/factory.ts";
@@ -13,7 +13,6 @@ import { changeRole, removeMembership, setMembership } from "../../../server/peo
 import type { AuditAction } from "../../../server/audit.ts";
 import { allowed, getViewer, NotAllowed, type Person, record } from "../../../server/viewer.ts";
 
-const BACK = "/admin/people";
 const text = (form: FormData, key: string): string => {
   const value = form.get(key);
   return typeof value === "string" ? value.trim() : "";
@@ -32,8 +31,9 @@ interface Done {
   team?: string;
   detail?: string;
 }
-// Each change: the admin and their second factor checked, the work done, and both kinds of outcome recorded.
-async function run(action: AuditAction, form: FormData, work: (admin: Person) => Promise<Done>): Promise<never> {
+// Each change: the admin and their second factor checked, the work done, and both kinds of outcome recorded; the page
+// refreshes where it is, and says what happened in a toast.
+async function run(action: AuditAction, form: FormData, work: (admin: Person) => Promise<Done>): Promise<ActionResult> {
   let notice: { ok?: string; error?: string };
   let admin: Person | null = null;
   try {
@@ -51,7 +51,8 @@ async function run(action: AuditAction, form: FormData, work: (admin: Person) =>
       detail: notice.error,
     });
   }
-  redirect(withNotice(BACK, notice));
+  refresh();
+  return notice;
 }
 
 const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -64,8 +65,8 @@ async function userById(id: string): Promise<{ id: string; name: string; email: 
 
 // Invites someone to a team: their account when new (no password: they sign in by email or a passkey), their role
 // and stakeholder record on the team, and for a new account an invitation with a sign-in link.
-export async function inviteAction(form: FormData): Promise<void> {
-  await run("person.invited", form, async () => {
+export async function inviteAction(form: FormData): Promise<ActionResult> {
+  return run("person.invited", form, async () => {
     const email = text(form, "email").toLowerCase();
     const name = text(form, "name");
     const team = text(form, "team");
@@ -85,8 +86,8 @@ export async function inviteAction(form: FormData): Promise<void> {
   });
 }
 
-export async function changeRoleAction(form: FormData): Promise<void> {
-  await run("person.role", form, async () => {
+export async function changeRoleAction(form: FormData): Promise<ActionResult> {
+  return run("person.role", form, async () => {
     const user = await userById(text(form, "userId"));
     const team = text(form, "team");
     const role = text(form, "role");
@@ -102,8 +103,8 @@ export async function changeRoleAction(form: FormData): Promise<void> {
   });
 }
 
-export async function removeAction(form: FormData): Promise<void> {
-  await run("person.removed", form, async () => {
+export async function removeAction(form: FormData): Promise<ActionResult> {
+  return run("person.removed", form, async () => {
     const user = await userById(text(form, "userId"));
     const team = text(form, "team");
     if (!TEAM_PARAM.test(team)) throw new Refused("No such team.");
@@ -123,8 +124,8 @@ const machinesEnded = (n: number): string => (n ? `; ${n === 1 ? "their machine 
 
 // A ban ends every session the person has, unlinks their machines, and keeps them from signing in; admins are managed
 // by create-admin.
-export async function banAction(form: FormData): Promise<void> {
-  await run("person.banned", form, async () => {
+export async function banAction(form: FormData): Promise<ActionResult> {
+  return run("person.banned", form, async () => {
     const user = await userById(text(form, "userId"));
     if (isAdminRole(user.role)) throw new Refused("Admins aren't banned from here; remove one with create-admin on the operator's machine.");
     const reason = text(form, "reason").slice(0, LIMITS.label) || "removed by an admin";
@@ -138,8 +139,8 @@ export async function banAction(form: FormData): Promise<void> {
   });
 }
 
-export async function unbanAction(form: FormData): Promise<void> {
-  await run("person.unbanned", form, async () => {
+export async function unbanAction(form: FormData): Promise<ActionResult> {
+  return run("person.unbanned", form, async () => {
     const user = await userById(text(form, "userId"));
     await auth().api.unbanUser({ body: { userId: user.id }, headers: await headers() });
     return { ok: `${user.email} can sign in again.`, target: user.email };

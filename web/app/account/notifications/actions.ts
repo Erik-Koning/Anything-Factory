@@ -1,7 +1,8 @@
 "use server";
 // One's own notification settings, and a test email to see that they arrive.
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
-import { withNotice } from "../../../components/ui.tsx";
+import type { ActionResult } from "../../../components/action-result.ts";
 import { can, pendingStep, roleIn } from "../../../server/access.ts";
 import { config } from "../../../server/config.ts";
 import { AUDIENCE, EVENT_KINDS, type EventKind } from "../../../server/events.ts";
@@ -25,6 +26,12 @@ import {
 import { getViewer, type Person, record, STEP_PAGE } from "../../../server/viewer.ts";
 
 const BACK = "/account/notifications";
+
+// What an in-place action says, with the page refreshed where it is (components/action-form.tsx shows it as a toast).
+const done = (result: ActionResult): ActionResult => {
+  refresh();
+  return result;
+};
 const TESTS_PER_HOUR = 3;
 
 async function self(): Promise<Person> {
@@ -41,7 +48,7 @@ async function scopeOf(viewer: Person): Promise<{ teams: string[]; kinds: EventK
   return { teams, kinds: kindsIn((kind) => teams.some((team) => can(viewer, AUDIENCE[kind], team))) };
 }
 
-export async function saveNotificationsAction(form: FormData): Promise<void> {
+export async function saveNotificationsAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
   const { teams, kinds } = await scopeOf(viewer);
   const current = prefsOr(await savedPrefs(viewer.userId), viewer.userId, widestRole(viewer), config().notifyTimeZone);
@@ -49,13 +56,13 @@ export async function saveNotificationsAction(form: FormData): Promise<void> {
   for (const kind of EVENT_KINDS) {
     if (!kinds.includes(kind)) continue;
     const chosen = form.get(`mode-${kind}`);
-    if (!isMode(chosen)) redirect(withNotice(BACK, { error: "Choose how you hear of each kind of event." }));
+    if (!isMode(chosen)) return done({ error: "Choose how you hear of each kind of event." });
     modes[kind] = chosen as Mode;
   }
   const hour = Number(form.get("hour"));
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23) redirect(withNotice(BACK, { error: "Choose the hour of your daily digest." }));
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return done({ error: "Choose the hour of your daily digest." });
   const timeZone = form.get("timeZone");
-  if (!isTimeZone(timeZone)) redirect(withNotice(BACK, { error: "Choose your time zone from the list." }));
+  if (!isTimeZone(timeZone)) return done({ error: "Choose your time zone from the list." });
   const heard = new Set(form.getAll("team").filter((value): value is string => typeof value === "string"));
   const next = {
     _id: viewer.userId,
@@ -71,13 +78,13 @@ export async function saveNotificationsAction(form: FormData): Promise<void> {
     outcome: "ok",
     detail: summaryOf({ ...next, updatedAt: new Date() }, kinds, hourLabel(hour)).join(" "),
   });
-  redirect(withNotice(BACK, { ok: "Saved. From now on, this is what we email you." }));
+  return done({ ok: "Saved. From now on, this is what we email you." });
 }
 
-export async function testNotificationAction(): Promise<void> {
+export async function testNotificationAction(): Promise<ActionResult> {
   const viewer = await self();
   if (!(await takeTestAllowance(viewer.userId, TESTS_PER_HOUR)))
-    redirect(withNotice(BACK, { error: `You've sent ${TESTS_PER_HOUR} test emails this hour, the most an hour; try again later.` }));
+    return done({ error: `You've sent ${TESTS_PER_HOUR} test emails this hour, the most an hour; try again later.` });
   const { kinds } = await scopeOf(viewer);
   const settings = config();
   const prefs = prefsOr(await savedPrefs(viewer.userId), viewer.userId, widestRole(viewer), settings.notifyTimeZone);
@@ -88,12 +95,9 @@ export async function testNotificationAction(): Promise<void> {
     problem = (error as Error).message;
   }
   await record(viewer, { action: "notifications.test", outcome: problem ? "failed" : "ok", detail: problem });
-  redirect(
-    withNotice(
-      BACK,
-      problem
-        ? { error: `The test email couldn't be sent: ${problem}` }
-        : { ok: "Test email sent to your sign-in address. If it isn't there in a few minutes, look in your spam folder." }
-    )
+  return done(
+    problem
+      ? { error: `The test email couldn't be sent: ${problem}` }
+      : { ok: "Test email sent to your sign-in address. If it isn't there in a few minutes, look in your spam folder." }
   );
 }

@@ -977,6 +977,25 @@ describe("the planner's summary and the guard", () => {
     assert.match(ideas(), /Approved with no --files or --area, so the claim can't keep them off other work: #3 \(/);
   });
 
+  test("approved research is the planner's to route by what it asks; a pass in the ideas area is the innovator's, first", () => {
+    const asked = task({ id: "7", status: "approved", kind: "research", area: "ideas", title: "Innovation pass: growth" });
+    const audit = task({ id: "8", status: "approved", kind: "research", title: "Audit onboarding for staff on phones" });
+    const all = [task({ id: "1", status: "triage" }), task({ id: "2", status: "triage" }), task({ id: "3", status: "triage" }), audit, asked];
+    const text = (fields: { running?: number; budgetBound?: boolean } = {}) =>
+      summary(all, { approval: "thresholds", ideas: { min: 3, running: fields.running ?? 0, budgetBound: fields.budgetBound ?? false } });
+    assert.match(
+      text(),
+      /Approved research for you to route by what it asks: #8 Audit onboarding for staff on phones; #7 Innovation pass: growth\. Start the teammate its words call for, briefed "on task <id>": the innovator for ideas, a market or growth; the UX specialist for how pages look and work; the security reviewer for who may reach what/
+    );
+    assert.match(text(), /#7 asks for ideas: start the innovator on it now, briefed "an innovation pass on task 7"\./);
+    assert.match(text(), /the team keeps at least 3/, "though the queue is full");
+    assert.match(text({ running: 1 }), /An innovator is at work; if it isn't on #7, start one on it once it's done\./);
+    assert.match(text({ budgetBound: true }), /#7 asks for ideas, but the budget has room only for the work under way\./);
+    // Without an innovator, research is still routed; with none approved, there's no line.
+    assert.match(summary([audit], { approval: "thresholds" }), /Approved research for you to route by what it asks: #8/);
+    assert.doesNotMatch(summary([{ ...asked, status: "done" as const }], { approval: "thresholds" }), /Approved research/);
+  });
+
   test("each role runs its own task commands", async () => {
     const home = makeRepo(team());
     await holds([

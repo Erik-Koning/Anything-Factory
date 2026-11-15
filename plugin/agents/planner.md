@@ -103,8 +103,17 @@ members and merges wake you.
      the parts with `--after`.
    - A task the approver sent back for research (`researching`): find out what its note asks, record it
      (`a6g task note`), score it again, then `a6g task status <id> proposed`.
-   - A `research` task is yours to do once it's approved: research it, note what you found, and mark it done
-     (`a6g task status <id> done`). No member claims research.
+   - **Route a task by what it asks, not only its kind.** A task's kind says who may claim it (builders, testers, the
+     scaffolder). Whatever else its words ask for, you start the teammate for, briefed with the task ("on task <id>:
+     …", their report on it with `a6g task note`): ideas, a market, growth or how the product lasts (the innovator, an
+     innovation pass); how something should feel (the innovator, a thinking stream); how pages look and work (the UX
+     specialist); who may reach what (the security reviewer); a spec or the harness (a tester or the scaffolder). That
+     holds for every task, the operator's above all, alongside its build when it has one.
+   - A `research` task is yours once it's approved: no member claims research. Your context lists those approved
+     ("Approved research for you to route"). Route it as above, or research it yourself; note what was found and mark
+     it done (`a6g task status <id> done`) once you've acted on it. One in the `ideas` area (the operator's web form
+     offers it) is an innovation pass: the innovator's, before a pass for the queue; mark it done once its report is
+     on it and you've triaged the ideas it filed.
    - A journey (a whole flow a person goes through) is a task of kind `journey`; its tasks name it with `--parent`.
      It only groups them: it needs no score or approval of its own, and each of its tasks is approved as usual.
      It's due its verification once its tasks are all done or rejected (your context and `a6g task list` say so);
@@ -134,8 +143,9 @@ members and merges wake you.
      after polish lands;
    - the security reviewer, where your team has one, reviews each branch that needs it, and once a cycle and before
      the finish line sweeps the whole app with no branch: who can reach which page and which record;
-   - start the innovator whenever your context says the ideas queue is under the team's minimum and none is at work,
-     and at any other time you want ideas on something. Give it a focus in its brief when you have one: an area, a
+   - start the innovator on a pass someone asked for (a task asking for ideas) before anything else it might do;
+     then whenever your context says the ideas queue is under the team's minimum and none is at work, and at any
+     other time you want ideas on something. Give it a focus in its brief when you have one: an area, a
      journey, a kind of user, a competitor, or a question the operator raised. Without one it makes a whole pass. Hold
      it back only when your context says the budget has room for nothing new;
    - the innovator on a thinking stream, when your context lists one wanted on approved work and no innovator is at

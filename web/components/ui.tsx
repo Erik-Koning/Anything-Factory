@@ -2,6 +2,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ReactNode } from "react";
 import { config } from "../server/config.ts";
+import { NoticeToast } from "./notice-toast.tsx";
 
 // A notice is signed with the app's secret, so a link someone else made can't put its own words in the notice box.
 const signature = (kind: string, text: string): string =>
@@ -15,25 +16,16 @@ const signed = (kind: string, text: string, sig: string): boolean => {
 export type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 export const param = (value: string | string[] | undefined): string => (Array.isArray(value) ? (value[0] ?? "") : (value ?? ""));
 
-// What an action came back with (?ok=… or ?error=…), said once at the top of the page.
+// What an action that went to another page came back with (?ok=… or ?error=…), said once, as a toast
+// (components/notice-toast.tsx): nothing on the page moves for it.
 export async function Notice({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const sig = param(params["sig"]);
   const error = param(params["error"]).slice(0, 500);
   const ok = error ? "" : param(params["ok"]).slice(0, 300);
   if ((error && !signed("error", error, sig)) || (ok && !signed("ok", ok, sig))) return null;
-  if (error)
-    return (
-      <p className="notice error" role="alert">
-        {error}
-      </p>
-    );
-  if (ok)
-    return (
-      <p className="notice ok" role="status">
-        {ok}
-      </p>
-    );
+  if (error) return <NoticeToast text={error} tone="error" />;
+  if (ok) return <NoticeToast text={ok} tone="ok" />;
   return null;
 }
 

@@ -9,6 +9,7 @@ import { allTeams } from "../../../server/factory.ts";
 import { type Membership, memberships } from "../../../server/people.ts";
 import { requireViewer } from "../../../server/viewer.ts";
 import { banAction, changeRoleAction, inviteAction, removeAction, unbanAction } from "./actions.ts";
+import { ActionForm } from "../../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "People" };
 
@@ -39,7 +40,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
       <section className="panel" aria-labelledby="invite">
         <h2 id="invite">Invite someone</h2>
         {teams.length ? (
-          <form action={inviteAction} className="stack">
+          <ActionForm action={inviteAction} className="stack">
             <div className="inline">
               <label>
                 Email
@@ -83,7 +84,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
             <div>
               <SubmitButton className="primary">Invite</SubmitButton>
             </div>
-          </form>
+          </ActionForm>
         ) : (
           <p className="empty">No team has published its settings yet.</p>
         )}
@@ -110,7 +111,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                       {theirs.map((m) => (
                         <li key={m.team}>
                           <span className="on-team">{m.team}</span>
-                          <form action={changeRoleAction}>
+                          <ActionForm action={changeRoleAction}>
                             <input type="hidden" name="userId" value={u.id} />
                             <input type="hidden" name="team" value={m.team} />
                             <label className="sr" htmlFor={`role-${u.id}-${m.team}`}>{`${u.email}'s role on ${m.team}`}</label>
@@ -124,14 +125,14 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                             <SubmitButton className="s" label={`Save ${u.email}'s role on ${m.team}`}>
                               Save
                             </SubmitButton>
-                          </form>
-                          <form action={removeAction}>
+                          </ActionForm>
+                          <ActionForm action={removeAction}>
                             <input type="hidden" name="userId" value={u.id} />
                             <input type="hidden" name="team" value={m.team} />
                             <SubmitButton className="quiet danger s" label={`Remove ${u.email} from ${m.team}`}>
                               Remove
                             </SubmitButton>
-                          </form>
+                          </ActionForm>
                         </li>
                       ))}
                     </ul>
@@ -140,25 +141,25 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
                   )}
                   {!admin && u.id !== viewer.userId ? (
                     u.banned ? (
-                      <form action={unbanAction}>
+                      <ActionForm action={unbanAction}>
                         <input type="hidden" name="userId" value={u.id} />
                         <SubmitButton className="s" label={`Unban ${u.email}`}>
                           Unban
                         </SubmitButton>
-                      </form>
+                      </ActionForm>
                     ) : (
                       // Asked for first: a ban ends every session the person has. The row says whose it is; a screen reader
                       // hears the address too.
                       <details className="more">
                         <summary aria-label={`Ban ${u.email}`}>Ban…</summary>
-                        <form action={banAction} className="inline">
+                        <ActionForm action={banAction} className="inline">
                           <input type="hidden" name="userId" value={u.id} />
                           <label>
                             {`Why ban ${u.email} (optional)`}
                             <input name="reason" maxLength={LIMITS.label} autoComplete="off" />
                           </label>
                           <SubmitButton className="danger">Ban and sign out</SubmitButton>
-                        </form>
+                        </ActionForm>
                       </details>
                     )
                   ) : null}
