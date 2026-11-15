@@ -4,13 +4,17 @@
 // typed to delete it). A form inside either that succeeds closes it (components/action-form.tsx).
 import { type ReactNode, useEffect, useRef } from "react";
 
-// A menu behind a ⋯ button: open, it lies over the page; a press elsewhere or Escape closes it.
+// A menu behind a ⋯ button: open, it lies over the page; a press elsewhere or Escape closes it. On a phone it's a sheet
+// from the bottom of the screen, over a dim that closes it too (globals.css); wider, it drops from the key, and turns to
+// open rightwards where it would run off the screen's left edge.
 export function MoreMenu({ label, children }: { label: string; children: ReactNode }) {
   const menu = useRef<HTMLDetailsElement>(null);
+  const items = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const away = (event: PointerEvent) => {
       const open = menu.current;
-      if (open?.open && !open.contains(event.target as Node)) open.open = false;
+      // The dim behind the sheet is the menu's own (::after), so a press on it is a press away.
+      if (open?.open && (!open.contains(event.target as Node) || event.target === open)) open.open = false;
     };
     const escape = (event: KeyboardEvent) => {
       const open = menu.current;
@@ -25,12 +29,23 @@ export function MoreMenu({ label, children }: { label: string; children: ReactNo
       document.removeEventListener("keydown", escape);
     };
   }, []);
+  const place = () => {
+    const list = items.current;
+    if (!list || !menu.current?.open) return;
+    delete list.dataset.align;
+    if (list.getBoundingClientRect().left < 8) list.dataset.align = "start";
+  };
   return (
-    <details ref={menu} className="menu">
+    <details ref={menu} className="menu" onToggle={place}>
       <summary aria-label={label} title={label}>
         <span aria-hidden="true">⋯</span>
       </summary>
-      <div className="menu-items">{children}</div>
+      <div ref={items} className="menu-items">
+        <p className="menu-title" aria-hidden="true">
+          {label}
+        </p>
+        {children}
+      </div>
     </details>
   );
 }

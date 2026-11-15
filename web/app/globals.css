@@ -493,12 +493,20 @@ button.menu-item {
   font-weight: 500;
   text-align: left;
 }
-button.menu-item:hover,
+/* Under the pointer only where there is one: a phone would keep the item a finger last pressed lit. */
 button.menu-item:focus-visible {
   background: var(--well);
   border-color: transparent;
   box-shadow: none;
   filter: none;
+}
+@media (hover: hover) {
+  button.menu-item:hover {
+    background: var(--well);
+    border-color: transparent;
+    box-shadow: none;
+    filter: none;
+  }
 }
 button.menu-item.danger {
   color: var(--signal);
@@ -506,6 +514,71 @@ button.menu-item.danger {
 button.menu-item:disabled {
   background: none;
   color: var(--ink-3);
+}
+/* Where dropping from the key's right edge would run off the screen's left side, it opens rightwards instead. */
+.menu-items[data-align="start"] {
+  right: auto;
+  left: 0;
+}
+.menu-title {
+  display: none;
+}
+/* On a phone the menu is a sheet from the bottom of the screen, its own title over keys a thumb can press, over a dim
+   that closes it: wherever the ⋯ key sits, all of it is on the screen. */
+@media (max-width: 720px) {
+  .menu[open]::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 24;
+    background: color-mix(in srgb, #000 32%, transparent);
+    animation: menu-dim 160ms ease;
+  }
+  .menu-items,
+  .menu-items[data-align="start"] {
+    position: fixed;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    left: 8px;
+    min-width: 0;
+    max-width: none;
+    max-height: 70dvh;
+    margin: 0;
+    padding: 8px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 16px;
+    animation: menu-sheet 200ms var(--ease);
+  }
+  .menu-title {
+    display: block;
+    margin: 4px 12px 6px;
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  button.menu-item {
+    min-height: 48px;
+    padding: 0 12px;
+    font-size: 16px;
+  }
+}
+@keyframes menu-sheet {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+@keyframes menu-dim {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu[open]::after,
+  .menu-items {
+    animation: none;
+  }
 }
 /* A dialog over the page (components/overlays.tsx): the page dims behind it and stays where it was. */
 .dialog {
@@ -4448,6 +4521,11 @@ ol.setup > li > * {
     grid-column: 2;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     margin-right: -104px;
+  }
+  /* What waits on the operator, a line of its own: the chip that says it is wider than half a phone's row. */
+  .glance-item.waits {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 @media (max-width: 720px) {
