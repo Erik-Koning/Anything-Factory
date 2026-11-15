@@ -26,30 +26,61 @@ export default async function AddTaskPage({ params, searchParams }: { params: Pr
         <Link href={`/t/${team.name}/board`}>← Board</Link>
       </p>
       <Notice searchParams={searchParams} />
-      <div className="grid uneven">
+      <div className="add-layout">
         <section className="panel" aria-labelledby="new-task">
           <h2 id="new-task">{admin ? "Add a task" : "Suggest a task"}</h2>
           <TaskForm team={team.name} admin={admin} journeys={journeys} />
         </section>
-        <section className="panel" aria-labelledby="triage">
-          <h2 id="triage">
-            Waiting for triage <span className="muted">{triage.length}</span>
-          </h2>
-          {triage.length ? (
-            <ol className="plain lane-cards">
-              {triage.slice(0, 12).map((card) => (
-                <TaskCard key={card.task.id} base={`/t/${team.name}`} card={card} origin={origins.of(card.task)} />
-              ))}
-            </ol>
-          ) : (
-            <p className="empty">Nothing is waiting: the planner has triaged everything.</p>
-          )}
-          {triage.length > 12 ? (
-            <p className="hint">
-              and {triage.length - 12} more on the <Link href={`/t/${team.name}/board`}>board</Link>
-            </p>
-          ) : null}
-        </section>
+        {/* Beside the form: what happens to the task once it's in, then what already waits for the planner to sort. */}
+        <aside className="panel add-side" aria-labelledby="what-happens">
+          <h2 id="what-happens">What happens to it</h2>
+          <ol className="plain timeline">
+            {admin ? (
+              <>
+                <li>
+                  <span>It goes in as your proposal, unless you approve it now.</span>
+                </li>
+                <li>
+                  <span>The planner scores it; the approver or you decide on it, in Decisions.</span>
+                </li>
+                <li>
+                  <span>Approved, a member builds it once what it comes after is done.</span>
+                </li>
+              </>
+            ) : (
+              <>
+                <li>
+                  <span>It waits for triage, below.</span>
+                </li>
+                <li>
+                  <span>The planner reads it, then proposes it, folds it into other work or turns it down.</span>
+                </li>
+                <li>
+                  <span>A proposal is decided on, then built. Its page says how it&apos;s going.</span>
+                </li>
+              </>
+            )}
+          </ol>
+          <section className="triage" aria-labelledby="triage">
+            <h3 id="triage">
+              Waiting for triage <span className="count">{triage.length}</span>
+            </h3>
+            {triage.length ? (
+              <ol className="plain lane-cards">
+                {triage.slice(0, 12).map((card) => (
+                  <TaskCard key={card.task.id} base={`/t/${team.name}`} card={card} origin={origins.of(card.task)} />
+                ))}
+              </ol>
+            ) : (
+              <p className="small muted">Nothing: the planner has sorted every suggestion and finding.</p>
+            )}
+            {triage.length > 12 ? (
+              <p className="hint">
+                and {triage.length - 12} more on the <Link href={`/t/${team.name}/board`}>board</Link>
+              </p>
+            ) : null}
+          </section>
+        </aside>
       </div>
     </>
   );

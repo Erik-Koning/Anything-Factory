@@ -318,7 +318,8 @@ button[data-pending]::before {
   animation: turn 700ms linear infinite;
 }
 /* A question being answered or decided, in Waiting on you: all but the form that's sending fades. */
-li.waiting:has(button[data-pending]) > :not(:has(button[data-pending])) {
+li.waiting:has(button[data-pending]) > :not(:has(button[data-pending])),
+li.waiting:has(button[data-pending]) .waiting-answer > :not(:has(button[data-pending])) {
   opacity: 0.55;
   transition: opacity 160ms ease;
 }
@@ -627,6 +628,98 @@ button.menu-item:disabled {
   color: var(--ink-2);
   font-size: 13.5px;
 }
+/* A narrow window's menu (components/main-nav.tsx): a key like the switcher's, the count of what waits on the
+   operator on it; open, the links lie over the page in a list, who is signed in under them. A wide window has the row
+   of links instead. */
+.main-menu {
+  display: none;
+  position: relative;
+  margin-left: auto;
+}
+.main-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--h-s);
+  margin: 0;
+  padding: 0 12px 0 10px;
+  list-style: none;
+  background: var(--key);
+  border: 1px solid color-mix(in srgb, var(--edge) 55%, var(--line));
+  border-radius: var(--r-ctl);
+  box-shadow: var(--rim), var(--raise-s);
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.main-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.main-menu > summary::before {
+  content: none;
+}
+.main-menu > summary svg {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.main-menu[open] > summary {
+  margin: 0;
+  background: var(--well);
+  box-shadow: var(--sink);
+}
+.main-menu-items {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 25;
+  width: min(320px, calc(100vw - 32px));
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--float);
+}
+.top .main-menu nav {
+  display: grid;
+  gap: 2px;
+}
+.main-menu nav a {
+  justify-content: space-between;
+  min-height: 40px;
+}
+.main-menu-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 5px;
+  padding: 9px 7px 4px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.main-menu-who > button {
+  margin-left: auto;
+}
+/* Too narrow for the row of links and who is signed in beside them: the name goes first, then the row gives way to
+   the menu. */
+@media (max-width: 1200px) {
+  .top-inner:has(.main-nav) > .who > span:first-child {
+    display: none;
+  }
+}
+@media (max-width: 1080px) {
+  .top .main-nav,
+  .top-inner:has(.main-menu) > .who {
+    display: none;
+  }
+  .main-menu {
+    display: block;
+  }
+}
 main {
   max-width: 1240px;
   margin: 0 auto;
@@ -694,6 +787,22 @@ main:focus {
   color: var(--ink-2);
   font-weight: 500;
 }
+/* How far a row that scrolls sideways fades out at its left edge: nothing until it has been scrolled (a phone's
+   tabs). */
+@property --edge-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes edge-fade-start {
+  0% {
+    --edge-fade-start: 0px;
+  }
+  6%,
+  100% {
+    --edge-fade-start: 28px;
+  }
+}
 
 /* The other teams, from a team's heading. */
 .switcher {
@@ -717,6 +826,15 @@ main:focus {
 }
 .switcher > summary::-webkit-details-marker {
   display: none;
+}
+.switcher > summary svg {
+  flex: none;
+  margin-right: -2px;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .switcher > summary::before {
   content: none;
@@ -795,6 +913,72 @@ main:focus {
 .grid.lead {
   grid-template-columns: minmax(260px, 1fr) minmax(0, 2.2fr);
 }
+/* What an idle or finished team waits for, above its facts. */
+.state-note {
+  margin: -4px 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+/* How a team runs (the overview, for its admins): a row per part, its name on the left as a part label and what
+   there is to say or do beside it, each row ruled off from the next. */
+.runs > .part {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  gap: 6px 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.runs > h2 + .part {
+  padding-top: 4px;
+  border-top: 0;
+}
+.runs > .part:last-child {
+  padding-bottom: 0;
+}
+.part > h3 {
+  margin: 0;
+  padding-top: 2px;
+}
+.part-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.part-body > * {
+  margin: 0;
+}
+.part-body > .command {
+  justify-self: start;
+}
+/* A team's work on its overview: its journeys and latest merges, beside the graph, which takes the width its drawing
+   needs (scrolling past what the page can give it) and leaves the rest to them. One above the other on a narrow
+   screen. */
+.work {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, max-content);
+  gap: var(--gap);
+  align-items: start;
+  margin: var(--gap) 0;
+}
+.work .panel {
+  margin: 0;
+}
+.work-side {
+  display: grid;
+  gap: var(--gap);
+}
+/* Why a request was turned down, ruled off under what it asked. */
+.turned-down {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.turned-down > h3 {
+  margin: 0;
+}
+.turned-down > .text {
+  margin-top: 4px;
+}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
@@ -843,6 +1027,33 @@ main:focus {
 .shortcuts a:hover {
   border-color: var(--edge);
   filter: brightness(0.97);
+}
+/* On a Teams row the keys are quiet, under the row's own raised key to the team: flat until the pointer is on one.
+   The one with something waiting on the operator carries a light. */
+.team-row .shortcuts a {
+  gap: 7px;
+  background: none;
+  border-color: var(--line);
+  box-shadow: none;
+  font-weight: 500;
+}
+.team-row .shortcuts a:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-color: color-mix(in srgb, var(--edge) 45%, var(--line));
+  filter: none;
+}
+.team-row .shortcuts a.attention {
+  --tone: var(--warn);
+  font-weight: 600;
+}
+.team-row .shortcuts a.attention::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--tone) 20%, transparent);
 }
 .plain {
   list-style: none;
@@ -1201,7 +1412,6 @@ button:where(:not(.level-graph *)):active,
   transition-duration: var(--press);
 }
 button.primary,
-button.approve,
 a.button.primary {
   background: linear-gradient(color-mix(in srgb, var(--solid) 88%, #fff), var(--solid) 60%);
   border-color: transparent;
@@ -1212,7 +1422,6 @@ a.button.primary {
   color: var(--on-solid);
 }
 button.primary:hover,
-button.approve:hover,
 a.button.primary:hover {
   background: var(--solid-hover);
   box-shadow:
@@ -1221,7 +1430,6 @@ a.button.primary:hover {
   filter: none;
 }
 button.primary:active,
-button.approve:active,
 a.button.primary:active {
   box-shadow: inset 1px 2px 4px rgb(0 0 0 / 40%);
   filter: none;
@@ -1267,7 +1475,6 @@ button:where(:not(.level-graph *)):disabled {
 }
 /* A key that's working stays put under the pointer: its hover (above) would otherwise outrank this. */
 button.primary:disabled,
-button.approve:disabled,
 button.reject:disabled,
 button.danger:disabled,
 button.quiet:disabled {
@@ -1420,13 +1627,42 @@ code.path {
 .codes:where(:not(:last-child)) {
   margin-bottom: 12px;
 }
+/* An IP address (the account page, a machine's card, a code to link): mono, its digits in columns; a touch smaller in a
+   line of words, where mono would otherwise stand out of it. */
+.ip {
+  font-family: var(--font-code);
+  font-size: 0.92em;
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+/* A part of a panel with a form of its own (new backup codes, turning the authenticator off): set off by a rule, under
+   a part label, so its fields read as its key's. */
+.sub-form {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.sub-form > * {
+  margin: 0;
+}
+/* Recent activity on the account page: a line each, when it was on the left. */
+.activity > li {
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr);
+  gap: 2px 10px;
+  padding: 8px 0;
+}
+.rows.activity > li > * + * {
+  margin-top: 0;
+}
 
 /* --- People ----------------------------------------------------------------------------------------------------- */
-/* A person: who they are on the left; on the right a line per team (team, role, save, remove), in columns that line
-   up down the page. */
+/* A person: who they are on the left; in the middle a line per team (team, role and its save, remove), in columns that
+   line up down the page; on the right whether they may sign in at all. */
 .person {
   display: grid;
-  grid-template-columns: minmax(0, 17rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 16rem) minmax(0, 1fr) minmax(0, 19rem);
   gap: 10px 28px;
   align-items: start;
 }
@@ -1466,23 +1702,82 @@ code.path {
   padding-block: 4px;
   font-size: 14px;
 }
+/* A role and the key that saves it, joined into one part: the Save is that team's, nobody else's. */
+.memberships form.role-pick {
+  gap: 0;
+}
+.role-pick select {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.role-pick button {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 .on-team {
   font-weight: 600;
 }
+/* Banning, at the row's right: a line to open, and its form under it once it's open. */
+.their-access {
+  display: grid;
+  justify-items: end;
+}
+.their-access > details {
+  margin: 0;
+}
+.their-access > details[open] {
+  justify-self: stretch;
+}
+.their-access > details > summary {
+  margin-left: auto;
+}
+@media (max-width: 900px) {
+  .their-access {
+    justify-items: start;
+  }
+  .their-access > details > summary {
+    margin-left: 0;
+  }
+}
+/* On a phone a team's name has a line of its own, and its role, save and remove share the next. */
+@media (max-width: 720px) {
+  ul.memberships > li {
+    grid-template-columns: auto auto;
+    justify-content: start;
+  }
+  ul.memberships > li > .on-team {
+    grid-column: 1 / -1;
+  }
+  .role-pick select {
+    width: 9.5rem;
+  }
+}
 
 /* --- Decisions -------------------------------------------------------------------------------------------------- */
+/* The decisions open to one task, one above the other, each its own group: no field stands between two keys. */
 .verdicts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-  gap: 12px 20px;
+  gap: 14px;
   margin-top: 12px;
-  max-width: 64rem;
 }
 .more {
   margin-top: 10px;
   font-size: 13.5px;
 }
-/* A decision: its note, then the key that makes it, on one line. */
+/* The decisions that take words, side by side under the approval while shut; one opened takes the row's width. */
+.other-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+}
+.other-ways > .more {
+  margin-top: 0;
+}
+.other-ways > .more[open] {
+  flex-basis: 100%;
+}
+/* A decision: what goes with it over the field, then the field and the key that makes it, on one line. */
 .verdicts form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1492,21 +1787,86 @@ code.path {
 .verdicts form > label {
   grid-column: 1 / -1;
 }
-/* A score by dimension: one line of mono figures, not a row of parts. */
-.score {
+/* An approval the move table would refuse as it stands: the key, out of reach, and why beside it. */
+.unapprovable {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
-  margin: 8px 0 0;
+  align-items: center;
+  gap: 6px 12px;
+}
+.unapprovable > button:disabled {
+  cursor: not-allowed;
+}
+.unapprovable > .hint {
+  flex: 1 1 12rem;
+}
+/* A decision to make (Decisions, Decided for you): what it's about, then the forms that decide it, sunk in as an
+   answer is; side by side where the panel is wide enough, so neither stops short of its edge. */
+.to-decide > .about,
+.to-decide > .decide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-content: start;
+  align-self: start;
+  min-width: 0;
+}
+.to-decide > .about > *,
+.to-decide > .decide > * {
+  margin: 0;
+}
+.to-decide > .decide {
+  padding: 14px 16px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--sink);
+}
+.rows > li.to-decide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px 32px;
+}
+.rows > li.to-decide > * + * {
+  margin-top: 0;
+}
+@media (min-width: 900px) {
+  .rows > li.to-decide:has(> .decide) {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 25rem);
+  }
+  .rows > li.to-decide > .head {
+    grid-column: 1 / -1;
+  }
+}
+/* A score by dimension: a small sheet, each name with its figure, read across. */
+.score {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0 18px;
+  max-width: 46rem;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
-.score .chip {
-  min-height: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  color: var(--ink-3);
+.score li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.score span {
+  color: var(--ink-2);
+  font: 500 11px/1.45 var(--font-code);
+  font-stretch: 100%;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.score b {
+  font: 600 13.5px/1.4 var(--font-code);
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
 /* --- The board and the graph ------------------------------------------------------------------------------------ */
@@ -1521,10 +1881,38 @@ code.path {
 .board-bar .lede {
   margin: 0;
 }
+/* Adding a task: the form, and beside it what happens to the task and what already waits for triage. */
+.add-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: var(--gap);
+  align-items: start;
+  margin: var(--gap) 0;
+}
+.add-layout > .panel {
+  margin: 0;
+}
+.add-side .timeline {
+  margin-bottom: 18px;
+}
+.add-side .triage {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.add-side .triage h3 .count {
+  margin-left: 6px;
+  color: var(--ink);
+}
+@media (max-width: 860px) {
+  .add-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* A lane per step. The board runs on from the page's column to the window's right edge, so a wide window fits them
    all; it scrolls sideways on its own when they don't fit, with room past the last lane to see its end. Where the
-   browser can tie a style to how far something has scrolled, the edge dims while there is more that way, and clears
-   once the last lane is in view or when everything fits. A phone shows one lane and the edge of the next. */
+   browser can tie a style to how far something has scrolled, the lane cut by an edge fades out while there is more
+   that way (the right one until the last lane is in view, the left one once it has left the first), and both clear
+   when everything fits. A phone shows one lane and the start of the next. */
 .kanban {
   display: flex;
   gap: 10px;
@@ -1535,30 +1923,56 @@ code.path {
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
   scroll-padding-inline: 2px 28px;
-  mask-image: linear-gradient(to right, #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 25%));
+  scrollbar-color: var(--edge) transparent;
+  mask-image: linear-gradient(
+    to right,
+    rgb(0 0 0 / 15%),
+    #000 calc(var(--edge-fade-start) * 2.5),
+    #000 calc(100% - var(--edge-fade) * 2.5),
+    rgb(0 0 0 / 10%)
+  );
+}
+@property --edge-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes edge-fade-start {
+  0% {
+    --edge-fade-start: 0px;
+  }
+  6%,
+  100% {
+    --edge-fade-start: 28px;
+  }
 }
 @supports (animation-timeline: scroll()) {
   .kanban,
   .graph {
-    animation: edge-fade linear both;
-    animation-timeline: scroll(self inline);
+    animation:
+      edge-fade linear both,
+      edge-fade-start linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
   }
 }
-/* A lane is a well; its cards are raised out of it. */
+/* A lane is a well; its cards are raised out of it. Lanes with cards are as wide as each other; an empty one is a narrow
+   rail with its name and nothing more, so a board of seven fits a laptop's width before it needs to scroll. */
 .lane {
   background: var(--well);
   border: 1px solid var(--line);
   border-radius: var(--r-panel);
   box-shadow: var(--sink);
   padding: 10px;
-  flex: 1 0 228px;
+  flex: 1 0 176px;
   max-width: 340px;
   min-width: 0;
   scroll-snap-align: start;
 }
-/* A lane with nothing in it keeps its place, narrower. */
-.lane:not(:has(ol)) {
-  flex: 0 0 172px;
+.lane:has(> .empty) {
+  flex: 0 0 116px;
+}
+.lane:has(> .empty) header .hint {
+  display: none;
 }
 .lane h2 {
   display: flex;
@@ -1652,13 +2066,20 @@ code.path {
   font-weight: 500;
   color: var(--brand);
 }
-/* Wider than its box, the drawing scrolls on its own and fades out where there is more. */
+/* Wider than its box, the drawing scrolls on its own and fades out at an edge where there is more. */
 .graph {
   overflow: auto;
   max-width: 100%;
   padding-right: 24px;
   border-radius: var(--r-ctl);
-  mask-image: linear-gradient(to right, #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 25%));
+  scrollbar-color: var(--edge) transparent;
+  mask-image: linear-gradient(
+    to right,
+    rgb(0 0 0 / 15%),
+    #000 calc(var(--edge-fade-start) * 2.5),
+    #000 calc(100% - var(--edge-fade) * 2.5),
+    rgb(0 0 0 / 10%)
+  );
 }
 .graph svg {
   font: 12px var(--font-text);
@@ -1683,14 +2104,17 @@ code.path {
   fill: var(--ink-3);
   font-size: 11px;
 }
+.graph .node .id {
+  fill: var(--ink-3);
+}
 .graph .node.status-building rect {
   stroke: var(--solid);
   stroke-width: 2;
 }
 .graph .node.status-blocked rect,
 .graph .node.status-question rect {
-  stroke: var(--signal);
-  stroke-width: 2;
+  stroke: color-mix(in srgb, var(--signal) 70%, var(--edge));
+  stroke-width: 1.25;
 }
 .graph .node.status-proposed rect,
 .graph .node.status-researching rect,
@@ -1709,12 +2133,139 @@ code.path {
 .graph .arrowhead {
   fill: var(--ink-3);
 }
-/* The graph by level: BetterDiagrams' editor fills this box, and pans and zooms inside it. */
+/* The graph by level: BetterDiagrams' editor fills this box, and pans and zooms inside it, sunk into the panel like
+   a well. Its colours come from the app's (components/level-graph.tsx); here its bar, legend and keys take the app's
+   materials. What it offers for drawing architecture rather than reading a task graph (its own name, Checks, Compare)
+   is left out; a phone keeps the search, the zoom and Fit. React Flow's attribution stays, quietly: it asks to be
+   hidden only by those who subscribe to React Flow Pro. */
 .level-graph {
   height: clamp(420px, 72vh, 900px);
   border: 1px solid var(--line);
   border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
   overflow: hidden;
+}
+.graph-how {
+  margin: -4px 0 12px;
+}
+/* Its cards come in once the first level has settled at its size (components/level-graph.tsx). */
+.level-graph .react-flow__viewport {
+  transition: opacity 160ms ease;
+}
+.level-graph:not([data-shown]) .react-flow__viewport {
+  opacity: 0;
+}
+/* Meanwhile, a word in the middle of the sheet, so it never looks like an empty graph. */
+.level-graph .react-flow {
+  position: relative;
+}
+.level-graph:not([data-shown]) .react-flow::after {
+  content: "Drawing the graph…";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  font-size: 13.5px;
+  pointer-events: none;
+}
+.level-graph .as-root .as-brand,
+.level-graph .as-root .as-toolbar__group:has(button[title^="Checks"]),
+.level-graph .as-root .as-toolbar__spacer > button[title^="Compare"] {
+  display: none;
+}
+.level-graph .as-root .as-brand + .as-toolbar__group::before {
+  display: none;
+}
+.level-graph .as-root .as-toolbar,
+.level-graph .as-root .as-focusbar {
+  padding: 6px 8px;
+  background: var(--face);
+  border-bottom-color: var(--line);
+  box-shadow: var(--rim);
+}
+.level-graph .as-root .as-btn,
+.level-graph .as-root .as-zoom,
+.level-graph .as-root .as-focusbar__crumb {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.level-graph .as-root .as-btn:hover:not(:disabled),
+.level-graph .as-root .as-zoom:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+.level-graph .as-root .as-zoom {
+  font: 500 12px/1 var(--font-code);
+  font-stretch: 87.5%;
+}
+.level-graph .as-root .as-search {
+  max-width: 360px;
+  background: var(--field);
+  border-color: var(--edge);
+  box-shadow: var(--sink);
+  font-size: 13.5px;
+}
+.level-graph .as-root .as-search::placeholder {
+  color: var(--ink-3);
+}
+.level-graph .as-root .as-focusbar__crumb--here {
+  color: var(--ink);
+}
+.level-graph .as-root .as-legend,
+.level-graph .as-root .react-flow__controls {
+  background: var(--face);
+  border: 1px solid var(--line);
+  box-shadow: var(--rim), var(--raise-s);
+  backdrop-filter: none;
+}
+.level-graph .as-root .react-flow__controls {
+  border-radius: var(--r-ctl);
+}
+.level-graph .as-root .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border-bottom-color: var(--line);
+  fill: var(--ink-2);
+}
+.level-graph .as-root .react-flow__controls-button:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  fill: var(--ink);
+}
+.level-graph .as-root .react-flow__attribution {
+  padding: 2px 6px;
+}
+.level-graph .as-root .react-flow__attribution a {
+  color: var(--ink-3);
+}
+@media (max-width: 560px) {
+  .level-graph {
+    height: clamp(340px, 56vh, 560px);
+  }
+  .level-graph .as-root .as-toolbar__group:has(button[title^="Hidden nodes"]),
+  .level-graph .as-root .as-toolbar__spacer > .as-menu-wrap {
+    display: none;
+  }
+  .level-graph .as-root .as-toolbar__spacer {
+    flex: 1 1 0;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .level-graph .as-root .as-search {
+    flex: 1 1 0;
+    min-width: 72px;
+  }
+  /* The breadcrumbs take the bar; the level's name in BetterDiagrams' own terms goes. */
+  .level-graph .as-root .as-focusbar__level {
+    display: none;
+  }
+}
+/* A finger pans the canvas with the cursor already, so the choice of tool goes. */
+@media (pointer: coarse) {
+  .level-graph .as-root .as-toolbar__group:has(.as-toolpicker) {
+    display: none;
+  }
 }
 
 /* A group of choices (the pause panel's radios and journeys). */
@@ -2025,10 +2576,59 @@ li.waiting > p,
 li.waiting > dl {
   margin: 0;
 }
-/* A question reads as a column, however wide the panel: a line you can follow, a form you can take in. */
-li.waiting > *,
+/* A question: what it is, then the answer to it; side by side where the panel is wide enough for both, so each is a
+   column you can follow and the panel has no empty band beside them. */
+.waiting-about,
+.waiting-answer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+.waiting-about > *,
+.waiting-answer > * {
+  margin: 0;
+}
+.rows > li.waiting > * + * {
+  margin-top: 0;
+}
+@media (min-width: 1000px) {
+  li.waiting {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 32px;
+  }
+  li.waiting > .head {
+    grid-column: 1 / -1;
+  }
+}
+/* The operator's own words: what's shown before they write reads as a prompt, not as words already there. */
+.answer textarea::placeholder {
+  font-style: italic;
+}
+/* A form that opens in a panel reads as a column, however wide the panel. */
 .panel > details > form.stack {
   max-width: 56rem;
+}
+/* A page's guidance past its first line, behind a line to open (Waiting on you, Decided for you, the agreement): there
+   for whoever wants it, out of the way of the work. */
+.lede:has(+ details.guide) {
+  margin-bottom: 4px;
+}
+details.guide {
+  max-width: 76ch;
+  margin: 0 0 18px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+details.guide > summary {
+  font-size: 13.5px;
+}
+details.guide[open] > summary {
+  margin-bottom: 4px;
+}
+details.guide > * + * {
+  margin-top: 6px;
 }
 /* Why it came to the operator, and what the team recommends: both always shown, a gap said as one. */
 dl.raised {
@@ -2132,9 +2732,37 @@ details.settled > summary {
 }
 
 /* --- Decided for you, and the agreement ------------------------------------------------------------------------- */
-/* A decision reads as a column, as a question does. */
-li.decided > * {
-  max-width: 56rem;
+/* How the check-ins went lately, in one line over the log: a part label, then each figure with what it counts. */
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin: 0 0 var(--gap);
+}
+.tally > h2:where(:not(.level-graph *)) {
+  margin: 0;
+  color: var(--ink-2);
+  font: 500 11px/1.45 var(--font-code);
+  font-stretch: 100%;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.tally > ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.tally b {
+  color: var(--ink);
+  font: 600 15px/1.3 var(--font-code);
+  font-stretch: 87.5%;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 /* What the team chose, in the solid's hue, and what that follows from, in none. */
 dl.raised.ruling > div.chose {
@@ -2143,17 +2771,23 @@ dl.raised.ruling > div.chose {
 dl.raised.ruling > div.because {
   --tone: var(--edge);
 }
-/* What was weighed: one line where it fits, a point between each. */
+/* What was weighed: an option a line, each set in from a dash, so a long one wraps under itself and no mark is left
+   at the end of a line. */
 .weighed {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.weighed li:not(:last-child)::after {
-  content: "·";
-  margin: 0 8px;
+.weighed li {
+  position: relative;
+  padding-left: 14px;
+}
+.weighed li::before {
+  content: "–";
+  position: absolute;
+  left: 0;
   color: var(--ink-3);
 }
 /* The operator's review: agreeing reads as an answer does; an overturn takes the signal's hue. */
@@ -2231,9 +2865,26 @@ table.matrix td[data-route="decide"] {
   box-shadow: var(--sink);
   font-size: 14px;
 }
-/* The form that changes it: a column, like the other forms; each topic a row, what it covers beside how it's treated. */
-.agreement-form {
-  max-width: 56rem;
+/* The form that changes it: the levels across the panel, then the topics beside how often a message may come and the
+   standing instructions, where there's room for both; each topic a row, what it covers beside how it's treated. */
+@media (min-width: 960px) {
+  .agreement-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 36px;
+    align-items: start;
+  }
+  .agreement-form > :not(fieldset.topics, .agreement-side) {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 721px) {
+  fieldset.levels {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* An example of what to write reads as one, not as words already there. */
+.agreement-form textarea::placeholder {
+  font-style: italic;
 }
 /* Six digits: a field as wide as what goes in it. */
 .agreement-form input[name="code"] {
@@ -2371,6 +3022,48 @@ fieldset.mode > legend {
 .digest-time label {
   min-width: 0;
 }
+/* What the server does with email when it sends none: said in amber, as news, not as the person's mistake; the
+   setting's name, for an admin, on a line of its own under it. */
+.notice.server-mail {
+  --tone: var(--warn);
+}
+.notice.server-mail > .hint {
+  display: block;
+  margin-top: 4px;
+}
+/* The notifications form's key, in a bar at the form's foot that says what it saves: the three panels above, not
+   Delivery under it. */
+.save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--rim), var(--raise-s);
+}
+.save-bar > .hint {
+  flex: 1 1 14rem;
+}
+/* On a phone each kind keeps one row of three, its words wrapping inside each, rather than a stack of three. */
+@media (max-width: 560px) {
+  fieldset.mode .segmented {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  fieldset.mode .segmented label {
+    display: grid;
+  }
+  fieldset.mode .segmented span {
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 6px;
+    font-size: 13px;
+    line-height: 1.25;
+    text-align: center;
+  }
+}
 
 /* --- Machines --------------------------------------------------------------------------------------------------- */
 /* A device code to read out and type, large. */
@@ -2381,10 +3074,33 @@ code.big {
   font-weight: 500;
   letter-spacing: 0.08em;
 }
+/* A code to type: a field as wide as one (nine characters), in mono, and the key that looks it up beside it. */
+.code-form > label {
+  flex: 0 0 auto;
+}
+input.code-field {
+  width: 12.5rem;
+  font-family: var(--font-code);
+  font-size: 17px;
+  line-height: 1.3;
+  font-stretch: 100%;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* A machine's card: the cards in a row stand level, and the key that unlinks one sits at its foot, under a rule. */
+.cards.machines {
+  align-items: stretch;
+}
+.cards.machines > li > form:last-child {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 
 /* --- Signing in ------------------------------------------------------------------------------------------------- */
 /* The sign-in page: a team at work drawn on the sheet, what the page asks at the foot of it, and under that a bar
-   along the bottom to match the one along the top, the way in on its left and what that way takes on its right. */
+   along the bottom to match the one along the top, holding the way in as one group read from the left: what the chosen
+   way takes, then the toggle, its fields and its button. */
 body:has(.sign-in) {
   display: flex;
   flex-direction: column;
@@ -2405,7 +3121,8 @@ main:has(> .sign-in) {
   display: flex;
   flex-direction: column;
 }
-/* The drawing (app/sign-in/team-at-work.tsx) has whatever room the window leaves above the words. */
+/* The drawing (app/sign-in/team-at-work.tsx) has whatever room the window leaves above the words, and stands at the
+   foot of it, just over them. */
 .team-at-work {
   flex: 1 1 0;
   min-height: 0;
@@ -2419,7 +3136,7 @@ main:has(> .sign-in) {
   width: 100%;
   font-family: var(--font-code);
 }
-/* Where the cycle has got to, like a drawing's title: under the brand, in the page's column. */
+/* Where the cycle has got to, like a drawing's title: over the drawing, in the page's column. */
 .team-at-work p {
   position: absolute;
   inset: 16px 0 auto;
@@ -2428,21 +3145,15 @@ main:has(> .sign-in) {
   padding: 0 20px;
   white-space: nowrap;
 }
-/* What's asked on the left, over the toggle; the chosen way, and anything that went wrong, on the right over its
-   fields. */
+/* What's asked, under the drawing and over the bar, in the page's column. */
 .sign-in-context {
   width: 100%;
   max-width: 1240px;
   margin: 0 auto;
-  padding: 48px 20px 28px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px 56px;
+  padding: 24px 20px 28px;
 }
 .sign-in-what {
-  flex: 0 1 34rem;
-  min-width: 0;
+  max-width: 34rem;
 }
 .sign-in-what h1 {
   font-size: clamp(30px, 4.4vw, 46px);
@@ -2485,10 +3196,10 @@ main:has(> .sign-in) {
 .sign-in-what .lede + .lede {
   margin-top: 4px;
 }
+/* What the chosen way takes, on a line of its own over the toggle: its name, then a word about it. */
 .sign-in-how {
-  flex: 0 1 26rem;
+  flex: 1 1 100%;
   min-width: 0;
-  text-align: right;
 }
 /* Nothing to say about the way in, and nothing wrong: no gap kept for it. */
 .sign-in-how:not(:has(h2, p)) {
@@ -2496,19 +3207,23 @@ main:has(> .sign-in) {
 }
 /* The chosen way's words come in as the toggle moves. */
 .sign-in-swap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
   animation: arrive var(--switch) var(--ease) both;
 }
 .sign-in-how h2 {
-  margin: 0 0 4px;
+  margin: 0;
 }
 .sign-in-how .notice {
-  margin: 14px 0 0;
-  text-align: left;
+  max-width: 46rem;
+  margin: 10px 0 0;
 }
 .sign-in-how > :empty + .notice {
   margin-top: 0;
 }
-/* The bar: raised like the top one, and as tall. It stays at the foot of the window while the page scrolls. */
+/* The bar: raised like the top one. It stays at the foot of the window while the page scrolls. */
 .sign-in-bar {
   --ctl: var(--h);
   position: sticky;
@@ -2522,12 +3237,11 @@ main:has(> .sign-in) {
   max-width: 1240px;
   min-height: 56px;
   margin: 0 auto;
-  padding: 8px 20px;
+  padding: 12px 20px 14px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 22px;
+  gap: 10px 22px;
 }
 .sign-in-bar fieldset {
   min-width: 0;
@@ -2586,22 +3300,23 @@ main:has(> .sign-in) {
   background: none;
   box-shadow: none;
 }
+/* The fields follow the toggle, the button after them. */
 .sign-in-fields {
   flex: 1 1 26rem;
+  max-width: 52rem;
   min-width: 0;
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
 }
-/* A field in the bar: its name stamped inside it, like a cell of a drawing's title block. */
+/* A field in the bar: its name in a cell of its own at its left, ruled off from where you type, like a cell of a
+   drawing's title block. */
 .sign-in-fields label {
-  flex: 0 1 300px;
+  flex: 1 1 300px;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
   min-height: var(--ctl);
-  padding: 0 0 0 12px;
+  padding: 0;
   background: var(--field);
   border: 1px solid var(--edge);
   border-radius: var(--r-ctl);
@@ -2627,6 +3342,12 @@ main:has(> .sign-in) {
 }
 .sign-in-fields label > span {
   flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 10px 0 12px;
+  background: color-mix(in srgb, var(--well) 70%, var(--field));
+  border-right: 1px solid var(--line);
   line-height: 1;
 }
 .sign-in-fields label:hover {
@@ -2643,7 +3364,7 @@ main:has(> .sign-in) {
   width: auto;
   min-width: 0;
   min-height: 0;
-  padding: 0 12px 0 0;
+  padding: 0 12px;
   background: none;
   border: 0;
   border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
@@ -2745,10 +3466,16 @@ details > * + * {
   align-items: center;
   gap: 6px 8px;
 }
+/* Words that fold the list, not keys of the same weight as a team's: no edge until the pointer is on one. */
+.folds-keys button {
+  border-color: transparent;
+  padding: 0 9px;
+  font-weight: 500;
+}
 /* A mode among the keys: pressed in and ticked while it holds, and set apart from the keys that act once. */
 .folds-keys button[aria-pressed="true"] {
   background: var(--well);
-  border-color: var(--edge);
+  border-color: var(--line);
   box-shadow: var(--sink);
   color: var(--ink);
 }
@@ -2772,6 +3499,15 @@ details > * + * {
 }
 .teams-foot p {
   margin: 0;
+}
+/* A command inside the note: mono, without the chip a command gets elsewhere, so the line stays quiet. */
+.teams-foot code {
+  display: inline;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--ink-2);
+  font-size: 0.95em;
 }
 /* A team's row: a raised part whose top edge is the fold. Its way in sits on that edge, outside the fold itself. */
 .team-row {
@@ -2820,7 +3556,7 @@ details.team[open] > summary {
 /* What a shut row says: four figures, each in its own column on every row, so the eye runs down one. */
 .glance {
   display: grid;
-  grid-template-columns: 152px 78px 118px 136px;
+  grid-template-columns: 158px 78px 148px 136px;
   align-items: center;
   gap: 2px 14px;
   color: var(--ink-2);
@@ -3125,8 +3861,9 @@ a.button.s {
   padding: 0 11px;
   font-size: 13.5px;
 }
-/* A command to run: sunken like a field, in mono. It wraps at its spaces, never inside a word unless one word is
-   wider than the block, and is never wider than what holds it; the key that copies it stays at its top right. */
+/* A command to run: sunken like a field, in mono. It wraps between its parts (components/command.tsx), inside one
+   only at its spaces when that part is wider than the block, never inside a word unless one word is wider than the
+   block, and is never wider than what holds it; the key that copies it stays at its top right. */
 .command {
   display: flex;
   /* A command of one line sits level with its key; the key stays at the top of one that runs to more. */
@@ -3153,8 +3890,26 @@ a.button.s {
   overflow-x: auto;
   overflow-wrap: normal;
 }
+.command .part {
+  display: inline-block;
+}
 .command .word {
   white-space: nowrap;
+}
+/* On a phone a command is as wide as what holds it, and a part too wide for it breaks between its words, never inside
+   one, so all of it is in sight: "&& node bin/a6g.ts" over "self-install". Only a single word wider than the block
+   scrolls sideways. */
+@media (max-width: 560px) {
+  .command {
+    width: 100%;
+  }
+  .command > code {
+    flex: 1 1 0;
+    width: 0;
+  }
+  .command .part {
+    display: inline;
+  }
 }
 .command > button {
   flex: none;
@@ -3380,20 +4135,64 @@ ol.setup > li > * {
 .panel.how > ol > li > span {
   max-width: 70ch;
 }
-/* How to turn something on, under the list it's about: a heading, a few words, each command in a block of its own. */
-.how-projects {
+/* Before a Mac starts projects: where things stand, with an amber light, a line over what to do about it. */
+.how-state {
+  --tone: var(--warn);
+  position: relative;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.how-state::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: calc(0.775em - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--tone) 20%, transparent);
+}
+.panel.how > h2 {
+  margin: 6px 0 6px;
+  font-size: 19px;
+}
+/* What to do if the first command isn't known: shut until it's wanted. */
+.how-update > summary {
+  font-size: 14px;
+}
+.how-update[open] {
   display: grid;
   gap: 8px;
   max-width: 70ch;
-  margin-top: 22px;
 }
-.how-projects > * {
+.how-update[open] > summary {
+  margin-bottom: 0;
+}
+/* How to link a machine and turn its projects on, in a panel under the list it's about: each part a heading, a few
+   words, each command in a block of its own; side by side where there's room. */
+.how-projects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 22px 40px;
+}
+.panel.how-projects > * + * {
+  margin-top: 0;
+}
+.how-projects > section {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.how-projects > section > * {
   margin: 0;
 }
-.how-projects > h2 {
+.how-projects h2 {
   font-size: 14.5px;
 }
-.how-projects > .command + .hint {
+.how-projects .command + .hint {
   margin-top: 6px;
 }
 
@@ -3475,14 +4274,9 @@ ol.setup > li > * {
   color: var(--ink-2);
   font-size: 13.5px;
 }
-#subscriptions > h3 {
-  margin-top: 16px;
-}
-#subscriptions > p {
-  max-width: 56rem;
-}
-#subscriptions > .small + .small {
-  margin-top: 0;
+/* The overview's row of them (components/subscriptions-panel.tsx): a little more room above each list's heading. */
+#subscriptions .part-body > h3 {
+  margin-top: 6px;
 }
 @media (max-width: 960px) {
   .start-layout {
@@ -3569,26 +4363,14 @@ ol.setup > li > * {
 
 /* --- Small screens, touch, motion, forced colours ---------------------------------------------------------------- */
 @media (max-width: 900px) {
-  .grid.lead {
+  .grid.lead,
+  .work {
     grid-template-columns: minmax(0, 1fr);
   }
   .person {
     grid-template-columns: minmax(0, 1fr);
   }
-  /* Signing in: the chosen way goes under what's asked, read from the left; the bar's toggle takes a row of its own,
-     and the fields fill the one below. */
-  .sign-in-context {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .sign-in-what,
-  .sign-in-how {
-    flex: none;
-    max-width: 34rem;
-  }
-  .sign-in-how {
-    text-align: left;
-  }
+  /* Signing in: the bar's toggle takes a row of its own, and the fields fill the one below. */
   .sign-in-bar-inner {
     padding-block: 12px;
     gap: 10px;
@@ -3598,6 +4380,10 @@ ol.setup > li > * {
   }
   .sign-in-bar .segmented {
     width: fit-content;
+  }
+  .sign-in-fields {
+    flex-basis: 100%;
+    max-width: none;
   }
   .sign-in-fields label {
     flex: 1 1 200px;
@@ -3610,8 +4396,8 @@ ol.setup > li > * {
   }
 }
 @media (max-width: 720px) {
-  /* The bar scrolls away with the page, and its links and a team's pages each stay on one row that scrolls
-     sideways, fading out where there is more. */
+  /* The bar scrolls away with the page: the brand, and the menu (or who's signed in) on one row. A team's pages stay
+     on one row that scrolls sideways, a whole tab at a time, fading out at an edge where there is more. */
   .top:where(:not(.level-graph *)) {
     position: static;
   }
@@ -3619,31 +4405,45 @@ ol.setup > li > * {
     padding: 8px 16px;
     gap: 6px 12px;
   }
-  /* The brand and who's signed in on one row, the main links on their own below. */
-  .top nav {
-    order: 3;
-    flex-basis: 100%;
-    flex-wrap: nowrap;
-    margin-inline: -16px;
-    padding: 2px 16px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
-  }
+  /* The rail runs to both edges of the screen, so a row that goes on past one reads as going on. */
   .tabs {
     display: flex;
     flex-wrap: nowrap;
+    max-width: none;
+    margin: 10px -16px 16px;
+    padding: 3px 16px;
+    border-inline: 0;
+    border-radius: 0;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 16px;
     scrollbar-width: none;
-    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 36px), rgb(0 0 0 / 15%));
   }
-  .top nav a:focus-visible,
+  .tabs > li {
+    flex: none;
+    scroll-snap-align: start;
+  }
+  .tabs a {
+    padding: 0 12px;
+  }
   .tabs a:focus-visible {
     outline-offset: -2px;
   }
-  .top nav::-webkit-scrollbar,
   .tabs::-webkit-scrollbar {
     display: none;
+  }
+  /* Where the browser can tie a style to how far the row has scrolled, each edge fades only while there is more that
+     way (see .kanban). */
+  @supports (animation-timeline: scroll()) {
+    .tabs {
+      mask-image: linear-gradient(to right, rgb(0 0 0 / 15%), #000 var(--edge-fade-start), #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 15%));
+      animation:
+        edge-fade linear both,
+        edge-fade-start linear both;
+      animation-timeline: scroll(self inline);
+    }
   }
   .who {
     margin-left: auto;
@@ -3669,7 +4469,15 @@ ol.setup > li > * {
     padding: 0 16px;
   }
   .sign-in-context {
-    padding: 32px 16px 22px;
+    padding: 16px 16px 22px;
+  }
+  /* On a phone the drawing has a room of its own size, just over the words, and the page's spare height goes round the
+     whole rather than into a band above the drawing. */
+  .sign-in {
+    justify-content: center;
+  }
+  .team-at-work {
+    flex: 0 0 clamp(190px, 30vh, 270px);
   }
   .sign-in-bar {
     position: static;
@@ -3691,8 +4499,8 @@ ol.setup > li > * {
   .every > input {
     max-width: 7rem;
   }
-  /* The board runs to both edges of the screen. A lane with nothing in it is only its name and count, so the first
-     lane with work in it shows whole beside it. */
+  /* The board runs to both edges of the screen: a lane as wide as the screen less the start of the next, which fades
+     out to say there is more that way. */
   .kanban {
     margin-inline: -16px;
     padding-inline: 16px 28px;
@@ -3700,17 +4508,12 @@ ol.setup > li > * {
     scroll-snap-type: x proximity;
   }
   .lane {
-    flex: 0 0 66%;
+    flex: 0 0 min(300px, calc(100vw - 92px));
     max-width: none;
   }
-  .lane:not(:has(ol)) {
-    flex: 0 0 auto;
-  }
-  .lane:not(:has(ol)) :is(.hint, .empty) {
-    display: none;
-  }
-  .lane:not(:has(ol)) h2 {
-    margin: 3px;
+  /* An empty lane's rail goes after the lanes with cards, so the board opens on work. */
+  .lane:has(> .empty) {
+    order: 1;
   }
   /* A rail of choices too wide for the screen stands its options one above the other. */
   .segmented {
@@ -3747,6 +4550,18 @@ ol.setup > li > * {
   }
   .facts dd {
     margin-bottom: 8px;
+  }
+  /* Short facts (a team's status, where a task stands, what each role runs on) keep each label beside its value. */
+  .facts.brief {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 14px;
+  }
+  .facts.brief dd {
+    margin-bottom: 0;
+  }
+  /* A row of How it runs: its name above what it says. */
+  .runs > .part {
+    grid-template-columns: minmax(0, 1fr);
   }
   .shortcuts a {
     min-height: 40px;
@@ -3823,10 +4638,32 @@ ol.setup > li > * {
     outline: none;
   }
 }
-/* A team's controls sit at the right of its heading, the switcher after them. */
-.team-head .team-actions {
+/* A team's controls sit at the right of its heading, the switcher after them; on a phone, on one line under the name,
+   the switcher at its right end, saying only "Switch". */
+.team-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
 }
-.team-head .team-actions + .switcher {
-  margin-left: 0;
+.team-tools:empty {
+  display: none;
+}
+@media (max-width: 720px) {
+  .team-head {
+    gap: 6px 10px;
+  }
+  .team-tools {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .switch-team {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }

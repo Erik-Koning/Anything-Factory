@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { type MachineTeam, online } from "../../../lib/fleet.ts";
+import { type MachineSubscription, type MachineTeam, online } from "../../../lib/fleet.ts";
 import { Command } from "../../components/command.tsx";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
 import { can, roleIn, type Viewer, visibleMachines } from "../../server/access.ts";
 import { allTeams, retirements } from "../../server/factory.ts";
-import { linkedMachines, type Machine, ownersOf } from "../../server/machines.ts";
+import { linkedMachines, type Machine, machineSubscriptions, ownersOf } from "../../server/machines.ts";
 import { requireViewer } from "../../server/viewer.ts";
 import { offSite } from "../../server/views.ts";
 import { unlinkMachineAction } from "./actions.ts";
@@ -22,7 +22,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
   const now = Date.now();
   // Those reporting first, then by name.
   const machines = visibleMachines(viewer, linked).sort((a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name));
-  const owners = everyone ? await ownersOf(machines) : null;
+  const [owners, subscriptions] = await Promise.all([everyone ? ownersOf(machines) : null, machineSubscriptions(machines.map((m) => m.id))]);
   const off = new Set(every.filter((team) => offSite(team, retired.get(team.name) ?? null)).map((team) => team.name));
   return (
     <>
@@ -33,7 +33,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
       </p>
       <Notice searchParams={searchParams} />
       {machines.length ? (
-        <ul className="cards">
+        <ul className="cards machines">
           {machines.map((machine) => (
             <MachineCard
               key={machine.id}
@@ -42,29 +42,42 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
               owner={owners ? (owners.get(machine.userId)?.email ?? "a removed account") : null}
               up={online(machine, now)}
               off={off}
+              subscriptions={subscriptions.get(machine.id) ?? null}
             />
           ))}
         </ul>
       ) : (
-        <p className="panel empty">{everyone ? "No machine is linked yet." : "None of your machines is linked yet."}</p>
+        <div className="panel empty">
+          <p>{everyone ? "No machine is linked yet." : "None of your machines is linked yet."}</p>
+          <p className="hint">
+            Run <code>a6g connect app</code> on one to link it: it shows a code and opens <Link href="/machines/link">the page to approve it on</Link>.
+          </p>
+        </div>
       )}
-      <p className="hint">
-        To link one, run <code>a6g connect app</code> on it: it shows a code and opens <Link href="/machines/link">the page to approve it on</Link>.
-      </p>
-      {/* How a Mac comes to start projects, each command a block of its own: the Starts projects fact links here. */}
-      <section className="how-projects" id="start-projects" aria-labelledby="how-projects">
-        <h2 id="how-projects">Starting projects from here</h2>
-        <p className="hint">
-          A linked Mac starts the projects you ask for on{" "}
-          <Link className="nowrap" href="/new">
-            Start a project
-          </Link>{" "}
-          once you&apos;ve turned that on at its own terminal. It can&apos;t be turned on from here, and it holds for the one folder you name:
-        </p>
-        <Command>a6g connect app --projects ~/code</Command>
-        <p className="hint">A Mac that needs a newer factory: update it first, in the folder you installed the factory from on that Mac.</p>
-        <Command>git pull && npm install && node bin/a6g.ts self-install</Command>
-      </section>
+      {/* How a Mac is linked, and how one comes to start projects, each command a block of its own: the Starts projects
+          fact links here. */}
+      <div className="panel how-projects">
+        <section aria-labelledby="how-link">
+          <h2 id="how-link">Linking a machine</h2>
+          <p className="hint">
+            Run this on it: it shows a code and opens <Link href="/machines/link">the page to approve it on</Link>.
+          </p>
+          <Command>a6g connect app</Command>
+        </section>
+        <section id="start-projects" aria-labelledby="how-projects">
+          <h2 id="how-projects">Starting projects from here</h2>
+          <p className="hint">
+            A linked Mac starts the projects you ask for on{" "}
+            <Link className="nowrap" href="/new">
+              Start a project
+            </Link>{" "}
+            once you&apos;ve turned that on at its own terminal. It can&apos;t be turned on from here, and it holds for the one folder you name:
+          </p>
+          <Command>a6g connect app --projects ~/code</Command>
+          <p className="hint">A Mac that needs a newer factory: update it first, in the folder you installed the factory from on that Mac.</p>
+          <Command>git pull && npm install && node bin/a6g.ts self-install</Command>
+        </section>
+      </div>
     </>
   );
 }
@@ -75,12 +88,15 @@ function MachineCard({
   owner,
   up,
   off,
+  subscriptions,
 }: {
   machine: Machine;
   viewer: Viewer;
   owner: string | null;
   up: boolean;
   off: ReadonlySet<string>;
+  // What it reports of its Claude subscriptions, from a factory version that does.
+  subscriptions: MachineSubscription[] | null;
 }) {
   // Only its own person asks it to start a project, or turns that on at its terminal.
   const mine = machine.userId === viewer.userId;
@@ -100,7 +116,12 @@ function MachineCard({
         <dt>Last report</dt>
         <dd>
           <Ago at={machine.at} />
-          {machine.lastIp ? ` from ${machine.lastIp}` : ""}
+          {machine.lastIp ? (
+            <>
+              {" "}
+              from <span className="ip">{machine.lastIp}</span>
+            </>
+          ) : null}
         </dd>
         <dt>Linked</dt>
         <dd>
@@ -110,6 +131,17 @@ function MachineCard({
           <>
             <dt>Factory</dt>
             <dd>{machine.factory}</dd>
+          </>
+        ) : null}
+        {subscriptions?.length ? (
+          <>
+            <dt>Subscriptions</dt>
+            <dd>
+              {subscriptions.map((s) => `${s.name}${s.weekly ? ` (${Math.round(100 - s.weekly.percent)}% of its week left)` : ""}`).join(", ")} ·{" "}
+              <Link className="nowrap" href={`/subscriptions?machine=${encodeURIComponent(machine.name)}`}>
+                Limits and usage
+              </Link>
+            </dd>
           </>
         ) : null}
         <dt>Starts projects</dt>
@@ -162,19 +194,15 @@ function MachineCard({
               ) : null}
             </span>
           ) : (
+            // How to update it is the same on every Mac: said on each, whoever's it is.
             <span className="muted">
-              no: needs a newer factory
-              {mine ? (
-                <>
-                  {" "}
-                  <span className="nowrap">
-                    ·{" "}
-                    <Link className="nowrap" href="#start-projects">
-                      How to update it
-                    </Link>
-                  </span>
-                </>
-              ) : null}
+              no: needs a newer factory{" "}
+              <span className="nowrap">
+                ·{" "}
+                <Link className="nowrap" href="#start-projects">
+                  How to update it
+                </Link>
+              </span>
             </span>
           )}
         </dd>

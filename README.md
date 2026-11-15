@@ -124,7 +124,10 @@ is retired and a fresh one starts on the new subscription at the next run. A rol
 earlier subscription is five points under its limits. A role none is open to waits: the guard starts none of its
 members, a waiting planner gets no ticks and keeps its messages for when it can work, the roles still open carry on,
 and it picks up by itself when one opens. You're told of every move and wait; `a6g subscriptions` shows each one's usage, limits and
-the teams on it, and `a6g status` each team's. A team's spend is counted on the subscription each request ran on, and
+the teams on it, and `a6g status` each team's. On the web app, **Subscriptions** shows every linked Mac's: how much of
+each window is left (the five hours, the week, a model's own week, extra usage), how fast it's going against the
+window, and where the teams stop; and what each used over the last day, week, 30 or 90 days, in API-equivalent dollars
+and tokens, by subscription and by model, every session on the Mac counted. A team's spend is counted on the subscription each request ran on, and
 a budget in percent counts each against that subscription's own week.
 
 The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
@@ -553,7 +556,9 @@ token in the Keychain, with the address it goes to, that does one thing: report 
 authorization grant, RFC 8628). It isn't a sign-in, can't read anything or act as you, and is replaced every week (an
 old one used after its successor ends the link, as does a new one turning up after the old one was given another). At
 the end of every full watchdog run it reports every team registered on it, those whose tasks are in files too: lead or
-worker, where the team stands, who's at work, and its checkout (as `~/…` under your home folder). **Machines** on the
+worker, where the team stands, who's at work, and its checkout (as `~/…` under your home folder); and its Claude
+subscriptions, by name, with their limits as last read and what each used there by hour and day (never a login's
+folder or account: a hash of the login, so one login on two Macs shows once). **Machines** on the
 web app shows you your machines, and an admin every machine and whose it is; a team's card on **Teams** names the
 machines its members and admins run it on. A machine not heard from for 15 minutes shows as not reporting. Admins and
 the members of a team link machines, ten each. Unlink one from its card or with `a6g disconnect app`; one that reports

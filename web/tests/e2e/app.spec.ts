@@ -653,6 +653,8 @@ test("the admin approves one proposal with a note and rejects another with a rea
   await page.getByRole("button", { name: `Approve #${approve}` }).click();
   await expect(page.getByRole("status")).toContainText(`#${approve} approved.`);
 
+  // Rejecting takes a reason, so its field opens once it's chosen.
+  await page.locator(`#task-${reject}`).getByText("Reject…", { exact: true }).click();
   await page.locator(`#reject-${reject}`).fill("Not this quarter");
   await page.getByRole("button", { name: `Reject #${reject}` }).click();
   await expect(page.getByRole("status")).toContainText(`#${reject} rejected.`);
@@ -946,6 +948,7 @@ test("the admin adds a proposal, and a task approved under a journey after anoth
   await page.goto("/t/shop/proposals");
   await expect(page.getByRole("heading", { name: /^In triage/ })).toBeVisible();
   const triaged = String((await graph.collection("tasks").findOne({ team: "shop", title: "Search orders by email" }))?.id);
+  await page.locator(`#task-${triaged}`).getByText("Reject…", { exact: true }).click();
   await expect(page.getByRole("button", { name: `Reject #${triaged}` })).toBeVisible();
   await page.goto(`/t/shop/tasks/${triaged}`);
   await expect(page.getByRole("link", { name: `Decide on #${triaged}` })).toBeVisible();
@@ -1701,6 +1704,7 @@ test("an answer or a decision on a task the team changed after the page was load
 
     // A proposal the planner edits while the Decisions page is open: the decision is on what was read.
     await page.goto("/t/shop/proposals");
+    await page.locator("#task-912").getByText("Reject…", { exact: true }).click();
     await expect(page.getByRole("button", { name: "Reject #912" })).toBeVisible();
     await tasks.updateOne({ _id: "shop:912" as never }, { $set: { body: "Wrap every order, at no charge.", updatedAt: changed }, $inc: { version: 1 } });
     await page.locator("#reject-912").fill("Not this quarter");
@@ -1710,6 +1714,8 @@ test("an answer or a decision on a task the team changed after the page was load
       "#912 changed after this page was loaded. It's shown as it stands now: read it again, then decide."
     );
     expect(await stored("912")).toMatchObject({ status: "proposed" });
+    // The page shown again keeps the reason's field open where it can; it's opened again where it isn't.
+    if (!(await page.locator("#reject-912").isVisible())) await page.locator("#task-912").getByText("Reject…", { exact: true }).click();
     await page.locator("#reject-912").fill("Not this quarter");
     await page.getByRole("button", { name: "Reject #912" }).click();
     await expect(page.getByRole("status")).toContainText("#912 rejected.");
@@ -1826,7 +1832,7 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
     await expect(page.locator("details#shop summary")).not.toContainText("no Mac runs it");
     // A team a linked Mac runs with its tasks in files is named under the rows, and why it isn't one.
     await expect(page.locator(".teams-foot")).toContainText(
-      "Notes on attic: its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
+      "Notes on attic keeps its tasks in files there (a6g task migrate --to mongo brings them here)"
     );
     await page.goto("/t/blog/inbox");
     await expect(page.locator(".team-head")).toContainText("no Mac runs it");
@@ -1975,7 +1981,8 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   const field = (name: string) => page.getByRole("textbox", { name, exact: true });
   // No Mac of theirs starts projects until it's said at its terminal: the page says how.
   await page.goto("/new");
-  await expect(page.getByRole("heading", { name: "None of your Macs starts projects yet" })).toBeVisible();
+  await expect(page.getByText("None of your Macs starts projects yet, so there's no form here yet.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Turn it on at one of your Macs" })).toBeVisible();
   await expect(page.getByText("a6g connect app --projects ~/code")).toBeVisible();
 
   // Their Mac reports that it does, with what it offers.

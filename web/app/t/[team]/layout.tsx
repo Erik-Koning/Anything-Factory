@@ -67,11 +67,14 @@ export default async function TeamLayout({ children, params }: { children: React
         <Chip>{team.status?.state ?? "no status yet"}</Chip>
         {quiet ? <QuietMark last={quiet.last} /> : null}
         <span className="muted small">you: {role}</span>
-        {/* A deleted team's own controls are gone with it: it's put back from its overview, or by a6g register. */}
-        {can(viewer, "team:control", team.name) && retired?.kind !== "action" ? (
-          <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
-        ) : null}
-        <TeamSwitcher current={team.name} teams={switchTo} />
+        {/* The controls and the switcher: at the right of the name, or on a line of their own under it on a phone. */}
+        <div className="team-tools">
+          {/* A deleted team's own controls are gone with it: it's put back from its overview, or by a6g register. */}
+          {can(viewer, "team:control", team.name) && retired?.kind !== "action" ? (
+            <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+          ) : null}
+          <TeamSwitcher current={team.name} teams={switchTo} />
+        </div>
       </div>
       {retired ? (
         <p className="notice attention off-site">

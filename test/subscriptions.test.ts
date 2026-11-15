@@ -54,7 +54,8 @@ describe("reading a subscription's usage", () => {
       percent: 52,
       resetsAt: "2026-11-08T16:00:00.684Z",
       session: null,
-      scoped: [{ model: "Fable", percent: 3 }],
+      scoped: [{ model: "Fable", percent: 3, resetsAt: "2026-11-08T16:00:00.000Z" }],
+      extra: null,
     });
     assert.equal(parseUsageReport(report(null)), null, "an API key, or a token without the scope");
     assert.equal(parseUsageReport("not json\n{}"), null);
@@ -91,8 +92,8 @@ describe("reading a subscription's usage", () => {
       join(dir, "mine.jsonl"),
       [line("a", "2026-11-02T11:10:00Z"), line("b", "2026-11-02T11:50:00Z"), line("c", "2026-11-02T12:05:00Z"), ""].join("\n")
     );
-    writeFileSync(join(dir, "old.jsonl"), [line("d", "2026-10-01T10:00:00Z"), ""].join("\n"));
-    const old = new Date("2026-10-01T10:00:00Z");
+    writeFileSync(join(dir, "old.jsonl"), [line("d", "2026-07-01T10:00:00Z"), ""].join("\n"));
+    const old = new Date("2026-07-01T10:00:00Z");
     utimesSync(join(dir, "old.jsonl"), old, old);
     assert.deepEqual(collectHours(join(root, "hours.json"), [dir], now), { "2026-11-02T11": 8, "2026-11-02T12": 4 });
   });

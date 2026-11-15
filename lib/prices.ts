@@ -50,13 +50,41 @@ export const modelKey = (model: string): string => model.replace(/\[[^\]]*\]$/, 
 
 export const priced = (model: string): boolean => Object.hasOwn(PRICES, modelKey(model));
 
-// The request's API-equivalent cost in dollars, or null for a model the table doesn't know.
-export function costOf(model: string, t: Tokens): number | null {
+// A request's API-equivalent cost in dollars, by what it was spent on; `fast` is the part fast mode added (in the others
+// too: it's the half of them that standard speed wouldn't have cost), and `saved` what its cache reads cost less than
+// the same tokens as input (not in the cost).
+export interface CostParts {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  fast: number;
+  saved: number;
+}
+
+// The request's cost, part by part, or null for a model the table doesn't know.
+export function costParts(model: string, t: Tokens): CostParts | null {
   const price = PRICES[modelKey(model)];
   if (!price) return null;
   const prompt = t.input + t.cacheRead + t.cacheWrite5m + t.cacheWrite1h;
   const { input, output } = price.tier && prompt > price.tier.over ? price.tier : price;
   const read = price.cacheRead !== undefined && !(price.tier && prompt > price.tier.over) ? price.cacheRead : input * 0.1;
-  const dollars = (t.input * input + t.output * output + t.cacheRead * read + t.cacheWrite5m * input * 1.25 + t.cacheWrite1h * input * 2) / 1e6;
-  return t.fast ? dollars * 2 : dollars;
+  const speed = t.fast ? 2 : 1;
+  const parts = {
+    input: (t.input * input * speed) / 1e6,
+    output: (t.output * output * speed) / 1e6,
+    cacheRead: (t.cacheRead * read * speed) / 1e6,
+    cacheWrite: ((t.cacheWrite5m * input * 1.25 + t.cacheWrite1h * input * 2) * speed) / 1e6,
+  };
+  return {
+    ...parts,
+    fast: t.fast ? (parts.input + parts.output + parts.cacheRead + parts.cacheWrite) / 2 : 0,
+    saved: (t.cacheRead * (input - read) * speed) / 1e6,
+  };
+}
+
+// The request's API-equivalent cost in dollars, or null for a model the table doesn't know.
+export function costOf(model: string, t: Tokens): number | null {
+  const parts = costParts(model, t);
+  return parts ? parts.input + parts.output + parts.cacheRead + parts.cacheWrite : null;
 }

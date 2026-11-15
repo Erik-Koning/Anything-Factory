@@ -29,6 +29,7 @@ import {
   MAX_MACHINES,
   type MachineProjects,
   type MachineReport,
+  type MachineSubscription,
   type MachineTeam,
   POLL_SECONDS,
   ROTATE_DAYS,
@@ -98,6 +99,9 @@ interface MachineDoc {
   projects?: MachineProjects | null;
   // Whether that report said anything of projects at all: a factory version that can start them says so, on or off.
   projectsKnown?: boolean;
+  // Its Claude subscriptions as its last report said (lib/fleet.ts), for the Subscriptions page only: absent or null
+  // from a factory version that doesn't report them.
+  subscriptions?: MachineSubscription[] | null;
   // When it last reported; null until its first report.
   at: Date | null;
 }
@@ -153,7 +157,8 @@ export function ensureIndexes(): Promise<unknown> {
 const hash = (secret: string): string => createHash("sha256").update(secret).digest("hex");
 const duplicate = (error: unknown): boolean => (error as { code?: number })?.code === 11000;
 const newToken = (): string => `a6gm_${randomBytes(32).toString("base64url")}`;
-const VIEW = { projection: { tokenHash: 0, previousHash: 0, orphanHashes: 0 } } as const;
+// Never a token's hash; nor its subscriptions, which only their page reads (machineSubscriptions).
+const VIEW = { projection: { tokenHash: 0, previousHash: 0, orphanHashes: 0, subscriptions: 0 } } as const;
 // Replaced tokens kept for spotting a second holder: at most this many, and none ever dropped. The old token coming
 // back once more ends the link instead (a CLI misses an answer now and then; a copy can come back every 20 seconds).
 const ORPHANS_KEPT = 10;
@@ -449,6 +454,7 @@ export async function recordReport(
     teams: report.teams,
     projects: report.projects ?? null,
     projectsKnown: report.projects !== undefined,
+    subscriptions: report.subscriptions ?? null,
     at: now,
     lastSeenAt: now,
     lastIp: ip,
@@ -479,6 +485,15 @@ export async function linkedMachines({ teams }: { teams?: readonly string[] } = 
     .sort({ name: 1 })
     .toArray();
   return docs.map(view);
+}
+
+// The subscriptions each of `ids` last reported, by machine id: only machines whose factory version reports them.
+export async function machineSubscriptions(ids: readonly string[]): Promise<Map<string, MachineSubscription[]>> {
+  if (!ids.length) return new Map();
+  const docs = await machines()
+    .find({ _id: { $in: [...ids] }, subscriptions: { $type: "array" } }, { projection: { subscriptions: 1 } })
+    .toArray();
+  return new Map(docs.map((doc) => [doc._id, doc.subscriptions ?? []]));
 }
 
 // Unlinks the machine `id`: only `userId`'s, or anyone's with null (an admin). The machine as it was, or null.

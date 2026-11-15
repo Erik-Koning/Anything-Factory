@@ -24,10 +24,11 @@ export function LinkMachine({ prefill }: { prefill: string }) {
         <p className="hint">
           On the machine you want to see here, run <code>a6g connect app</code>. It shows a code and opens this page.
         </p>
-        <form action={look} className="inline">
+        <form action={look} className="inline code-form">
           <label>
             Code
             <input
+              className="code-field"
               name="code"
               defaultValue={looked.code}
               autoComplete="off"
@@ -56,7 +57,7 @@ export function LinkMachine({ prefill }: { prefill: string }) {
         </dd>
         <dt>Asked</dt>
         <dd>
-          {link.ago} from {link.ip ?? "an unknown address"}
+          {link.ago} from {link.ip ? <span className="ip">{link.ip}</span> : "an unknown address"}
           {link.here ? ", the address you're on now" : ""}, by {link.device}
         </dd>
       </dl>
@@ -84,7 +85,15 @@ export function LinkMachine({ prefill }: { prefill: string }) {
         {link.here ? null : (
           <label>
             Type the code your terminal shows, to approve it
-            <input name="typed" autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="BCDF-GHJK" maxLength={12} />
+            <input
+              className="code-field"
+              name="typed"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              placeholder="BCDF-GHJK"
+              maxLength={12}
+            />
           </label>
         )}
         <div className="inline">

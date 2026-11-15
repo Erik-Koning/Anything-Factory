@@ -190,6 +190,9 @@ const WALK_SPEED = 700;
 const MERGE_SPEED = 560;
 const SHIP = 1.1;
 const REST = 0.9;
+// How far into its first cycle the page opens: this long into building, and never more than AHEAD seconds in all.
+const AHEAD = 20;
+const AHEAD_BUILDING = 1.6;
 // A sign turns over in this long, and stays this long after the work under it stops. Whoever only passes a task (the
 // approver, the tester, the UX specialist) is at it for a glance.
 const TURN = 0.36;
@@ -358,9 +361,14 @@ function lay(random: Random, width: number, height: number, above: number, now: 
   const rule = unit * 2;
 
   const plan = planCycle(random, levels, rows);
-  // How far from the middle line the tasks reach; the middle line is on the ruling, unless the rail wouldn't fit.
+  // How far from the middle line the tasks reach; the middle line is on the ruling, halfway down the room (with room
+  // above for the drawing's title, and no lower than the rail lets it sit), so any room to spare is open sheet shared
+  // above and below the drawing rather than a band on one side of it.
   const reach = Math.max(...plan.tasks.map((task) => Math.abs(task.slot))) * unit + h / 2;
-  const mid = Math.min(Math.round((above + height / 2) / rule) * rule - above, height - reach - drop - 10);
+  const lowest = height - reach - drop - 10;
+  // On a phone the room is the drawing's own size (globals.css), so it stands at the foot of it, just over the words.
+  const halfway = width > 720 ? Math.min(lowest, Math.max(reach + 56, (height - drop) / 2)) : lowest;
+  const mid = Math.min(Math.floor((above + lowest) / rule), Math.round((above + halfway) / rule)) * rule - above;
   const parts: Part[] = plan.tasks.map((task) => ({
     ...task,
     x: Math.round(left + w / 2 + task.level * step),
@@ -1304,6 +1312,21 @@ function run(canvas: HTMLCanvasElement, title: HTMLElement): () => void {
     canvas.style.height = `${tall}px`;
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(tall * ratio);
+    // The title stands just over the drawing, wherever in its room that is.
+    title.style.top = `${Math.max(16, (scene?.top ?? 0) - 12)}px`;
+  };
+  // A scene laid out as the page opens (or the window changes) is shown partway through its cycle: the page opens on a
+  // team already at work, its plan grown and approved and the first tasks being built, never on an empty sheet with a
+  // dot coming in. The cycles after it run from their request.
+  const ahead = () => {
+    if (!scene || scene.still) return;
+    for (let step = 0; step < AHEAD * 60; step++) {
+      if (scene.phase === "build" && clock >= scene.since + AHEAD_BUILDING) break;
+      clock += 1 / 60;
+      if (advance(scene, clock, random)) break;
+    }
+    // Whoever is there by now is there at once, not fading in.
+    for (const agent of scene.agents) if (!agent.leaving && clock >= agent.from) agent.presence = 1;
   };
   const tick = (time: number) => {
     frame = requestAnimationFrame(tick);
@@ -1331,7 +1354,10 @@ function run(canvas: HTMLCanvasElement, title: HTMLElement): () => void {
     const fits = scene !== null && Math.round(box.width) === width && scene.bottom <= box.height;
     width = Math.round(box.width);
     height = Math.round(box.height);
-    if (!fits) next();
+    if (!fits) {
+      next();
+      ahead();
+    }
     render(0);
     const moving = scene !== null && !scene.still;
     if (moving && !frame) frame = requestAnimationFrame(tick);

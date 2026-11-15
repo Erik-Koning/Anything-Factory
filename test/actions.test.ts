@@ -80,9 +80,22 @@ describe("the operator's actions on a team's lead", () => {
       ["waiting"]
     );
 
-    // Free: it starts, and members may start again.
-    await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: () => null, now: later });
-    assert.deepEqual(started, [asked.id]);
+    // Free: retired in this very pass (no job, which could find it woken again), a fresh planner started, and members
+    // may start again.
+    const retired: string[] = [];
+    const woken: string[] = [];
+    await applyActions(entryAt(run), store, await store.controls.all(), "mac", {
+      start,
+      busy: () => null,
+      now: later,
+      retire: (r) => (retired.push(r), "mcp:old"),
+      wake: (e) => void woken.push(e.name),
+    });
+    assert.deepEqual([started, retired, woken], [[], [run], ["fixture"]]);
+    assert.deepEqual(
+      actionsOf(await store.controls.all()).map((s) => [s.outcome, s.said]),
+      [["done", "The planner's thread (mcp:old) was retired; a fresh one starts now and carries on from the log."]]
+    );
     assert.equal(restartAsked(run), null);
     assert.equal(waitRefusal(run, "builder"), null);
   });

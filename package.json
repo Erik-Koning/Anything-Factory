@@ -1,6 +1,6 @@
 {
   "name": "anything-factory",
-  "version": "0.8.3",
+  "version": "0.8.5",
   "description": "Provision a harness-based software engineering team in any code repo, on T3 Code and Claude Code.",
   "type": "module",
   "license": "UNLICENSED",
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "26.6.5",
+    "prettier": "3.10.1",
     "typescript": "7.0.2"
   },
   "optionalDependencies": {

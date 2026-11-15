@@ -64,6 +64,17 @@ request (Article 8).
   and the teams registered on it: lead or worker, state, planner, members at work and checkout (a team whose tasks
   are in files is named, with no pages here); and Unlink. `/machines/link`: where `a6g connect app` sends you to look
   up its code, check it, and approve or refuse it.
+- `/subscriptions` Subscriptions: the Claude subscriptions on the machines you see (an admin, every linked one's), one
+  per login however many Macs report it, as T3 Code's Usage page shows them. **Limits** (the default): a card per
+  window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of the pool is
+  left, whether it's going faster than the window runs, and a bar with each subscription's part: what's left of it,
+  its used part hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams
+  stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed to them.
+  **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's,
+  a chart (read with the arrow keys too), processed, cached, uncached and output tokens and what the cache saved,
+  dollars and tokens by type and by speed, and a breakdown by model (each opens its own figures) or by day. Narrowed
+  to one machine or one subscription; what's shown is in the address. Usage is every session on the Mac (the
+  operator's own too) at `lib/prices.ts`'s prices: a model with no price there counts its tokens and says so.
 - `/t/<team>/add`, as an admin, **Approve it now**: the task goes straight to the builders.
 - Beside a team's name on each of its pages, for admins: **Stop** (a pause now), **Pause…** (its choices in a dialog:
   after the work under way, after chosen journeys, or now) and, once either is asked, **Resume**; and **⋯**: Resume
@@ -213,7 +224,8 @@ handles the machine's token. Admins and the members of a team link machines, at 
    unlink it.
 4. The watchdog reports with it (`POST /api/machines/report`, `Authorization: Bearer …`): the report is rebuilt from
    the fields it may have (`lib/fleet.ts parseReport`: no control or format characters, checkouts as absolute or
-   `~/` paths) and refused whole otherwise (400), over 256 KB (413), or sooner than 20 seconds after the last (429). It
+   `~/` paths) and refused whole otherwise (400; wrong subscriptions only are dropped, the rest kept), over 768 KB
+   (413), or sooner than 20 seconds after the last (429). It
    doesn't rename the machine. When the token is a week old, the answer carries the next one (200); the old one keeps
    working for a day, for a CLI that missed it, until the new one is used, and if it's used after that, the link ends
    (RFC 9700's refresh token rotation). An old one that comes back while its successor is unused gets another in the

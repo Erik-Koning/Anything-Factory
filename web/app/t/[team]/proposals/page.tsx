@@ -61,16 +61,28 @@ export default async function ProposalsPage({ params, searchParams }: { params: 
           </section>
         ))
       ) : (
-        <p className="panel empty">Nothing is waiting for a decision.</p>
+        <div className="panel empty">
+          <p>Nothing is waiting for a decision.</p>
+          <p className="hint">
+            The planner&apos;s proposals come here when they&apos;re yours to approve. What else needs you is in{" "}
+            <Link href={`/t/${team.name}/inbox`}>Waiting on you</Link>.
+          </p>
+        </div>
       )}
     </>
   );
 }
 
+// What the move table asks before the operator approves (lib/tasks/model.ts, scored): new work is scored first; a finding
+// with a severity needn't be. Said beside the key, which is shown but can't be pressed, rather than refused after.
+const needsScore = (t: Task): boolean => t.kind !== "journey" && !t.score && (t.kind === "feature" || !t.severity);
+
+// One proposal: what it is and why on the left, the decision on the right (one above the other on a narrow screen). Each
+// field stands over the key it goes with, and no key here is the solid: a page of proposals has no one commit.
 function Proposal({ team, task: t, origin }: { team: string; task: Task; origin: string }) {
   const last = t.notes.at(-1);
   return (
-    <li id={`task-${t.id}`}>
+    <li id={`task-${t.id}`} className="to-decide">
       <div className="head">
         <span className="id">#{t.id}</span>
         <h3 className="title">
@@ -81,65 +93,86 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
         {t.severity ? <Chip tone="">{t.severity}</Chip> : null}
         {t.priority !== null ? <Chip tone="">{`p${t.priority}`}</Chip> : null}
       </div>
-      <p className="small muted">{origin}</p>
-      {t.gate ? (
-        <dl className="facts small">
-          <dt>Who asked, why</dt>
-          <dd>{t.gate.asked}</dd>
-          <dt>Delete or simplify</dt>
-          <dd>{t.gate.simplify}</dd>
-          <dt>Simplest version</dt>
-          <dd>{t.gate.simplest}</dd>
-        </dl>
-      ) : (
-        <p className="small muted">No gate yet.</p>
-      )}
-      {t.score ? (
-        <>
+      <div className="about">
+        <p className="small muted">{origin}</p>
+        {t.gate ? (
+          <dl className="facts small">
+            <dt>Who asked, why</dt>
+            <dd>{t.gate.asked}</dd>
+            <dt>Delete or simplify</dt>
+            <dd>{t.gate.simplify}</dd>
+            <dt>Simplest version</dt>
+            <dd>{t.gate.simplest}</dd>
+          </dl>
+        ) : null}
+        {/* Neither yet: one line for both, as the task's page says it. */}
+        {!t.gate && !t.score ? <p className="small muted">Not gated or scored yet: the planner does both.</p> : null}
+        {t.score ? (
+          <>
+            <p className="small">
+              <b>Score:</b> {t.score.why}{" "}
+              <span className="muted">
+                (confidence {t.score.confidence}, size {t.score.size})
+              </span>
+            </p>
+            <ul className="score" aria-label="Score by dimension, 0 to 3">
+              {DIMENSIONS.map((d) => (
+                <li key={d}>
+                  <span>{d}</span> <b>{t.score?.[d] ?? 0}</b>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : t.gate ? (
+          <p className="small muted">Not scored yet.</p>
+        ) : null}
+        {t.body ? <p className="text small">{clip(t.body, 900)}</p> : null}
+        {t.request ? (
           <p className="small">
-            <b>Score:</b> {t.score.why}{" "}
-            <span className="muted">
-              (confidence {t.score.confidence}, size {t.score.size})
-            </span>
+            From request <Link href={`/t/${team}/requests/${t.request}`}>{t.request}</Link>
           </p>
-          <ul className="score small" aria-label="Score by dimension, 0 to 3">
-            {DIMENSIONS.map((d) => (
-              <li key={d}>
-                <Chip tone="">{`${d} ${t.score?.[d] ?? 0}`}</Chip>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p className="small muted">Not scored yet{t.severity ? "" : ": it needs a score before it can be approved"}.</p>
-      )}
-      {t.body ? <p className="text small">{clip(t.body, 900)}</p> : null}
-      {t.request ? (
-        <p className="small">
-          From request <Link href={`/t/${team}/requests/${t.request}`}>{t.request}</Link>
-        </p>
-      ) : null}
-      {last ? (
-        <p className="small muted">
-          {last.by}: {clip(last.text, 400)}
-        </p>
-      ) : null}
-      <div className="verdicts">
-        <Verdict team={team} id={t.id} seen={t.version} decision="approve" label="Approve" field="Note (optional)" required={false} className="approve" />
-        <Verdict team={team} id={t.id} seen={t.version} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
+        ) : null}
+        {last ? (
+          <p className="small muted">
+            {last.by}: {clip(last.text, 400)}
+          </p>
+        ) : null}
       </div>
-      {/* A proposal is one of question, proposed and researching, so one of these is always open to it. */}
-      <details className="more">
-        <summary>{`Research or escalate #${t.id} instead`}</summary>
+      <div className="decide">
         <div className="verdicts">
-          {t.status !== "researching" ? (
-            <Verdict team={team} id={t.id} seen={t.version} decision="research" label="Research it" field="What to find out" required />
-          ) : null}
-          {t.status !== "question" ? (
-            <Verdict team={team} id={t.id} seen={t.version} decision="escalate" label="Escalate" field="What has to be decided" required />
-          ) : null}
+          {needsScore(t) ? (
+            <div className="unapprovable">
+              <button type="button" disabled aria-describedby={`unscored-${t.id}`}>{`Approve #${t.id}`}</button>
+              <p id={`unscored-${t.id}`} className="hint">
+                It needs a score before it can be approved: the planner scores it first.
+              </p>
+            </div>
+          ) : (
+            <Verdict team={team} id={t.id} seen={t.version} decision="approve" label="Approve" field="Note (optional)" required={false} />
+          )}
         </div>
-      </details>
+        {/* The other decisions each take words, so each opens its field only once chosen: one form in sight at a time.
+            A proposal is one of question, proposed and researching, so research or escalate is always open to it. */}
+        <div className="other-ways">
+          <details className="more">
+            <summary>Reject…</summary>
+            <div className="verdicts">
+              <Verdict team={team} id={t.id} seen={t.version} decision="reject" label="Reject" field="Why it's rejected" required className="reject" />
+            </div>
+          </details>
+          <details className="more">
+            <summary>Research or escalate…</summary>
+            <div className="verdicts">
+              {t.status !== "researching" ? (
+                <Verdict team={team} id={t.id} seen={t.version} decision="research" label="Research it" field="What to find out" required />
+              ) : null}
+              {t.status !== "question" ? (
+                <Verdict team={team} id={t.id} seen={t.version} decision="escalate" label="Escalate" field="What has to be decided" required />
+              ) : null}
+            </div>
+          </details>
+        </div>
+      </div>
     </li>
   );
 }

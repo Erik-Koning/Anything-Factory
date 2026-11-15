@@ -49,7 +49,6 @@ export function TeamInbox({
           <h2 id={`${team}-questions`}>
             Questions for you <span className="muted">{box.questions.length}</span>
           </h2>
-          <p className="hint">The team keeps going on everything else, and settles these once you answer.</p>
           <ul className="plain rows">
             {box.questions.map((w) => (
               <WaitingItem key={w.task.id} team={team} base={base} w={w} back={back} titles={titles} agreement={agreement} waits={waits} />
@@ -144,155 +143,159 @@ function WaitingItem({
   return (
     <li id={`task-${t.id}`} className="waiting">
       <Heading base={base} task={t} journey={w.journey} />
-      <p className="small muted">
-        {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
-        {/* A question the planner raised says which rule of the working agreement made it the operator's, and how it
+      {/* What it is, and the answer to it: side by side where the panel is wide enough for both. */}
+      <div className="waiting-about">
+        <p className="small muted">
+          {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
+          {/* A question the planner raised says which rule of the working agreement made it the operator's, and how it
             judged it; one the approver escalated says the approval rule, which is the team's own setting and not the
             agreement's to change. */}
-        {t.status === "question" && t.ask?.rule ? (
-          <span className="asked-because">
-            Asked because: {t.ask.rule}
-            {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
-            {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
-          </span>
-        ) : null}
-      </p>
-      <dl className="raised">
-        <div className="why">
-          <dt>Why it&apos;s yours</dt>
-          <dd>
-            {w.why ? (
-              <LinkedText text={w.why} base={base} titles={titles} />
-            ) : (
-              <span className="missing">No reason was recorded. The team gives one now whenever it raises something to you; this one came before.</span>
-            )}
-          </dd>
-        </div>
-        <div className="recommends">
-          <dt>The team recommends</dt>
-          <dd>
-            {w.recommendation ? (
-              <LinkedText text={w.recommendation} base={base} titles={titles} />
-            ) : byOperator ? (
-              <span className="missing">Nothing: you raised it yourself.</span>
-            ) : (
-              <span className="missing">
-                No recommendation was recorded. The team gives one now whenever it raises something to you; the planner adds one to this (a6g task ask).
-              </span>
-            )}
-            {w.recommendationFrom === "inferred" ? <span className="hint"> (from the task&apos;s own words)</span> : null}
-          </dd>
-        </div>
-      </dl>
-      {shown ? (
-        <div className="ask">
-          {fromNote && !repeats ? (
-            <p className="small muted">
-              The {w.question.by} asks, <Ago at={w.question.at} />:
-            </p>
+          {t.status === "question" && t.ask?.rule ? (
+            <span className="asked-because">
+              Asked because: {t.ask.rule}
+              {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
+              {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
+            </span>
           ) : null}
-          <p className="text">
-            <LinkedText text={clip(shown, 2400)} base={base} titles={titles} />
-          </p>
-        </div>
-      ) : null}
-      {w.holds.length || w.related.length ? (
-        <dl className="facts small">
-          {w.holds.length ? (
-            <>
-              <dt>Holds up</dt>
-              <dd>
-                {w.holds.map((h, i) => (
-                  <span key={h.id}>
-                    {i ? ", " : ""}
-                    <Link href={`${base}/tasks/${h.id}`}>
-                      #{h.id} {h.title}
-                    </Link>
-                  </span>
-                ))}
-              </dd>
-            </>
-          ) : null}
-          {w.related.length ? (
-            <>
-              <dt>Also waiting on you</dt>
-              <dd>
-                {w.related.map((r, i) => (
-                  <span key={r.id}>
-                    {i ? ", " : ""}
-                    <a href={`#task-${r.id}`}>
-                      #{r.id} {r.title}
-                    </a>
-                  </span>
-                ))}
-              </dd>
-            </>
-          ) : null}
+        </p>
+        <dl className="raised">
+          <div className="why">
+            <dt>Why it&apos;s yours</dt>
+            <dd>
+              {w.why ? (
+                <LinkedText text={w.why} base={base} titles={titles} />
+              ) : (
+                <span className="missing">No reason was recorded. The team gives one now whenever it raises something to you; this one came before.</span>
+              )}
+            </dd>
+          </div>
+          <div className="recommends">
+            <dt>The team recommends</dt>
+            <dd>
+              {w.recommendation ? (
+                <LinkedText text={w.recommendation} base={base} titles={titles} />
+              ) : byOperator ? (
+                <span className="missing">Nothing: you raised it yourself.</span>
+              ) : (
+                <span className="missing">
+                  No recommendation was recorded. The team gives one now whenever it raises something to you; the planner adds one to this (a6g task ask).
+                </span>
+              )}
+              {w.recommendationFrom === "inferred" ? <span className="hint"> (from the task&apos;s own words)</span> : null}
+            </dd>
+          </div>
         </dl>
-      ) : null}
-      {(fromNote && t.body && !repeats) || others.length ? (
-        <details className="more">
-          <summary>{fromNote && t.body && !repeats ? ["The task", more].filter(Boolean).join(", and ") : `Notes (${others.length})`}</summary>
-          {fromNote && t.body && !repeats ? (
-            <p className="text small">
-              <LinkedText text={clip(t.body, 2400)} base={base} titles={titles} />
+        {shown ? (
+          <div className="ask">
+            {fromNote && !repeats ? (
+              <p className="small muted">
+                The {w.question.by} asks, <Ago at={w.question.at} />:
+              </p>
+            ) : null}
+            <p className="text">
+              <LinkedText text={clip(shown, 2400)} base={base} titles={titles} />
             </p>
-          ) : null}
-          <ul className="plain rows small">
-            {others.map((n) => (
-              <li key={`${n.by}-${n.at}`}>
-                <p className="muted">
-                  {n.by}
-                  {n.kind === "answer" ? " (answer)" : ""} · <Ago at={n.at} />
-                </p>
-                <p className="text">
-                  <LinkedText text={n.text} base={base} titles={titles} />
-                </p>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-      <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} waits={waits} />
-      {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
-      {t.kind === "design" ? null : (
-        <details className="more">
-          <summary>{`Or decide #${t.id} yourself`}</summary>
-          <div className="verdicts">
-            {approvable(t) ? (
+          </div>
+        ) : null}
+        {w.holds.length || w.related.length ? (
+          <dl className="facts small">
+            {w.holds.length ? (
+              <>
+                <dt>Holds up</dt>
+                <dd>
+                  {w.holds.map((h, i) => (
+                    <span key={h.id}>
+                      {i ? ", " : ""}
+                      <Link href={`${base}/tasks/${h.id}`}>
+                        #{h.id} {h.title}
+                      </Link>
+                    </span>
+                  ))}
+                </dd>
+              </>
+            ) : null}
+            {w.related.length ? (
+              <>
+                <dt>Also waiting on you</dt>
+                <dd>
+                  {w.related.map((r, i) => (
+                    <span key={r.id}>
+                      {i ? ", " : ""}
+                      <a href={`#task-${r.id}`}>
+                        #{r.id} {r.title}
+                      </a>
+                    </span>
+                  ))}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        ) : null}
+        {(fromNote && t.body && !repeats) || others.length ? (
+          <details className="more">
+            <summary>{fromNote && t.body && !repeats ? ["The task", more].filter(Boolean).join(", and ") : `Notes (${others.length})`}</summary>
+            {fromNote && t.body && !repeats ? (
+              <p className="text small">
+                <LinkedText text={clip(t.body, 2400)} base={base} titles={titles} />
+              </p>
+            ) : null}
+            <ul className="plain rows small">
+              {others.map((n) => (
+                <li key={`${n.by}-${n.at}`}>
+                  <p className="muted">
+                    {n.by}
+                    {n.kind === "answer" ? " (answer)" : ""} · <Ago at={n.at} />
+                  </p>
+                  <p className="text">
+                    <LinkedText text={n.text} base={base} titles={titles} />
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </div>
+      <div className="waiting-answer">
+        <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} waits={waits} />
+        {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
+        {t.kind === "design" ? null : (
+          <details className="more">
+            <summary>{`Or decide #${t.id} yourself`}</summary>
+            <div className="verdicts">
+              {approvable(t) ? (
+                <Verdict
+                  team={team}
+                  id={t.id}
+                  decision="approve"
+                  label={t.status === "blocked" ? "Approve again" : "Approve"}
+                  field="Note (optional)"
+                  required={false}
+                  back={back}
+                  seen={t.version}
+                />
+              ) : null}
               <Verdict
                 team={team}
                 id={t.id}
-                decision="approve"
-                label={t.status === "blocked" ? "Approve again" : "Approve"}
-                field="Note (optional)"
-                required={false}
-                className="approve"
+                decision="reject"
+                label="Reject"
+                field="Why it's rejected"
+                required
+                className="reject"
                 back={back}
                 seen={t.version}
               />
-            ) : null}
-            <Verdict
-              team={team}
-              id={t.id}
-              decision="reject"
-              label="Reject"
-              field="Why it's rejected"
-              required
-              className="reject"
-              back={back}
-              seen={t.version}
-            />
-          </div>
-          {approvable(t) ? null : (
-            <p className="hint">
-              {t.kind === "research"
-                ? "A question has nothing to build: answer it, or reject it."
-                : "It isn't scored yet, so it can't be approved: answer it instead."}
-            </p>
-          )}
-        </details>
-      )}
+            </div>
+            {approvable(t) ? null : (
+              <p className="hint">
+                {t.kind === "research"
+                  ? "A question has nothing to build: answer it, or reject it."
+                  : "It isn't scored yet, so it can't be approved: answer it instead."}
+              </p>
+            )}
+          </details>
+        )}
+      </div>
     </li>
   );
 }

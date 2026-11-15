@@ -1,4 +1,4 @@
-import { a6g, ROOT } from "./helpers.ts";
+import { a6g, ROOT, tmp } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, readdirSync, readFileSync } from "node:fs";
@@ -51,6 +51,19 @@ describe("release", () => {
   test("scripts are executable", () => {
     for (const file of ["bin/a6g.ts", ...readdirSync(join(ROOT, "templates/team/adapters")).map((f) => `templates/team/adapters/${f}`)])
       assert.doesNotThrow(() => accessSync(join(ROOT, file), constants.X_OK), file);
+  });
+
+  test("--help on a command shows what the help says of it and runs nothing", async () => {
+    const cwd = tmp("a6g-help-");
+    const init = await a6g(["init", "--help"], { cwd });
+    assert.equal(init.code, 0, init.out);
+    assert.match(init.out, /^ {2}a6g init \[<repo>\] \[options\]/);
+    assert.match(init.out, /--store files\|mongo/, "its options too");
+    assert.doesNotMatch(init.out, /a6g doctor/, "not the whole help");
+    assert.deepEqual(readdirSync(cwd), [], "and it made nothing");
+    assert.match((await a6g(["e2e", "try", "-h"], { cwd })).out, /a6g e2e run\|try\|status\|done/);
+    // A command's own -h, after --, is the command's.
+    assert.match((await a6g(["lock", "merge", "--", "echo", "-h"], { cwd })).out, /not in a team/);
   });
 
   test("the CLI answers help, its version and an unknown command", async () => {

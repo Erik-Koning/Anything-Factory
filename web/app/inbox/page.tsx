@@ -33,10 +33,16 @@ export default async function InboxPage({ searchParams }: { searchParams: Search
       <h1>Waiting on you</h1>
       <p className="lede">
         {total
-          ? `${total} waiting for your answer${across > 1 ? `, across ${across} teams` : ""}. The teams keep working on everything else meanwhile.`
-          : "Nothing is waiting on you. The teams ask here when they need a decision."}{" "}
-        <Link href="/account/notifications">Notifications</Link> say how you hear about new ones.
+          ? `${total} waiting for your answer${across > 1 ? `, across ${across} teams` : ""}.`
+          : "Nothing is waiting on you. The teams ask here when they need a decision."}
       </p>
+      <details className="guide">
+        <summary>How this works</summary>
+        <p>
+          You answer as the operator. The teams keep working on everything else meanwhile; the planner gets each answer within a minute, records it in its
+          decisions and moves the task on. <Link href="/account/notifications">Notifications</Link> say how you hear about new ones.
+        </p>
+      </details>
       <Notice searchParams={searchParams} />
       {waiting.map(({ team, box, tasks, open, noMac }) => (
         <section key={team.name} className="team-inbox" aria-labelledby={`team-${team.name}`}>

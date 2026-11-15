@@ -217,6 +217,26 @@ if (["help", "--help", "-h"].includes(command)) {
   process.stdout.write(HELP);
   process.exit(0);
 }
+// --help (or -h) on a command shows what the help says of it, and runs nothing: `a6g init --help` made a checkout,
+// and `a6g e2e try --help` started a run. Words after "--" are a command's own (a6g lock … -- <command> -h).
+// The commands with a usage of their own say it themselves.
+const OWN_USAGE = ["task", "decision", "request", "agreement", "ditto"];
+const own = args.indexOf("--");
+if (!OWN_USAGE.includes(command) && (own === -1 ? args : args.slice(0, own)).some((arg) => arg === "--help" || arg === "-h")) {
+  const lines = HELP.split("\n");
+  const said: string[] = [];
+  for (const [i, line] of lines.entries()) {
+    if (!new RegExp(`\\ba6g ${command}\\b`).test(line)) continue;
+    said.push(line);
+    // The lines that go on from it: indented further than a command's own line.
+    for (const next of lines.slice(i + 1)) {
+      if (!/^ {10,}\S/.test(next) || /^\s+a6g /.test(next)) break;
+      said.push(next);
+    }
+  }
+  process.stdout.write(said.length ? `${[...new Set(said)].join("\n")}\n` : HELP);
+  process.exit(0);
+}
 if (command === "--version") {
   console.info(PACKAGE.version);
   process.exit(0);

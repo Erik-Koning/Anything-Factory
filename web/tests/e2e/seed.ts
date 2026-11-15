@@ -4,7 +4,7 @@
 // daily limit the tests reach, three machines linked to them as a6g connect app links one, with their reports, and
 // what Shop's planner decided in the operator's place (Blog is published as an older factory version would publish it:
 // it keeps no such log and reads no agreement).
-import type { MachineReport } from "../../../lib/fleet.ts";
+import { type MachineReport, type MachineSubscription, USAGE_FIELDS, type UsageBucket } from "../../../lib/fleet.ts";
 import { recordDecision } from "../../../lib/tasks/decisions.ts";
 import { newTask, nowIso, priorityOf, type Score, type Task, withEvent } from "../../../lib/tasks/model.ts";
 import { addRequest, stakeholderFor } from "../../../lib/tasks/requests.ts";
@@ -241,7 +241,14 @@ export async function seed(): Promise<World> {
   });
   await link(
     operator?.user.id,
-    { name: "attic", factory: "0.4.0", teams: [{ ...team, name: "shop", title: "Shop", part: "worker", store: "mongo", home: "/Users/olive/shop" }] },
+    {
+      name: "attic",
+      factory: "0.8.5",
+      teams: [{ ...team, name: "shop", title: "Shop", part: "worker", store: "mongo", home: "/Users/olive/shop" }],
+      // A version that starts projects, not told to yet.
+      projects: null,
+      subscriptions: subscriptionsSeen(new Date()),
+    },
     new Date(Date.now() - 2 * 3_600_000)
   );
   // Someone on another team only, whose machine says it leads Shop.
@@ -258,4 +265,80 @@ export async function seed(): Promise<World> {
     requests: { promoted: promoted.id, rejected: rejected.id },
     studioToken,
   };
+}
+
+// The operator's two Claude subscriptions as the attic reports them (lib/subscriptions.ts subscriptionsReport): a month
+// of days and a day of hours on two models, one of them with no price, the week of one used up.
+function subscriptionsSeen(now: Date): MachineSubscription[] {
+  const bucket = (at: string, model: string, scale: number, priced = true): UsageBucket => {
+    const f: Record<(typeof USAGE_FIELDS)[number], number> = {
+      requests: Math.round(40 * scale),
+      input: Math.round(9_000 * scale),
+      output: Math.round(160_000 * scale),
+      cacheRead: Math.round(4_800_000 * scale),
+      cacheWrite: Math.round(210_000 * scale),
+      cost: 0,
+      costInput: priced ? 0.04 * scale : 0,
+      costOutput: priced ? 3.2 * scale : 0,
+      costCacheRead: priced ? 0.96 * scale : 0,
+      costCacheWrite: priced ? 1.05 * scale : 0,
+      fast: priced && model.includes("opus") ? 0.4 * scale : 0,
+      saved: priced ? 18 * scale : 0,
+      unpriced: priced ? 0 : Math.round(40 * scale),
+    };
+    f.cost = Math.round((f.costInput + f.costOutput + f.costCacheRead + f.costCacheWrite) * 1e4) / 1e4;
+    for (const k of ["costInput", "costOutput", "costCacheRead", "costCacheWrite", "fast", "saved"] as const) f[k] = Math.round(f[k] * 1e4) / 1e4;
+    return [at, model, ...USAGE_FIELDS.map((k) => f[k])];
+  };
+  const day = (ago: number) => new Date(now.getTime() - ago * 86_400_000).toISOString().slice(0, 10);
+  const hour = (ago: number) => new Date(now.getTime() - ago * 3_600_000).toISOString().slice(0, 13);
+  const wave = (i: number, phase: number) => Math.max(0.05, 0.6 + 0.5 * Math.sin(i / 2.3 + phase) + (i % 7 === 5 ? -0.4 : 0));
+  const usage = (phase: number, weight: number) => ({
+    days: Array.from({ length: 30 }, (_, i) => [
+      bucket(day(i), "claude-opus-5-5", weight * wave(i, phase) * 2),
+      bucket(day(i), "claude-fable-5-1", weight * wave(i, phase + 1)),
+      ...(i < 6 ? [bucket(day(i), "claude-fable-5-2", weight * 0.5, false)] : []),
+    ]).flat(),
+    hours: Array.from({ length: 25 }, (_, i) => [bucket(hour(i), "claude-opus-5-5", weight * wave(i, phase) * 0.12)]).flat(),
+  });
+  const read = new Date(now.getTime() - 20 * 60_000).toISOString();
+  const later = (ms: number) => new Date(now.getTime() + ms).toISOString();
+  return [
+    {
+      name: "default",
+      login: "0f1e2d3c4b5a6978",
+      plan: "Max",
+      at: read,
+      weekly: { percent: 64, resetsAt: later(2.4 * 86_400_000) },
+      session: { percent: 35, resetsAt: later(2.2 * 3_600_000) },
+      models: [{ model: "Fable", percent: 41, resetsAt: later(2.4 * 86_400_000) }],
+      extra: { enabled: true, limit: 50, used: 12.5, currency: "USD" },
+      week: 1480,
+      limits: { weekly: 85, session: null },
+      closed: null,
+      teams: [{ team: "shop", roles: ["builder", "reviewer"] }],
+      today: day(0),
+      ...usage(0, 1),
+      sessions: [12, 61, 240, 410],
+      counted: read,
+    },
+    {
+      name: "refdocs",
+      login: "8796a5b4c3d2e1f0",
+      plan: "Max",
+      at: read,
+      weekly: { percent: 100, resetsAt: later(0.6 * 86_400_000) },
+      session: { percent: 0, resetsAt: later(4 * 3_600_000) },
+      models: [{ model: "Fable", percent: 88, resetsAt: later(0.6 * 86_400_000) }],
+      extra: { enabled: false, limit: null, used: null, currency: null },
+      week: 1720,
+      limits: { weekly: null, session: null },
+      closed: { why: "refdocs has used its week", until: later(0.6 * 86_400_000), exhausted: true },
+      teams: [{ team: "shop", roles: ["planner"] }],
+      today: day(0),
+      ...usage(1.7, 0.7),
+      sessions: [5, 33, 130, 220],
+      counted: read,
+    },
+  ];
 }
