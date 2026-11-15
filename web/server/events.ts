@@ -45,12 +45,21 @@ const clip = (text: string, max: number): string => {
 // A move's reason, from its history line ("question → approved: why").
 const reasonOf = (what: string): string => /^\S+ → \S+: (.+)$/s.exec(what)?.[1] ?? "";
 
-// What an email says of something raised to the operator: why it's theirs and what the team recommends (the task's
-// ask, or the move's reason from before asks), then the task.
+// What an email says of something raised to the operator: the decision and its options, what the team recommends,
+// then why it's theirs (the task's ask, or the move's reason from before asks) and the task, for whoever reads on.
 function raisedDetail(t: Task, moved: string): string {
   const reason = t.ask?.reason.trim() || moved;
   const recommendation = t.ask?.recommendation.trim();
-  return [reason ? `Why it's yours: ${reason}` : "", recommendation ? `The team recommends: ${recommendation}` : "", t.body].filter(Boolean).join("\n\n");
+  const options = (t.ask?.options ?? []).map((o, i) => `(${String.fromCharCode(97 + i)}) ${o}`).join("\n");
+  return [
+    t.ask?.headline ? `Decide: ${t.ask.headline}` : "",
+    options,
+    recommendation ? `The team recommends: ${recommendation}` : "",
+    reason ? `Why it's yours: ${reason}` : "",
+    t.body,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // What an email says of a call the team made for the operator: what it chose, what that follows from, and how it's
@@ -97,7 +106,7 @@ export function eventsOf(team: string, tasks: Task[], requests: FeatureRequest[]
           kind: "question",
           team,
           at: e.at,
-          title: `#${t.id} ${t.title}`,
+          title: `#${t.id} ${t.ask?.headline ?? t.title}`,
           detail: clip(raisedDetail(t, reasonOf(e.what) || e.what.replace(/^raised to the operator: /, "")), 700),
           path: `${base}/inbox#task-${t.id}`,
         });

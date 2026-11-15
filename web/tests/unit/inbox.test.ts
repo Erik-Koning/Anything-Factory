@@ -122,6 +122,40 @@ test("waitingOf takes the reason and the recommendation from the team's ask, els
   );
   const before = waitingOf(moved(task("proposed"), "question", "planner", "it's yours", "2026-11-01T10:00:00.000Z"), []);
   assert.deepEqual([before.why, before.whyFrom, before.recommendation, before.recommendationFrom], ["it's yours", "inferred", null, null]);
+  assert.equal(w.headline, null, "an ask from before headlines leads with the title");
+});
+
+test("an ask with a headline and options is answered from them: its options over any in the task's words", () => {
+  const asked = {
+    ...moved(
+      task("proposed", { body: "Options: (a) a PDF route with the receipt's fields; (b) nothing new. Recommendation: (b)." }),
+      "question",
+      "planner",
+      "yours",
+      "2026-11-01T10:00:00.000Z"
+    ),
+    ask: {
+      reason: "it's a new thing donors get, and printing costs nothing to run",
+      recommendation: "(a) holiday gifts are the season's biggest ask",
+      headline: "Let donors print their gift as a card?",
+      options: ["Yes, a printable card after payment", "Not now: the receipt is enough"],
+      by: "planner",
+      at: "2026-11-01T10:00:00.000Z",
+    },
+  };
+  const w = waitingOf(asked, [asked]);
+  assert.equal(w.headline, "Let donors print their gift as a card?");
+  assert.deepEqual(
+    w.choices.map((c) => [c.key, c.text, c.recommended]),
+    [
+      ["a", "Yes, a printable card after payment", true],
+      ["b", "Not now: the receipt is enough", false],
+    ]
+  );
+  // The answer says the option in the words the operator saw.
+  assert.deepEqual(answerText("a", "", w), { text: "(a) Yes, a printable card after payment." });
+  // A headline the team changed is a question the form wasn't drawn with.
+  assert.notEqual(shownAs(w), shownAs({ ...w, headline: "Let donors print a card?" }));
 });
 
 test("waitingOf says who asked, why, since when, and what it holds up", () => {

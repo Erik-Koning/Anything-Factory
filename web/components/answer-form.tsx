@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { type AnswerFormState, answerAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
 import { toast } from "./toaster.tsx";
@@ -44,6 +44,8 @@ export function AnswerForm({
   }, EMPTY);
   const [pick, setPick] = useState(state.pick);
   const [typed, setTyped] = useState(state.extra.trim() !== "");
+  // Words beside a chosen option are a line to open: the options are the answer, and most need nothing added.
+  const [noting, setNoting] = useState(false);
   const words = useRef<HTMLTextAreaElement>(null);
   const offered = !adding && (choices.length > 0 || recommendation !== null);
   const recommendedChoice = choices.some((c) => c.recommended);
@@ -51,10 +53,10 @@ export function AnswerForm({
   // The key takes the solid once there's an answer to send: a page of questions has one solid, on the one being
   // answered, not one under each.
   const ready = own ? typed : pick !== "";
-  const choose = (key: string) => {
-    setPick(key);
-    if (key === "other") words.current?.focus();
-  };
+  const writing = own || noting || typed;
+  useEffect(() => {
+    if (pick === "other" || noting) words.current?.focus();
+  }, [pick, noting]);
   const field = `answer-${id}${adding ? "-more" : ""}`;
   return (
     <form action={action} className="answer stack">
@@ -72,7 +74,7 @@ export function AnswerForm({
           <legend>Your answer to #{id}</legend>
           {choices.map((c) => (
             <label key={c.key} className="check choice">
-              <input type="radio" name="pick" value={c.key} required defaultChecked={state.pick === c.key} onChange={() => choose(c.key)} />
+              <input type="radio" name="pick" value={c.key} required defaultChecked={state.pick === c.key} onChange={() => setPick(c.key)} />
               <span>
                 <b>({c.key})</b> {c.text}
                 {c.recommended ? (
@@ -92,7 +94,7 @@ export function AnswerForm({
                 value="recommended"
                 required
                 defaultChecked={state.pick === "recommended"}
-                onChange={() => choose("recommended")}
+                onChange={() => setPick("recommended")}
               />
               <span>
                 <b>Go with the recommendation:</b> {recommendation} <span className="chip ok">recommended</span>
@@ -100,27 +102,35 @@ export function AnswerForm({
             </label>
           ) : null}
           <label className="check choice">
-            <input type="radio" name="pick" value="other" required defaultChecked={state.pick === "other"} onChange={() => choose("other")} />
+            <input type="radio" name="pick" value="other" required defaultChecked={state.pick === "other"} onChange={() => setPick("other")} />
             <span>Something else: I&apos;ll say what below</span>
           </label>
         </fieldset>
       ) : null}
-      <label htmlFor={field}>
-        {offered ? (own ? "Your answer" : "Anything to add (optional)") : adding ? `Add to your answer on #${id}` : `Your answer to #${id}`}
-      </label>
-      <textarea
-        id={field}
-        ref={words}
-        name="extra"
-        rows={offered && !own ? 2 : 4}
-        maxLength={LIMITS.note}
-        required={own}
-        defaultValue={state.extra}
-        onChange={(event) => setTyped(event.target.value.trim() !== "")}
-        placeholder={
-          own ? "What you decided, and the principle behind it if there is one: the planner records both" : "A condition, a change to it, or why"
-        }
-      />
+      {writing ? (
+        <>
+          <label htmlFor={field}>
+            {offered ? (own ? "Your answer" : "Anything to add (optional)") : adding ? `Add to your answer on #${id}` : `Your answer to #${id}`}
+          </label>
+          <textarea
+            id={field}
+            ref={words}
+            name="extra"
+            rows={offered && !own ? 2 : 4}
+            maxLength={LIMITS.note}
+            required={own}
+            defaultValue={state.extra}
+            onChange={(event) => setTyped(event.target.value.trim() !== "")}
+            placeholder={
+              own ? "What you decided, and the principle behind it if there is one: the planner records both" : "A condition, a change to it, or why"
+            }
+          />
+        </>
+      ) : (
+        <button type="button" className="linkish add-note" onClick={() => setNoting(true)}>
+          Add a note
+        </button>
+      )}
       <div className="inline">
         {/* While it's on its way, the question it answers fades (data-pending, globals.css). */}
         <button type="submit" className={ready ? "primary" : undefined} disabled={pending} data-pending={pending || undefined}>

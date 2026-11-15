@@ -191,11 +191,11 @@ request (Article 8).
 - `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
   you're signed in, with each session's address; the IP addresses you've confirmed, and whether new ones are checked
   (always, for an admin); your recent activity; sign out.
-- `/sign-up`: a name, an email address, a password, and the two choices, both ticked: two-factor authentication and
-  the check of new IP addresses. `/sign-up/confirmed` is where the emailed link lands when it couldn't sign anyone in
-  (used already, expired).
-- `/welcome`: where someone who chose two-factor authentication as they signed up sets up their authenticator, or
-  puts it off, before anything else opens.
+- `/sign-up`: a name, an email address and a password. It states the two protections every new account starts
+  with, two-factor authentication and the check of new IP addresses, and offers no way to turn either off.
+  `/sign-up/confirmed` is where the emailed link lands when it couldn't sign anyone in (used already, expired).
+- `/welcome`: where someone who has just signed up and confirmed their email sets up their authenticator, or puts it
+  off, before anything else opens.
 - `/second-factor` and `/confirm-sign-in`: where a session waits for its authenticator's code, or for its new IP
   address to be confirmed by email; `/sign-in/confirm` is the email's page (“Was this you?”), no session needed.
 - `/forgot-password` and `/reset-password`: asking for a link to set a new password, and the page the link opens
@@ -252,21 +252,24 @@ emails a sign-in link. An invited account has no password; one that signed up is
   person in, once (opened again it signs nobody in). Until then the password is refused, and the link is sent again
   (at most one a minute). A sign-up for an address that already has an account answers exactly as a new one does, as
   slowly, changes nothing on that account, and emails its owner that they have one. A sign-up sets a name, an
-  address, a password and the two choices below and nothing else: a role in the request is refused, and a ban, a
-  second factor or “confirmed” is dropped. Nobody becomes an admin by signing up, and a confirmation link never signs
-  an admin in. From one IP address: three sign-ups and three requests for the link again a minute.
-- **The two choices on the sign-up page**, both ticked unless the person unticks them, are kept on the account
-  (`authenticatorDue`, `ipCheck`). They're read as the account is made and changed afterwards only by the app's own
-  server actions; no endpoint takes either.
+  address and a password and nothing else: a role in the request is refused, and a ban, a second factor, “confirmed”
+  or a protection turned off is dropped. Nobody becomes an admin by signing up, and a confirmation link never signs an
+  admin in. From one IP address: three sign-ups and three requests for the link again a minute.
+- **Two protections are on for every account that signs up**, whatever its request says (`authenticatorDue`,
+  `ipCheck`). Whoever fills in a sign-up hasn't proven the address is theirs, so nothing they send turns either off:
+  someone who signs up with another person's address can't leave that account unguarded. Only the person can,
+  afterwards, signed in to the confirmed account, through the app's own server actions; no endpoint takes either.
   - **Two-factor authentication**: once the address is confirmed the person lands on `/welcome` and sets up an
     authenticator app before anything else opens: their password, the QR code (or its key), a code to prove it, ten
-    backup codes shown once, then on to Teams. **Set it up later** there puts it off (audited); the account page
-    offers it from then on.
+    backup codes shown once, then on to Teams. **Set it up later** there puts it off for that sign-in only
+    (`authenticatorLater`, the session's id; audited): the next sign-in asks again, until it's set up or the account
+    page's **Stop asking me** turns the asking off (audited).
   - **Check new IP addresses**: a sign-in from an address they haven't used asks them by email first (below). Without
     it no address is asked about. It can be changed on the account page: turning it off takes a sign-in from the last
     ten minutes and a code from the authenticator when one is on, is audited, and emails the person that it was
     turned off; turning it on confirms the address it's turned on from. An admin's addresses are always checked.
-  - Accounts from before these were kept read as: new addresses checked, nothing due.
+  - Accounts from before these were kept read as: new addresses checked, nothing due. An account that signed up
+    while the page still had two boxes keeps what it chose.
 - An account whose address is first proven by a sign-in link, not by its confirmation link, loses the password it was
   signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on.
 - **A forgotten password is set again from a link by email** (`/forgot-password`, from the sign-in page;
@@ -300,11 +303,11 @@ emails a sign-in link. An invited account has no password; one that signed up is
     password is set again from the sign-in page with the authenticator's code, and that whoever runs the site starts
     an admin without their authenticator afresh with `npm run create-admin`. The page answers the same as for
     anyone, so without the note nothing would say why no link came.
-- **Anyone else may turn on an authenticator**, as they sign up or from their account page (a QR code, a code to
-  prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on every sign-in, by passkey,
-  link or password, also asks for its code. Turning it off takes a current code. An account with a password gives it
-  too, to turn the authenticator on or off and to make new backup codes (Better Auth asks it of any account that has
-  one); an invited account has none to give.
+- **Anyone else may turn on an authenticator**, at `/welcome` once their sign-up is confirmed or from their account
+  page (a QR code, a code to prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on
+  every sign-in, by passkey, link or password, also asks for its code. Turning it off takes a current code. An
+  account with a password gives it too, to turn the authenticator on or off and to make new backup codes (Better Auth
+  asks it of any account that has one); an invited account has none to give.
 - Each session records **whether it has its second factor** (`session.secondFactor`): set by the server from how the
   session was made, or once a code is entered for it at `/second-factor` (an admin whose passkey didn't verify them,
   anyone with an authenticator after a link). Five wrong codes end the session. The client can't set it.
@@ -325,9 +328,9 @@ emails a sign-in link. An invited account has no password; one that signed up is
   database (`audit`), written once and never changed, kept `AUDIT_RETENTION_DAYS` (400). Admins read and filter it at
   `/admin/audit`; each person sees their own recent activity on their account page. The team's agents never see it.
 - Pages and server actions check all of this on the server (`server/viewer.ts`, `server/access.ts`): a session that
-  owes its second factor, an address confirmation or the authenticator it chose at sign-up is sent to finish that and
-  can do nothing else. Over HTTP a session without its second factor or its address confirmed may
-  only look at itself, sign out or sign in again, so it can't enrol a passkey or new backup codes to raise itself.
+  owes its second factor, an address confirmation or the authenticator every sign-up starts with is sent to finish
+  that and can do nothing else. Over HTTP a session without its second factor or its address confirmed may only look
+  at itself, sign out or sign in again, so it can't enrol a passkey or new backup codes to raise itself.
   Better Auth's own admin endpoints (`/api/auth/admin/*`) and turning the authenticator on or off are never served over
   HTTP; the app calls them from its server actions after its own checks. (`server/auth.ts` has the sign-in rules in
   one place.)
@@ -397,8 +400,8 @@ npm run check:infra    # sst install, then tsc against SST's platform: the deplo
 
 The integration tests (`tests/integration/auth.test.ts`) call `auth().handler` directly, with no server or browser, over
 a throwaway replica set from the same cached mongod binary as below: signing up (nothing before the address is
-confirmed, the same answer for an address that has an account, what a sign-up can't set, the two choices and that no
-request changes them, the limit), magic links, a forgotten password (the link alone for an account without an
+confirmed, the same answer for an address that has an account, what a sign-up can't set, the two protections and
+that no request changes them, the limit), magic links, a forgotten password (the link alone for an account without an
 authenticator, the link and a code for one with, what the link proves, the limits), an admin's password and
 authenticator code, confirming a new IP address by email, backup codes, the HTTP guard, passkeys signed by a software
 authenticator (with and without user verification, and from another origin), sessions, bans and `create-admin` run again.
@@ -420,7 +423,8 @@ signing in: a request without the secret refused, an admin's new address confirm
 taken elsewhere and “it wasn't me”, a member's authenticator and every sign-in after it asking for a code, and the
 audit log. `sign-up.spec.ts` signs three people up: one through the confirmation email and the authenticator at
 `/welcome` to an empty Teams page, one who puts the authenticator off and turns the IP check off and on from the
-account page, one with both boxes unticked, whom an admin then adds to a team. Playwright's Chromium must be installed (`npx playwright install chromium`).
+account page, one whose sign-up asks for both protections off and still starts with both on, whom an admin then
+adds to a team. Playwright's Chromium must be installed (`npx playwright install chromium`).
 
 `npm run test:e2e:atlas` runs the same suite against a real cluster: it reads `DB_USER`, `DB_PASSWORD` and `DB_HOST`
 from the repository's `.env` (gitignored; or `E2E_MONGODB_URI`), and uses databases of its own, `a6g_e2e` and
@@ -598,7 +602,8 @@ changing the domain means adding passkeys again.
   invitations, new addresses); no address is spelled out, so nobody is shown a link hundreds of characters long.
   Other emails show their text, each address a link under a short name.
 - `server/people.ts`: memberships, stakeholder links, the daily limit on requests and suggestions. `server/bootstrap.ts`: create-admin.
-- `server/account-choices.ts`: the two choices made at sign-up, and whether an account has a password.
+- `server/account-choices.ts`: the two protections every sign-up starts with, turned off or on only by the app's
+  own server actions, and whether an account has a password.
 - `server/password-reset.ts`: a new password from an emailed link, and the authenticator's code it takes for an
   account that has one; `server/totp.ts`: an authenticator's codes, made and checked.
 - `components/level-graph.tsx`: the graph by level in BetterDiagrams' editor, in the browser only, with the journey and

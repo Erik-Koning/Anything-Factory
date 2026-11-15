@@ -468,6 +468,8 @@ describe("an answer that takes the recommendation, and an escalation that says w
         "question",
         "--reason",
         "it changes what every owner sees",
+        "--headline",
+        "Decide it?",
         "--recommend",
         "(a) with tax",
         "--topic",
@@ -525,6 +527,7 @@ describe("an answer that takes the recommendation, and an escalation that says w
       approval,
       text: "over the size",
       recommendation: "build it",
+      headline: "Build the large one?",
     });
     assert.equal(large.ask?.rule, "the approval rules: size L is over this team's M (team.json approval)");
     assert.equal("agreement" in (large.ask ?? {}), false, "not routed by the agreement");
@@ -533,6 +536,7 @@ describe("an answer that takes the recommendation, and an escalation that says w
       approval,
       text: "a new area",
       recommendation: "later",
+      headline: "Open a new area?",
       topic: "scope",
     });
     assert.deepEqual(
@@ -545,7 +549,7 @@ describe("an answer that takes the recommendation, and an escalation that says w
     assert.match(escalationRule(theirs, "approver", approval) ?? "", /work made of a stakeholder's words is the operator's to approve/);
     assert.equal(escalationRule(theirs, OPERATOR, approval), undefined, "the operator's own carries none");
     await assert.rejects(
-      decide(store, (await add()).id, "escalate", { who: "approver", approval, text: "x", recommendation: "y", topic: "pricing" }),
+      decide(store, (await add()).id, "escalate", { who: "approver", approval, text: "x", recommendation: "y", headline: "z?", topic: "pricing" }),
       /--topic says what an escalation is about/
     );
     await assert.rejects(
@@ -558,7 +562,7 @@ describe("an answer that takes the recommendation, and an escalation that says w
     const { as, store } = setup(baseTeam({ board: "tasks", roles: { planner: {}, builder: {}, reviewer: {}, approver: {} } }));
     await store().tasks.create(newTask({ team: "fixture", title: "A whole new area", kind: "feature", status: "proposed", by: "planner" }));
     const escalated = await a6g(
-      ["task", "escalate", "1", "--reason", "it changes who the product serves", "--recommend", "later", "--topic", "scope"],
+      ["task", "escalate", "1", "--reason", "it changes who the product serves", "--headline", "Decide it?", "--recommend", "later", "--topic", "scope"],
       as("approver")
     );
     assert.equal(escalated.code, 0, escalated.out);

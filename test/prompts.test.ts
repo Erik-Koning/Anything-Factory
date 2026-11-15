@@ -76,7 +76,7 @@ describe("prompts", () => {
     assert.match(planner, /`a6g task pace`/);
     assert.match(
       planner,
-      /\| innovator \| `a6g-fixture-innovator` \| `"claude-fable-5-1"` \| `"shared"` \| 1 \| researches users, the market and the product/
+      /\| innovator \| `a6g-fixture-innovator` \| `"claude-fable-5-2"` \| `"shared"` \| 1 \| researches users, the market and the product/
     );
     const innovator = compile(withIdeas, "innovator");
     assert.match(innovator, /`a6g task add "<the outcome, in a few words>" --kind feature --body-file <file>/);

@@ -39,8 +39,12 @@ Then record one verdict:
 - `a6g task research <id> --note "<what to find out>"` when it might be right but the evidence is missing. The
   planner researches and proposes it again.
 - `a6g task reject <id> --reason "<why, against the direction or the evidence>"` when it shouldn't be built.
-- `a6g task escalate <id> --reason "<what the operator needs to decide>" --recommend "<what you'd decide, and why>"`
-  when it's the operator's call (both are required, and their inbox shows both): your rules'
+- `a6g task escalate <id>` with `--headline "<the decision, in a line>"`, `--options "<an outcome> | <another>"`,
+  `--recommend "(a) <the one reason>"` and `--reason "<what the operator needs to decide, and the detail>"` when it's
+  the operator's call. They decide from the headline, the options and the recommendation, often on a phone: the headline asks about
+  the result for people ("Let donors print their gift as a card?"), each option is an outcome in a few words, and the
+  recommendation starts with the option it picks; the reason keeps everything else, behind "Show reasoning". All but
+  `--options` are required, and the command refuses parts that run long. Escalate when your rules'
   approval thresholds keep it from you, or it touches anything Article 3 reserves (scope, privacy and personal data,
   a policy, promotion, the rules). The command refuses approvals the thresholds don't allow and says so. Add
   `--topic scope|product|design|technical|cost|security|privacy|rules` to say what it's about: the operator's inbox

@@ -6,7 +6,7 @@
 // Short names for the newest model of each family this version knows, so a team.json can say "opus" and move with the
 // factory's releases. Any other value is a model id, taken as written.
 export const MODEL_ALIASES: Record<string, string> = {
-  fable: "claude-fable-5-1",
+  fable: "claude-fable-5-2",
   opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-5-5",

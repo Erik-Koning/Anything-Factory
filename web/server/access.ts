@@ -3,8 +3,8 @@
 // - admin (the operator): everything, on every team, but only from a session signed in with a second factor;
 // - anyone: nothing at all while their session still owes a step: an authenticator's code (admins always, others once
 //   they've turned one on), then confirming, from their email, an IP address they haven't used before (admins always,
-//   others unless they've turned the check off), then, for someone who chose two-factor authentication as they signed
-//   up, setting up their authenticator or putting it off;
+//   others unless they've turned the check off), then, for someone who signed up and hasn't yet, setting up their
+//   authenticator or putting it off;
 // - member: the board, what's in progress, journeys, the graph, every request (senders by role), what the team
 //   decided in the operator's place (reading it, never reviewing it), sending requests and suggesting tasks for the
 //   planner to triage;
@@ -31,9 +31,11 @@ export interface Viewer {
   // The person's own choice: a sign-in from an address they haven't used asks them by email first. On unless they
   // turned it off; an admin's addresses are checked whatever this says (checksIp).
   ipCheck: boolean;
-  // The person chose two-factor authentication as they signed up and hasn't set up their authenticator, or put it
-  // off, yet.
+  // The person signed up (two-factor authentication is on for every sign-up) and hasn't set up their authenticator
+  // yet, nor turned it off on their account page.
   authenticatorDue: boolean;
+  // They put it off for this sign-in ("Set it up later"): the next one asks again.
+  authenticatorPutOff?: boolean;
   // The person's role on each team they belong to.
   teams: Readonly<Record<string, TeamRole>>;
 }
@@ -81,13 +83,14 @@ const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
 export const checksIp = (person: Pick<Viewer, "admin" | "ipCheck">): boolean => person.admin || person.ipCheck;
 
 // What a session must still do before anything opens: enter an authenticator's code, then confirm its IP address by
-// email, then set up the authenticator the person asked for as they signed up (or put it off). Null when nothing's left.
+// email, then set up the authenticator every sign-up starts with (or put it off for this sign-in). Null when nothing's
+// left.
 export type PendingStep = "second-factor" | "confirm-ip" | "set-up-authenticator";
 export function pendingStep(viewer: Viewer | null): PendingStep | null {
   if (!viewer) return null;
   if ((viewer.admin || viewer.twoFactor) && !viewer.secondFactor) return "second-factor";
   if (checksIp(viewer) && !viewer.ipConfirmed) return "confirm-ip";
-  if (!viewer.admin && viewer.authenticatorDue && !viewer.twoFactor) return "set-up-authenticator";
+  if (!viewer.admin && viewer.authenticatorDue && !viewer.twoFactor && !viewer.authenticatorPutOff) return "set-up-authenticator";
   return null;
 }
 export const blocked = (viewer: Viewer | null): boolean => pendingStep(viewer) !== null;

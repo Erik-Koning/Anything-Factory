@@ -107,7 +107,7 @@ describe("counting what a team used", () => {
     );
     close(planner?.cost ?? null, (1000 * 4 + 2000 * 20 + 10_000 * 0.2 + 4000 * 5) / 1e6);
     assert.equal(builder?.task, "12");
-    close(builder?.cost ?? null, (1000 * 2 + 2000 * 10 + 10_000 * 0.2 + 1000 * 2.5 + 3000 * 4) / 1e6);
+    close(builder?.cost ?? null, (1000 * 2 + 2000 * 10 + 10_000 * 0.1 + 1000 * 2.5 + 3000 * 4) / 1e6);
 
     // Nothing new: nothing changes. A request whose lines straddle two reads counts once; a half-written line waits.
     assert.deepEqual(collectUsage({ run: w.run, team: "app", machine: "studio", dirs }), []);

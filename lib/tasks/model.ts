@@ -84,6 +84,11 @@ export interface Ask {
   recommendation: string;
   by: string;
   at: string;
+  // The decision as the operator reads it first, often on a phone: one short question about the outcome (what people
+  // would see, get, pay or risk), and its options as outcomes, a few words each. The reason holds the detail, shown when
+  // they ask for it. Asks raised before 0.8.9 have neither.
+  headline?: string;
+  options?: string[];
   topic?: Topic;
   stakes?: Grade;
   confidence?: Grade;
@@ -454,7 +459,7 @@ const journeyKept: Check = (t, to, _actor, { all }) => {
         .map((c) => `#${c.id}`)
         .join(
           ", "
-        )}), so its tests are still owed, and rejecting it is the operator's call: raise it, as a matter of checking less (a6g task status ${t.id} question --topic rules --stakes … --confidence … --reason "…" --recommend "…")`
+        )}), so its tests are still owed, and rejecting it is the operator's call: raise it, as a matter of checking less (a6g task status ${t.id} question --topic rules --stakes … --confidence … --headline "…" --recommend "…" --reason "…")`
     : null;
 };
 const codeDone = (t: Task): string => `code is done when the merge queue merges it (a6g merge … --closes ${t.id}); reject it instead if it won't be built`;
@@ -478,7 +483,7 @@ export const designOpen = (all: Task[]): Task | null => all.find((t) => t.kind =
 // rejected by the team.
 const designAsked: Check = (t, to) =>
   t.kind === "design" && to !== "question"
-    ? `#${t.id} is the design check-in, which only the operator settles: raise it once the foundation is built and its record written (a6g task status ${t.id} question --reason "…" --recommend "…")`
+    ? `#${t.id} is the design check-in, which only the operator settles: raise it once the foundation is built and its record written (a6g task status ${t.id} question --headline "…" --recommend "…" --reason "…")`
     : null;
 // What counts as the operator's answer on the check-in, for the planner that was refused: a note it writes itself
 // from a message it read doesn't.
@@ -690,12 +695,44 @@ export function move(
   return withEvent(moved, by, `${task.status} → ${to}${why ? `: ${why}` : ""}`, { from: task.status, to, ...(sha ? { sha } : {}) });
 }
 
+// How long the parts of an ask the operator reads first may be: a decision they take in at a glance, not a brief.
+export const ASK_LIMITS = { headline: 120, option: 80, options: 5, recommendation: 240 } as const;
+
+// The options of --options "Ship it now | Wait for the review": split at "|", each without the "(a)" an agent may have
+// put before it (the keys are the order).
+export const askOptions = (text: string | undefined): string[] =>
+  (text ?? "")
+    .split("|")
+    .map((o) => o.replace(/^\s*\(?[a-e]\)\s*/i, "").trim())
+    .filter(Boolean);
+
+// The option a recommendation picks: "(b) keeps checkout at one tap" → b.
+export const recommendedOption = (recommendation: string): string | null => /^\s*\(?([a-e])\)/i.exec(recommendation)?.[1]?.toLowerCase() ?? null;
+
 // What a question must carry: why it's the operator's and the team's recommendation. The operator raising one to
-// themselves gives the reason only.
-export function askRefusal(ask: Pick<Ask, "reason" | "recommendation"> | null, actor: Actor): string | null {
+// themselves gives the reason only. One the team raises leads with the decision in a line, its options as outcomes and
+// a recommendation as short, so the operator decides from those and opens the reasoning only when they want it.
+export function askRefusal(ask: Pick<Ask, "reason" | "recommendation" | "headline" | "options"> | null, actor: Actor): string | null {
   if (!ask?.reason.trim()) return "say why it's the operator's to decide: --reason \"…\"";
-  if (actor !== OPERATOR && !ask.recommendation.trim())
-    return 'give the team\'s recommendation: --recommend "…" (what you would do, and why; name the option when there are some)';
+  if (actor === OPERATOR) return null;
+  const recommendation = ask.recommendation.trim();
+  if (!recommendation) return 'give the team\'s recommendation: --recommend "…" (what you would do, and why; name the option when there are some)';
+  const headline = ask.headline?.trim() ?? "";
+  if (!headline)
+    return `lead with the decision, in one line the operator answers at a glance: --headline "<the outcome to choose, in their words: what people would see, get, pay or risk>" (at most ${ASK_LIMITS.headline} characters; the detail stays in --reason)`;
+  if (headline.length > ASK_LIMITS.headline)
+    return `the headline is ${headline.length} characters: keep it to ${ASK_LIMITS.headline}, the outcome to choose and no more (the rest goes in --reason)`;
+  const options = ask.options ?? [];
+  if (options.length === 1) return 'give two options or more, or none for an open question: --options "<one outcome> | <another>"';
+  if (options.length > ASK_LIMITS.options) return `give at most ${ASK_LIMITS.options} options: the ones worth choosing between`;
+  const long = options.find((o) => o.length > ASK_LIMITS.option);
+  if (long)
+    return `each option is an outcome in a few words, at most ${ASK_LIMITS.option} characters ("${long.slice(0, 40)}…" is ${long.length}): what follows from it goes in --reason`;
+  if (recommendation.length > ASK_LIMITS.recommendation)
+    return `the recommendation is ${recommendation.length} characters: keep it to ${ASK_LIMITS.recommendation}, the option and the one reason that decides it (the rest goes in --reason)`;
+  const key = recommendedOption(recommendation);
+  if (options.length && (!key || key.charCodeAt(0) - 97 >= options.length))
+    return `start the recommendation with the option it picks, (a) to (${String.fromCharCode(96 + options.length)}): --recommend "(a) <the one reason, in a line>"`;
   return null;
 }
 

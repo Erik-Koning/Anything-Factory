@@ -473,7 +473,9 @@ function proposalsSection(proposals: Task[]): string {
     const asked = waitsOnOperator(t) && t.ask ? t.ask : null;
     const said = answersOn(t).at(-1);
     const question = asked
-      ? `<p class="body"><b>Why it's yours:</b> ${esc(asked.reason)}</p>
+      ? `${asked.headline ? `<p class="body"><b>Decide:</b> ${esc(asked.headline)}</p>` : ""}
+  ${(asked.options ?? []).map((o, i) => `<p class="why">(${String.fromCharCode(97 + i)}) ${esc(o)}</p>`).join("")}
+  <p class="body"><b>Why it's yours:</b> ${esc(asked.reason)}</p>
   ${asked.recommendation ? `<p class="why"><b>The team recommends:</b> ${esc(asked.recommendation)}</p>` : ""}
   ${asked.rule ? `<p class="why muted small">Asked because: ${esc(asked.rule)}</p>` : ""}
   ${said ? `<p class="why"><b>You answered:</b> ${esc(clip(said.text, 600))} <span class="muted">(the planner moves it on)</span></p>` : ""}`

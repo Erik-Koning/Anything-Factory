@@ -40,7 +40,7 @@ import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, type Options, parseArgs, readJson, writeJson } from "../util.ts";
+import { die, localTime, type Options, parseArgs, readJson, writeJson } from "../util.ts";
 import { acquireSlot } from "../lock.ts";
 import { answers, applyTeamControls, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
@@ -332,7 +332,7 @@ function registerTeam(
   return 0;
 }
 
-// Each model and the roles on it, in a line: "claude-fable-5-1 for the planner and scaffolder; claude-opus-5-5 for …".
+// Each model and the roles on it, in a line: "claude-fable-5-2 for the planner and scaffolder; claude-opus-5-5 for …".
 export function describeModels(models: Record<string, string>): string {
   const on = new Map<string, string[]>();
   for (const [role, model] of Object.entries(models)) on.set(model, [...(on.get(model) ?? []), role]);
@@ -750,7 +750,10 @@ export async function status(argv: string[]): Promise<number> {
     const checked = readVerifyLog(entry.home).at(-1);
     if (checked) console.info(`   checked after merges: ${checked}`);
     const due = checkDue(entry.home);
-    if (due) console.info(`   a check after merges is due${due.after ? ` (after ${due.after})` : ""}: the next merge runs it`);
+    if (due)
+      console.info(
+        `   a check after merges is due${due.at ? ` since ${localTime(new Date(due.at))}` : ""}${due.after ? ` (after ${due.after})` : ""}: the next merge runs it`
+      );
     const kept = keptWorktrees(entry.run);
     if (kept.length)
       console.info(

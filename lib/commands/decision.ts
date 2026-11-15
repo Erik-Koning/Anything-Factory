@@ -61,7 +61,7 @@ const routeCommand: Handler = async ({ team, store }, _positional, options) => {
   const routed = route(agreement, call, team.operator);
   const next =
     routed.route === "ask"
-      ? `Raise it: a6g task status <id> question --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence} --reason "…" --recommend "…"`
+      ? `Raise it: a6g task status <id> question --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence} --headline "…" --recommend "…" --reason "…"`
       : `Decide it, and record it: a6g decision record "<the question>" --decided "…" --because "…" --topic ${call.topic} --stakes ${call.stakes} --confidence ${call.confidence}${
           routed.route === "tell" ? "\nIt's flagged for the operator: name it in your next message to them, under what you decided for them." : ""
         }`;

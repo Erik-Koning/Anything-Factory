@@ -436,7 +436,8 @@ function WaitingRow({ team, w }: { team: string; w: Waiting }) {
   return (
     <li className="wait-row">
       <span className="wait-what">
-        <span className="id">#{t.id}</span> <Link href={`/t/${team}/tasks/${t.id}`}>{t.title}</Link> <Chip>{t.status}</Chip>{" "}
+        {/* The decision in a line when the team gave one, else the task's title. */}
+        <span className="id">#{t.id}</span> <Link href={`/t/${team}/tasks/${t.id}`}>{w.headline ?? t.title}</Link> <Chip>{t.status}</Chip>{" "}
         <span className="muted small nowrap">
           waiting <Ago at={w.since} />
         </span>

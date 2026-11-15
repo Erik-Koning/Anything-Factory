@@ -43,17 +43,17 @@ async function letTheNextLinkGo(email: string): Promise<void> {
 }
 
 test("someone who forgot their password asks from the sign-in page, sets a new one from the email, and signs in with it", async ({ browser }) => {
-  // Fay signs up and confirms her address, with no authenticator.
+  // Fay signs up, confirms her address, and puts the authenticator off.
   const first = await newPage(browser, { ip: "203.0.113.71" });
   await first.page.goto("/sign-up");
   await first.page.getByLabel("Your name").fill("Fay Forgetful");
   await first.page.getByLabel("Email", { exact: true }).fill(FAY);
   await first.page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await first.page.getByRole("checkbox", { name: "Two-factor authentication" }).uncheck();
   const seen = mailsTo(FAY).length;
   await first.page.getByRole("button", { name: "Create my account" }).click();
   await expect(first.page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await first.page.goto(await nextLinkLike(FAY, seen, CONFIRM_EMAIL));
+  await first.page.getByRole("button", { name: "Set it up later" }).click();
   await expect(first.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
 
   // On another browser she can't remember it: the sign-in page has the way.
@@ -104,6 +104,9 @@ test("someone who forgot their password asks from the sign-in page, sets a new o
   await expect(page.locator("main").getByRole("alert")).toBeVisible();
   await form.getByLabel("Password").fill(NEW_PASSWORD);
   await form.getByRole("button", { name: "Continue" }).click();
+  // She put her authenticator off at sign-up for that sign-in only: this one asks again.
+  await expect(page).toHaveURL(/\/welcome$/);
+  await page.getByRole("button", { name: "Set it up later" }).click();
   await expect(page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
 
   // It is on her account page and in the log, and she was told by email.

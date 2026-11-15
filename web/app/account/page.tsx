@@ -15,6 +15,7 @@ import {
   forgetIpAction,
   revokeOtherSessionsAction,
   revokeSessionAction,
+  stopAskingAuthenticatorAction,
   turnOffAuthenticatorAction,
   turnOffIpCheckAction,
   turnOnIpCheckAction,
@@ -79,26 +80,41 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
               <BackupCodes password />
             </>
           ) : (
-            <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
-              <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
-              <BackupCodes password={password} />
-              <div className="sub-form" role="group" aria-labelledby="turn-off">
-                <h3 id="turn-off">Turn it off</h3>
-                <ActionForm action={turnOffAuthenticatorAction} className="inline">
-                  {password ? (
+            <>
+              <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
+                <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
+                <BackupCodes password={password} />
+                <div className="sub-form" role="group" aria-labelledby="turn-off">
+                  <h3 id="turn-off">Turn it off</h3>
+                  <ActionForm action={turnOffAuthenticatorAction} className="inline">
+                    {password ? (
+                      <label>
+                        Password, to turn it off
+                        <input name="password" type="password" required autoComplete="current-password" />
+                      </label>
+                    ) : null}
                     <label>
-                      Password, to turn it off
-                      <input name="password" type="password" required autoComplete="current-password" />
+                      A code from it, to turn it off
+                      <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
                     </label>
-                  ) : null}
-                  <label>
-                    A code from it, to turn it off
-                    <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
-                  </label>
-                  <SubmitButton className="danger">Turn it off</SubmitButton>
-                </ActionForm>
-              </div>
-            </AuthenticatorSetup>
+                    <SubmitButton className="danger">Turn it off</SubmitButton>
+                  </ActionForm>
+                </div>
+              </AuthenticatorSetup>
+              {/* Two-factor authentication every sign-up starts with: asked for at each sign-in until it's set up, or until
+              the person says to stop here. */}
+              {!viewer.twoFactor && viewer.authenticatorDue ? (
+                <div className="sub-form" role="group" aria-labelledby="stop-asking">
+                  <h3 id="stop-asking">Asked at every sign-in</h3>
+                  <p className="hint">
+                    Two-factor authentication is on for every new account, so each sign-in asks you to set up an authenticator until you do.
+                  </p>
+                  <ActionForm action={stopAskingAuthenticatorAction} className="inline">
+                    <SubmitButton className="quiet">Stop asking me</SubmitButton>
+                  </ActionForm>
+                </div>
+              ) : null}
+            </>
           )}
         </section>
       </div>

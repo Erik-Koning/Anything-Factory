@@ -298,7 +298,7 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep(adminAway), "confirm-ip");
     assert.equal(checksIp(member), true);
   });
-  test("who chose two-factor authentication as they signed up sets up the authenticator, or puts it off, before anything opens", () => {
+  test("who signed up sets up the authenticator, or puts it off, before anything opens", () => {
     const due = { ...member, authenticatorDue: true };
     assert.equal(pendingStep(due), "set-up-authenticator");
     assert.equal(blocked(due), true);
@@ -308,7 +308,9 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep({ ...due, ipCheck: false, ipConfirmed: false }), "set-up-authenticator");
     assert.equal(pendingStep({ ...due, twoFactor: true }), "second-factor", "once it's on, its code is what's owed");
     assert.equal(pendingStep({ ...due, twoFactor: true, secondFactor: true }), null);
-    assert.equal(pendingStep({ ...due, authenticatorDue: false }), null, "put off: nothing owed");
+    assert.equal(pendingStep({ ...due, authenticatorPutOff: true }), null, "put off for this sign-in");
+    assert.equal(pendingStep({ ...due, authenticatorPutOff: false }), "set-up-authenticator", "the next sign-in asks again");
+    assert.equal(pendingStep({ ...due, authenticatorDue: false }), null, "turned off on the account page: nothing owed");
     assert.equal(pendingStep({ ...admin, authenticatorDue: true, twoFactor: false }), null, "admins get theirs from create-admin");
   });
 });

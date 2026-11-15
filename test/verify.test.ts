@@ -24,6 +24,7 @@ import {
   markQueued,
   type Memory,
   othersQueued,
+  OVERDUE_MIN,
   pendingDir,
   verifyAfterMerge,
 } from "../lib/verify.ts";
@@ -102,6 +103,35 @@ describe("the check after merges", () => {
     await gone;
     assert.ok(!othersQueued(state), "its process ended");
     assert.deepEqual(marks(), ["a6g_b1-own.json", "a6g_b6-torn.json"]);
+  });
+
+  test("a check keeps when it first became due, and one overdue holds its turn instead of giving way to the merges behind it", async () => {
+    const home = makeRepo(baseTeam({ board: "tasks", roles: plain }));
+    const [team, run, state] = [loadTeam(home), tmp("a6g-run-"), stateDir(home)];
+    const wake = (): void => assert.fail("nothing new to say");
+    const other = spawn("sleep", ["60"], { stdio: "ignore" });
+    const gone = new Promise((done) => other.on("exit", done));
+    try {
+      assert.ok(other.pid);
+      markQueued(join(pendingDir(state), "a6g_b9-next.json"), other.pid);
+      // Due a while, not long: the merge leaves it to the one queued behind, and keeps when it became due.
+      const lately = new Date(Date.now() - 10 * 60_000).toISOString();
+      writeJson(join(state, "verify-due.json"), { at: lately, after: "a6g/b1-first" });
+      await verifyAfterMerge(home, team, run, "a6g/b2-second", { wake });
+      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b2-second" });
+      assert.ok(!existsSync(join(state, "verify.log")), "it gave way");
+
+      // Due longer than OVERDUE_MIN: it runs with a merge still queued behind it.
+      const long = new Date(Date.now() - (OVERDUE_MIN + 1) * 60_000).toISOString();
+      writeJson(join(state, "verify-due.json"), { at: long, after: "a6g/b2-second" });
+      await verifyAfterMerge(home, team, run, "a6g/b3-third", { wake });
+      assert.ok(othersQueued(state), "the merge behind it is still queued");
+      assert.match(logOf(home), /[0-9a-f]{9} nothing to check\n$/);
+      assert.equal(checkDue(home), null);
+    } finally {
+      other.kill("SIGKILL");
+    }
+    await gone;
   });
 
   test("a merge that didn't land runs the check a landed one left due, and marks none of its own", async () => {

@@ -1,6 +1,6 @@
-// What waits on the operator on one team, from server/inbox.ts: each question with its options and the team's
-// recommendation, each blocked task with why, an answer form for either, and what the planner has yet to act on or
-// settled lately. The pages pass the team's inbox in; the forms write through the team's server actions.
+// What waits on the operator on one team, from server/inbox.ts: each question as a decision in a line, with its options
+// and the team's recommendation, and the reasoning behind it a tap away; each blocked task the same; an answer form for
+// either; and what the planner has yet to act on or settled lately. The pages pass the team's inbox in; the forms write through the team's server actions.
 import Link from "next/link";
 import { OPERATOR, type Task } from "../../lib/tasks/model.ts";
 import { type Inbox, type Settled, shownAs, type Waiting } from "../server/inbox.ts";
@@ -138,125 +138,141 @@ function WaitingItem({
   // When the reason is the very note that asks (raised before tasks carried their own), the task says the rest.
   const repeats = Boolean(w.why && fromNote && w.question.text.includes(w.why));
   const shown = repeats ? t.body : w.question.shown;
-  const more = others.length ? `${others.length} more note${others.length === 1 ? "" : "s"}` : "";
   const byOperator = t.ask?.by === OPERATOR;
   return (
     <li id={`task-${t.id}`} className="waiting">
       <Heading base={base} task={t} journey={w.journey} />
-      {/* What it is, and the answer to it: side by side where the panel is wide enough for both. */}
-      <div className="waiting-about">
+      {/* The decision as the operator takes it in at a glance: the headline, the team's recommendation in a line, and
+        the answer. Why it's theirs, the detail and the notes are kept whole behind Show reasoning. */}
+      <div className="decide">
+        {w.headline ? <p className="headline">{w.headline}</p> : null}
         <p className="small muted">
           {t.status === "question" ? "Asked" : "Blocked"} by the {w.askedBy} <Ago at={w.since} />
-          {/* A question the planner raised says which rule of the working agreement made it the operator's, and how it
-            judged it; one the approver escalated says the approval rule, which is the team's own setting and not the
-            agreement's to change. */}
-          {t.status === "question" && t.ask?.rule ? (
-            <span className="asked-because">
-              Asked because: {t.ask.rule}
-              {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
-              {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
-            </span>
-          ) : null}
+          {w.holds.length ? ` · holds up ${w.holds.length} task${w.holds.length === 1 ? "" : "s"}` : ""}
         </p>
-        <dl className="raised">
-          <div className="why">
-            <dt>Why it&apos;s yours</dt>
-            <dd>
-              {w.why ? (
-                <LinkedText text={w.why} base={base} titles={titles} />
-              ) : (
-                <span className="missing">No reason was recorded. The team gives one now whenever it raises something to you; this one came before.</span>
-              )}
-            </dd>
-          </div>
-          <div className="recommends">
-            <dt>The team recommends</dt>
-            <dd>
-              {w.recommendation ? (
-                <LinkedText text={w.recommendation} base={base} titles={titles} />
-              ) : byOperator ? (
-                <span className="missing">Nothing: you raised it yourself.</span>
-              ) : (
-                <span className="missing">
-                  No recommendation was recorded. The team gives one now whenever it raises something to you; the planner adds one to this (a6g task ask).
-                </span>
-              )}
-              {w.recommendationFrom === "inferred" ? <span className="hint"> (from the task&apos;s own words)</span> : null}
-            </dd>
-          </div>
-        </dl>
-        {shown ? (
-          <div className="ask">
-            {fromNote && !repeats ? (
-              <p className="small muted">
-                The {w.question.by} asks, <Ago at={w.question.at} />:
-              </p>
-            ) : null}
-            <p className="text">
-              <LinkedText text={clip(shown, 2400)} base={base} titles={titles} />
-            </p>
-          </div>
+        {w.recommendation ? (
+          <p className="recommend-line">
+            <span className="chip ok">Recommended</span> <LinkedText text={clip(w.recommendation, 240)} base={base} titles={titles} />
+          </p>
         ) : null}
-        {w.holds.length || w.related.length ? (
-          <dl className="facts small">
-            {w.holds.length ? (
-              <>
-                <dt>Holds up</dt>
-                <dd>
-                  {w.holds.map((h, i) => (
-                    <span key={h.id}>
-                      {i ? ", " : ""}
-                      <Link href={`${base}/tasks/${h.id}`}>
-                        #{h.id} {h.title}
-                      </Link>
-                    </span>
-                  ))}
-                </dd>
-              </>
-            ) : null}
-            {w.related.length ? (
-              <>
-                <dt>Also waiting on you</dt>
-                <dd>
-                  {w.related.map((r, i) => (
-                    <span key={r.id}>
-                      {i ? ", " : ""}
-                      <a href={`#task-${r.id}`}>
-                        #{r.id} {r.title}
-                      </a>
-                    </span>
-                  ))}
-                </dd>
-              </>
-            ) : null}
-          </dl>
-        ) : null}
-        {(fromNote && t.body && !repeats) || others.length ? (
-          <details className="more">
-            <summary>{fromNote && t.body && !repeats ? ["The task", more].filter(Boolean).join(", and ") : `Notes (${others.length})`}</summary>
-            {fromNote && t.body && !repeats ? (
-              <p className="text small">
-                <LinkedText text={clip(t.body, 2400)} base={base} titles={titles} />
-              </p>
-            ) : null}
-            <ul className="plain rows small">
-              {others.map((n) => (
-                <li key={`${n.by}-${n.at}`}>
-                  <p className="muted">
-                    {n.by}
-                    {n.kind === "answer" ? " (answer)" : ""} · <Ago at={n.at} />
-                  </p>
-                  <p className="text">
-                    <LinkedText text={n.text} base={base} titles={titles} />
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
-      </div>
-      <div className="waiting-answer">
         <AnswerForm team={team} id={t.id} back={back} choices={w.choices} recommendation={w.recommendation} shown={shownAs(w)} waits={waits} />
+        <details className="more reasoning">
+          <summary>Show reasoning</summary>
+          <div className="reasoning-body">
+            <dl className="raised">
+              <div className="why">
+                <dt>Why it&apos;s yours</dt>
+                <dd>
+                  {w.why ? (
+                    <LinkedText text={w.why} base={base} titles={titles} />
+                  ) : (
+                    <span className="missing">
+                      No reason was recorded. The team gives one now whenever it raises something to you; this one came before.
+                    </span>
+                  )}
+                </dd>
+              </div>
+              <div className="recommends">
+                <dt>The team recommends</dt>
+                <dd>
+                  {w.recommendation ? (
+                    <LinkedText text={w.recommendation} base={base} titles={titles} />
+                  ) : byOperator ? (
+                    <span className="missing">Nothing: you raised it yourself.</span>
+                  ) : (
+                    <span className="missing">
+                      No recommendation was recorded. The team gives one now whenever it raises something to you; the planner adds one to this (a6g task
+                      ask).
+                    </span>
+                  )}
+                  {w.recommendationFrom === "inferred" ? <span className="hint"> (from the task&apos;s own words)</span> : null}
+                </dd>
+              </div>
+            </dl>
+            {t.status === "question" && t.ask?.rule ? (
+              /* A question the planner raised says which rule of the working agreement made it the operator's, and how
+                it judged it; one the approver escalated says the approval rule, which is the team's own setting and not
+                the agreement's to change. */
+              <p className="small muted asked-because">
+                Asked because: {t.ask.rule}
+                {t.ask.topic && t.ask.stakes && t.ask.confidence ? ` (${t.ask.topic}: ${t.ask.stakes} stakes, ${t.ask.confidence} confidence)` : ""}.{" "}
+                {agreement && t.ask.agreement !== undefined ? <Link href={`${base}/agreement`}>Change what the team asks you</Link> : null}
+              </p>
+            ) : null}
+            {shown ? (
+              <div className="ask">
+                {fromNote && !repeats ? (
+                  <p className="small muted">
+                    The {w.question.by} asks, <Ago at={w.question.at} />:
+                  </p>
+                ) : null}
+                <p className="text">
+                  <LinkedText text={clip(shown, 2400)} base={base} titles={titles} />
+                </p>
+              </div>
+            ) : null}
+            {w.holds.length || w.related.length ? (
+              <dl className="facts small">
+                {w.holds.length ? (
+                  <>
+                    <dt>Holds up</dt>
+                    <dd>
+                      {w.holds.map((h, i) => (
+                        <span key={h.id}>
+                          {i ? ", " : ""}
+                          <Link href={`${base}/tasks/${h.id}`}>
+                            #{h.id} {h.title}
+                          </Link>
+                        </span>
+                      ))}
+                    </dd>
+                  </>
+                ) : null}
+                {w.related.length ? (
+                  <>
+                    <dt>Also waiting on you</dt>
+                    <dd>
+                      {w.related.map((r, i) => (
+                        <span key={r.id}>
+                          {i ? ", " : ""}
+                          <a href={`#task-${r.id}`}>
+                            #{r.id} {r.title}
+                          </a>
+                        </span>
+                      ))}
+                    </dd>
+                  </>
+                ) : null}
+              </dl>
+            ) : null}
+            {fromNote && t.body && !repeats ? (
+              <div className="ask">
+                <p className="small muted">The task</p>
+                <p className="text small">
+                  <LinkedText text={clip(t.body, 2400)} base={base} titles={titles} />
+                </p>
+              </div>
+            ) : null}
+            {others.length ? (
+              <div className="ask">
+                <p className="small muted">Notes ({others.length})</p>
+                <ul className="plain rows small">
+                  {others.map((n) => (
+                    <li key={`${n.by}-${n.at}`}>
+                      <p className="muted">
+                        {n.by}
+                        {n.kind === "answer" ? " (answer)" : ""} · <Ago at={n.at} />
+                      </p>
+                      <p className="text">
+                        <LinkedText text={n.text} base={base} titles={titles} />
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </details>
         {/* The design check-in is answered, never approved or rejected (lib/tasks/model.ts). */}
         {t.kind === "design" ? null : (
           <details className="more">

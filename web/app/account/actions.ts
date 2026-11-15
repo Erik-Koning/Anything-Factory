@@ -28,7 +28,7 @@ const done = (result: ActionResult): ActionResult => {
 const FRESH_MINUTES = 10;
 
 // The person, when their session owes nothing. `onboarding` also lets through someone who still owes the authenticator
-// they asked for as they signed up: setting it up is that step (/welcome).
+// every sign-up starts with: setting it up is that step (/welcome).
 async function self(onboarding = false) {
   const viewer = await getViewer();
   if (!viewer) redirect("/sign-in");
@@ -128,8 +128,8 @@ const codesOf = (value: unknown): string[] =>
 
 // Turning on an authenticator, in two steps: "start" makes its secret (Better Auth, unconfirmed until a code proves the
 // app has it), "confirm" checks a code from the app, which turns it on. From the account page, or from /welcome by
-// someone who asked for one as they signed up (turning it on is what they then owe, and settles it). An account with a
-// password gives it to start (Better Auth asks it of anyone who has one); wrong ones count like wrong codes.
+// someone who has just signed up (turning it on is what they then owe, and settles it). An account with a password
+// gives it to start (Better Auth asks it of anyone who has one); wrong ones count like wrong codes.
 export async function authenticatorAction(previous: AuthenticatorState, form: FormData): Promise<AuthenticatorState> {
   const viewer = await self(true);
   const idle: AuthenticatorState = { stage: "idle", error: null, qr: null, key: null, backupCodes: [] };
@@ -161,6 +161,16 @@ export async function authenticatorAction(previous: AuthenticatorState, form: Fo
   if (viewer.authenticatorDue) await setAuthenticatorDue(viewer.userId, false);
   await record(viewer, { action: "authenticator.on", outcome: "ok" });
   return { stage: "done", error: null, qr: null, key: null, backupCodes: scanning.backupCodes };
+}
+
+// Stops asking for the authenticator every sign-up starts with, for someone who hasn't set one up: their own call,
+// made here on their account page once signed in, never at sign-up.
+export async function stopAskingAuthenticatorAction(): Promise<ActionResult> {
+  const viewer = await self();
+  if (viewer.admin || viewer.twoFactor || !viewer.authenticatorDue) return done({});
+  await setAuthenticatorDue(viewer.userId, false);
+  await record(viewer, { action: "authenticator.not-asked", outcome: "ok" });
+  return done({ ok: "We won't ask you to set up an authenticator again. You can still set one up here." });
 }
 
 // Turning it off takes a code from it (and the password of an account that has one), so a session left open somewhere

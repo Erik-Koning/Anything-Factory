@@ -13,7 +13,7 @@ import { compile } from "../lib/prompts.ts";
 import { newTask } from "../lib/tasks/model.ts";
 import { fileStore } from "../lib/tasks/files.ts";
 
-const FABLE = "claude-fable-5-1";
+const FABLE = "claude-fable-5-2";
 const OPUS = "claude-opus-5-5";
 const every = {
   planner: {},
@@ -91,7 +91,7 @@ describe("a role's model", () => {
     assert.match(planner, /from this table `target\.providerInstanceId`, `target\.model` and the top-level `isolation`/);
     assert.match(planner, /\| Role \| providerInstanceId \| model \| isolation \| At most \| Does \|/);
     assert.match(planner, /\| builder \| `a6g-fixture-builder` \| `"claude-opus-5-5"` \| `"worktree"` \| 2 \|/);
-    assert.match(planner, /\| scaffolder \| `a6g-fixture-scaffolder` \| `"claude-fable-5-1"` \| `"worktree"` \| 1 \|/);
+    assert.match(planner, /\| scaffolder \| `a6g-fixture-scaffolder` \| `"claude-fable-5-2"` \| `"worktree"` \| 1 \|/);
     assert.match(planner, /\| reviewer \| `a6g-fixture-reviewer` \| `"claude-sonnet-5-5"` \| `"shared"` \| 1 \|/);
     assert.doesNotMatch(compile(loadTeam(home), "builder"), /target\.model/);
   });
@@ -122,7 +122,7 @@ describe("a role's model", () => {
     const home = makeRepo();
     const wrong = guard(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: FABLE }, isolation: "worktree" });
     assert.equal(wrong.outcome, "refuse");
-    assert.match(wrong.said, /start a builder with target\.model: "claude-opus-5-5" \(beside target\.providerInstanceId\).*claude-fable-5-1 isn't it/);
+    assert.match(wrong.said, /start a builder with target\.model: "claude-opus-5-5" \(beside target\.providerInstanceId\).*claude-fable-5-2 isn't it/);
     const none = guard(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder" }, isolation: "worktree" });
     assert.match(none.said, /target\.model: "claude-opus-5-5".*without it, it would run on whichever model T3 Code lists first/);
   });
@@ -135,14 +135,14 @@ describe("register and the watchdog", () => {
       mkdirSync(join(w.a6gHome, "versions", PACKAGE.version, "plugin"), { recursive: true });
       const result = await w.a6g("register", w.home);
       assert.equal(result.code, 0, result.out);
-      assert.match(result.out, /^ {2}models: claude-fable-5-1 for the planner, scaffolder; claude-opus-5-5 for the builder, reviewer$/m);
+      assert.match(result.out, /^ {2}models: claude-fable-5-2 for the planner, scaffolder; claude-opus-5-5 for the builder, reviewer$/m);
       const entry = JSON.parse(readFileSync(join(w.a6gHome, "teams", "fixture.json"), "utf8")) as { model: string; models: Record<string, string> };
       assert.equal(entry.model, FABLE, "the planner's, for a watchdog that knows one model");
       assert.deepEqual(entry.models, { planner: FABLE, builder: OPUS, scaffolder: FABLE, reviewer: OPUS });
       assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
       const starts = w.calls().filter((call) => call.startsWith("t3 thread start"));
       assert.equal(starts.length, 1, starts.join("\n"));
-      assert.match(starts[0] ?? "", /--provider a6g-fixture-planner --model claude-fable-5-1 /);
+      assert.match(starts[0] ?? "", /--provider a6g-fixture-planner --model claude-fable-5-2 /);
     } finally {
       await w.close();
     }

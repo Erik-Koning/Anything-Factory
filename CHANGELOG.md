@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.8.9: Questions you answer at a glance, and both protections on for every sign-up
+
+A question from the team read like a brief: the reason, the options with what each led to, and a recommendation with
+its case, all at once, often on a phone. The operator decides outcomes; the rest was in the way until they wanted it.
+
+- **A question is a decision in a line.** The planner and the approver raise each one with a headline about its outcome
+  for people ("Let donors print their gift as a card?"), two to five options as outcomes in a few words, and a
+  recommendation that picks one with the reason that decides it. Everything else (why it's the operator's, what each
+  option leads to, what the team assumes meanwhile, the principle behind it, the notes) is kept whole under **Show
+  reasoning**. `a6g task status … question`, `a6g task ask` and `a6g task escalate` take `--headline` and `--options`,
+  and refuse a question without a headline or with parts that run long: at most 120 characters for the headline, 80
+  for an option, 240 for the recommendation.
+- **Waiting on you leads with it:** the headline, the recommendation in a line, the options to pick, and the answer;
+  a note beside a chosen option is a line to open. The Teams page's rows and the emails lead with the headline too, and
+  the planner's messages put each question above the line and the details below it.
+- **Toasts drop in from the top on a phone,** across the screen, and stay in the lower right on a wide one. A long word
+  wraps inside one instead of widening the page; one waits while the pointer or the focus is on it, and goes with a
+  swipe up.
+
+Both protections on for every sign-up: the sign-up page had two boxes, ticked, for two-factor authentication and the
+check of new IP addresses, and whoever filled the page in could untick them. Someone signing up with another person's
+address could so leave that account with no check on where it was signed in from.
+
+- **Nothing sent with a sign-up turns a protection off.** Every account that signs up starts with its authenticator
+  due and its new IP addresses checked. The page states both and has no box to untick; a request that asks anyway
+  is made like any other.
+- **Only the person turns one off,** on their account page, signed in to the confirmed account. "Set it up later" at
+  `/welcome` puts the authenticator off for that sign-in only: the next one asks again, until it's set up or the
+  account page's **Stop asking me** says not to. The IP check goes off from the account page with a sign-in from the
+  last ten minutes.
+- Accounts made before keep what they chose.
+
+Also:
+
+- **The check after merges can't be put off for ever.** On a busy team every merge found another queued behind it and
+  left the check to that one. Once it has been due for 90 minutes, it runs with merges queued and its suite doesn't
+  give way; `a6g status` says since when it's been due.
+- **Prices as of 2026-11-15:** Claude Fable 5.2 and Claude Mythos 5.2 ($8 in, $40 out, $0.20 a cache read), Claude
+  Sonnet 5.5's cache reads at $0.10, and the older Opus and Sonnet models. The `fable` alias, which the planner, the
+  innovator and the scaffolder run on unless a team says otherwise, is Claude Fable 5.2: 20% cheaper than 5.1.
+
+The planner's and the approver's new words reach a team at `a6g upgrade` and `a6g rotate`; the web app's at its next
+deploy.
+
 ## 0.8.8: An innovator that brings someone new, bets on value, and has its pass argued with
 
 Two more judged innovation passes scored 5 and 6 of 10. Their research held up, but they brought no one new to the

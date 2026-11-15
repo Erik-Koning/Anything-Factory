@@ -75,16 +75,30 @@ test("eventsOf: a block raised to the operator, or an ask added later, is a ques
   };
   const later = {
     ...withEvent(move(task("proposed", { title: "Open the log" }), "question", "planner", "yours"), "planner", "raised to the operator: who reads it"),
-    ask: { reason: "who reads it", recommendation: "own staff only", by: "planner", at: "2026-11-01T00:00:00.000Z" },
+    ask: {
+      reason: "who reads it",
+      recommendation: "(a) own staff only",
+      headline: "Who may read the handover log?",
+      options: ["Our own staff only", "Staff and volunteers"],
+      by: "planner",
+      at: "2026-11-01T00:00:00.000Z",
+    },
   };
   const events = eventsOf("shop", [raised, later], [], "2000-01-01T00:00:00.000Z");
   assert.deepEqual(
     events.map((e) => e.kind),
     ["question", "question", "question"]
   );
+  // What to decide comes first, then what the team recommends, then why it's theirs.
   assert.match(
     events.find((e) => e.title.includes("Ship"))?.detail ?? "",
-    /^Why it's yours: only you hold the carrier's key The team recommends: add it to the vault/
+    /^The team recommends: add it to the vault Why it's yours: only you hold the carrier's key/
+  );
+  const headed = events.find((e) => e.title.includes("handover"));
+  assert.equal(headed?.title.replace(/^#\d+ /, ""), "Who may read the handover log?");
+  assert.match(
+    headed?.detail ?? "",
+    /^Decide: Who may read the handover log\? \(a\) Our own staff only \(b\) Staff and volunteers The team recommends: \(a\) own staff only Why it's yours: who reads it/
   );
 });
 
