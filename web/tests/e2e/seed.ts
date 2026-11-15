@@ -245,6 +245,8 @@ export async function seed(): Promise<World> {
       name: "attic",
       factory: "0.8.5",
       teams: [{ ...team, name: "shop", title: "Shop", part: "worker", store: "mongo", home: "/Users/olive/shop" }],
+      // A version that starts projects, not told to yet.
+      projects: null,
       subscriptions: subscriptionsSeen(new Date()),
     },
     new Date(Date.now() - 2 * 3_600_000)

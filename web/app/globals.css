@@ -1943,17 +1943,24 @@ code.path {
     animation-timeline: scroll(self inline), scroll(self inline);
   }
 }
-/* A lane is a well; its cards are raised out of it. Every lane is as wide as the others, empty or not. */
+/* A lane is a well; its cards are raised out of it. Lanes with cards are as wide as each other; an empty one is a narrow
+   rail with its name and nothing more, so a board of seven fits a laptop's width before it needs to scroll. */
 .lane {
   background: var(--well);
   border: 1px solid var(--line);
   border-radius: var(--r-panel);
   box-shadow: var(--sink);
   padding: 10px;
-  flex: 1 0 224px;
+  flex: 1 0 176px;
   max-width: 340px;
   min-width: 0;
   scroll-snap-align: start;
+}
+.lane:has(> .empty) {
+  flex: 0 0 116px;
+}
+.lane:has(> .empty) header .hint {
+  display: none;
 }
 .lane h2 {
   display: flex;
@@ -2094,8 +2101,8 @@ code.path {
 }
 .graph .node.status-blocked rect,
 .graph .node.status-question rect {
-  stroke: var(--signal);
-  stroke-width: 2;
+  stroke: color-mix(in srgb, var(--signal) 70%, var(--edge));
+  stroke-width: 1.25;
 }
 .graph .node.status-proposed rect,
 .graph .node.status-researching rect,
@@ -2135,6 +2142,20 @@ code.path {
 }
 .level-graph:not([data-shown]) .react-flow__viewport {
   opacity: 0;
+}
+/* Meanwhile, a word in the middle of the sheet, so it never looks like an empty graph. */
+.level-graph .react-flow {
+  position: relative;
+}
+.level-graph:not([data-shown]) .react-flow::after {
+  content: "Drawing the graph…";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  font-size: 13.5px;
+  pointer-events: none;
 }
 .level-graph .as-root .as-brand,
 .level-graph .as-root .as-toolbar__group:has(button[title^="Checks"]),
@@ -3270,7 +3291,7 @@ main:has(> .sign-in) {
 /* The fields follow the toggle, the button after them. */
 .sign-in-fields {
   flex: 1 1 26rem;
-  max-width: 44rem;
+  max-width: 52rem;
   min-width: 0;
   display: flex;
   gap: 8px;
@@ -3278,7 +3299,7 @@ main:has(> .sign-in) {
 /* A field in the bar: its name in a cell of its own at its left, ruled off from where you type, like a cell of a
    drawing's title block. */
 .sign-in-fields label {
-  flex: 0 1 300px;
+  flex: 1 1 300px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -3863,8 +3884,9 @@ a.button.s {
 .command .word {
   white-space: nowrap;
 }
-/* On a phone a command is as wide as what holds it, and a part too wide for it scrolls sideways rather than breaking:
-   "&& node bin/a6g.ts self-install" stays one line, faded at the edge while there's more of it. */
+/* On a phone a command is as wide as what holds it, and a part too wide for it breaks between its words, never inside
+   one, so all of it is in sight: "&& node bin/a6g.ts" over "self-install". Only a single word wider than the block
+   scrolls sideways. */
 @media (max-width: 560px) {
   .command {
     width: 100%;
@@ -3874,14 +3896,7 @@ a.button.s {
     width: 0;
   }
   .command .part {
-    white-space: nowrap;
-  }
-  @supports (animation-timeline: scroll()) {
-    .command > code {
-      mask-image: linear-gradient(to right, #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 25%));
-      animation: edge-fade linear both;
-      animation-timeline: scroll(self inline);
-    }
+    display: inline;
   }
 }
 .command > button {

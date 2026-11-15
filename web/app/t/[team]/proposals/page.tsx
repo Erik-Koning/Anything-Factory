@@ -104,9 +104,9 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
             <dt>Simplest version</dt>
             <dd>{t.gate.simplest}</dd>
           </dl>
-        ) : (
-          <p className="small muted">No gate yet.</p>
-        )}
+        ) : null}
+        {/* Neither yet: one line for both, as the task's page says it. */}
+        {!t.gate && !t.score ? <p className="small muted">Not gated or scored yet: the planner does both.</p> : null}
         {t.score ? (
           <>
             <p className="small">
@@ -123,9 +123,9 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
               ))}
             </ul>
           </>
-        ) : (
+        ) : t.gate ? (
           <p className="small muted">Not scored yet.</p>
-        )}
+        ) : null}
         {t.body ? <p className="text small">{clip(t.body, 900)}</p> : null}
         {t.request ? (
           <p className="small">

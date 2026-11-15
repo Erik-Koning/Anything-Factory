@@ -144,19 +144,6 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </section>
       </div>
 
-      {/* How the team runs, for its admins: a row each for its controls, its subscriptions and its place on the site. */}
-      {control || retire ? (
-        <section className="panel runs" aria-labelledby="runs">
-          <h2 id="runs">How it runs</h2>
-          {control ? <TeamControls team={team} controls={controls} /> : null}
-          {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
-          {retire ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
-        </section>
-      ) : null}
-      {control ? (
-        <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
-      ) : null}
-
       {/* The work: its journeys and what merged lately, beside the graph, which takes the width its drawing needs. */}
       {details ? (
         <div className="work">
@@ -194,6 +181,20 @@ export default async function OverviewPage({ params, searchParams }: { params: P
       ) : (
         journeysPanel
       )}
+
+      {/* Under the work, for its admins: how the team runs (a row each for its controls, its subscriptions and its place
+          on the site), then what it spent. */}
+      {control || retire ? (
+        <section className="panel runs" aria-labelledby="runs">
+          <h2 id="runs">How it runs</h2>
+          {control ? <TeamControls team={team} controls={controls} /> : null}
+          {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
+          {retire ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
+        </section>
+      ) : null}
+      {control ? (
+        <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
+      ) : null}
     </>
   );
 }

@@ -361,11 +361,13 @@ function lay(random: Random, width: number, height: number, above: number, now: 
   const rule = unit * 2;
 
   const plan = planCycle(random, levels, rows);
-  // How far from the middle line the tasks reach; the middle line is on the ruling, as low as the rail lets it sit, so
-  // the drawing stands just over the words under it and any room to spare is open sheet above it.
+  // How far from the middle line the tasks reach; the middle line is on the ruling, halfway down the room (with room
+  // above for the drawing's title, and no lower than the rail lets it sit), so any room to spare is open sheet shared
+  // above and below the drawing rather than a band on one side of it.
   const reach = Math.max(...plan.tasks.map((task) => Math.abs(task.slot))) * unit + h / 2;
   const lowest = height - reach - drop - 10;
-  const mid = Math.floor((above + lowest) / rule) * rule - above;
+  const halfway = Math.min(lowest, Math.max(reach + 56, (height - drop) / 2));
+  const mid = Math.min(Math.floor((above + lowest) / rule), Math.round((above + halfway) / rule)) * rule - above;
   const parts: Part[] = plan.tasks.map((task) => ({
     ...task,
     x: Math.round(left + w / 2 + task.level * step),
