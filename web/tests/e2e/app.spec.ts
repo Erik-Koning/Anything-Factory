@@ -1767,9 +1767,9 @@ test("the Teams page folds: its key goes to the team, and what's left open is ke
   // A shut row still says how the team is; an open one shows where its work stands and the ways in.
   await page.getByRole("button", { name: "Collapse all" }).click();
   await expect(shop).toHaveJSProperty("open", false);
-  await expect(shop.locator("summary")).toContainText("at work");
+  await expect(shop.locator(":scope > summary")).toContainText("at work");
   await expect(shop.getByRole("link", { name: "Board" })).toBeHidden();
-  await shop.locator("summary").click();
+  await shop.locator(":scope > summary").click();
   await expect(shop.getByRole("link", { name: "Board" })).toBeVisible();
   await expect(shop.getByRole("link", { name: "Add a task" })).toHaveAttribute("href", "/t/shop/add");
   await expect(shop.locator(".counts li")).toHaveCount(7);
@@ -1786,7 +1786,7 @@ test("the Teams page folds: its key goes to the team, and what's left open is ke
   await one.click();
   await expect(one).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Expand all" })).toBeDisabled();
-  await blog.locator("summary").click();
+  await blog.locator(":scope > summary").click();
   await expect(blog).toHaveJSProperty("open", true);
   await expect(shop).toHaveJSProperty("open", false);
   // A link that names a team opens that one.
