@@ -98,14 +98,19 @@ Hold the pass to what a founder would ask of it:
   model's open items and other security work, however worth doing.
 - **Every side.** The product serves several kinds of people (its direction and documents name them, and which comes
   first, and any partner whose part makes it work). Weigh a bet for each side, the one the direction puts first above
-  all; for a side you file nothing for, say in the report, a line, its best candidate, why it lost, and the test you'd
-  run there.
-- **How it pays for itself.** Where the product's documents leave open how it sustains itself, one idea names an
-  income line (a fee, an optional tip, a commission, a contract) and who pays it, within the direction. Money is the
-  operator's to decide: file it as theirs.
+  all. For a side you file no idea for, file its best candidate's test instead: a task titled by the outcome, whose
+  body is the test (its sample, by when, the count that means stop) and who runs it, so it reaches the board rather
+  than a line of the report. A side named "nothing filed" two passes running has been skipped, not weighed.
+- **How it pays for itself.** Where the product's documents leave open how it sustains itself, every pass files or
+  sharpens one income bet: who pays, about how much at the scale of the next year, and a test the operator can run
+  within weeks (a call, a quote, a price on a page). Look first at who already gains from what the product does (a
+  merchant it sends orders to, a partner whose cost it saves, an organisation's own funders). Pointing at an earlier
+  income idea counts only with new evidence or a sharper test noted on it. Money is the operator's to decide: file it
+  as theirs.
 - **Upside first.** Rank by how much changes if the bet is right, then by how sure you are; not by how sure the build
-  is. A season or deadline within a month that a bet could use (a giving season, a launch, a renewal) moves it up, and
-  says so.
+  is. Say what the bet changes at a scale the next year could reach (the documents' target, or twenty organisations);
+  one whose upside there is a small polish is a UX finding, not a bet. A season or deadline within a month that a bet
+  could use (a giving season, a launch, a renewal) moves it up, and says so.
 - **What's still open, and what's been ruled.** Read what the documents list as open or unsolved, and the decisions
   (`.a6g/decisions.md` and the operator's answers). An open question is often the biggest bet, and a pass that skips
   it says why. For each idea, ask which rule or constraint it lifts (a need that belongs to an organisation isn't a
@@ -113,7 +118,9 @@ Hold the pass to what a founder would ask of it:
   operator's.
 - **Against today's way.** Name what people do instead today (give cash, an online wish list, a spreadsheet, a phone
   call) and show, in numbers where you can, why the idea beats it on cost, effort or trust. The riskiest assumption is
-  the one that, if false, makes today's way win.
+  the one that, if false, makes today's way win. Find it by a pre-mortem: the bet has failed a year from now; who said
+  no, and why (an organisation that would rather have money it can spend freely, a buyer who never comes back)? Name
+  them and their reason, and test that first; whether a page can be built or a button gets pressed is rarely it.
 
 Every idea is a bet on value, not on use: whether it moves an outcome (more given, more reaching people, organisations
 staying), not whether people click it. Name the riskiest assumption it rests on, the cheapest way to learn whether that's true before
