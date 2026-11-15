@@ -2,8 +2,8 @@
 // Turning on an authenticator: the password first for an account that has one, a QR code to scan (or a key to type), a
 // code from the app to prove it, then the backup codes, shown once. It stays mounted once the authenticator is on (the
 // page re-renders in the same round trip), so the codes stay on screen until they're put away; then it shows what the
-// page gives it for an authenticator that's on. On the account page, and at /welcome for someone who asked for one as
-// they signed up: there the codes are put away by going on to `next`.
+// page gives it for an authenticator that's on. On the account page, and at /welcome for someone who has just signed
+// up: there the codes are put away by going on to `next`.
 import { type ReactNode, useActionState, useEffect, useRef, useState } from "react";
 import { type AuthenticatorState, authenticatorAction } from "./actions.ts";
 

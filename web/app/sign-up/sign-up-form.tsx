@@ -41,7 +41,6 @@ export function SignUpForm() {
           const email = String(data.get("email") ?? "").trim();
           setBusy(true);
           setProblem(null);
-          // The two choices go under names of their own: the account's fields can't be set from a request (server/auth.ts).
           void authClient
             .$fetch("/sign-up/email", {
               method: "POST",
@@ -49,8 +48,6 @@ export function SignUpForm() {
                 name: String(data.get("name") ?? "").trim(),
                 email,
                 password: String(data.get("password") ?? ""),
-                setUpAuthenticator: data.get("setUpAuthenticator") === "on",
-                checkNewIps: data.get("checkNewIps") === "on",
               },
             })
             .then(
@@ -83,28 +80,25 @@ export function SignUpForm() {
         <p className="hint" id="password-hint">
           At least {MIN_PASSWORD} characters.
         </p>
-        <fieldset className="choices">
-          <legend>Keeping your account safe</legend>
-          {/* Each box is named by its first line and described by its second, so a screen reader says them apart. */}
-          <label className="check choice">
-            <input type="checkbox" name="setUpAuthenticator" defaultChecked aria-labelledby="authenticator-choice" aria-describedby="authenticator-hint" />
-            <span>
-              <b id="authenticator-choice">Two-factor authentication</b>
-              <span className="hint" id="authenticator-hint">
+        {/* Stated, not chosen: both are on for every new account (server/auth.ts), and the account page turns one off. */}
+        <div className="protections">
+          <p className="protections-title" id="protections">
+            Keeping your account safe
+          </p>
+          <ul aria-labelledby="protections">
+            <li>
+              <b>Two-factor authentication</b>
+              <span className="hint">
                 An authenticator app on your phone, set up as soon as your email is confirmed. Every sign-in then asks for its code too.
               </span>
-            </span>
-          </label>
-          <label className="check choice">
-            <input type="checkbox" name="checkNewIps" defaultChecked aria-labelledby="ip-choice" aria-describedby="ip-hint" />
-            <span>
-              <b id="ip-choice">Check new IP addresses</b>
-              <span className="hint" id="ip-hint">
-                A sign-in from an address you haven&apos;t used asks you by email first.
-              </span>
-            </span>
-          </label>
-        </fieldset>
+            </li>
+            <li>
+              <b>Check new IP addresses</b>
+              <span className="hint">A sign-in from an address you haven&apos;t used asks you by email first.</span>
+            </li>
+          </ul>
+          <p className="hint">Both are on for every new account. You can turn either off from your account page once your email is confirmed.</p>
+        </div>
         <div>
           <button type="submit" className="primary" disabled={busy}>
             {busy ? "Creating it…" : "Create my account"}
