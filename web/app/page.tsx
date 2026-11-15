@@ -7,7 +7,18 @@ import { TeamFolds } from "../components/team-folds.tsx";
 import { Ago, Chip, Notice, QuietMark, type SearchParams } from "../components/ui.tsx";
 import { machinesRunning, type MachineTeam, online } from "../../lib/fleet.ts";
 import { can, roleIn, runsTeam } from "../server/access.ts";
-import { allTeams, controlsOf, limitDollars, type Limits, limitsOf, retirements, type Spend, storeFor, type TeamDoc } from "../server/factory.ts";
+import {
+  allTeams,
+  controlsFor,
+  limitDollars,
+  type Limits,
+  limitsOf,
+  retirements,
+  type Spend,
+  storeFor,
+  tasksFor,
+  type TeamDoc,
+} from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { linkedMachines, type Machine, ownersOf } from "../server/machines.ts";
 import { type Start, startOpen, starts } from "../server/starts.ts";
@@ -30,22 +41,25 @@ const unshownWhy = (store: MachineTeam["store"]): string =>
       : "it keeps no task graph the site reads";
 
 export default async function TeamsPage({ searchParams }: { searchParams: SearchParams }) {
-  const viewer = await requireViewer();
-  // Every team that published its settings, those taken off the site among them (server/factory.ts retirements).
-  const [every, off] = await Promise.all([allTeams({ retired: true }), retirements()]);
+  // Every team that published its settings, those taken off the site among them (server/factory.ts retirements), and
+  // every linked machine: read beside the session, and shown only as the person may see them.
+  const [viewer, every, off, all] = await Promise.all([requireViewer(), allTeams({ retired: true }), retirements(), linkedMachines()]);
   const teams = every.filter((team) => !offSite(team, off.get(team.name) ?? null) && roleIn(viewer, team.name) !== null);
   const offTeams = viewer.admin ? every.filter((team) => offSite(team, off.get(team.name) ?? null)) : [];
   // Only the machines that report a team whose board the viewer sees.
-  const machines = await linkedMachines({ teams: teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name) });
-  const owners = await ownersOf(machines);
-  const rows = await Promise.all(teams.map(async (team) => ({ team, ...(await summary(team, can(viewer, "team:control", team.name))) })));
+  const boards = new Set(teams.filter((team) => can(viewer, "team:board", team.name)).map((team) => team.name));
+  const machines = all.filter((machine) => machine.teams.some((t) => boards.has(t.name)));
+  const mayStart = can(viewer, "projects:start");
+  const [owners, rows, asked] = await Promise.all([
+    ownersOf(machines),
+    Promise.all(teams.map(async (team) => ({ team, ...(await summary(team, can(viewer, "team:control", team.name))) }))),
+    mayStart ? starts(new Set(every.map((team) => team.name))) : Promise.resolve([] as Start[]),
+  ]);
   const asking = rows.filter((c) => c.asks && can(viewer, "proposals:decide", c.team.name));
   const asks = asking.reduce((n, c) => n + c.asks, 0);
-  const mayStart = can(viewer, "projects:start");
-  const asked: Start[] = mayStart ? await starts(new Set(every.map((team) => team.name))) : [];
   // Each ask's Mac, to say whether it's there to pick the ask up: every linked one, not only those that run a team. An
   // admin's also say which teams they run that this page doesn't show.
-  const linked = asked.length || viewer.admin ? await linkedMachines() : [];
+  const linked = asked.length || viewer.admin ? all : [];
   const published = new Set(every.map((team) => team.name));
   const unshown = viewer.admin
     ? linked.flatMap((machine) => machine.teams.filter((t) => t.part === "lead" && !published.has(t.name)).map((team) => ({ machine, team })))
@@ -367,11 +381,10 @@ function Spent({
 }
 
 async function summary(team: TeamDoc, control: boolean) {
-  const store = storeFor(team.name);
   const [tasks, cycles, controls] = await Promise.all([
-    store.tasks.all(),
-    team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
-    control ? controlsOf(team.name) : Promise.resolve([]),
+    tasksFor(team.name),
+    team.mode === "cycles" ? storeFor(team.name).cycles.all() : Promise.resolve([]),
+    control ? controlsFor(team.name) : Promise.resolve([]),
   ]);
   return {
     tasks,

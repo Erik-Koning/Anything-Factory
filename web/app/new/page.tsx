@@ -47,9 +47,11 @@ const EMPTY: StartFormState = {
 // An admin asks one of their own Macs to start a team (docs/plans/run-from-the-site.md). The form shows only for a Mac
 // whose operator said at its terminal that it starts projects; until then the page says how.
 export default async function StartPage({ searchParams }: { searchParams: SearchParams }) {
-  const viewer = await requireViewer();
+  // The machines and the names taken (every team that published its settings: those taken off the site keep theirs),
+  // read beside the session.
+  const [viewer, all, teams] = await Promise.all([requireViewer(), linkedMachines(), allTeams({ retired: true })]);
   if (!can(viewer, "projects:start")) notFound();
-  const linked = (await linkedMachines()).filter((machine) => machine.userId === viewer.userId);
+  const linked = all.filter((machine) => machine.userId === viewer.userId);
   const now = Date.now();
   const machines: StartMachine[] = startingMachines(linked, viewer.userId)
     .sort((a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name))
@@ -65,13 +67,12 @@ export default async function StartPage({ searchParams }: { searchParams: Search
       newer: machine.projects?.github !== undefined,
       github: machine.projects?.github ?? null,
     }));
-  // Names taken: every team that published its settings (those taken off the site keep theirs), and the asks open.
-  const teams = await allTeams({ retired: true });
-  const open = (await starts(new Set(teams.map((team) => team.name)))).filter(startOpen);
-  const taken = [...teams.map((team) => team.name), ...open.map((start) => start.team)];
   // Asked again after one stopped: the form opens with what that one said.
   const again = param((await searchParams)["again"]);
-  const before = again ? await startFor(again) : null;
+  // Names taken: those teams', and the asks open.
+  const [started, before] = await Promise.all([starts(new Set(teams.map((team) => team.name))), again ? startFor(again) : Promise.resolve(null)]);
+  const open = started.filter(startOpen);
+  const taken = [...teams.map((team) => team.name), ...open.map((start) => start.team)];
   const initial: StartFormState =
     before && !startOpen(before)
       ? {

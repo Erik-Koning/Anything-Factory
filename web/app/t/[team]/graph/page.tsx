@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { LevelGraph } from "../../../../components/level-graph.tsx";
 import { levelDiagram } from "../../../../../lib/tasks/graph.ts";
 import { can } from "../../../../server/access.ts";
-import { tasksOf, teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Graph" };
 
@@ -11,6 +11,7 @@ export const metadata: Metadata = { title: "Graph" };
 // further down. ?at=<id> opens the level inside that card, or the one a task is on (components/level-graph.tsx).
 export default async function GraphPage({ params }: { params: Promise<{ team: string }> }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:board", team.name)) notFound();
   const tasks = await tasksOf(team.name);

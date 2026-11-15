@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased: the web app answers at once
+
+The operator found the site slow: a click on a tab or link changed nothing until the next page was all there, and
+sending an answer in Waiting on you took a while. Measured from the operator's Mac against the same database cluster,
+a page made 5 to 12 rounds of database queries one after another, and a click showed nothing for 0.4 to 1.1 s. The
+site runs on AWS in Ohio and the database on Google Cloud in Iowa, so each round crosses between the two. The site
+only: nothing to install on a Mac.
+
+- **A click answers at once.** The tab or menu link clicked shows as the current one as it's pressed (Next's
+  `useLinkStatus`, `components/link-pending.tsx`); the page being left stays up and fades a little after 150 ms, and a
+  line along the top runs while it waits (`components/nav-progress.tsx`). No loading outline in its place: React holds
+  a fallback on screen for at least 300 ms, so one made every page quicker than that wait for it.
+- **A key answers at once.** A key whose action is on its way turns a mark beside its words, and in Waiting on you the
+  question being answered or decided fades while its answer goes.
+- **Fewer rounds of queries.** A session is read with its person in one query (Better Auth's joins), what the layouts
+  and the page each read is read once per request (`server/factory.ts`), and reads that don't wait on each other start
+  together, beside the session: a team's page starts its own there too, since a click from one of its pages to another
+  doesn't render the layout again. The header's count of what waits on you never holds up a page: it shows the count
+  it had until the new one is in.
+- **An answer or a decision** reads its task once, beside the team's settings: the factory's `update` tries the copy
+  just read before reading it again, its version guarding the write as before (`lib/tasks/store.ts`, `answer.ts`,
+  `decide.ts`; `a6g task answer`, `approve`, `reject`, `research` and `escalate` read less too). Its audit entry is
+  written beside the page rendered after, not before it (`after()`). An answer takes 7 rounds with its page, from
+  about 17.
+- Measured on the operator's Mac with each database round trip made 20 ms, against the browser 120 ms away: a tab or
+  menu link shows it's taken in about 10 ms (nothing showed before the page did), and the page is there in 150 to
+  270 ms, from 290 to 740 ms; an answer is sent and shown in about 200 ms, from 540 ms.
+
 ## 0.8.2: Starting a project from GitHub, and the team's rules chosen on the form
 
 The operator asked to start a project on a GitHub repository by its name, cloned when their account owns it or can push

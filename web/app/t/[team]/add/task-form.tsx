@@ -124,7 +124,7 @@ export function TaskForm({ team, admin, journeys }: { team: string; admin: boole
         </>
       ) : null}
       <div>
-        <button type="submit" className="primary" disabled={pending}>
+        <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Adding…" : admin ? "Add the task" : "Suggest the task"}
         </button>
       </div>

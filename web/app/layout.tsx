@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { MainNav } from "../components/main-nav.tsx";
+import { NavProgress } from "../components/nav-progress.tsx";
 import { blocked, can } from "../server/access.ts";
-import { allTeams, storeFor } from "../server/factory.ts";
+import { allTeams, tasksFor } from "../server/factory.ts";
 import { waitingCount } from "../server/inbox.ts";
 import { getViewer, type Person } from "../server/viewer.ts";
 import { RememberName } from "./remember-name.tsx";
@@ -40,10 +41,11 @@ export const viewport: Viewport = {
 };
 
 // What waits on an admin, on every team they decide for: the header says how much on every page, and never fails one.
+// Streamed in (components/main-nav.tsx): no page waits for it.
 async function waitingFor(viewer: Person): Promise<number> {
   try {
     const teams = (await allTeams()).filter((team) => can(viewer, "proposals:decide", team.name));
-    const counts = await Promise.all(teams.map(async (team) => waitingCount(await storeFor(team.name).tasks.all())));
+    const counts = await Promise.all(teams.map(async (team) => waitingCount(await tasksFor(team.name))));
     return counts.reduce((n, count) => n + count, 0);
   } catch {
     return 0;
@@ -63,10 +65,13 @@ function Mark() {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
   const signedIn = viewer !== null && !blocked(viewer);
-  const waiting = signedIn && viewer.admin ? await waitingFor(viewer) : 0;
+  const waiting = signedIn && viewer.admin ? waitingFor(viewer) : 0;
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
+        <Suspense fallback={null}>
+          <NavProgress />
+        </Suspense>
         <a className="skip" href="#main">
           Skip to the content
         </a>

@@ -6,13 +6,14 @@ import { Notice, QuietNote, type SearchParams } from "../../../../components/ui.
 import { can } from "../../../../server/access.ts";
 import { inbox } from "../../../../server/inbox.ts";
 import { quietSince } from "../../../../server/views.ts";
-import { tasksOf, teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Waiting on you" };
 
 // What waits on the operator on this team: questions to answer, blocked work, and what the planner has yet to act on.
 export default async function TeamInboxPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "proposals:decide", team.name)) notFound();
   const tasks = await tasksOf(team.name);

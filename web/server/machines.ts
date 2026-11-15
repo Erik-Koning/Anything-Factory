@@ -193,10 +193,16 @@ async function ownersById(userIds: readonly string[]): Promise<Map<string, Owner
   const { auth, isAdminRole } = await import("./auth.ts");
   const context = await auth().$context;
   const ids = [...new Set(userIds)];
-  const roles = await membershipsOf(ids);
+  // Their memberships and each of them, all at once.
+  const [roles, users] = await Promise.all([
+    membershipsOf(ids),
+    Promise.all(
+      ids.map((userId) => context.internalAdapter.findUserById(userId) as Promise<{ email: string; role?: string | null; banned?: boolean | null } | null>)
+    ),
+  ]);
   const owners = new Map<string, Owner>();
-  for (const userId of ids) {
-    const user = (await context.internalAdapter.findUserById(userId)) as { email: string; role?: string | null; banned?: boolean | null } | null;
+  for (const [index, userId] of ids.entries()) {
+    const user = users[index];
     if (!user) continue;
     const teams: Record<string, TeamRole> = {};
     for (const m of roles) if (m.userId === userId) teams[m.team] = m.role;
