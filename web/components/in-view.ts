@@ -1,7 +1,7 @@
 import type { FocusEvent } from "react";
 
-// A row that scrolls sideways on a narrow screen (the main links, a team's pages, the board): what's in it stays in
-// view. Only the row moves, never the page.
+// A row that scrolls sideways on a narrow screen (a team's pages, the board): what's in it stays in view. Only the row
+// moves, never the page.
 
 // Clear of the fade at the row's edge.
 const EDGE = 28;
