@@ -32,7 +32,7 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
         </p>
       ) : null}
       <input type="hidden" name="team" value={team} />
-      <fieldset className="choices">
+      <fieldset className="choices levels">
         <legend>How readily the team asks you</legend>
         {LEVELS.map((level) => (
           <label key={level} className="check choice">
@@ -68,70 +68,73 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
           {never.includes("technical") ? " Never asked of you: the platform and the stack, since this team's operator isn't technical (team.json)." : ""}
         </p>
       </fieldset>
-      <fieldset className="choices messages">
-        <legend>How often a message may reach you</legend>
-        <p className="hint">
-          The planner&apos;s questions and reports by email. What waits on you is in the app the moment it&apos;s raised, whatever this says.
-        </p>
-        <label className="check choice">
-          <input type="radio" name="messages" value="team" defaultChecked={state.messages === "team"} />
-          <span>
-            <b>As the team&apos;s own settings say</b>
-            <span className="hint">
-              What its <code>team.json</code> sets under <code>contact</code>: a digest every four hours, unless it says otherwise.
+      {/* Beside the topics where there's room: how often a message may come, and the planner's standing instructions. */}
+      <div className="stack agreement-side">
+        <fieldset className="choices messages">
+          <legend>How often a message may reach you</legend>
+          <p className="hint">
+            The planner&apos;s questions and reports by email. What waits on you is in the app the moment it&apos;s raised, whatever this says.
+          </p>
+          <label className="check choice">
+            <input type="radio" name="messages" value="team" defaultChecked={state.messages === "team"} />
+            <span>
+              <b>As the team&apos;s own settings say</b>
+              <span className="hint">
+                What its <code>team.json</code> sets under <code>contact</code>: a digest every four hours, unless it says otherwise.
+              </span>
             </span>
+          </label>
+          <label className="check choice">
+            <input type="radio" name="messages" value="digest" defaultChecked={state.messages === "digest"} />
+            <span>
+              <b>A digest</b>
+              <span className="hint">Everything open together, at most once per window. One urgent message may still go in between.</span>
+            </span>
+          </label>
+          <div className="every">
+            <label htmlFor="agreement-every">A digest&apos;s window, in hours</label>
+            <input
+              id="agreement-every"
+              name="every"
+              type="number"
+              inputMode="decimal"
+              min={CONTACT_EVERY.min / 60}
+              max={CONTACT_EVERY.max / 60}
+              // Any part of an hour: a window set from the terminal (20 minutes, say) must not fail the field's own check.
+              step="any"
+              defaultValue={state.every}
+            />
+            <span className="hint">At most one message every so many hours, from a quarter of an hour to a week.</span>
+          </div>
+          <label className="check choice">
+            <input type="radio" name="messages" value="priority" defaultChecked={state.messages === "priority"} />
+            <span>
+              <b>Each as soon as it&apos;s needed</b>
+              <span className="hint">A message goes when the planner sends it.</span>
+            </span>
+          </label>
+        </fieldset>
+        <label htmlFor="agreement-notes">
+          Standing instructions (optional)
+          <span className="hint">
+            In your own words, for the planner: what to batch, what to check with you first, when you&apos;re away. It follows them as it follows your
+            direction; they don&apos;t change what the team is allowed to do.
           </span>
         </label>
-        <label className="check choice">
-          <input type="radio" name="messages" value="digest" defaultChecked={state.messages === "digest"} />
-          <span>
-            <b>A digest</b>
-            <span className="hint">Everything open together, at most once per window. One urgent message may still go in between.</span>
-          </span>
-        </label>
-        <div className="every">
-          <label htmlFor="agreement-every">A digest&apos;s window, in hours</label>
-          <input
-            id="agreement-every"
-            name="every"
-            type="number"
-            inputMode="decimal"
-            min={CONTACT_EVERY.min / 60}
-            max={CONTACT_EVERY.max / 60}
-            // Any part of an hour: a window set from the terminal (20 minutes, say) must not fail the field's own check.
-            step="any"
-            defaultValue={state.every}
-          />
-          <span className="hint">At most one message every so many hours, from a quarter of an hour to a week.</span>
-        </div>
-        <label className="check choice">
-          <input type="radio" name="messages" value="priority" defaultChecked={state.messages === "priority"} />
-          <span>
-            <b>Each as soon as it&apos;s needed</b>
-            <span className="hint">A message goes when the planner sends it.</span>
-          </span>
-        </label>
-      </fieldset>
-      <label htmlFor="agreement-notes">
-        Standing instructions (optional)
-        <span className="hint">
-          In your own words, for the planner: what to batch, what to check with you first, when you&apos;re away. It follows them as it follows your
-          direction; they don&apos;t change what the team is allowed to do.
-        </span>
-      </label>
-      <textarea
-        id="agreement-notes"
-        name="notes"
-        rows={5}
-        maxLength={NOTES_MAX}
-        defaultValue={state.notes}
-        onChange={(event) => setLength(event.target.value.length)}
-        aria-describedby="agreement-notes-count"
-        placeholder="I'm away until Monday: batch what can wait. Never add a dependency without asking."
-      />
-      <p id="agreement-notes-count" className="hint">
-        {length.toLocaleString("en")} of {NOTES_MAX.toLocaleString("en")} characters
-      </p>
+        <textarea
+          id="agreement-notes"
+          name="notes"
+          rows={5}
+          maxLength={NOTES_MAX}
+          defaultValue={state.notes}
+          onChange={(event) => setLength(event.target.value.length)}
+          aria-describedby="agreement-notes-count"
+          placeholder="For example: I'm away until Monday, so batch what can wait. Never add a dependency without asking."
+        />
+        <p id="agreement-notes-count" className="hint">
+          {length.toLocaleString("en")} of {NOTES_MAX.toLocaleString("en")} characters
+        </p>
+      </div>
       <div className="inline">
         <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Saving…" : "Change the agreement"}

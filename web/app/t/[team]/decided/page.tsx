@@ -40,47 +40,43 @@ export default async function DecidedPage({ params, searchParams }: { params: Pr
       <p className="lede small">
         {review ? (
           <>
-            Questions the team would otherwise have brought to you, and answered itself under your{" "}
-            {agreement ? <Link href={`${base}/agreement`}>working agreement</Link> : "working agreement"}. Each says what it chose, what that follows from,
-            and why you weren&apos;t asked. The flagged ones are the calls it thought you&apos;d want to see: agree, or overturn one and the planner undoes
-            it.
+            Questions the team answered itself under your {agreement ? <Link href={`${base}/agreement`}>working agreement</Link> : "working agreement"},
+            instead of bringing them to you.
           </>
         ) : (
-          <>
-            Questions the team answered itself instead of bringing them to the operator, under the operator&apos;s working agreement. Each says what it
-            chose, what that follows from, and why it wasn&apos;t asked. The operator reviews the flagged ones.
-          </>
+          "Questions the team answered itself under the operator's working agreement, instead of bringing them to the operator."
         )}
       </p>
+      <details className="guide">
+        <summary>How this works</summary>
+        <p>
+          {review
+            ? "Each says what it chose, what that follows from, and why you weren't asked. The flagged ones are the calls it thought you'd want to see: agree, or overturn one and the planner undoes it."
+            : "Each says what it chose, what that follows from, and why it wasn't asked. The operator reviews the flagged ones."}
+        </p>
+      </details>
       {readsAgreement(team) ? null : (
         <p className="notice">
           This team&apos;s factory version doesn&apos;t keep a decision log yet. Once it&apos;s upgraded (<code>a6g upgrade {team.name}</code>, then{" "}
           <code>a6g rotate {team.name}</code>), what its planner decides in the operator&apos;s place shows up here.
         </p>
       )}
+      {/* How the check-ins went, in a line: what's to review now is the count beside its own heading below. */}
       {decisions.length ? (
-        <section className="panel" aria-labelledby="check-ins">
+        <section className="tally" aria-labelledby="check-ins">
           <h2 id="check-ins">The last {DAYS} days</h2>
-          <ul className="counts">
+          <ul>
             <li>
-              <b>{stats.toReview}</b>
-              <span className="small muted">To review now</span>
+              <b>{stats.decided}</b> decided by the team
             </li>
             <li>
-              <b>{stats.decided}</b>
-              <span className="small muted">Decided by the team</span>
+              <b>{stats.flagged}</b> of those flagged
             </li>
             <li>
-              <b>{stats.flagged}</b>
-              <span className="small muted">Of those, flagged</span>
+              <b>{stats.overturned}</b> overturned
             </li>
             <li>
-              <b>{stats.overturned}</b>
-              <span className="small muted">Overturned</span>
-            </li>
-            <li>
-              <b>{stats.asked}</b>
-              <span className="small muted">Asked instead</span>
+              <b>{stats.asked}</b> asked instead
             </li>
           </ul>
         </section>
