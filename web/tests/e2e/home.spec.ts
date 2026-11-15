@@ -66,3 +66,26 @@ test("a question waiting on the operator is answered from its team's row, or dis
     await tasks.deleteMany({ _id: { $in: ["shop:921"] as never[] } });
   }
 });
+
+test("on a phone a team's ⋯ menu is a sheet on the screen, wherever its key sits, and a press on the dim closes it", async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 360, height: 780 });
+  await signIn(page);
+  for (const path of ["/", "/t/shop"]) {
+    await page.goto(path);
+    const key = page.getByLabel("More for Shop").first();
+    await key.click();
+    const sheet = page.locator("details.menu[open] .menu-items");
+    await expect(sheet.getByRole("button", { name: "Restart the planner" })).toBeVisible();
+    // Once it has slid up into place.
+    await expect
+      .poll(async () => {
+        const box = await sheet.boundingBox();
+        return box !== null && box.x >= 0 && box.x + box.width <= 360 && box.y >= 0 && box.y + box.height <= 780;
+      }, path)
+      .toBe(true);
+    // The dim over the page is the menu's own: a press on it, above the sheet, closes it.
+    await page.mouse.click(180, 40);
+    await expect(page.locator("details.menu[open]")).toHaveCount(0);
+  }
+});
