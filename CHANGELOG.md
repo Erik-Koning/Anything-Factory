@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: what waits on you, and a team's keys, on the Teams page
+## 0.8.6: What waits on you, and a team's keys, on the Teams page
 
 The operator asked to discard what waits on them, and to pause a team and the rest, from the Teams page itself.
 
