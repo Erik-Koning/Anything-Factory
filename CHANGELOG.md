@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.11: A team's ⋯ menu on a phone
+
+- **On a phone, a team's ⋯ menu is a sheet from the bottom of the screen,** its title over keys a thumb can press, over
+  a dim that closes it. It dropped from the ⋯ key at 240px wide, so on a team's own page it ran off the screen's left
+  edge. On a wider screen it still drops from the key, and opens rightwards where it would leave the screen.
+- On a phone, the Teams page's "waiting on you" chip has a line of its own instead of running into "at work".
+
 ## 0.8.10: An innovator whose bets carry their upside in numbers, and ask before undoing a ruling
 
 A sixth judged innovation pass scored 6.5 of 10, the best so far: its argument with a subagent visibly changed it, and
