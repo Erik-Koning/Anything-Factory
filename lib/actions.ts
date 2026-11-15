@@ -102,7 +102,9 @@ export async function applyActions(
       const why = busy(entry.run);
       if (why) {
         const said = sentence(why);
-        if (words.get(control.id)?.said !== said) {
+        // Said once per reason: "3 members running" and "5 members running" are the same one.
+        const steady = (text: string | undefined) => (text ?? "").replace(/\d+/g, "#");
+        if (steady(words.get(control.id)?.said) !== steady(said)) {
           await say(control, "waiting", said);
           log.push(`${whoAsked(control.by)} ${what} (${control.id}): waiting, as ${why}; no new member starts until it's done`);
         }

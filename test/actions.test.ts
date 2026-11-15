@@ -68,9 +68,12 @@ describe("the operator's actions on a team's lead", () => {
     assert.equal(waitRefusal(run, "planner"), null, "the planner itself isn't held");
     assert.match(steeringNote(run), /The operator asked to restart your thread \(k1\): start no members/);
 
-    // Seventy minutes on, still waiting: it was seen in time, so it isn't too old.
+    // Seventy minutes on, still waiting, with more members at work: it was seen in time, so it isn't too old, and the
+    // same reason isn't said again.
     const later = Date.now() + 70 * 60_000;
-    await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: members, now: later });
+    const more = () => "the planner has 5 members running; they report to it, so it restarts once they've finished";
+    await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: more, now: later });
+    assert.equal((await store.controls.all()).filter((c) => c.kind === "acted").length, 1);
     assert.deepEqual(started, []);
     assert.deepEqual(
       actionsOf(await store.controls.all()).map((s) => s.outcome),
