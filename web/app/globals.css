@@ -3617,6 +3617,67 @@ details.team > .team-body {
 .team-cols > section {
   min-width: 0;
 }
+/* A part's heading with the team's own keys at its right: stop, pause or resume, and ⋯. */
+.team-body-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+}
+.team-body-head h3 {
+  margin: 0;
+}
+/* What waits on the operator, a line each: what it is on the left, how to settle it on the right. Discard opens
+   under its line, so the line keeps its place while the reason is typed. */
+.waits {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.wait-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.wait-what {
+  min-width: 0;
+  flex: 1 1 22rem;
+}
+.wait-do {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+}
+details.discard > summary {
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+details.discard[open] {
+  flex-basis: 100%;
+}
+.discard-form {
+  display: grid;
+  grid-template-columns: minmax(0, 28rem) auto;
+  align-items: end;
+  gap: 4px 8px;
+  margin-top: 8px;
+}
+.discard-form > label {
+  grid-column: 1 / -1;
+  font-size: 13px;
+}
+.wait-do:has(details.discard[open]) {
+  flex-basis: 100%;
+  justify-content: flex-start;
+}
 /* Counts at a row's size: the same sunk figures in one even strip, a word under each that never breaks, and faint
    where there's nothing to count. */
 .counts.mini {

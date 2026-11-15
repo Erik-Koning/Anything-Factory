@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased: what waits on you, and a team's keys, on the Teams page
+
+The operator asked to discard what waits on them, and to pause a team and the rest, from the Teams page itself.
+
+- **Waiting on you, on each team's row**: every question and every piece of blocked work waiting on the operator,
+  longest waiting first (five, with a link to the rest): what it is and how long it has waited; **Answer** goes to it
+  on Waiting on you, where its question and choices are; **Discard…** opens under it and rejects it from there, with
+  the words the team reads ("Not needed now." until they're changed). A design check-in is only ever answered.
+- **The team's own keys** beside that heading (or beside Work, when nothing waits): Stop and Pause…, or Resume while
+  it's held, and under ⋯ restarting its planner or its environment, upgrading it, waking it and deleting it, as
+  beside its name on its own pages.
+- **The innovator** weighs each idea against how things are done today, files the constraints an idea lifts as bets,
+  names precedents honestly, and sets stop counts it can reach. Its new words reach a team at `a6g upgrade` and
+  `a6g rotate`.
+
 ## 0.8.5: Every subscription's limits and usage on the web app, and every page cleaned up
 
 The operator asked for a tab that shows all their Claude subscriptions and their usage, with the same views as T3

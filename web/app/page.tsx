@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Fragment, type ReactNode } from "react";
+import { ActionForm } from "../components/action-form.tsx";
 import { Refresh } from "../components/refresh.tsx";
 import { StartCard } from "../components/start-card.tsx";
+import { SubmitButton } from "../components/submit-button.tsx";
+import { TeamActions } from "../components/team-actions.tsx";
 import { TeamFolds } from "../components/team-folds.tsx";
 import { Ago, Chip, Notice, QuietMark, type SearchParams } from "../components/ui.tsx";
 import { machinesRunning, type MachineTeam, online } from "../../lib/fleet.ts";
-import { can, roleIn, runsTeam } from "../server/access.ts";
+import { can, LIMITS, roleIn, runsTeam } from "../server/access.ts";
 import {
   allTeams,
   controlsFor,
@@ -19,11 +22,12 @@ import {
   tasksFor,
   type TeamDoc,
 } from "../server/factory.ts";
-import { waitingCount } from "../server/inbox.ts";
+import { inbox, type Waiting, waitingCount } from "../server/inbox.ts";
 import { linkedMachines, type Machine, ownersOf } from "../server/machines.ts";
 import { type Start, startOpen, starts } from "../server/starts.ts";
 import { requireViewer } from "../server/viewer.ts";
 import { dollars, merges, offSite, progress, proposals, quietSince } from "../server/views.ts";
+import { decideAction } from "./t/[team]/actions.ts";
 
 export const metadata: Metadata = { title: "Teams" };
 
@@ -120,7 +124,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
       {rows.length ? (
         <TeamFolds count={rows.length}>
           <ul className="plain team-rows" aria-labelledby="all-teams">
-            {rows.map(({ team, tasks, waiting, asks: teamAsks, cycles, lastMerge, limits }) => {
+            {rows.map(({ team, tasks, waiting, asks: teamAsks, waits, controls, cycles, lastMerge, limits }) => {
               const role = roleIn(viewer, team.name);
               const status = team.status;
               const atWork = status ? Object.entries(status.members).filter(([, n]) => n > 0) : [];
@@ -188,8 +192,35 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                       </span>
                     </summary>
                     <div className="team-body">
+                      {/* What waits on the operator, each settled from here or on Waiting on you; the team's own keys
+                          (stop, pause, resume, and the rest under ⋯) beside the heading, as beside its name on its pages. */}
+                      {decides && waits.length ? (
+                        <section aria-label={`${title}: waiting on you`}>
+                          <div className="team-body-head">
+                            <h3 className="small">Waiting on you</h3>
+                            {control ? (
+                              <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+                            ) : null}
+                          </div>
+                          <ul className="plain waits">
+                            {waits.slice(0, WAITS_SHOWN).map((w) => (
+                              <WaitingRow key={w.task.id} team={team.name} w={w} />
+                            ))}
+                          </ul>
+                          {waits.length > WAITS_SHOWN ? (
+                            <p className="small">
+                              <Link href={`/t/${team.name}/inbox`}>{`All ${waits.length} on Waiting on you`}</Link>
+                            </p>
+                          ) : null}
+                        </section>
+                      ) : null}
                       <section aria-label={`${title}: where the work stands`}>
-                        <h3 className="small">Work</h3>
+                        <div className="team-body-head">
+                          <h3 className="small">Work</h3>
+                          {control && !(decides && waits.length) ? (
+                            <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+                          ) : null}
+                        </div>
                         <ul className="counts mini">
                           {progress(tasks).map(({ label, count }, index) => (
                             <li key={label} className={count ? undefined : "none"} title={label}>
@@ -393,16 +424,60 @@ function Spent({
   );
 }
 
+// At most this many waiting things on a row; the rest are on the team's Waiting on you.
+const WAITS_SHOWN = 5;
+
+// One thing waiting on the operator, on its team's row: what it is and how long it's waited; Answer goes to it on
+// Waiting on you, where its question and choices are; Discard rejects it from here, with words the team reads, once
+// it's opened (so one press can't do it). A design check-in is only ever answered (lib/tasks/model.ts).
+function WaitingRow({ team, w }: { team: string; w: Waiting }) {
+  const t = w.task;
+  const field = `discard-${team}-${t.id}`;
+  return (
+    <li className="wait-row">
+      <span className="wait-what">
+        <span className="id">#{t.id}</span> <Link href={`/t/${team}/tasks/${t.id}`}>{t.title}</Link> <Chip>{t.status}</Chip>{" "}
+        <span className="muted small nowrap">
+          waiting <Ago at={w.since} />
+        </span>
+      </span>
+      <span className="wait-do">
+        <Link className="button s" href={`/t/${team}/inbox#task-${t.id}`}>
+          Answer
+        </Link>
+        {t.kind === "design" ? null : (
+          <details className="discard">
+            <summary>Discard…</summary>
+            <ActionForm action={decideAction} className="discard-form">
+              <input type="hidden" name="team" value={team} />
+              <input type="hidden" name="id" value={t.id} />
+              <input type="hidden" name="decision" value="reject" />
+              <input type="hidden" name="seen" value={t.version} />
+              <label htmlFor={field}>Why, for the team</label>
+              <input id={field} name="text" required maxLength={LIMITS.note} defaultValue="Not needed now." autoComplete="off" />
+              <SubmitButton className="reject s">{`Discard #${t.id}`}</SubmitButton>
+            </ActionForm>
+          </details>
+        )}
+      </span>
+    </li>
+  );
+}
+
 async function summary(team: TeamDoc, control: boolean) {
   const [tasks, cycles, controls] = await Promise.all([
     tasksFor(team.name),
     team.mode === "cycles" ? storeFor(team.name).cycles.all() : Promise.resolve([]),
     control ? controlsFor(team.name) : Promise.resolve([]),
   ]);
+  const { questions, blocked } = inbox(tasks);
   return {
     tasks,
+    controls,
     waiting: proposals(tasks).length,
     asks: waitingCount(tasks),
+    // What waits on the operator now, longest waiting first: the questions, then blocked work.
+    waits: [...questions, ...blocked],
     cycles: cycles.length,
     lastMerge: merges(tasks, 1)[0]?.at ?? null,
     limits: limitsOf(controls),
