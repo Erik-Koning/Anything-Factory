@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: a team's controls on the web app, and what a button did said in a toast
+## 0.8.3: A team's controls on the web app, toasts in place of notices, tasks routed by what they ask, and a site that answers at once
 
 The operator asked that a button complete at once and say so in a toast, not in a notice that moves the page, and for
 deleting, stopping and resuming a team from the web app, with the other things they'd do to a team on its Mac. For
@@ -48,7 +48,7 @@ research --area ideas` does the same). An operator's ask for ideas had sat as re
 - **The watchdog's word on a new budget** says it in the budget's own unit, with its limits on each subscription, as
   `a6g budget` does: one set only on a subscription read "none a day, none a week, none in all".
 
-## Unreleased: the web app answers at once
+### The web app answers at once
 
 The operator found the site slow: a click on a tab or link changed nothing until the next page was all there, and
 sending an answer in Waiting on you took a while. Measured from the operator's Mac against the same database cluster,
