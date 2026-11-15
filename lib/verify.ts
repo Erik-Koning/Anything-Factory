@@ -1,9 +1,10 @@
 // The merge queue's check after merges: the team's pages and its end-to-end suite, re-run on the integration branch, so
 // what was done stays done. One check for the newest commit, however many merged meanwhile: each merge that lands marks
 // a check due, and every queued merge, however it ends, runs one that's due unless another merge is queued behind it (a
-// check already running takes the newer commit when it finishes). It holds the merge lock (nothing fast-forwards the
-// checkout), then the app lock (nothing restarts the app), then a gate slot, in that order, as every holder of those
-// locks takes them; and it throws a run away if the checkout's commit moved anyway.
+// check already running takes the newer commit when it finishes). A check due for longer than OVERDUE_MIN holds its
+// turn instead, so a steady run of merges can't leave the branch unchecked. It holds the merge lock (nothing
+// fast-forwards the checkout), then the app lock (nothing restarts the app), then a gate slot, in that order, as every
+// holder of those locks takes them; and it throws a run away if the checkout's commit moved anyway.
 //
 // The app's health comes first: an app that's down is one finding, nothing else runs, and the check stays due; one
 // that goes away while the checks run files nothing, and the check stays due too. Then
@@ -56,6 +57,11 @@ interface Pending {
 }
 // With no start time to compare (ps didn't say), a mark this old is nobody's: longer than a merge waits and runs.
 const MARK_MAX_MS = 6 * 60 * 60_000;
+// A check due this long, since the first merge it's due for, gives way to no merge: those queued behind it wait for it
+// (a merge waits up to two hours for the merge lock). Giving way every time let a busy team's merges go unchecked for
+// hours, each one leaving the check to the next.
+export const OVERDUE_MIN = 90;
+const overdue = (due: { at?: string } | null): boolean => Boolean(due?.at) && Date.now() - Date.parse(due?.at ?? "") > OVERDUE_MIN * 60_000;
 export function markQueued(file: string, pid: number): void {
   mkdirSync(dirname(file), { recursive: true });
   writeJson(file, { pid, started: startOf(pid), at: new Date().toISOString() } satisfies Pending);
@@ -402,12 +408,14 @@ export interface CheckOptions {
   audit?: Runner;
 }
 
-// One check of the integration branch's head, holding merge, app and gate in that order.
+// One check of the integration branch's head, holding merge, app and gate in that order. An overdue one (`holds`)
+// doesn't give way to a merge queued behind it.
 async function checkOnce(
   home: string,
   team: LoadedTeam,
   run: string,
-  { healthWaitMs = 5000, lockWaitMin, queuedEveryMs, audit }: CheckOptions
+  { healthWaitMs = 5000, lockWaitMin, queuedEveryMs, audit }: CheckOptions,
+  holds = false
 ): Promise<Checked> {
   const state = stateDir(home);
   const holder = "the merge queue's check";
@@ -506,11 +514,11 @@ async function checkOnce(
           try {
             // A merge queued behind this check waits for the merge lock it holds, however long the suite takes (one of
             // two hours held the team's integration branch still): the suite gives way to it, and the check stays due
-            // for the newer commit, which that merge runs once nothing is queued behind it.
+            // for the newer commit, which that merge runs once nothing is queued behind it. An overdue check doesn't.
             suite = await recordSuite(home, team, {
               retries: 1,
               namespace: `verify-${Date.now().toString(36)}`,
-              stopWhen: () => othersQueued(state),
+              stopWhen: () => !holds && othersQueued(state),
               ...(queuedEveryMs ? { stopEveryMs: queuedEveryMs } : {}),
             });
             if (suite.gaveWay) {
@@ -645,10 +653,11 @@ async function checkOnce(
 // Whether a check is due, and since when: for a6g status.
 export const checkDue = (home: string): { at?: string; after?: string } | null => parsed(dueFile(stateDir(home)));
 
-// For a queued merge, however it ended: a merge that landed marks a check due (`merged`), and every one runs a check
-// that's due, unless another merge is queued behind it (which runs it) or a check is running (which takes the newest
-// commit when it finishes). A check that couldn't look (a lock stayed busy, the app is down) leaves itself due for the
-// next merge; one whose commit moved under it runs once more, then leaves it.
+// For a queued merge, however it ended: a merge that landed marks a check due (`merged`), keeping when it first became
+// due, and every one runs a check that's due, unless another merge is queued behind it (which runs it; not when the
+// check is overdue) or a check is running (which takes the newest commit when it finishes). A check that couldn't look
+// (a lock stayed busy, the app is down) leaves itself due for the next merge; one whose commit moved under it runs once
+// more, then leaves it.
 export async function verifyAfterMerge(
   home: string,
   team: LoadedTeam,
@@ -658,18 +667,19 @@ export async function verifyAfterMerge(
 ): Promise<void> {
   const state = stateDir(home);
   mkdirSync(state, { recursive: true });
-  if (merged) writeJson(dueFile(state), { at: new Date().toISOString(), after: branch });
+  if (merged) writeJson(dueFile(state), { at: parsed<{ at?: string }>(dueFile(state))?.at ?? new Date().toISOString(), after: branch });
   let retried = false;
   // A merge that finished while a check held the lock, and found it taken, left its mark: that's the next round.
   for (let round = 0; round < 4 && existsSync(dueFile(state)); round++) {
-    if (othersQueued(state)) return;
+    const holds = overdue(parsed(dueFile(state)));
+    if (!holds && othersQueued(state)) return;
     const verify = await acquire(home, "verify", { slots: 1, waitMin: 0, holder: `check after ${branch}` });
     if (!verify) return;
     let checked: Checked;
     try {
       const due = parsed<{ at?: string; after?: string }>(dueFile(state));
       rmSync(dueFile(state), { force: true });
-      checked = await checkOnce(home, team, run, options);
+      checked = await checkOnce(home, team, run, options, holds);
       if (checked.due && !existsSync(dueFile(state)))
         writeJson(dueFile(state), {
           at: due?.at ?? new Date().toISOString(),
