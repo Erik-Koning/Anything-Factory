@@ -111,7 +111,8 @@ export function AnswerForm({
         }
       />
       <div className="inline">
-        <button type="submit" className="primary" disabled={pending}>
+        {/* While it's on its way, the question it answers fades (data-pending, globals.css). */}
+        <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Sending…" : adding ? `Add to the answer on #${id}` : `Send the answer on #${id}`}
         </button>
         <span className="hint">

@@ -23,7 +23,7 @@ import { can } from "../../../../server/access.ts";
 import { agreementHistory, agreementPending, hintSays, messagesFields, readsAgreement, topicRows, toYou } from "../../../../server/decided.ts";
 import { agreementOf } from "../../../../server/factory.ts";
 import { askedBy } from "../../../../server/views.ts";
-import { controlsFor, decisionsFor, tasksOf, teamFor } from "../team.ts";
+import { controlsFor, decisionsFor, readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Agreement" };
 
@@ -75,6 +75,7 @@ function Matrix({ level, inForce }: { level: Level; inForce: boolean }) {
 // earlier version. Admins only.
 export default async function AgreementPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name, "decisions", "controls");
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:control", team.name)) notFound();
   const [controls, decisions, tasks] = await Promise.all([controlsFor(team.name), decisionsFor(team.name), tasksOf(team.name)]);

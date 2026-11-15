@@ -5,10 +5,10 @@ import { Chip, clip, Notice, type SearchParams } from "../../../../components/ui
 import { Verdict } from "../../../../components/verdict.tsx";
 import { DIMENSIONS } from "../../../../../lib/tasks/model.ts";
 import { can } from "../../../../server/access.ts";
-import { storeFor, type Task } from "../../../../server/factory.ts";
+import type { Task } from "../../../../server/factory.ts";
 import { originsFor } from "../../../../server/origin.ts";
 import { proposals } from "../../../../server/views.ts";
-import { teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Decisions" };
 
@@ -21,9 +21,10 @@ const HEADINGS: Record<string, string> = {
 
 export default async function ProposalsPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "proposals:decide", team.name)) notFound();
-  const [tasks, origins] = await Promise.all([storeFor(team.name).tasks.all(), originsFor(team.name, viewer)]);
+  const [tasks, origins] = await Promise.all([tasksOf(team.name), originsFor(team.name, viewer)]);
   // Triage is the planner's to sort; an admin may decide one too (it's down, or it's spam), by the same rules.
   const waiting = [...proposals(tasks), ...tasks.filter((t) => t.status === "triage" && t.kind !== "journey" && t.kind !== "design")];
   const groups = Object.keys(HEADINGS)

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { TeamInbox } from "../../components/inbox.tsx";
 import { Chip, Notice, QuietNote, type SearchParams } from "../../components/ui.tsx";
 import { can } from "../../server/access.ts";
-import { allTeams, storeFor } from "../../server/factory.ts";
+import { allTeams, tasksFor } from "../../server/factory.ts";
 import { inbox } from "../../server/inbox.ts";
 import { requireViewer } from "../../server/viewer.ts";
 import { quietSince } from "../../server/views.ts";
@@ -13,12 +13,13 @@ export const metadata: Metadata = { title: "Waiting on you" };
 
 // Everything waiting on the operator, on every team they decide for: the teams with something first.
 export default async function InboxPage({ searchParams }: { searchParams: SearchParams }) {
-  const viewer = await requireViewer();
-  const teams = (await allTeams()).filter((team) => can(viewer, "proposals:decide", team.name));
+  // The teams are read beside the session, and shown only as the person may see them.
+  const [viewer, every] = await Promise.all([requireViewer(), allTeams()]);
+  const teams = every.filter((team) => can(viewer, "proposals:decide", team.name));
   if (!teams.length && !viewer.admin) notFound();
   const boxes = await Promise.all(
     teams.map(async (team) => {
-      const tasks = await storeFor(team.name).tasks.all();
+      const tasks = await tasksFor(team.name);
       const box = inbox(tasks);
       return { team, box, tasks, open: box.questions.length + box.blocked.length, noMac: quietSince(team) };
     })

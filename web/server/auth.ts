@@ -209,8 +209,9 @@ function makeAuth() {
       },
     },
     // The viewer's address, from the one header the CDN sets (and nobody else can, proxy.ts): sessions record it, rate
-    // limits count by it, and the new-IP check compares it. IPv6 by its /64.
-    advanced: { ipAddress: { ipAddressHeaders: [config().ipHeader], ipv6Subnet: 64 } },
+    // limits count by it, and the new-IP check compares it. IPv6 by its /64. A session is read with its person in one
+    // query ($lookup), not two: every page starts with it.
+    advanced: { ipAddress: { ipAddressHeaders: [config().ipHeader], ipv6Subnet: 64 }, database: { joins: true } },
     session: {
       additionalFields: { secondFactor: { type: "boolean", required: false, defaultValue: false, input: false } },
     },

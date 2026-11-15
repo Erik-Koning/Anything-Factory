@@ -45,10 +45,11 @@ export interface Store {
 export { Refused } from "./model.ts";
 
 // Applies `change` to the document `id`, reading it again and retrying when someone else changed it first. `change`
-// throws a Refused to stop.
-export async function update<T extends Doc>(collection: Collection<T>, id: string, change: (doc: T) => T): Promise<T> {
+// throws a Refused to stop. `read`: the document as the caller read it just now, tried first without reading it again
+// (its version stops a write over a newer one, which is then read and tried again like any other).
+export async function update<T extends Doc>(collection: Collection<T>, id: string, change: (doc: T) => T, read?: T): Promise<T> {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const doc = await collection.get(id);
+    const doc = attempt === 0 && read?.id === id ? read : await collection.get(id);
     if (!doc) throw new Refused(`no ${id}`);
     const written = await collection.replace(change(doc));
     if (written) return written;

@@ -6,7 +6,7 @@ import { Notice, param, type SearchParams } from "../../../../components/ui.tsx"
 import { checkIns } from "../../../../../lib/tasks/decisions.ts";
 import { can } from "../../../../server/access.ts";
 import { type Decided, decidedLog, readsAgreement } from "../../../../server/decided.ts";
-import { controlsFor, decisionsFor, tasksOf, teamFor } from "../team.ts";
+import { controlsFor, decisionsFor, readAhead, tasksOf, teamFor } from "../team.ts";
 
 // One page for two readers: an admin's tab calls it Decided for you; a member reads the same log, decided for someone else.
 export const metadata: Metadata = { title: "Decision log" };
@@ -19,6 +19,7 @@ const DAYS = 30;
 // didn't ask. What's flagged and not reviewed comes first; an admin agrees with one or overturns it.
 export default async function DecidedPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name, "decisions", "controls");
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "decisions:read", team.name)) notFound();
   const review = can(viewer, "proposals:decide", team.name);
