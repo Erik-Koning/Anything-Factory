@@ -795,6 +795,72 @@ main:focus {
 .grid.lead {
   grid-template-columns: minmax(260px, 1fr) minmax(0, 2.2fr);
 }
+/* What an idle or finished team waits for, above its facts. */
+.state-note {
+  margin: -4px 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+/* How a team runs (the overview, for its admins): a row per part, its name on the left as a part label and what
+   there is to say or do beside it, each row ruled off from the next. */
+.runs > .part {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  gap: 6px 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.runs > h2 + .part {
+  padding-top: 4px;
+  border-top: 0;
+}
+.runs > .part:last-child {
+  padding-bottom: 0;
+}
+.part > h3 {
+  margin: 0;
+  padding-top: 2px;
+}
+.part-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.part-body > * {
+  margin: 0;
+}
+.part-body > .command {
+  justify-self: start;
+}
+/* A team's work on its overview: its journeys and latest merges, beside the graph, which takes the width its drawing
+   needs (scrolling past what the page can give it) and leaves the rest to them. One above the other on a narrow
+   screen. */
+.work {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, max-content);
+  gap: var(--gap);
+  align-items: start;
+  margin: var(--gap) 0;
+}
+.work .panel {
+  margin: 0;
+}
+.work-side {
+  display: grid;
+  gap: var(--gap);
+}
+/* Why a request was turned down, ruled off under what it asked. */
+.turned-down {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.turned-down > h3 {
+  margin: 0;
+}
+.turned-down > .text {
+  margin-top: 4px;
+}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
@@ -1521,10 +1587,38 @@ code.path {
 .board-bar .lede {
   margin: 0;
 }
+/* Adding a task: the form, and beside it what happens to the task and what already waits for triage. */
+.add-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: var(--gap);
+  align-items: start;
+  margin: var(--gap) 0;
+}
+.add-layout > .panel {
+  margin: 0;
+}
+.add-side .timeline {
+  margin-bottom: 18px;
+}
+.add-side .triage {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.add-side .triage h3 .count {
+  margin-left: 6px;
+  color: var(--ink);
+}
+@media (max-width: 860px) {
+  .add-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* A lane per step. The board runs on from the page's column to the window's right edge, so a wide window fits them
    all; it scrolls sideways on its own when they don't fit, with room past the last lane to see its end. Where the
-   browser can tie a style to how far something has scrolled, the edge dims while there is more that way, and clears
-   once the last lane is in view or when everything fits. A phone shows one lane and the edge of the next. */
+   browser can tie a style to how far something has scrolled, the lane cut by an edge fades out while there is more
+   that way (the right one until the last lane is in view, the left one once it has left the first), and both clear
+   when everything fits. A phone shows one lane and the start of the next. */
 .kanban {
   display: flex;
   gap: 10px;
@@ -1535,30 +1629,49 @@ code.path {
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
   scroll-padding-inline: 2px 28px;
-  mask-image: linear-gradient(to right, #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 25%));
+  scrollbar-color: var(--edge) transparent;
+  mask-image: linear-gradient(
+    to right,
+    rgb(0 0 0 / 15%),
+    #000 calc(var(--edge-fade-start) * 2.5),
+    #000 calc(100% - var(--edge-fade) * 2.5),
+    rgb(0 0 0 / 10%)
+  );
+}
+@property --edge-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes edge-fade-start {
+  0% {
+    --edge-fade-start: 0px;
+  }
+  6%,
+  100% {
+    --edge-fade-start: 28px;
+  }
 }
 @supports (animation-timeline: scroll()) {
   .kanban,
   .graph {
-    animation: edge-fade linear both;
-    animation-timeline: scroll(self inline);
+    animation:
+      edge-fade linear both,
+      edge-fade-start linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
   }
 }
-/* A lane is a well; its cards are raised out of it. */
+/* A lane is a well; its cards are raised out of it. Every lane is as wide as the others, empty or not. */
 .lane {
   background: var(--well);
   border: 1px solid var(--line);
   border-radius: var(--r-panel);
   box-shadow: var(--sink);
   padding: 10px;
-  flex: 1 0 228px;
+  flex: 1 0 224px;
   max-width: 340px;
   min-width: 0;
   scroll-snap-align: start;
-}
-/* A lane with nothing in it keeps its place, narrower. */
-.lane:not(:has(ol)) {
-  flex: 0 0 172px;
 }
 .lane h2 {
   display: flex;
@@ -1652,13 +1765,20 @@ code.path {
   font-weight: 500;
   color: var(--brand);
 }
-/* Wider than its box, the drawing scrolls on its own and fades out where there is more. */
+/* Wider than its box, the drawing scrolls on its own and fades out at an edge where there is more. */
 .graph {
   overflow: auto;
   max-width: 100%;
   padding-right: 24px;
   border-radius: var(--r-ctl);
-  mask-image: linear-gradient(to right, #000 calc(100% - var(--edge-fade)), rgb(0 0 0 / 25%));
+  scrollbar-color: var(--edge) transparent;
+  mask-image: linear-gradient(
+    to right,
+    rgb(0 0 0 / 15%),
+    #000 calc(var(--edge-fade-start) * 2.5),
+    #000 calc(100% - var(--edge-fade) * 2.5),
+    rgb(0 0 0 / 10%)
+  );
 }
 .graph svg {
   font: 12px var(--font-text);
@@ -1682,6 +1802,9 @@ code.path {
 .graph .node text.sub {
   fill: var(--ink-3);
   font-size: 11px;
+}
+.graph .node .id {
+  fill: var(--ink-3);
 }
 .graph .node.status-building rect {
   stroke: var(--solid);
@@ -1709,12 +1832,125 @@ code.path {
 .graph .arrowhead {
   fill: var(--ink-3);
 }
-/* The graph by level: BetterDiagrams' editor fills this box, and pans and zooms inside it. */
+/* The graph by level: BetterDiagrams' editor fills this box, and pans and zooms inside it, sunk into the panel like
+   a well. Its colours come from the app's (components/level-graph.tsx); here its bar, legend and keys take the app's
+   materials. What it offers for drawing architecture rather than reading a task graph (its own name, Checks, Compare)
+   is left out; a phone keeps the search, the zoom and Fit. React Flow's attribution stays, quietly: it asks to be
+   hidden only by those who subscribe to React Flow Pro. */
 .level-graph {
   height: clamp(420px, 72vh, 900px);
   border: 1px solid var(--line);
   border-radius: var(--r-ctl);
+  box-shadow: var(--sink);
   overflow: hidden;
+}
+.graph-how {
+  margin: -4px 0 12px;
+}
+/* Its cards come in once the first level has settled at its size (components/level-graph.tsx). */
+.level-graph .react-flow__viewport {
+  transition: opacity 160ms ease;
+}
+.level-graph:not([data-shown]) .react-flow__viewport {
+  opacity: 0;
+}
+.level-graph .as-root .as-brand,
+.level-graph .as-root .as-toolbar__group:has(button[title^="Checks"]),
+.level-graph .as-root .as-toolbar__spacer > button[title^="Compare"] {
+  display: none;
+}
+.level-graph .as-root .as-brand + .as-toolbar__group::before {
+  display: none;
+}
+.level-graph .as-root .as-toolbar,
+.level-graph .as-root .as-focusbar {
+  padding: 6px 8px;
+  background: var(--face);
+  border-bottom-color: var(--line);
+  box-shadow: var(--rim);
+}
+.level-graph .as-root .as-btn,
+.level-graph .as-root .as-zoom,
+.level-graph .as-root .as-focusbar__crumb {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.level-graph .as-root .as-btn:hover:not(:disabled),
+.level-graph .as-root .as-zoom:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+}
+.level-graph .as-root .as-zoom {
+  font: 500 12px/1 var(--font-code);
+  font-stretch: 87.5%;
+}
+.level-graph .as-root .as-search {
+  max-width: 360px;
+  background: var(--field);
+  border-color: var(--edge);
+  box-shadow: var(--sink);
+  font-size: 13.5px;
+}
+.level-graph .as-root .as-search::placeholder {
+  color: var(--ink-3);
+}
+.level-graph .as-root .as-focusbar__crumb--here {
+  color: var(--ink);
+}
+.level-graph .as-root .as-legend,
+.level-graph .as-root .react-flow__controls {
+  background: var(--face);
+  border: 1px solid var(--line);
+  box-shadow: var(--rim), var(--raise-s);
+  backdrop-filter: none;
+}
+.level-graph .as-root .react-flow__controls {
+  border-radius: var(--r-ctl);
+}
+.level-graph .as-root .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border-bottom-color: var(--line);
+  fill: var(--ink-2);
+}
+.level-graph .as-root .react-flow__controls-button:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  fill: var(--ink);
+}
+.level-graph .as-root .react-flow__attribution {
+  padding: 2px 6px;
+}
+.level-graph .as-root .react-flow__attribution a {
+  color: var(--ink-3);
+}
+@media (max-width: 560px) {
+  .level-graph {
+    height: clamp(340px, 56vh, 560px);
+  }
+  .level-graph .as-root .as-toolbar__group:has(button[title^="Hidden nodes"]),
+  .level-graph .as-root .as-toolbar__spacer > .as-menu-wrap {
+    display: none;
+  }
+  .level-graph .as-root .as-toolbar__spacer {
+    flex: 1 1 0;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .level-graph .as-root .as-search {
+    flex: 1 1 0;
+    min-width: 72px;
+  }
+  /* The breadcrumbs take the bar; the level's name in BetterDiagrams' own terms goes. */
+  .level-graph .as-root .as-focusbar__level {
+    display: none;
+  }
+}
+/* A finger pans the canvas with the cursor already, so the choice of tool goes. */
+@media (pointer: coarse) {
+  .level-graph .as-root .as-toolbar__group:has(.as-toolpicker) {
+    display: none;
+  }
 }
 
 /* A group of choices (the pause panel's radios and journeys). */
@@ -3475,14 +3711,9 @@ ol.setup > li > * {
   color: var(--ink-2);
   font-size: 13.5px;
 }
-#subscriptions > h3 {
-  margin-top: 16px;
-}
-#subscriptions > p {
-  max-width: 56rem;
-}
-#subscriptions > .small + .small {
-  margin-top: 0;
+/* The overview's row of them (components/subscriptions-panel.tsx): a little more room above each list's heading. */
+#subscriptions .part-body > h3 {
+  margin-top: 6px;
 }
 @media (max-width: 960px) {
   .start-layout {
@@ -3569,7 +3800,8 @@ ol.setup > li > * {
 
 /* --- Small screens, touch, motion, forced colours ---------------------------------------------------------------- */
 @media (max-width: 900px) {
-  .grid.lead {
+  .grid.lead,
+  .work {
     grid-template-columns: minmax(0, 1fr);
   }
   .person {
@@ -3691,8 +3923,8 @@ ol.setup > li > * {
   .every > input {
     max-width: 7rem;
   }
-  /* The board runs to both edges of the screen. A lane with nothing in it is only its name and count, so the first
-     lane with work in it shows whole beside it. */
+  /* The board runs to both edges of the screen: a lane as wide as the screen less the start of the next, which fades
+     out to say there is more that way. */
   .kanban {
     margin-inline: -16px;
     padding-inline: 16px 28px;
@@ -3700,17 +3932,8 @@ ol.setup > li > * {
     scroll-snap-type: x proximity;
   }
   .lane {
-    flex: 0 0 66%;
+    flex: 0 0 min(300px, calc(100vw - 92px));
     max-width: none;
-  }
-  .lane:not(:has(ol)) {
-    flex: 0 0 auto;
-  }
-  .lane:not(:has(ol)) :is(.hint, .empty) {
-    display: none;
-  }
-  .lane:not(:has(ol)) h2 {
-    margin: 3px;
   }
   /* A rail of choices too wide for the screen stands its options one above the other. */
   .segmented {
@@ -3747,6 +3970,18 @@ ol.setup > li > * {
   }
   .facts dd {
     margin-bottom: 8px;
+  }
+  /* Short facts (a team's status, where a task stands, what each role runs on) keep each label beside its value. */
+  .facts.brief {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 14px;
+  }
+  .facts.brief dd {
+    margin-bottom: 0;
+  }
+  /* A row of How it runs: its name above what it says. */
+  .runs > .part {
+    grid-template-columns: minmax(0, 1fr);
   }
   .shortcuts a {
     min-height: 40px;

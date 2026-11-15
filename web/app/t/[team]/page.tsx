@@ -35,6 +35,57 @@ export default async function OverviewPage({ params, searchParams }: { params: P
   const details = can(viewer, "team:board", team.name);
   const shownJourneys = journeys(tasks);
   const waiting = can(viewer, "proposals:decide", team.name) ? waitingCount(tasks) : 0;
+  const retire = can(viewer, "team:retire", team.name);
+  // What wakes an idle or finished team: new work, from whoever may give it some.
+  const adds = can(viewer, "tasks:add", team.name) ? "add a task" : can(viewer, "tasks:suggest", team.name) ? "suggest a task" : null;
+  const asks = can(viewer, "requests:send", team.name);
+  const wake =
+    adds || asks ? (
+      <>
+        {adds ? <Link href={`/t/${team.name}/add`}>{adds.replace(/^./, (c) => c.toUpperCase())}</Link> : null}
+        {adds && asks ? " or " : null}
+        {asks ? <Link href={`/t/${team.name}/requests`}>{adds ? "send a request" : "Send a request"}</Link> : null}.
+      </>
+    ) : null;
+  // A journey's title opens its page for those who may see the board.
+  const journeysPanel = (
+    <section className="panel" aria-labelledby="journeys">
+      <h2 id="journeys">Journeys</h2>
+      {shownJourneys.length ? (
+        <ul className="plain rows">
+          {shownJourneys.map((j) => (
+            <li key={j.id}>
+              <div className="head">
+                <span className="id">#{j.id}</span>
+                {details ? (
+                  <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
+                    {j.title}
+                  </Link>
+                ) : (
+                  <span className="title">{j.title}</span>
+                )}
+                <Chip>{j.status}</Chip>
+                {j.due ? <Chip tone="caution">due its verification</Chip> : null}
+              </div>
+              <p className="small muted">
+                {j.done} of {j.total} task{j.total === 1 ? "" : "s"} done
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="empty">
+          No journeys yet. The planner groups work into journeys as it plans, each one verified once its tasks are done
+          {can(viewer, "tasks:add", team.name) ? (
+            <>
+              ; you can <Link href={`/t/${team.name}/add`}>add one</Link> too
+            </>
+          ) : null}
+          .
+        </p>
+      )}
+    </section>
+  );
   return (
     <>
       <Notice searchParams={searchParams} />
@@ -52,11 +103,17 @@ export default async function OverviewPage({ params, searchParams }: { params: P
       <div className="grid lead">
         <section className="panel" aria-labelledby="status">
           <h2 id="status">Status</h2>
-          <dl className="facts">
-            <dt>State</dt>
-            <dd>
-              <Chip>{status?.state ?? "no status yet"}</Chip>
-            </dd>
+          {/* Its state is the chip beside its name; a team with nothing to do says what starts it again. */}
+          {status?.state === "idle" ? (
+            <p className="small state-note">
+              <b>Idle:</b> it has built what it had, and waits for new work to wake it. {wake}
+            </p>
+          ) : status?.state === "complete" ? (
+            <p className="small state-note">
+              <b>Complete:</b> its finish line holds, and it checks it nightly; new work starts it again. {wake}
+            </p>
+          ) : null}
+          <dl className="facts brief">
             <dt>Planner</dt>
             <dd>{status?.planner ?? "not running"}</dd>
             <dt>At work</dt>
@@ -87,71 +144,56 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         </section>
       </div>
 
-      {control ? <TeamControls team={team} controls={controls} /> : null}
+      {/* How the team runs, for its admins: a row each for its controls, its subscriptions and its place on the site. */}
+      {control || retire ? (
+        <section className="panel runs" aria-labelledby="runs">
+          <h2 id="runs">How it runs</h2>
+          {control ? <TeamControls team={team} controls={controls} /> : null}
+          {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
+          {retire ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
+        </section>
+      ) : null}
       {control ? (
         <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
       ) : null}
-      {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
-      {can(viewer, "team:retire", team.name) ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
 
-      <div className="grid">
-        <section className="panel" aria-labelledby="journeys">
-          <h2 id="journeys">Journeys</h2>
-          {shownJourneys.length ? (
-            <ul className="plain rows">
-              {shownJourneys.map((j) => (
-                <li key={j.id}>
-                  <div className="head">
-                    <span className="id">#{j.id}</span>
-                    {details ? (
-                      <Link className="title" href={`/t/${team.name}/tasks/${j.id}`}>
-                        {j.title}
-                      </Link>
-                    ) : (
-                      <span className="title">{j.title}</span>
-                    )}
-                    <Chip>{j.status}</Chip>
-                    {j.due ? <Chip tone="caution">due its verification</Chip> : null}
-                  </div>
-                  <p className="small muted">
-                    {j.done} of {j.total} task{j.total === 1 ? "" : "s"} done
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="empty">No journeys yet.</p>
-          )}
-        </section>
-        {details ? (
-          <section className="panel" aria-labelledby="merges">
-            <h2 id="merges">Recent merges</h2>
-            {merges(tasks).length ? (
-              <ul className="plain rows">
-                {merges(tasks).map(({ task, at }) => (
-                  <li key={task.id}>
-                    <span className="id">#{task.id}</span> <Link href={`/t/${team.name}/tasks/${task.id}`}>{task.title}</Link>{" "}
-                    <span className="muted small">
-                      · <Ago at={at} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty">Nothing merged yet.</p>
-            )}
-          </section>
-        ) : null}
-      </div>
+      {/* The work: its journeys and what merged lately, beside the graph, which takes the width its drawing needs. */}
       {details ? (
-        <section className="panel" aria-labelledby="graph">
-          <h2 id="graph">Graph</h2>
-          <TaskGraph tasks={tasks} />
-          <p className="small">
-            <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
-          </p>
-        </section>
-      ) : null}
+        <div className="work">
+          <div className="work-side">
+            {journeysPanel}
+            <section className="panel" aria-labelledby="merges">
+              <h2 id="merges">Recent merges</h2>
+              {merges(tasks).length ? (
+                <ul className="plain rows">
+                  {merges(tasks).map(({ task, at }) => (
+                    <li key={task.id}>
+                      <span className="id">#{task.id}</span> <Link href={`/t/${team.name}/tasks/${task.id}`}>{task.title}</Link>{" "}
+                      <span className="muted small">
+                        · <Ago at={at} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty">
+                  Nothing merged yet. Work shows here once it&apos;s built, reviewed and merged; the <Link href={`/t/${team.name}/board`}>board</Link> has
+                  what&apos;s under way.
+                </p>
+              )}
+            </section>
+          </div>
+          <section className="panel" aria-labelledby="graph">
+            <h2 id="graph">Graph</h2>
+            <TaskGraph tasks={tasks} />
+            <p className="small">
+              <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
+            </p>
+          </section>
+        </div>
+      ) : (
+        journeysPanel
+      )}
     </>
   );
 }

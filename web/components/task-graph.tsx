@@ -4,7 +4,8 @@ import { layout } from "../../lib/tasks/graph.ts";
 import { journeyDue, type Task } from "../../lib/tasks/model.ts";
 import { clip } from "./ui.tsx";
 
-const BOX_W = 200;
+// Wide enough for an id and a title of 34 characters, and a line such as "building · feature · builder@studio" whole.
+const BOX_W = 248;
 const BOX_H = 52;
 const COL_W = BOX_W + 44;
 const ROW_H = BOX_H + 14;
@@ -14,7 +15,7 @@ const BAND_GAP = 16;
 
 export function TaskGraph({ tasks }: { tasks: Task[] }) {
   const { bands, placed } = layout(tasks);
-  if (!placed.length && !bands.some((b) => b.journey)) return <p className="empty">No tasks yet.</p>;
+  if (!placed.length && !bands.some((b) => b.journey)) return <p className="empty">No tasks yet: the planner adds work as it plans.</p>;
   const where = new Map<string, { x: number; y: number }>();
   const width = Math.max(...bands.map((b) => PAD * 2 + b.cols * COL_W - (COL_W - BOX_W)));
   const drawnBands: { id: string; y: number; h: number; label: string }[] = [];
@@ -72,10 +73,10 @@ export function TaskGraph({ tasks }: { tasks: Task[] }) {
               <title>{`#${t.id} ${t.title} (${detail})`}</title>
               <rect x={at.x} y={at.y} width={BOX_W} height={BOX_H} rx="6" />
               <text x={at.x + 10} y={at.y + 21}>
-                {clip(`#${t.id} ${t.title}`, 30)}
+                <tspan className="id">#{t.id}</tspan> {clip(t.title, 34 - t.id.length)}
               </text>
               <text className="sub" x={at.x + 10} y={at.y + 39}>
-                {clip(detail, 34)}
+                {clip(detail, 40)}
               </text>
             </g>
           );
