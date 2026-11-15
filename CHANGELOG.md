@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased: every subscription's limits and usage on the web app
+
+The operator asked for a tab that shows all their Claude subscriptions and their usage, with the same views as T3
+Code's own Usage page (T3 Code runs the teams' threads). A Mac reports its subscriptions once this version is installed
+there; the site shows them for every Mac that does.
+
+- **Subscriptions**, beside Machines. **Limits** first: a card for each window the subscriptions report (the five-hour
+  session, the week, a model's own week, extra usage by the month), with how much of the pool is left and whether it's
+  going faster than the window runs, and a bar with each subscription's part: what's left of it, its used part
+  hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams stop on it
+  (`a6g subscriptions limit`). Below, each subscription's plan, Macs, teams and whether it's closed to them.
+- **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's
+  (with sessions), one smoothed line each on a chart that reads with the arrow keys too, processed, cached, uncached
+  and output tokens and what the cache saved, dollars and tokens by type and by speed (fast mode's premium), and a
+  breakdown by model, each opening its own figures (per million tokens, cache hits, its own chart), or by day. Narrowed
+  to one machine or one subscription; what's shown is in the address.
+- **On the Mac**, the watchdog's quarter-hourly read of each subscription now keeps what every session on it used, by
+  hour and model, for 91 days (`lib/usage.ts collectAccountUsage`; the first read goes through the last 91 days of
+  transcripts once, about 9 seconds for 3 GB), its five-hour window, a model's own week with its reset, and extra
+  usage. The report carries each subscription by name, its login only as a hash (one login on two Macs is shown once),
+  never a folder. A report's subscriptions that are wrong are dropped and the rest kept; a report may be 768 KB.
+- A request on a model with no price in `lib/prices.ts` counts its tokens and is said to be unpriced, rather than
+  costing nothing silently.
+
 ## Unreleased: the web app answers at once
 
 The operator found the site slow: a click on a tab or link changed nothing until the next page was all there, and

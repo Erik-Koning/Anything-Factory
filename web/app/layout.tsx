@@ -87,6 +87,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   { href: "/", label: "Teams" },
                   ...(viewer.admin ? [{ href: "/inbox", label: "Waiting on you", count: waiting }] : []),
                   { href: "/machines", label: "Machines" },
+                  { href: "/subscriptions", label: "Subscriptions" },
                   ...(viewer.admin
                     ? [
                         { href: "/admin/people", label: "People" },

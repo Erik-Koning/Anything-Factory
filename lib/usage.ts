@@ -11,7 +11,7 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, stat
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { roleOfAgent } from "./config.ts";
-import { costOf, modelKey, priced, type Tokens } from "./prices.ts";
+import { type CostParts, costParts, modelKey, type Tokens } from "./prices.ts";
 import { ticketOf } from "./tasks/model.ts";
 import { dayOf, round, type UsageDay, type UsageRow } from "./tasks/spend.ts";
 import { readJson, writeFileAtomic } from "./util.ts";
@@ -70,7 +70,7 @@ export function transcriptDirsByAccount(home: string, worktrees: string, configD
 }
 
 // One request read from a transcript: when, by which agent (null outside the factory's agents), on which model, branch
-// and folder, its tokens, and its API-equivalent cost (null for a model with no price).
+// and folder, its tokens, and its API-equivalent cost, in all and by part (null for a model with no price).
 export interface Request {
   at: Date;
   role: string | null;
@@ -79,6 +79,9 @@ export interface Request {
   cwd: string | null;
   tokens: Tokens;
   cost: number | null;
+  parts: CostParts | null;
+  // The session it was part of: its transcript's name.
+  session: string;
 }
 
 // Reads what each transcript in `dirs` added since `cursors` were last moved on (they are, in place), and hands each new
@@ -102,8 +105,10 @@ export function readRequests(dirs: string[], cursors: Record<string, Cursor>, vi
       const end = text.lastIndexOf("\n");
       if (end < 0) continue;
       const seen = new Set(cursor.seen);
+      const session = name.slice(0, -".jsonl".length);
       for (const raw of text.slice(0, end).split("\n")) {
-        if (!raw) continue;
+        // Only a request or the agent a transcript runs as says anything here: the rest isn't parsed at all.
+        if (!raw || (!raw.includes('"assistant"') && !raw.includes('"agent-setting"'))) continue;
         let line: Line;
         try {
           line = JSON.parse(raw) as Line;
@@ -129,6 +134,7 @@ export function readRequests(dirs: string[], cursors: Record<string, Cursor>, vi
           fast: usage.speed === "fast",
         };
         const model = modelKey(message.model);
+        const parts = costParts(model, tokens);
         visit({
           at,
           role: cursor.role,
@@ -136,7 +142,9 @@ export function readRequests(dirs: string[], cursors: Record<string, Cursor>, vi
           branch: line.gitBranch ?? null,
           cwd: line.cwd ?? null,
           tokens,
-          cost: priced(model) ? costOf(model, tokens) : null,
+          cost: parts ? parts.input + parts.output + parts.cacheRead + parts.cacheWrite : null,
+          parts,
+          session,
         });
         any = true;
       }
@@ -203,13 +211,60 @@ export function collectUsage(opts: {
   return [...changed].sort().map((day) => ({ team: opts.team, day, machine: opts.machine, rows: state.days[day] ?? [], updatedAt }));
 }
 
+// What an account used in an hour on one model: requests, tokens by kind, and API-equivalent dollars in all and by part
+// (prices.ts CostParts); `unpriced` requests were on a model with no price, so they're in no dollars.
+export interface Tally {
+  requests: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  costInput: number;
+  costOutput: number;
+  costCacheRead: number;
+  costCacheWrite: number;
+  fast: number;
+  saved: number;
+  unpriced: number;
+}
+export const TALLY_FIELDS = [
+  "requests",
+  "input",
+  "output",
+  "cacheRead",
+  "cacheWrite",
+  "cost",
+  "costInput",
+  "costOutput",
+  "costCacheRead",
+  "costCacheWrite",
+  "fast",
+  "saved",
+  "unpriced",
+] as const satisfies readonly (keyof Tally)[];
+export const emptyTally = (): Tally => Object.fromEntries(TALLY_FIELDS.map((field) => [field, 0])) as unknown as Tally;
+
 // Everything an account's Claude Code used on this machine, every session's (the operator's own too: they all draw on
-// the same subscription), API-equivalent dollars by UTC hour ("2026-11-02T03"), the last fortnight kept. In
-// `stateFile`, with where it stopped in each transcript.
-export function collectHours(stateFile: string, dirs: string[], now = new Date()): Record<string, number> {
-  const state = readJson<{ cursors: Record<string, Cursor>; hours: Record<string, number> }>(stateFile, { cursors: {}, hours: {} });
+// the same subscription), by UTC hour ("2026-11-02T03"): API-equivalent dollars (`hours`, the last fortnight, for
+// lib/subscriptions.ts), what each model used (`tallies`, the last KEPT_DAYS, for the web app), and the hour each
+// session last ran in. In `stateFile`, with where it stopped in each transcript.
+export interface AccountUsage {
+  hours: Record<string, number>;
+  tallies: Record<string, Record<string, Tally>>;
+  sessions: Record<string, string>;
+}
+export const KEPT_DAYS = 91;
+const HOURS_DAYS = 15;
+
+export function collectAccountUsage(stateFile: string, dirs: string[], now = new Date()): AccountUsage {
+  const read = readJson<Partial<AccountUsage> & { cursors?: Record<string, Cursor> }>(stateFile, {});
+  // A file from before the tallies is read again from the start, so they cover what its dollars did.
+  const state: AccountUsage & { cursors: Record<string, Cursor> } = read.tallies
+    ? { cursors: read.cursors ?? {}, hours: read.hours ?? {}, tallies: read.tallies, sessions: read.sessions ?? {} }
+    : { cursors: {}, hours: {}, tallies: {}, sessions: {} };
   // A transcript first seen and untouched for longer than is kept is passed over whole: nothing in it would count.
-  const kept = now.getTime() - 15 * 86_400_000;
+  const kept = now.getTime() - KEPT_DAYS * 86_400_000;
   for (const dir of dirs) {
     let names: string[];
     try {
@@ -226,16 +281,40 @@ export function collectHours(stateFile: string, dirs: string[], now = new Date()
       } catch {}
     }
   }
+  const oldest = new Date(kept).toISOString().slice(0, 13);
   const changed = readRequests(dirs, state.cursors, (request) => {
-    if (request.cost === null) return;
     const hour = request.at.toISOString().slice(0, 13);
-    state.hours[hour] = round((state.hours[hour] ?? 0) + request.cost);
+    if (hour < oldest) return;
+    if (request.cost !== null) state.hours[hour] = round((state.hours[hour] ?? 0) + request.cost);
+    const tally = ((state.tallies[hour] ??= {})[request.model] ??= emptyTally());
+    tally.requests += 1;
+    tally.input += request.tokens.input;
+    tally.output += request.tokens.output;
+    tally.cacheRead += request.tokens.cacheRead;
+    tally.cacheWrite += request.tokens.cacheWrite5m + request.tokens.cacheWrite1h;
+    const parts = request.parts;
+    if (parts) {
+      tally.cost = round(tally.cost + parts.input + parts.output + parts.cacheRead + parts.cacheWrite);
+      tally.costInput = round(tally.costInput + parts.input);
+      tally.costOutput = round(tally.costOutput + parts.output);
+      tally.costCacheRead = round(tally.costCacheRead + parts.cacheRead);
+      tally.costCacheWrite = round(tally.costCacheWrite + parts.cacheWrite);
+      tally.fast = round(tally.fast + parts.fast);
+      tally.saved = round(tally.saved + parts.saved);
+    } else tally.unpriced += 1;
+    if ((state.sessions[request.session] ?? "") < hour) state.sessions[request.session] = hour;
   });
-  const oldest = new Date(now.getTime() - 15 * 86_400_000).toISOString().slice(0, 13);
-  for (const hour of Object.keys(state.hours)) if (hour < oldest) delete state.hours[hour];
-  if (changed || !existsSync(stateFile)) writeFileAtomic(stateFile, `${JSON.stringify(state)}\n`);
-  return state.hours;
+  const hoursFrom = new Date(now.getTime() - HOURS_DAYS * 86_400_000).toISOString().slice(0, 13);
+  for (const hour of Object.keys(state.hours)) if (hour < hoursFrom) delete state.hours[hour];
+  for (const hour of Object.keys(state.tallies)) if (hour < oldest) delete state.tallies[hour];
+  for (const [session, hour] of Object.entries(state.sessions)) if (hour < oldest) delete state.sessions[session];
+  if (changed || !read.tallies) writeFileAtomic(stateFile, `${JSON.stringify(state)}\n`);
+  return { hours: state.hours, tallies: state.tallies, sessions: state.sessions };
 }
+
+// The dollars alone (lib/subscriptions.ts).
+export const collectHours = (stateFile: string, dirs: string[], now = new Date()): Record<string, number> =>
+  collectAccountUsage(stateFile, dirs, now).hours;
 
 // Every transcript folder of a Claude Code config folder (~/.claude, or an account's own CLAUDE_CONFIG_DIR).
 export function allTranscriptDirs(configDir: string): string[] {

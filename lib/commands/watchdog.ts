@@ -44,14 +44,24 @@ import { readUri } from "../tasks/mongoUri.ts";
 import { acquireSlot } from "../lock.ts";
 import { A6G_HOME, entryOf, PACKAGE, readRegistry, type RegistryEntry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
-import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
+import { type MachineReport, type MachineSubscription, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
-import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
+import {
+  accounts,
+  describeWait,
+  loginDirs,
+  nearLimit,
+  observeSubscriptions,
+  subscriptionLimits,
+  subscriptionsReport,
+  subscriptionState,
+  weekFor,
+} from "../subscriptions.ts";
 import { collectUsage, transcriptDirsByAccount } from "../usage.ts";
 import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
@@ -482,6 +492,19 @@ async function takeProjectAsks(reach: Channel[], glog: (text: string) => void): 
 // the app takes (team.json's has no limit): one that's too long or holds a newline mustn't stop the whole report.
 export function machineReport(): MachineReport {
   const teams: MachineTeam[] = [];
+  // The roles of each team led here, by the subscription each runs on now (none: this Mac's own login).
+  const on: Record<string, MachineSubscription["teams"]> = {};
+  const own = accounts().find((a) => a.configDir === null)?.name ?? null;
+  for (const entry of registered()) {
+    if (entry.worker) continue;
+    for (const [role, sub] of Object.entries(subscriptionsOf(entry)?.roles ?? {})) {
+      const name = sub ?? own;
+      if (!name) continue;
+      const list = (on[name] ??= []);
+      const team = list.find((t) => t.team === entry.name) ?? list[list.push({ team: entry.name, roles: [] }) - 1];
+      team?.roles.push(role);
+    }
+  }
   for (const entry of registered()) {
     const { state, planner, members } = teamState(entry, entry.run);
     const title = plain(entry.title).replace(/\s+/g, " ").trim();
@@ -503,7 +526,12 @@ export function machineReport(): MachineReport {
   try {
     projects = machineProjects();
   } catch {}
-  return { name: machineName(), factory: PACKAGE.version, teams, projects };
+  // Its subscriptions, for the app's Subscriptions page: none said rather than a report that fails.
+  let subscriptions: MachineSubscription[] = [];
+  try {
+    subscriptions = subscriptionsReport(on);
+  } catch {}
+  return { name: machineName(), factory: PACKAGE.version, teams, projects, subscriptions };
 }
 
 const registered = (): RegistryEntry[] =>
