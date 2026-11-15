@@ -145,10 +145,16 @@ describe("a machine takes an ask from GitHub", () => {
 
   // gh as GitHub would answer it for octocat: `repos` the repositories it sees, with whether it can push (and, for one
   // that moved, the name GitHub answers with); a clone made as a real repository (with origin), failing its first
-  // `cloneFails` tries; and a6g register failing its first `registerFails`.
-  function world(repos: Record<string, { push: boolean; now?: string }>, { cloneFails = 0, registerFails = 0 } = {}) {
+  // `cloneFails` tries; and a6g register failing its first `registerFails`, saying `registerSays`. No Docker engine is
+  // chosen unless a test says which.
+  function world(
+    repos: Record<string, { push: boolean; now?: string }>,
+    { cloneFails = 0, registerFails = 0, registerSays = "T3 Code isn't answering" } = {}
+  ) {
     const s = setting();
     const ran: string[] = [];
+    // The DOCKER_HOST each of the factory's commands ran with.
+    const hostOf: Record<string, string | undefined> = {};
     const gh: string[] = [];
     let fails = cloneFails;
     let registers = registerFails;
@@ -193,7 +199,8 @@ describe("a machine takes an ask from GitHub", () => {
       const line = args.slice(1).join(" ");
       ran.push(line);
       ranAt[line.split(" ")[0] ?? ""] = new Date().toISOString();
-      if (line.startsWith("register") && registers-- > 0) return { code: 1, out: "T3 Code isn't answering" };
+      hostOf[line.split(" ")[0] ?? ""] = process.env.DOCKER_HOST;
+      if (line.startsWith("register") && registers-- > 0) return { code: 1, out: registerSays };
       return { code: 0, out: "" };
     };
     return {
@@ -202,8 +209,20 @@ describe("a machine takes an ask from GitHub", () => {
       ran,
       gh,
       ranAt,
+      hostOf,
       waited: () => waited,
-      deps: { store, setting: s, sh, setup: () => ({ code: 0, out: "done" }), github: me, wait: () => void waited++ },
+      deps: {
+        store,
+        setting: s,
+        sh,
+        setup: () => {
+          hostOf["setup"] = process.env.DOCKER_HOST;
+          return { code: 0, out: "done" };
+        },
+        github: me,
+        wait: () => void waited++,
+        engine: () => null,
+      },
     };
   }
   const state = async (store: ReturnType<typeof storeOver>) => startOf(await store.controls.all()) as NonNullable<ReturnType<typeof startOf>>;
@@ -289,7 +308,7 @@ describe("a machine takes an ask from GitHub", () => {
   test("an ask made again runs on its own rules, not the first try's", async () => {
     const w = world({ "octocat/hello": { push: true } });
     await w.store.controls.create(startControl("hello", "web:s1", ask({ push: "pull-request", mode: "cycles", approval: "thresholds" })));
-    const stops = { ...w.deps, setup: () => ({ code: 0, out: "Needs the operator: a key" }) };
+    const stops = { ...w.deps, setup: () => ({ code: 1, out: "stopped" }) };
     assert.equal(await carryOut("hello", await state(w.store), stops), false);
     // The first try's draft, as init would have left it.
     const checkout = join(w.s.dir, "hello-a6g");
@@ -338,6 +357,78 @@ describe("a machine takes an ask from GitHub", () => {
     await moved.store.controls.create(startControl("hello", "web:s1", ask({ repo: { github: "octocat/app" } })));
     assert.equal(await carryOut("hello", await state(moved.store), moved.deps), false);
     assert.equal((await state(moved.store)).problem, "GitHub says that's acme/app now, which isn't octocat's.");
+  });
+
+  test("a setup that asks for something optional, and whose check passes, starts, and the ask reaches the operator as a note", async () => {
+    const w = world({ "octocat/hello": { push: true } });
+    await w.store.controls.create(startControl("hello", "web:s1", ask()));
+    const optional = {
+      ...w.deps,
+      setup: () => ({ code: 0, out: "Set up.\n\nNeeds the operator: nothing blocks the team, but a real model key widens its tests\n" }),
+    };
+    assert.equal(await carryOut("hello", await state(w.store), optional), true);
+    assert.deepEqual(await steps(w.store), ["repository", "draft", "setup", "check", "register", "started"]);
+    assert.deepEqual((await state(w.store)).notes.slice(-1), [
+      "The setup agent left you a note: nothing blocks the team, but a real model key widens its tests",
+    ]);
+  });
+
+  test("the setup agent runs on the subscription the ask chose, not this Mac's own login", async () => {
+    const two = tmp("a6g-login-");
+    write(A6G_HOME, {
+      "subscriptions.json": [
+        { name: "default", configDir: null },
+        { name: "two", configDir: two },
+      ],
+    });
+    try {
+      const ran: (string | null)[] = [];
+      for (const use of [["two", "default"], ["default"]]) {
+        const w = world({ "octocat/hello": { push: true } });
+        await w.store.controls.create(startControl("hello", "web:s1", ask({ use })));
+        const setup = (_repo: string, _checkout: string, { configDir }: { configDir: string | null }) => {
+          ran.push(configDir);
+          return { code: 0, out: "done" };
+        };
+        assert.equal(await carryOut("hello", await state(w.store), { ...w.deps, setup }), true);
+      }
+      assert.deepEqual(ran, [two, null]);
+    } finally {
+      rmSync(join(A6G_HOME, "subscriptions.json"), { force: true });
+    }
+  });
+
+  test("one Docker engine from the setup on, so its check and register agree; register refusing between engines says which to name", async () => {
+    const colima = "unix:///Users/op/.colima/default/docker.sock";
+    const before = process.env.DOCKER_HOST;
+    delete process.env.DOCKER_HOST;
+    try {
+      const w = world({ "octocat/hello": { push: true } });
+      await w.store.controls.create(startControl("hello", "web:s1", ask()));
+      assert.equal(await carryOut("hello", await state(w.store), { ...w.deps, engine: () => ({ host: colima, context: "colima" }) }), true);
+      assert.deepEqual([w.hostOf["init"], w.hostOf["setup"], w.hostOf["check"], w.hostOf["register"]], [undefined, colima, colima, colima]);
+
+      // Nothing chosen (several running and none of them the docker CLI's current one): register's own refusal, and
+      // the command that names an engine.
+      delete process.env.DOCKER_HOST;
+      const several = world(
+        { "octocat/hello": { push: true } },
+        {
+          registerFails: 1,
+          registerSays:
+            "a6g: 2 Docker engines are running here (colima, rancher-desktop), each with its own containers: say which one is this team's with --docker <name>",
+        }
+      );
+      await several.store.controls.create(startControl("hello", "web:s1", ask()));
+      assert.equal(await carryOut("hello", await state(several.store), several.deps), false);
+      const stopped = await state(several.store);
+      assert.equal(stopped.stoppedAt, "register");
+      assert.equal(stopped.fix, "Say which Docker engine is the team's (colima or rancher-desktop). To register it on colima, on studio:");
+      assert.match(stopped.command ?? "", /^a6g register \S*hello-a6g --docker colima && a6g start hello$/);
+    } finally {
+      if (before === undefined) delete process.env.DOCKER_HOST;
+      else process.env.DOCKER_HOST = before;
+    }
   });
 });
 

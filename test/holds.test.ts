@@ -260,6 +260,15 @@ describe("controls in the run folder", () => {
     assert.match(applied.log[1] ?? "", /\$40 a day, none a week, \$500 in all/);
     assert.match(holdNote(run), /pausing the team after the work under way \(#11, #12, #14\)/);
     assert.deepEqual(JSON.parse(readFileSync(join(run, "controls-applied"), "utf8")), [now.id, resume.id, graceful.id, budget.id]);
+
+    // One set in shares of a subscription's week, as the start form sets it, is said in those, not in dollars.
+    const shares = control(
+      budgetControl("fixture", "web:s1", { daily: 90, weekly: null, total: null, unit: "subscription", since: "2026-11-01T00:00:00Z", autoResume: false })
+    );
+    assert.equal(
+      applyControls(run, [now, resume, graceful, budget, shares]).log[0],
+      "the budget is now 90% a day, none a week, none in all (each a share of one subscription's weekly limit)"
+    );
   });
 
   test("the budget's pause tells the planner when auto-resume starts the team again", () => {

@@ -86,7 +86,8 @@ export function writeLimits(run: string, limits: Limits | null): void {
 }
 
 export const whoAsked = (by: string): string => (by === "budget" ? "the budget" : by.startsWith("web:") ? "the operator (web app)" : "the operator");
-const money = (n: number | null): string => (n === null ? "none" : dollars(n));
+// A limit as it's set: dollars, or a share of one subscription's week.
+const limitOf = (n: number | null, unit: Limits["unit"]): string => (n === null ? "none" : unit === "subscription" ? `${n}%` : dollars(n));
 
 // A message for the planner from a control: one that `wake`s it starts a turn (the rest only matter to a planner in
 // the middle of one), and one to `keep` waits for the resume when the team is paused, since it asks for work.
@@ -179,7 +180,11 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     } else if (control.kind === "budget") {
       writeLimits(run, control.limits);
       const l = control.limits;
-      log.push(l ? `the budget is now ${money(l.daily)} a day, ${money(l.weekly)} a week, ${money(l.total)} in all` : "the budget was cleared");
+      log.push(
+        l
+          ? `the budget is now ${limitOf(l.daily, l.unit)} a day, ${limitOf(l.weekly, l.unit)} a week, ${limitOf(l.total, l.unit)} in all${l.unit === "subscription" ? " (each a share of one subscription's weekly limit)" : ""}`
+          : "the budget was cleared"
+      );
     } else if (control.kind === "agreement") {
       // Against the one in force before it; several at once are told one by one, so the planner ends on the newest.
       const before = agreementOf(controls.slice(0, index)).agreement;

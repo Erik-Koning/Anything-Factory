@@ -28,6 +28,9 @@ export interface RoleSettings {
 
 // The ideas the planner keeps queued by starting the innovator (roles.innovator.minQueue), unless the team says.
 export const DEFAULT_MIN_QUEUE = 5;
+// How long a member's command runs in the foreground: unless it says, and at most (Claude Code's own are 2 and 10
+// minutes). A run of the end-to-end suite, or the gate, takes longer than ten.
+export const MEMBER_COMMAND_MIN = { usual: 30, most: 120 };
 
 export interface PageSpec {
   id: string;
@@ -667,6 +670,14 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     problems.push(
       'approval.stakeholders: "operator" (you approve work from a stakeholder\'s words) or "screened" (the approver too, when the planner screened it clear)'
     );
+  // Under the operator's approval every proposal is theirs, and the approver may decide nothing (lib/tasks/model.ts): one
+  // in roles would only be started to have each decision refused, so it isn't one of the team's roles.
+  if (approvalMode === "operator" && roles["approver"]) {
+    delete roles["approver"];
+    warnings.push(
+      'roles.approver: approval.mode "operator" leaves the approver nothing to decide, so it isn\'t started; drop it, or let it approve up to a size with "thresholds"'
+    );
+  }
   const operatorIn = object(input.operator, "operator", ["technical", "designCheckIn"]) ?? {};
   const technical = flag(operatorIn.technical, "operator.technical") ?? true;
   const designCheckIn = flag(operatorIn.designCheckIn, "operator.designCheckIn") ?? false;

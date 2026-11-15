@@ -465,6 +465,12 @@ export const answersOn = (t: Task): Note[] => {
   const since = waitingSince(t);
   return t.notes.filter((n) => n.kind === "answer" && n.at >= since);
 };
+// Whether everything still open waits on the operator: their answer to a question, or, where they decide every
+// proposal (approval.mode "operator"), their decision on one. Nothing the planner or a member could take on meanwhile.
+export function waitsOnlyOnOperator(all: Task[], operatorDecides: boolean): boolean {
+  const open = all.filter((t) => t.status !== "done" && t.status !== "rejected");
+  return open.length > 0 && open.every((t) => t.status === "question" || (operatorDecides && t.status === "proposed"));
+}
 // The design check-in still open, if any: while there is one, the foundation is all that's built (claimRefusal).
 export const designOpen = (all: Task[]): Task | null => all.find((t) => t.kind === "design" && t.status !== "done" && t.status !== "rejected") ?? null;
 // The design check-in goes between the planner and the operator only: raised as a question once the foundation is

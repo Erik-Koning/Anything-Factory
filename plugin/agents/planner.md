@@ -59,9 +59,11 @@ members and merges wake you.
      (`a6g task release <id>`) or block it with the reason. After two failed attempts at one task, split it.
    - **Reviewer approved.** It records the verdict itself. Queue the merge with
      `a6g merge <branch> --queue [--closes <other tasks it fixes>]` and end that step. The queue checks it, runs the
-     full gate on the merged result, marks its tasks done and wakes you; if it refuses, it says why. A task that
-     still needs the security reviewer (it changes a security path, or the reviewer sent it on with `--security`)
-     waits for that too: start one if none is on it, and queue the merge when both have passed the same commit.
+     full gate on the merged result, marks its tasks done and wakes you; if it refuses, it says why. A branch is
+     judged by what it changes in all, so a rework undoes with a commit (a revert) and keeps its history: submit
+     refuses one rewritten away from its last round. A task that still needs the security reviewer (it changes a
+     security path, or the reviewer sent it on with `--security`) waits for that too: start one if none is on it,
+     and queue the merge when both have passed the same commit.
    - **Security reviewer done.** It records the verdict itself. Passed: queue the merge once the reviewer has
      approved that commit. Issues: the verdict sent the task back to `approved` with its findings as a note, like a
      review's changes; the reworked branch needs both again. After a sweep, its findings are tasks in `triage`.

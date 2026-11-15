@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { instanceId, loadTeam, modelsOf, type RawTeam, type Team } from "../config.ts";
+import { instanceId, loadTeam, MEMBER_COMMAND_MIN, modelsOf, type RawTeam, type Team } from "../config.ts";
 import * as docker from "../docker.ts";
 import { defaultModel } from "../models.ts";
 import {
@@ -92,7 +92,9 @@ export function versionFor(team: Team): string {
 }
 
 // A member's environment: team.json's vars, then the factory's own, so a var never decides who a member is, where
-// its team lives or which Docker engine its containers run on.
+// its team lives or which Docker engine its containers run on. A member other than the planner runs nothing in the
+// background: its turn is its task, and a background command's end would wake it only after the turn had ended and
+// handed the task back (hooks/stop.ts), when the planner may have given it to another. It waits in the foreground.
 export function memberEnvironment(
   team: Team,
   role: string,
@@ -105,6 +107,13 @@ export function memberEnvironment(
   return {
     ...vars,
     ...(engine ? { DOCKER_HOST: engine.host } : {}),
+    ...(role === "planner"
+      ? {}
+      : {
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+          BASH_DEFAULT_TIMEOUT_MS: String(MEMBER_COMMAND_MIN.usual * 60_000),
+          BASH_MAX_TIMEOUT_MS: String(MEMBER_COMMAND_MIN.most * 60_000),
+        }),
     A6G_TEAM: team.name,
     A6G_ROLE: role,
     A6G_HOME: A6G_HOME,

@@ -870,6 +870,60 @@ describe("claims over time", () => {
     assert.equal((await a6g(["task", "submit", "1"], as("builder", tree))).code, 0);
     assert.equal(stop().status, 0);
   });
+
+  test("the stop hook runs the gate once a commit: stopping again on one that passed doesn't run it again", async () => {
+    const runs = join(tmp("a6g-gate-"), "runs");
+    const { home, run, as, worktree } = setup(team({ gate: { full: "true", quick: `echo ran >> ${runs}` } }));
+    const store = fileStore(run, "fixture");
+    await store.tasks.createAs("1", newTask({ team: "fixture", title: "a", kind: "feature", status: "approved", by: "planner" }));
+    const tree = worktree("gate");
+    assert.equal((await a6g(["task", "claim"], as("builder", tree))).code, 0);
+    const stop = () =>
+      spawnSync(process.execPath, [join(import.meta.dirname, "..", "plugin", "hooks", "stop.ts")], {
+        input: JSON.stringify({ session_id: `s-${Math.random()}`, cwd: tree, agent_type: "a6g:builder" }),
+        env: { ...process.env, A6G_TEAM: "fixture", A6G_HOME_DIR: home, A6G_ROLE: "builder", A6G_RUN: run, CLAUDE_PROJECT_DIR: tree },
+        encoding: "utf8",
+      });
+    const gated = () => (existsSync(runs) ? readFileSync(runs, "utf8").trim().split("\n").length : 0);
+    git(tree, "branch", "-m", "a6g/b1-a");
+    commit(tree, { "src/a.ts": "a\n" });
+    // Waiting on something it started, it's told why stopping can't be the wait.
+    const first = stop();
+    assert.equal(first.status, 2);
+    assert.match(first.stderr, /a6g task submit 1 .*nothing wakes you to carry on after that: wait for anything you started now, in this turn/);
+    assert.equal(stop().status, 2);
+    assert.equal(gated(), 1, "the same commit, gated once");
+    commit(tree, { "src/b.ts": "b\n" });
+    assert.equal(stop().status, 2);
+    assert.equal(gated(), 2, "a new commit is gated again");
+    assert.equal((await a6g(["task", "submit", "1"], as("builder", tree))).code, 0);
+    assert.equal(stop().status, 0);
+    assert.equal(gated(), 2, "nor again once it's handed in");
+  });
+
+  test("a scaffolder's test-infra work that changes product code is refused at submit, as the merge would refuse it", async () => {
+    const roles = { planner: {}, builder: {}, reviewer: {}, scaffolder: {} };
+    const { run, as, worktree } = setup(team({ roles }));
+    const store = fileStore(run, "fixture");
+    await store.tasks.createAs("1", newTask({ team: "fixture", title: "harness", kind: "test-infra", status: "approved", by: "planner" }));
+    const tree = worktree("harness");
+    assert.equal((await a6g(["task", "claim", "1"], as("scaffolder", tree))).code, 0);
+    git(tree, "branch", "-m", "a6g/s1-harness");
+    commit(tree, { "e2e/home.spec.ts": "test('home', () => {});\n", "src/testid.ts": "export const testid = 'app';\n" });
+    const refused = await a6g(["task", "submit", "1"], as("scaffolder", tree));
+    assert.notEqual(refused.code, 0);
+    assert.match(
+      refused.out,
+      /is test-infra work, which changes test and harness files only, and it changes src\/testid\.ts: the merge would refuse it\. Undo it with a commit/
+    );
+    assert.equal((await store.tasks.get("1"))?.status, "building", "still the scaffolder's");
+    // Undone with a commit, the branch keeps its history and goes to review.
+    git(tree, "rm", "-q", "src/testid.ts");
+    git(tree, "commit", "-q", "-m", "Take the product change out");
+    const handed = await a6g(["task", "submit", "1"], as("scaffolder", tree));
+    assert.equal(handed.code, 0, handed.out);
+    assert.equal((await store.tasks.get("1"))?.status, "review");
+  });
 });
 
 describe("a 0.3 files board", () => {

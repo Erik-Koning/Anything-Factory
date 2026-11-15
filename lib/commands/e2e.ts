@@ -65,7 +65,18 @@ function suiteOf(dir: string): { harness: Harness; config: string; timeoutMin: n
 // Runs the suite in the team's checkout against its app, holding the app, and records the run for the checkout's
 // commit: a6g e2e run, and the merge queue's check after merges (one retry there, and its own namespace). A recorded
 // run sets its own retries and forbids .only, so the repository's configuration can't forgive a failure or run a part.
-export async function recordSuite(home: string, team: Team, { retries = 0, namespace = `e2e-${Date.now().toString(36)}` } = {}): Promise<SuiteRecord> {
+// `stopWhen` stops a run partway (the merge queue's check gives way to a merge queued behind it): such a run is
+// recorded nowhere, and says it gave way.
+export async function recordSuite(
+  home: string,
+  team: Team,
+  {
+    retries = 0,
+    namespace = `e2e-${Date.now().toString(36)}`,
+    stopWhen,
+    stopEveryMs,
+  }: { retries?: number; namespace?: string; stopWhen?: () => boolean; stopEveryMs?: number } = {}
+): Promise<SuiteRecord> {
   const { harness, config, timeoutMin } = suiteOf(home);
   const base = pagePlan(team, harness).appUrl;
   if (!base) throw new Error("team.json pages.appUrl (or environment.health) says where the team's app runs");
@@ -77,8 +88,12 @@ export async function recordSuite(home: string, team: Team, { retries = 0, names
       env: { PLAYWRIGHT_BASE_URL: base, A6G_NAMESPACE: namespace },
       timeoutMin,
       work: join(workDir(home), "e2e"),
+      ...(stopWhen ? { stopWhen } : {}),
+      ...(stopEveryMs ? { stopEveryMs } : {}),
     })
   );
+  if (ran.gaveWay)
+    return { commit, at: new Date().toISOString(), ran: false, gaveWay: true, timedOut: false, status: null, specs: [], errors: ["it gave way partway"] };
   const specs = specsOf(ran.report, home);
   const missing = browserMissing(specs);
   const record: SuiteRecord = {

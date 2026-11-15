@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appSettings } from "../app.ts";
 import { channels } from "../channels.ts";
+import { contexts, forStart, type Pin, pinOf, running, useEngine } from "../docker.ts";
 import { machineName } from "../machine.ts";
 import {
   type Ask,
@@ -40,7 +41,7 @@ import {
 } from "../orders.ts";
 import { FACTORY_ROOT } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
-import { setTeamUses, teamUses } from "../subscriptions.ts";
+import { accounts, setTeamUses, teamUses } from "../subscriptions.ts";
 import { DEFAULT_AGREEMENT } from "../tasks/agreement.ts";
 import { agreementControl, budgetControl, holdOf, pauseControl, resumeControl, startingControl, type StartState } from "../tasks/controls.ts";
 import { driver, type MongoClientLike } from "../tasks/mongo.ts";
@@ -147,9 +148,29 @@ export interface CarryDeps {
   // Stand-ins for the tests: the commands a step runs, the setup agent, this machine's GitHub account, and the wait
   // between tries at cloning a fork GitHub is still making.
   sh?: Sh;
-  setup?: (repo: string, checkout: string) => { code: number; out: string };
+  setup?: (repo: string, checkout: string, options: { configDir: string | null }) => { code: number; out: string };
   github?: () => string | null;
   wait?: (ms: number) => void;
+  // The Docker engine the team's containers go on, or null to leave it to whatever the steps find.
+  engine?: (team: string, checkout: string) => Pin | null;
+}
+
+// The Docker engine for a team being started here (lib/docker.ts forStart); null when there's none to choose or it
+// can't be said which, and register then says so.
+function engineForStart(team: string, checkout: string): Pin | null {
+  const engines = contexts();
+  const chosen = forStart({ previous: pinOf(team, checkout), engines, up: running(engines), host: process.env.DOCKER_HOST });
+  return "problem" in chosen ? null : chosen.pin;
+}
+
+// What to run when register couldn't choose between the Docker engines running here: register on the first of them.
+function registerByHand(out: string, checkout: string, team: string, here: string): [string, string] {
+  const engines = /Docker engines are running here \(([^)]+)\)/.exec(out)?.[1]?.split(", ") ?? [];
+  if (engines.length < 2) return [`To register it yourself, on ${here}:`, `a6g register ${underHome(checkout)} && a6g start ${team}`];
+  return [
+    `Say which Docker engine is the team's (${engines.join(" or ")}). To register it on ${engines[0]}, on ${here}:`,
+    `a6g register ${underHome(checkout)} --docker ${engines[0]} && a6g start ${team}`,
+  ];
 }
 
 const pause = (ms: number): void => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -393,23 +414,35 @@ export async function carryOut(team: string, state: StartState, deps: CarryDeps)
       applyRules(checkout, ask);
     }
 
+    // One Docker engine from here on: what the setup agent starts, the check's environment and register's choice all
+    // reach the same one, rather than register refusing a machine that runs several.
+    useEngine((deps.engine ?? engineForStart)(team, checkout));
+
     await begin("setup");
-    const setup = (deps.setup ?? setupUnattended)(repo, checkout);
+    // On the subscription the ask chose (the first of them this machine has), as the team's roles will be, not this
+    // Mac's own login unless that's the one chosen.
+    const logins = accounts();
+    const login = ask.use.map((name) => logins.find((account) => account.name === name)).find((account) => account !== undefined);
+    const setup = (deps.setup ?? setupUnattended)(repo, checkout, { configDir: login?.configDir ?? null });
     process.stdout.write(setup.out.endsWith("\n") ? setup.out : `${setup.out}\n`);
-    // Its last word when it can't go on without the operator (plugin/agents/setup.md): that's what they're shown.
+    if (setup.code !== 0) throw new Stop("The setup agent stopped before the team was ready.", tail(setup.out), ...byHand);
+    // Its last word when it says it can't go on without the operator (plugin/agents/setup.md). The check it was to make
+    // pass says whether that's so: one that passes means what it asks for can come later (a key that widens what the
+    // team can test), and it goes to the operator as a note; one that fails stops the start with the agent's words.
     const needs = /^Needs the operator:\s*(.+)$/m.exec(setup.out)?.[1];
-    if (setup.code !== 0 || needs)
-      throw new Stop(
-        needs ? "The setup agent can't finish without you." : "The setup agent stopped before the team was ready.",
-        needs ? plain(needs).trim().slice(0, 300) : tail(setup.out),
-        ...byHand
-      );
+    const asked = needs ? plain(needs).trim().slice(0, 300) : null;
 
     await begin("check");
     const proved = a6g(["check", checkout, "--run"], checkout, 40);
-    if (proved.code !== 0) throw new Stop("The setup didn't pass its check.", tail(proved.out), ...byHand);
+    if (proved.code !== 0) {
+      if (asked) {
+        step = "setup";
+        throw new Stop("The setup agent can't finish without you.", asked, ...byHand);
+      }
+      throw new Stop("The setup didn't pass its check.", tail(proved.out), ...byHand);
+    }
 
-    await begin("register");
+    await begin("register", asked ? `The setup agent left you a note: ${asked}` : null);
     // The subscriptions first, so registering puts each role on one of them; the budget before the first run applies it.
     if (ask.use.length) setTeamUses({ ...teamUses(), [team]: { "*": ask.use } });
     // Set up, then wait for the operator: the pause, by whoever asked, is there before the team is, so no run of the
@@ -421,12 +454,7 @@ export async function carryOut(team: string, state: StartState, deps: CarryDeps)
       await deps.store.controls.create(resumeControl(team, state.control.by, "Asked again, to start as soon as it's set up"));
     const registered = a6g(["register", checkout], checkout);
     if (registered.code !== 0)
-      throw new Stop(
-        "a6g register didn't take it.",
-        tail(registered.out),
-        `To register it yourself, on ${here}:`,
-        `a6g register ${underHome(checkout)} && a6g start ${team}`
-      );
+      throw new Stop("a6g register didn't take it.", tail(registered.out), ...registerByHand(registered.out, checkout, team, here));
     if (ask.limits) await deps.store.controls.create(budgetControl(team, state.control.by, { ...ask.limits, since: new Date().toISOString() }));
     // How readily it asks the operator, as they chose: the working agreement, by them.
     if (ask.level) await deps.store.controls.create(agreementControl(team, state.control.by, { ...DEFAULT_AGREEMENT, level: ask.level }));

@@ -19,7 +19,9 @@ export const STARTS_A_DAY = 10;
 const numbered = (id: string): number => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0);
 
 // Every ask that still says something: under way, waiting, or ended within SHOWN_DAYS. `published` are the teams
-// that have their own card by now; one of those that started is left to it. Newest first.
+// that have their own card by now; one of those that started is left to it, and so is one that stopped and was then
+// finished by hand at its machine (its reason, and the command to carry on, would say what's no longer so). Newest
+// first.
 export async function starts(published: ReadonlySet<string>, now = Date.now()): Promise<Start[]> {
   const rows = await graphDb()
     .collection("controls")
@@ -38,7 +40,7 @@ export async function starts(published: ReadonlySet<string>, now = Date.now()): 
       now
     );
     if (!state) continue;
-    if (state.step === "started" && published.has(team)) continue;
+    if ((state.step === "started" || state.step === "failed") && published.has(team)) continue;
     const over = state.step === "expired" || startEnded(state.step);
     if (over && now - Date.parse(state.at) > SHOWN_DAYS * 86_400_000) continue;
     found.push({ ...state, team });

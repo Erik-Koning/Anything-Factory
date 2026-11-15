@@ -23,8 +23,11 @@ Yours:
 - **Flaky tests:** you find why a test fails at random and fix that.
 
 Not yours: product features (a builder's), the specs of journeys where the team has a tester (you set up their folder
-and one example; the tester writes them), and the team's rules (`.a6g/` other than `harness.json`). If the gate, the
-environment script or the finish line needs to change, say exactly what in your report; the planner asks the operator.
+and one example; the tester writes them), and the team's rules (`.a6g/` other than `harness.json`). On a `test` or
+`test-infra` task, product code isn't yours to touch at all, not even a test id on a component: use what the page
+already has (a role, a label, its text, an existing class), and where nothing will do, file the test id as a builder's
+task (`a6g task add`). `a6g task submit` refuses such a branch, as the merge would. If the gate, the environment script
+or the finish line needs to change, say exactly what in your report; the planner asks the operator.
 
 ## How you work
 

@@ -1,5 +1,69 @@
 # Changelog
 
+## Unreleased: a start from the web app that finishes on its own, and a team that loses less time
+
+Found watching the first starts from the web app, which stopped at a step a person had to finish by hand.
+
+- **One Docker engine, chosen before the setup.** On a Mac running several engines (Colima and Rancher Desktop), a
+  start stopped at register, which won't guess between them. It now settles on the one a plain `docker` reaches there
+  (the docker CLI's current context) before the setup agent runs, so the setup, its check and register all use it.
+  Where it still can't tell, the command the start card gives names an engine.
+- **An optional ask doesn't stop a start.** The setup agent ended a finished setup, whose check passed, with a "Needs
+  the operator" line listing keys that would only widen the team's tests, and the start stopped there. The check now
+  decides: one that passes goes on, and the agent's line reaches you as a note on the start card; one that fails stops
+  the start with the agent's words, as before. The agent's instructions say the line is for what stops the check.
+- **A start that stopped, then finished by hand**, gives way on the Teams page to the team's own row, as one that
+  started does, instead of showing its old reason and command for a fortnight.
+- **The setup agent runs on the subscription chosen on the form** (the first of them the Mac has), as the team's roles
+  do, not on the Mac's own login.
+- **A budget in shares of a subscription's week** is said that way in the team's log (`90% a day`), not as dollars.
+
+Found watching the first team started this way at work:
+
+- **Members wait for what they run.** A scaffolder started the browser specs and the gate in the background and ended
+  its turn to wait for them. Its turn ending handed its task back, the planner gave the task to a second scaffolder,
+  and the background runs then woke the first one: two members on one task and one branch, and the two runs at once
+  loading the machine into a timed-out test and a dropped connection. Members other than the planner now run nothing
+  in the background (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`), may run a command in the foreground for up to two hours
+  (30 minutes unless they say), and are told so in their prompt.
+- **The stop hook says why stopping isn't waiting.** A member that stops holding its task is told that nothing wakes
+  it after that, and to wait for what it started in this turn. It had been told only to hand the task in, three times,
+  and took each for permission to wait.
+- **No approver where you approve every proposal.** A team on `approval.mode: "operator"` kept the approver its draft
+  had, and its planner started one, which had every decision refused; the planner had to learn not to. Such a team has
+  no approver now, and `a6g check` says why.
+- **Your decisions reach the planner within a minute**, as your answers do: approving, rejecting or sending back a
+  proposal, from the web app or `a6g task approve|reject|research`. It had waited for the planner's next tick.
+- **Proposals don't pile up past what you'll decide.** With 28 waiting for you, the planner kept writing and scoring
+  more. Past fifteen waiting, its context now asks it to propose nothing new unless it outranks what waits or unblocks
+  work, and to keep what waits short: duplicates folded together, what no longer serves rejected.
+- **Waiting on you costs little.** While everything open waits for your answers or, where you decide every proposal,
+  your decisions, and nothing else is under way, the planner is ticked hourly instead of every ten minutes, as it
+  already was while the design check-in waited for you. A team with 20 proposals waiting overnight had been woken six
+  times an hour to find nothing to do.
+- **Test work that touches product code is refused at hand-in**, not after its review. The scaffolder's harness added
+  a test id to a product component; the reviewer approved it, and only the merge queue refused it, sending the whole
+  harness back to be rewritten. `a6g task submit` now holds a scaffolder's test and test-infra branch to the same lane.
+- **The check after merges gives way to the next merge.** It holds the merge lock and the team's app while it runs
+  the end-to-end suite, and this repository's suite of 44 spec files takes over two hours: nothing merged meanwhile,
+  and the UX specialist's own run waited out its limit behind it. A merge queued behind the check now stops the suite
+  within half a minute; the check stays due and runs on the newer commit once nothing is queued behind it, so it still
+  checks the newest commit, without holding the integration branch still. A run that gave way is recorded nowhere.
+- **No more members on a machine past what it can run.** Three teams at work on one Mac took its load to 58 on 20
+  cores, and everything slowed into timeouts: MongoDB reads, T3 Code's, Docker's, and tests that then failed and ran
+  again. Each team kept to its own limits, and nothing counted across them. The guard now refuses to start a member
+  while the machine's load is past twice its cores, and the planner starts it at its next wake.
+- **An ask to start a project is picked up within a minute**, by the watchdog's minute-by-minute run as well as its full
+  one, which had picked it up only once a full run over every team was through (two minutes, that night). The start
+  card says so.
+- **The teams are watched at once.** The full run went through them one by one, so one whose checks waited (a health
+  address slow to answer, a store timing out on a loaded machine) held up every other team's ticks and controls.
+- **An idle environment isn't called down.** The team's development server, quiet for a while, took 20 s over its
+  first request, and the watchdog, which waited five, told the planner the environment was down and to start it
+  again. A health address that doesn't answer at once is now asked once more, given 45 s, first.
+- **The quick gate runs once a commit.** The stop hook ran it on every stop, so a member told to hand in its task ran
+  it again for nothing, and its load fell on everything else running. A pass on the same commit now stands.
+
 ## 0.8.2: Starting a project from GitHub, and the team's rules chosen on the form
 
 The operator asked to start a project on a GitHub repository by its name, cloned when their account owns it or can push

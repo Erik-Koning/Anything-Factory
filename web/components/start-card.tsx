@@ -128,7 +128,7 @@ export function StartCard({ start, up }: { start: Start; up: boolean | null }) {
       ) : null}
       {step === "waiting" ? (
         <p className="small">
-          Asked <Ago at={start.asked} />. {ask.machineName} looks every five minutes.
+          Asked <Ago at={start.asked} />. {ask.machineName} looks every minute.
           {up === false ? ` It isn't reporting now, so nothing starts until it's on with its watchdog running.` : ""}
           {up === null ? ` It isn't linked to your account any more, so it won't see this.` : ""}
         </p>

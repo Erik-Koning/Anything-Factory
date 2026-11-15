@@ -21,10 +21,12 @@ export function playwrightCli(from: string): string | null {
 }
 
 export interface SuiteRun {
-  // The command's exit, null when it was stopped (timedOut).
+  // The command's exit, null when it was stopped (timedOut, or gaveWay).
   status: number | null;
   // It ran past its limit, and everything it started was ended.
   timedOut: boolean;
+  // Its caller's stopWhen said to stop, and everything it started was ended: it says nothing of the tests.
+  gaveWay?: boolean;
   report: Report | null;
   // The last lines it printed, for a run with no report.
   tail: string;
@@ -82,7 +84,19 @@ export async function runPlaywright(
     timeoutMin,
     work,
     graceMs = 10_000,
-  }: { config: string; args?: string[]; env?: Record<string, string>; timeoutMin: number; work: string; graceMs?: number }
+    stopWhen,
+    stopEveryMs = 30_000,
+  }: {
+    config: string;
+    args?: string[];
+    env?: Record<string, string>;
+    timeoutMin: number;
+    work: string;
+    graceMs?: number;
+    // Asked every stopEveryMs while it runs: true stops it, as its time limit would.
+    stopWhen?: () => boolean;
+    stopEveryMs?: number;
+  }
 ): Promise<SuiteRun> {
   const cli = playwrightCli(configDir(dir, config));
   if (!cli)
@@ -119,21 +133,33 @@ export async function runPlaywright(
   child.stdout?.on("data", keep);
   child.stderr?.on("data", keep);
   let timedOut = false;
+  let gaveWay = false;
   const timers: NodeJS.Timeout[] = [];
+  let asking: NodeJS.Timeout | undefined;
   const status = await new Promise<number | null>((done) => {
     child.on("error", () => done(1));
     child.on("close", (code) => done(code));
     // Its output can stay open after it has gone (something it started holds it): what it printed is in by then.
     child.on("exit", (code) => timers.push(setTimeout(() => done(code), 1000)));
+    const stop = (): void => {
+      signalGroup("SIGTERM");
+      timers.push(setTimeout(() => signalGroup("SIGKILL"), graceMs));
+      timers.push(setTimeout(() => done(null), graceMs * 1.5));
+    };
     timers.push(
       setTimeout(() => {
         timedOut = true;
-        signalGroup("SIGTERM");
-        timers.push(setTimeout(() => signalGroup("SIGKILL"), graceMs));
-        timers.push(setTimeout(() => done(null), graceMs * 1.5));
+        stop();
       }, timeoutMin * 60_000)
     );
+    if (stopWhen)
+      asking = setInterval(() => {
+        if (gaveWay || timedOut || !stopWhen()) return;
+        gaveWay = true;
+        stop();
+      }, stopEveryMs);
   });
+  clearInterval(asking);
   for (const timer of timers) clearTimeout(timer);
   for (const signal of SIGNALS) process.off(signal, passOn);
   // Nothing the run started in its group outlives it: what a test left running, or what ignored the limit's request.
@@ -146,7 +172,13 @@ export async function runPlaywright(
   try {
     report = existsSync(reportFile) ? (JSON.parse(readFileSync(reportFile, "utf8")) as Report) : null;
   } catch {}
-  return { status: timedOut ? null : status, timedOut, report, tail: printed.trim().split("\n").slice(-12).join("\n") };
+  return {
+    status: timedOut || gaveWay ? null : status,
+    timedOut,
+    ...(gaveWay ? { gaveWay } : {}),
+    report,
+    tail: printed.trim().split("\n").slice(-12).join("\n"),
+  };
 }
 
 // How a test went. `excused` is one declared to fail (test.fail, test.info().fail()) that did: Playwright calls that
@@ -270,6 +302,8 @@ export interface SuiteRecord {
   // none of its tests failed.
   ran: boolean;
   timedOut: boolean;
+  // Stopped partway for something more pressing (recordSuite's stopWhen): never kept in the history.
+  gaveWay?: boolean;
   status: number | null;
   specs: SpecResult[];
   // What went wrong outside any test (the config didn't load, the app didn't answer).

@@ -1975,7 +1975,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   const starting = page.locator("#start-shop-two");
   await expect(starting.getByRole("heading", { name: "Shop two" })).toBeVisible();
   await expect(starting).toContainText("waiting for the Mac");
-  await expect(starting).toContainText("attic looks every five minutes.");
+  await expect(starting).toContainText("attic looks every minute.");
   // The same name can't be asked for twice.
   await page.goto("/new");
   await field("Title").fill("Shop two");

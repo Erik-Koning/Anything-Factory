@@ -302,7 +302,7 @@ export async function asksFor(client: MongoClientLike, database: string, machine
   return asks;
 }
 
-// The watchdog's part, at each full run: an ask nobody has picked up is refused in words, or picked up and started
+// The watchdog's part, at each of its runs: an ask nobody has picked up is refused in words, or picked up and started
 // (one at a time: the rest wait for the next run); one whose process is gone without a last word is said to have
 // stopped. `launch` starts an ask's process, and `tell` lets the operator know through this machine's own channels.
 export async function takeOrders(deps: {

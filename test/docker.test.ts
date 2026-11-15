@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { loadTeam } from "../lib/config.ts";
-import { choose, clashes, type Container, containersOn, contexts, type Engine, named, running, some, starter, strays } from "../lib/docker.ts";
+import { choose, clashes, type Container, containersOn, contexts, type Engine, forStart, named, running, some, starter, strays } from "../lib/docker.ts";
 import { memberEnvironment } from "../lib/commands/team.ts";
 import { PACKAGE, type RegistryEntry } from "../lib/paths.ts";
 import { fakeWorld, type World } from "./fake-t3.ts";
@@ -126,6 +126,18 @@ describe("choosing a team's engine", () => {
     assert.deepEqual(down.pin, { host: COLIMA, context: "colima" });
     assert.match(down.why, /isn't running now/);
     assert.deepEqual(choose({ engines: [], up: [] }), { pin: null, why: "" });
+  });
+
+  test("a start from the web app, with several running: the docker CLI's current one, unless something says which", () => {
+    const started = forStart({ engines, up: engines });
+    assert.ok(!("problem" in started));
+    assert.deepEqual(started.pin, { host: COLIMA, context: "colima" });
+    const kept = { host: RANCHER, context: "rancher-desktop" };
+    assert.deepEqual(forStart({ previous: kept, engines, up: engines }), { pin: kept, why: "as it was registered" });
+    assert.deepEqual((forStart({ engines, up: engines, host: RANCHER }) as { pin: unknown }).pin, kept);
+    // The current one isn't running: as register says, the operator says.
+    const other = { name: "orbstack", host: "unix:///Users/op/.orbstack/run/docker.sock", current: false };
+    assert.ok("problem" in forStart({ engines: [...engines, other], up: [rancher, other] }));
   });
 });
 
@@ -359,6 +371,18 @@ describe("register", () => {
       memberEnvironment(team, "builder", { home, run: "/tmp/run", version: PACKAGE.version, ...(engine ? { engine } : {}) });
     assert.equal(env({ host: COLIMA, context: "colima" })["DOCKER_HOST"], COLIMA);
     assert.equal(env()["DOCKER_HOST"], "unix:///elsewhere.sock", "with no engine chosen, the team's own var stands");
+  });
+
+  test("a member runs nothing in the background and may wait up to two hours in the foreground; the planner is as it was", () => {
+    const home = makeRepo(baseTeam({ vars: { BASH_MAX_TIMEOUT_MS: "1000" } }));
+    const team = loadTeam(home);
+    const env = (role: string) => memberEnvironment(team, role, { home, run: "/tmp/run", version: PACKAGE.version });
+    const builder = env("builder");
+    assert.deepEqual(
+      [builder["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"], builder["BASH_DEFAULT_TIMEOUT_MS"], builder["BASH_MAX_TIMEOUT_MS"]],
+      ["1", String(30 * 60_000), String(120 * 60_000)]
+    );
+    assert.equal(env("planner")["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"], undefined);
   });
 });
 

@@ -70,6 +70,11 @@ function refuse(reason: string): never {
 // A claimed task is handed in (submitted) or handed back (released) before the member stops, so it never sits claimed
 // by nobody until its lease runs out. Only a claim the task graph still shows counts.
 const claimed = await heldTask();
+// What a member that would stop with its task still claimed is told. One that means to wait for something it started
+// in the background learns that waiting can't be done by stopping: the stop hands the task back, and a background
+// command's end, or a monitor's, would wake it only after the planner has given the task to another.
+const handIn = (id: string): string =>
+  `hand in task ${id}: a6g task submit ${id} (or a6g task release ${id} --blocked "<why>"). Ending your turn hands it back, and nothing wakes you to carry on after that: wait for anything you started now, in this turn, running it in the foreground.`;
 async function heldTask(): Promise<string | null> {
   const run = process.env.A6G_RUN;
   if (!run || team.board.type !== "tasks") return null;
@@ -109,7 +114,23 @@ if (pattern && !new RegExp(pattern).test(branch)) refuse(`name your branch to ma
 
 const gate = team.gate.quick;
 if (!gate) {
-  if (claimed) refuse(`hand in task ${claimed}: a6g task submit ${claimed} (or a6g task release ${claimed} --blocked "<why>").`);
+  if (claimed) refuse(handIn(claimed));
+  pass();
+}
+// A gate that passed on this very commit needn't run again: a member stopping twice (told to hand its task in first,
+// say) would otherwise run it each time, and its load slows whatever else runs on the machine. A failure runs again.
+const record = join(gates, `${branch.replaceAll("/", "_")}.json`);
+const sha = git(cwd, "rev-parse", "HEAD");
+const passedHere = ((): boolean => {
+  try {
+    const last = JSON.parse(readFileSync(record, "utf8")) as { sha?: string; gate?: string; passed?: boolean };
+    return last.passed === true && last.sha === sha && last.gate === gate;
+  } catch {
+    return false;
+  }
+})();
+if (passedHere) {
+  if (claimed) refuse(handIn(claimed));
   pass();
 }
 // From the worktree's root: the member may have cd'ed into a package, and the gate's path is relative to the root.
@@ -121,13 +142,10 @@ const result = spawnSync(
 const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 const tail = output.split("\n").slice(-40).join("\n");
 const passed = result.status === 0;
-writeFileSync(
-  join(gates, `${branch.replaceAll("/", "_")}.json`),
-  JSON.stringify({ branch, sha: git(cwd, "rev-parse", "HEAD"), gate, passed, at: new Date().toISOString(), tail })
-);
+writeFileSync(record, JSON.stringify({ branch, sha, gate, passed, at: new Date().toISOString(), tail }));
 if (result.signal || (result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT")
   refuse(`the gate (${gate}) didn't finish within ${GATE_MS / 60_000} minutes; make it faster or ask the planner.\n${tail}`);
 if (result.status === TIMED_OUT) refuse(`no gate slot came free in ${WAIT_MIN} minutes; try stopping again.`);
 if (!passed) refuse(`the gate (${gate}) fails:\n${tail}`);
-if (claimed) refuse(`hand in task ${claimed}: a6g task submit ${claimed} (or a6g task release ${claimed} --blocked "<why>").`);
+if (claimed) refuse(handIn(claimed));
 pass();

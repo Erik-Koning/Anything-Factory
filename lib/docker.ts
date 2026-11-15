@@ -116,6 +116,27 @@ export function choose({
   return current ? { pin: of(current), why: "the docker CLI's current one; it isn't running now" } : { pin: null, why: "" };
 }
 
+// The engine for a team the web app asked this machine to start (lib/commands/projects.ts), chosen before its setup so
+// that the setup, its check and register all reach the same one. Nobody is there to say which, so with several running
+// it's the one a plain `docker` reaches here (the docker CLI's current context): where its containers would have gone
+// anyway, and where the operator's own docker commands go. Otherwise as register chooses.
+export function forStart({
+  previous,
+  engines,
+  up,
+  host,
+}: {
+  previous?: Pin | null | undefined;
+  engines: Engine[];
+  up: Engine[];
+  host?: string | undefined;
+}): { pin: Pin | null; why: string } | { problem: string } {
+  const current = up.find((engine) => engine.current);
+  if (!previous && !host && up.length > 1 && current)
+    return { pin: { host: current.host, context: current.name }, why: "the docker CLI's current one, as nobody was there to say" };
+  return choose({ previous, engines, up, host });
+}
+
 // The engine of the team in `home`, when it's registered with one.
 export function pinOf(name: string, home: string): Pin | null {
   try {

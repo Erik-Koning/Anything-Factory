@@ -2,6 +2,7 @@ import { baseTeam, bash, type GuardCase, type GuardOptions, git, guardAsync, hol
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpus } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { type GuardCase as SelfTestCase, guardCases } from "../lib/commands/check.ts";
@@ -570,6 +571,20 @@ describe("guard", () => {
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" }, "allow"),
       tool(home, "builder", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: opus } }, "refuse"),
     ]);
+    // A machine past twice its cores' load, which other teams share, starts no more members; one at work, does.
+    const starts = { target: { providerInstanceId: "a6g-fixture-builder", model: opus }, isolation: "worktree" };
+    const cores = cpus().length;
+    await holds([
+      tool(home, "planner", delegate, starts, "refuse", { env: { A6G_MACHINE_LOAD: String(cores * 3) } }),
+      tool(home, "planner", delegate, starts, "allow", { env: { A6G_MACHINE_LOAD: String(cores) } }),
+    ]);
+    const busy = await guardAsync(home, "planner", delegate, starts, { env: { A6G_MACHINE_LOAD: String(cores * 3) } });
+    assert.match(
+      busy.said,
+      new RegExp(
+        `this machine is too busy to start another member now \\(its load is ${cores * 3} on ${cores} cores\\): start the builder at your next wake`
+      )
+    );
     const draining = makeRepo();
     mkdirSync(join(draining, ".a6g/run/state"), { recursive: true });
     writeFileSync(join(draining, ".a6g/run/state/drain"), "builder tester\n");

@@ -17,6 +17,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { answerCheckInByReply, relayAnswers } from "../answers.ts";
+import { loadTeam } from "../config.ts";
 import { applyReviews } from "../reviews.ts";
 import { appSettings, cleaned, forgetLink, hasAppLink, readAppLink, sendReport } from "../app.ts";
 import { type Channel, channels, failingSend, outboxMessage, recordSend, type Replies, type Reply } from "../channels.ts";
@@ -48,7 +49,7 @@ import { type MachineReport, type MachineTeam, REPORT_LIMITS } from "../fleet.ts
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
-import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task } from "../tasks/model.ts";
+import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task, waitsOnlyOnOperator } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
 import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
 import { accounts, describeWait, loginDirs, nearLimit, observeSubscriptions, subscriptionLimits, subscriptionState, weekFor } from "../subscriptions.ts";
@@ -66,6 +67,8 @@ const GLOBAL_LOG = join(A6G_HOME, "watchdog.log");
 // When the last full run started; the minute-by-minute runs between full ones apply controls only.
 const FULL_RUN = join(A6G_HOME, ".stamp-full-run");
 const FULL_EVERY_MIN = 4.5;
+// How long a health address that didn't answer at once is given on its second ask (the first can take ~20 s).
+const HEALTH_PATIENCE_MS = 45_000;
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
 function notify(title: string, text: string): void {
@@ -399,32 +402,37 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
           .map((f) => f.replace(/\.json$/, ""))
       : [];
   let skipped: string | null = null;
-  for (const name of names) {
-    const entry = readRegistry(name);
-    if (!entry) continue;
-    // One watcher per team at a time: launchd's run and a6g start can overlap, and both would start a planner.
-    mkdirSync(entry.run, { recursive: true });
-    const release = await acquireRun(entry.run);
-    if (!release) {
-      glog(`${name}: another watchdog run is busy with it; skipped`);
-      skipped = "another watchdog run is busy with the team; try again in a minute";
-      continue;
-    }
-    try {
-      skipped = before?.(entry) ?? null;
-      if (!skipped)
-        await watchTeam(
-          entry,
-          reach,
-          replies.filter((reply) => reply.team === name),
-          seen
-        );
-    } catch (error) {
-      glog(`watching ${name} failed: ${(error as Error).message}`);
-    } finally {
-      release();
-    }
-  }
+  // The teams at once: one whose checks wait (a health address that's slow to answer, a store that times out, on a
+  // loaded machine) doesn't hold up the others' ticks and controls. What they share is changed only in synchronous
+  // steps (lib/steer.ts, the replies' seen set), which never interleave.
+  await Promise.all(
+    names.map(async (name) => {
+      const entry = readRegistry(name);
+      if (!entry) return;
+      // One watcher per team at a time: launchd's run and a6g start can overlap, and both would start a planner.
+      mkdirSync(entry.run, { recursive: true });
+      const release = await acquireRun(entry.run);
+      if (!release) {
+        glog(`${name}: another watchdog run is busy with it; skipped`);
+        skipped = "another watchdog run is busy with the team; try again in a minute";
+        return;
+      }
+      try {
+        skipped = before?.(entry) ?? null;
+        if (!skipped)
+          await watchTeam(
+            entry,
+            reach,
+            replies.filter((reply) => reply.team === name),
+            seen
+          );
+      } catch (error) {
+        glog(`watching ${name} failed: ${(error as Error).message}`);
+      } finally {
+        release();
+      }
+    })
+  );
   if (reach.some((channel) => channel.replies)) writeJson(seenFile, [...seen].slice(-500));
   warnFailing(reach, glog);
   if (!only) {
@@ -437,8 +445,19 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
 
 // The web app's asks to start a project on this machine (lib/orders.ts), once its operator said it takes them (a6g
 // connect app --projects): one picked up is started in a process of its own, and the operator hears of it through
-// this machine's own channels, with how to stop it. A failure to read them is logged at most hourly.
+// this machine's own channels, with how to stop it. Every run looks, the minute-by-minute ones too, one at a time (two
+// runs that overlap would pick the same ask up twice). A failure to read them is logged at most hourly.
 async function takeProjectAsks(reach: Channel[], glog: (text: string) => void): Promise<void> {
+  if (!projectsSetting()) return;
+  const release = await acquireSlot([join(A6G_HOME, ".orders.lock")], { waitMin: 0, holder: "watchdog" });
+  if (!release) return;
+  try {
+    await takeAsksHeld(reach, glog);
+  } finally {
+    release();
+  }
+}
+async function takeAsksHeld(reach: Channel[], glog: (text: string) => void): Promise<void> {
   const mark = join(A6G_HOME, ".stamp-asks-unread");
   const failed = (text: string): void => {
     if (minutesSince(mark) < 60) return;
@@ -557,6 +576,15 @@ async function beat(glog: (text: string) => void): Promise<void> {
   }
 }
 
+// Whether the operator decides every proposal of the team in `home` (team.json approval.mode, as the factory reads it).
+function operatorDecides(home: string): boolean {
+  try {
+    return loadTeam(home, { strict: false }).approval.mode === "operator";
+  } catch {
+    return false;
+  }
+}
+
 async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[], seen: Set<string>): Promise<void> {
   const { run, title } = entry;
   const w: Partial<RegistryEntry["watchdog"]> = entry.watchdog ?? {};
@@ -605,6 +633,8 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // wakes an idle cycles team or a finished one.
   let arrived = "";
   let graph: Task[] | null = null;
+  // Stakeholders' requests nobody has looked at yet: the planner's to sort, so the team isn't only waiting on the operator.
+  let unsorted = 0;
   if (entry.tasks)
     try {
       const store = await openStore({ name: entry.name, tasks: entry.tasks }, run);
@@ -619,7 +649,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
         // its planner's nightly re-check write waits for that tick.
         const finished = existsSync(join(run, "complete"));
         const fromOutside = (t: Task): boolean => [OPERATOR, "stakeholder"].includes(t.history.at(-1)?.by ?? t.by);
-        const requests = (await store.requests.all()).filter((r) => r.status === "new" && r.updatedAt > since).length;
+        const fresh = (await store.requests.all()).filter((r) => r.status === "new");
+        unsorted = fresh.length;
+        const requests = fresh.filter((r) => r.updatedAt > since).length;
         // Anything the planner acts on: a finding or proposal, approved work, a hand-in to review, and a journey whose
         // last task just finished (it's due its verification).
         const all = await store.tasks.all();
@@ -730,10 +762,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     (text) => oncePer("answers-unread", 60) && log(text)
   );
 
-  // The environment: only the planner can restart it (it lives in the checkout), so tell it.
+  // The environment: only the planner can restart it (it lives in the checkout), so tell it. A development server that
+  // has sat idle can take a while over its first request (it builds the route again): one that doesn't answer is
+  // asked once more, given longer, before it's said to be down and the planner is woken to start it.
   let envNote = "";
   for (const target of entry.health ?? []) {
-    if (!(await answers(target)))
+    if (!(await answers(target)) && !(await answers(target, HEALTH_PATIENCE_MS)))
       envNote = ` The team's environment is down (${target.replace(/^any:/, "")} isn't answering): run a6g env up before anything else.`;
   }
   if (envNote && oncePer("env-down-log", 30)) log("the team's environment is down");
@@ -796,6 +830,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     members.every((r) => r.n === 0) &&
     graph.some((t) => t.kind === "design" && t.status === "question") &&
     !graph.some((t) => FOUNDATION.includes(t.kind) && ["approved", "building", "review"].includes(t.status));
+  // The same once everything open waits on the operator, their answers to its questions and, where they decide every
+  // proposal, their decisions on its proposals: both reach the planner within a minute by themselves (lib/answers.ts).
+  const awaitsOperator = graph !== null && unsorted === 0 && members.every((r) => r.n === 0) && waitsOnlyOnOperator(graph, operatorDecides(entry.home));
   const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}${steeringNote(run)}`;
   if (BUSY.includes(status)) {
     if (quiet >= (w.stuckAfterMin ?? 45) && oncePer("stuck", 60)) {
@@ -835,6 +872,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
       t3.threadSend(planner, tickText(", hourly: the team waits for the operator's word on the design"))
     )
       log("hourly tick (the design check-in waits for the operator)");
+  } else if (awaitsOperator) {
+    if (
+      ((envNote && oncePer("env-down", 30)) || oncePer("tick", Math.max(60, w.tickEveryMin ?? 10))) &&
+      t3.threadSend(planner, tickText(", hourly: everything open waits for the operator's answers or decisions"))
+    )
+      log("hourly tick (everything open waits for the operator)");
   } else if ((envNote && oncePer("env-down", 30)) || oncePer("tick", w.tickEveryMin ?? 10)) {
     log(t3.threadSend(planner, tickText()) ? `tick (planner was ${status})` : "couldn't send a tick");
   }
@@ -945,7 +988,14 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
 
 // Between full runs, every minute: only the operator's new controls and answers, so a pause, a resume or an answer from
 // the web app reaches the team within a minute, not at the next full run. A team another run is busy with waits for it.
+// And the web app's asks to start a project, so one is picked up within a minute too.
 async function applyControlsOnce(): Promise<void> {
+  const glog = (text: string) => appendFileSync(GLOBAL_LOG, `${stamp()} ${text}\n`);
+  let reach: Channel[] = [];
+  try {
+    reach = channels();
+  } catch {}
+  await takeProjectAsks(reach, glog);
   const names = existsSync(teamsDir) ? readdirSync(teamsDir).filter((f) => f.endsWith(".json")) : [];
   for (const name of names.map((f) => f.replace(/\.json$/, ""))) {
     const entry = readRegistry(name);

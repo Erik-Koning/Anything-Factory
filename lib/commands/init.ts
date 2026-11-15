@@ -339,8 +339,13 @@ const UNATTENDED_MIN = 45;
 // Runs the setup agent with nobody there, on a checkout `a6g init --no-interview` drafted: it reads the repository and
 // the goal in the brief, decides what it would have asked, and proves the result (plugin/agents/setup.md, "When the
 // operator isn't there"). Its message goes on standard input, since the list of tools would otherwise take it for one
-// more. Resolves to its exit status and what it printed.
-export function setupUnattended(repo: string, checkout: string, { model = "fable" }: { model?: string } = {}): { code: number; out: string } {
+// more. `configDir` is the Claude Code config folder of the subscription it runs on (null: this Mac's own login).
+// Resolves to its exit status and what it printed.
+export function setupUnattended(
+  repo: string,
+  checkout: string,
+  { model = "fable", configDir = null }: { model?: string; configDir?: string | null } = {}
+): { code: number; out: string } {
   const team = readJson<{ name?: string; branch?: string; base?: string; operator?: { technical?: boolean } } | null>(
     join(checkout, ".a6g", "team.json"),
     null
@@ -386,7 +391,14 @@ export function setupUnattended(repo: string, checkout: string, { model = "fable
       encoding: "utf8",
       timeout: UNATTENDED_MIN * 60_000,
       maxBuffer: 32 * 1024 * 1024,
-      env: { ...process.env, A6G_SETUP: "1", A6G_UNATTENDED: "1", A6G_HOME_DIR: checkout, A6G_FACTORY: FACTORY_ROOT },
+      env: {
+        ...process.env,
+        ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+        A6G_SETUP: "1",
+        A6G_UNATTENDED: "1",
+        A6G_HOME_DIR: checkout,
+        A6G_FACTORY: FACTORY_ROOT,
+      },
     }
   );
   const out = `${session.stdout ?? ""}${session.stderr ?? ""}`;

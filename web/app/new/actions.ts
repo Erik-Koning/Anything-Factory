@@ -184,7 +184,7 @@ export async function startProjectAction(_previous: StartFormState, form: FormDa
       return again(`You've asked for ${STARTS_A_DAY} projects today, the most a day.`);
     const from = (await stakeholderOf(fields.name, viewer, "operator")).id;
     const control = await startFromWeb(fields.name, ask, from);
-    said = `Asked ${machine.name} to start ${ask.title}. It looks every five minutes; each step shows here as it goes.`;
+    said = `Asked ${machine.name} to start ${ask.title}. It looks every minute; each step shows here as it goes.`;
     await record(viewer, {
       action: "project.asked",
       outcome: "ok",

@@ -222,4 +222,7 @@ form there, and isn't at this machine. Nobody reads what you print as you go, an
   committing each fix. Don't register or start the team: the factory does both once your check has passed, with the
   budget and the subscriptions the operator chose.
 - **If it can't be set up without them** (an account, a credential, a missing tool), end with one line that starts
-  `Needs the operator:` and says exactly what and why. That line is what they're shown.
+  `Needs the operator:` and says exactly what and why. That line is what they're shown. It's for what stops the check
+  passing, and only that: something that would only widen what the team can do or test (a real provider's key, a
+  newer tool) goes under "Assumed in place of an answer" in the brief, and once the check passes you end without the
+  line. The factory goes on when the check passes, and passes such a line to the operator as a note.

@@ -250,7 +250,7 @@ describe("a machine takes an ask", () => {
     assert.match(refusalOf(ask(), "taken", s) ?? "", /already runs a team named taken/);
   });
 
-  test("at each full run: one ask picked up and started, the next waits; another machine's is left alone; a start that died is said", async () => {
+  test("at each run: one ask picked up and started, the next waits; another machine's is left alone; a start that died is said", async () => {
     const s = setting();
     const client = fakeMongo();
     const launched: string[] = [];
@@ -333,6 +333,8 @@ describe("a machine takes an ask", () => {
     const limits = { daily: 20, weekly: null, total: 100, unit: "usd" as const, since: "2026-01-01T00:00:00.000Z", autoResume: false };
     await store.controls.create(startControl("shop-two", "web:s1", ask({ limits, use: ["default"], technical: false })));
     const ran: string[] = [];
+    // The check fails while this is so: the setup agent's "Needs the operator" stops the start only then.
+    let checkFails = true;
     // git for real; the factory's own commands only recorded.
     const sh: Sh = (command, args, { cwd }) => {
       if (command === "git") {
@@ -340,14 +342,17 @@ describe("a machine takes an ask", () => {
         return { code: done.status ?? 1, out: `${done.stdout}${done.stderr}` };
       }
       ran.push(args.slice(1).join(" "));
-      return { code: 0, out: "" };
+      return { code: checkFails && args[1] === "check" ? 1 : 0, out: "" };
     };
     const state = async () => startOf(await store.controls.all());
     let setups = 0;
+    // No Docker engine chosen: the tests don't reach this machine's.
+    const engine = () => null;
     const first = await carryOut("shop-two", (await state()) as NonNullable<Awaited<ReturnType<typeof state>>>, {
       store,
       setting: s,
       sh,
+      engine,
       setup: () => ({ code: 0, out: `working…\nNeeds the operator: a Stripe key scoped for the team\n${++setups}` }),
     });
     assert.equal(first, false);
@@ -363,15 +368,18 @@ describe("a machine takes an ask", () => {
     assert.equal(spawnSync("git", ["log", "--format=%s"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "Start Shop two");
     assert.deepEqual(ran, [
       `init ${repo} --name shop-two --title Shop two --store mongo --goal-file ${join(A6G_HOME, "orders", "shop-two.goal.md")} --no-interview --non-technical`,
+      `check ${join(s.dir, "shop-two-a6g")} --run`,
     ]);
     assert.equal(limitsOf(await store.controls.all()), null, "no budget before it's registered");
 
     // Carried on: what the first try made is its own, and the rest follows.
+    checkFails = false;
     ran.length = 0;
     const second = await carryOut("shop-two", (await state()) as NonNullable<Awaited<ReturnType<typeof state>>>, {
       store,
       setting: s,
       sh,
+      engine,
       setup: () => ({ code: 0, out: "done" }),
     });
     assert.equal(second, true);
@@ -400,7 +408,7 @@ describe("a machine takes an ask", () => {
     const asked = startOf(await third.controls.all()) as NonNullable<ReturnType<typeof startOf>>;
     assert.equal(asked.control.id, "k2");
     assert.equal(refusalOf(asked.ask, "shop-two", s), null);
-    assert.equal(await carryOut("shop-two", asked, { store: third, setting: s, sh, setup: () => ({ code: 0, out: "" }) }), true);
+    assert.equal(await carryOut("shop-two", asked, { store: third, setting: s, sh, engine, setup: () => ({ code: 0, out: "" }) }), true);
     assert.equal(
       readFileSync(brief, "utf8"),
       "# Brief\n\n## What should exist when the team is done\n\nA shop that also takes returns.\n\n## How done is proven\n\nTests.\n"
@@ -416,6 +424,7 @@ describe("a machine takes an ask", () => {
         store: other,
         setting: s,
         sh: failing,
+        engine,
         setup: () => ({ code: 0, out: "" }),
       }),
       false

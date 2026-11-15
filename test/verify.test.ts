@@ -377,6 +377,37 @@ describe("the check after merges, in a real browser", { skip: noBrowser ?? false
   // One viewport and a short settle: each check is quick.
   const pages = (): RawTeam["pages"] => ({ appUrl: url, schemes: ["light"], settleMs: 50, viewports: [{ id: "desktop", width: 1024, height: 768 }] });
 
+  test("a long suite gives way to a merge queued behind the check: nothing is filed or recorded, and the check stays due", async () => {
+    const home = makeRepo({ ...baseTeam({ board: "tasks", roles }), pages: pages() } as RawTeam, {
+      ".a6g/harness.json": { e2e: { config: "playwright.config.mjs", timeoutMin: 3 } },
+      "playwright.config.mjs": config,
+      "e2e/slow.spec.mjs":
+        'import { test } from "playwright/test";\ntest("takes its time", async () => { await new Promise((r) => setTimeout(r, 60_000)); });\n',
+      ".gitignore": "node_modules\n",
+    });
+    withPlaywright(home);
+    const run = tmp("a6g-run-");
+    const store = fileStore(run, "fixture");
+    const state = stateDir(home);
+    // A merge queued once the suite is under way: a process of its own, as a queued merge is.
+    const waiting = spawn("sleep", ["120"], { stdio: "ignore" });
+    const queue = setTimeout(() => waiting.pid && markQueued(join(pendingDir(state), "a6g_b9-next.json"), waiting.pid), 4000);
+    const woken: string[] = [];
+    const started = Date.now();
+    try {
+      await verifyAfterMerge(home, loadTeam(home), run, "a6g/b8-slow", { wake: (text) => woken.push(text), queuedEveryMs: 200 });
+      assert.ok(Date.now() - started < 45_000, "it didn't sit out the suite");
+      assert.ok(checkDue(home), "still due, for the queued merge to run");
+      assert.deepEqual(await filedBy(store), [], "nothing filed");
+      assert.deepEqual(woken, []);
+      assert.deepEqual(readJson<SuiteRecord[]>(join(state, "e2e", "history.json"), []), [], "no run recorded");
+      assert.match(readFileSync(join(state, "verify.log"), "utf8"), /the suite gave way to a merge queued behind it; the check is still due/);
+    } finally {
+      clearTimeout(queue);
+      waiting.kill();
+    }
+  });
+
   test("checks pages and the suite at the head, files what fails and the journeys without specs once, and wakes the planner", async () => {
     serve["/broken"] = () => [500, "Broken"];
     const home = makeRepo({ ...baseTeam({ board: "tasks", roles }), pages: pages() } as RawTeam, {

@@ -392,15 +392,22 @@ interface Checked {
   due?: "moved" | "waiting";
 }
 export interface CheckOptions {
-  // How long between asking a quiet app again, and how long to wait for the merge and app locks: shortened by tests.
+  // How long between asking a quiet app again, how long to wait for the merge and app locks, and how often the suite
+  // asks whether a merge is queued behind it: shortened by tests.
   healthWaitMs?: number;
   lockWaitMin?: number;
+  queuedEveryMs?: number;
   // What runs a package manager's audit: a test's own.
   audit?: Runner;
 }
 
 // One check of the integration branch's head, holding merge, app and gate in that order.
-async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWaitMs = 5000, lockWaitMin, audit }: CheckOptions): Promise<Checked> {
+async function checkOnce(
+  home: string,
+  team: LoadedTeam,
+  run: string,
+  { healthWaitMs = 5000, lockWaitMin, queuedEveryMs, audit }: CheckOptions
+): Promise<Checked> {
   const state = stateDir(home);
   const holder = "the merge queue's check";
   const log = (text: string): void => appendFileSync(join(state, "verify.log"), `${localTime()} ${text}\n`);
@@ -496,7 +503,19 @@ async function checkOnce(home: string, team: LoadedTeam, run: string, { healthWa
         if (harness?.e2e) {
           let why: string | null = null;
           try {
-            suite = await recordSuite(home, team, { retries: 1, namespace: `verify-${Date.now().toString(36)}` });
+            // A merge queued behind this check waits for the merge lock it holds, however long the suite takes (one of
+            // two hours held the team's integration branch still): the suite gives way to it, and the check stays due
+            // for the newer commit, which that merge runs once nothing is queued behind it.
+            suite = await recordSuite(home, team, {
+              retries: 1,
+              namespace: `verify-${Date.now().toString(36)}`,
+              stopWhen: () => othersQueued(state),
+              ...(queuedEveryMs ? { stopEveryMs: queuedEveryMs } : {}),
+            });
+            if (suite.gaveWay) {
+              log(`${short} the suite gave way to a merge queued behind it; the check is still due`);
+              return { told: null, due: "waiting" };
+            }
             if (!suite.ran) why = notRun(suite);
           } catch (error) {
             why = firstLine(error);

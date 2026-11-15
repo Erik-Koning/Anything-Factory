@@ -87,6 +87,27 @@ export function answersSince(tasks: Task[], since: string): PendingAnswer[] {
     .sort((a, b) => a.note.at.localeCompare(b.note.at));
 }
 
+// The operator's decisions on what waited for them to decide (a proposal, or one escalated to them): approved,
+// rejected or sent back for research, from the web app or a6g task approve|reject|research. Passed on like answers, so
+// approved work is started within a minute rather than at the planner's next tick, which is slow while the team has
+// nothing but their decisions to wait for (the watchdog).
+export interface PendingDecision {
+  task: Task;
+  at: string;
+  what: string;
+  key: string;
+}
+const DECIDED = /^(proposed|question) → (approved|rejected|researching)\b/;
+export function decisionsSince(tasks: Task[], since: string): PendingDecision[] {
+  return tasks
+    .flatMap((task) =>
+      task.history
+        .filter((h) => h.by === OPERATOR && h.at >= since && DECIDED.test(h.what))
+        .map((h) => ({ task, at: h.at, what: h.what, key: `decided-${task.id}-${Date.parse(h.at)}` }))
+    )
+    .sort((a, b) => a.at.localeCompare(b.at));
+}
+
 // One message to the planner for every answer that came since it last heard.
 export function answersMessage(answers: PendingAnswer[]): string {
   const lines = answers.map(({ task, note }, i) => `${i + 1}. #${task.id} "${task.title}" (${task.status}): ${note.text}`);
@@ -96,5 +117,17 @@ export function answersMessage(answers: PendingAnswer[]): string {
     ...lines,
     "",
     `Each answer is a note on its task already (a6g task show <id>), so don't note it again. Act on it as your rules say: add it to .a6g/decisions.md, re-check the other open questions against it, and move each task on.`,
+  ].join("\n");
+}
+
+// One message to the planner for the operator's decisions since it last heard.
+export function decisionsMessage(decisions: PendingDecision[]): string {
+  const lines = decisions.map(({ task, what }, i) => `${i + 1}. #${task.id} "${task.title}": ${what}`);
+  return [
+    `The operator decided on what waited for them:`,
+    "",
+    ...lines,
+    "",
+    `Each is on its task already (a6g task show <id>). Start what's approved as your rules say, and take a rejection's or a research request's reasons into what you propose next.`,
   ].join("\n");
 }

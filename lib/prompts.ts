@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_MIN_QUEUE, instanceId, type Lane, type LoadedTeam, ROLES, type Team } from "./config.ts";
+import { DEFAULT_MIN_QUEUE, instanceId, type Lane, type LoadedTeam, MEMBER_COMMAND_MIN, ROLES, type Team } from "./config.ts";
 import { DITTO_NOTE, DITTO_READ, dittoTools } from "./ditto.ts";
 import { FACTORY_ROOT, PACKAGE } from "./paths.ts";
 import { contactRule } from "./contact.ts";
@@ -72,6 +72,10 @@ function laneText(team: Team, role: string): string {
   parts.push("Never the factory's own files: `.a6g/` (except what your lane names), `.claude/` and `.mcp.json`.");
   if (lane.readOnly) parts.push("You work in the shared checkout and change nothing in it: no checkout, switch, stash, commit or edits.");
   if (lane.branch) parts.push(`Your branch matches ${code(lane.branch)}, made from ${code(team.branch)} in your own worktree.`);
+  if (role !== "planner")
+    parts.push(
+      `Your turn is your task: run each command in the foreground and wait for it (one may take up to ${MEMBER_COMMAND_MIN.most} minutes; give Bash a timeout that long), one at a time, since two runs at once load the machine into flaky failures. Once your turn ends nothing wakes you, and a task you still hold goes back.`
+    );
   return parts.join(" ");
 }
 

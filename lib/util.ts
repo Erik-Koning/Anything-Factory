@@ -110,11 +110,12 @@ export function die(message: string, code = 2): never {
   process.exit(code);
 }
 
-// Whether a health address answers: any:<url> takes any answer at all, a plain URL one below 400. Five seconds each.
-export async function answers(target: string): Promise<boolean> {
+// Whether a health address answers: any:<url> takes any answer at all, a plain URL one below 400. Five seconds each,
+// unless the caller waits longer.
+export async function answers(target: string, waitMs = 5000): Promise<boolean> {
   const any = target.startsWith("any:");
   try {
-    const response = await fetch(any ? target.slice(4) : target, { signal: AbortSignal.timeout(5000), redirect: "manual" });
+    const response = await fetch(any ? target.slice(4) : target, { signal: AbortSignal.timeout(waitMs), redirect: "manual" });
     return any || response.status < 400;
   } catch {
     return false;

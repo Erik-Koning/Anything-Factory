@@ -338,6 +338,8 @@ export interface IdeasState {
 }
 // After a pass that filed nothing, the next isn't asked for (only started with a focus) for this long.
 export const IDEAS_RETRY_MIN = 360;
+// Proposals waiting for the operator past which the planner is asked to propose no more but what outranks them.
+export const WAITING_ON_OPERATOR_MOST = 15;
 
 // A few lines for the planner's context: counts by status, what's due, what's claimed, the ideas queue. Kept short:
 // hook context is shown in full only under about 10,000 characters.
@@ -405,12 +407,16 @@ export function summary(
     );
   // Journeys only group tasks: nobody approves one.
   const proposed = [...by("proposed"), ...by("researching")].filter((t) => t.kind !== "journey");
+  // More than the operator decides in a sitting: each one more is the planner's time, and the operator's, to read past.
+  const plenty = approval === "operator" && proposed.length >= WAITING_ON_OPERATOR_MOST;
   if (proposed.length)
     parts.push(
       `${approval === "operator" ? "Proposals waiting for the operator" : "Proposals for the approver"}: ${proposed.length} (${proposed
         .slice(0, 5)
         .map((t) => `#${t.id}${t.score ? "" : " unscored"}`)
-        .join(", ")}).`
+        .join(
+          ", "
+        )}).${plenty ? " That's plenty for them to decide: propose nothing new unless it outranks what waits or unblocks work, and keep what waits sharp (fold duplicates together, reject what no longer serves the direction)." : ""}`
     );
   if (by("triage").length)
     parts.push(

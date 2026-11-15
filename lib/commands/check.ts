@@ -195,6 +195,8 @@ export function runGuard(team: Team, { role, tool, input }: GuardCase, run: stri
         A6G_ROLE: role,
         CLAUDE_PROJECT_DIR: team.home,
         A6G_SETUP: "",
+        // The rules, not how busy the machine is today: a start refused for its load would pass a case for another reason.
+        A6G_MACHINE_LOAD: "0",
         NODE_COMPILE_CACHE: join(FACTORY_ROOT, ".cache"),
         A6G_NODE_CACHE: "1",
       },

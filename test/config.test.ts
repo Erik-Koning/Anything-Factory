@@ -80,6 +80,14 @@ describe("config", () => {
     assert.equal(queue.team.roles["builder"]?.minQueue, undefined);
   });
 
+  test("the operator approving every proposal leaves no approver to start; with thresholds it stays", () => {
+    const roles = { planner: {}, builder: {}, approver: {} };
+    const operator = norm({ roles, approval: { mode: "operator" } });
+    assert.deepEqual(Object.keys(operator.team.roles), ["planner", "builder"]);
+    assert.match(operator.warnings.join("\n"), /roles\.approver: approval\.mode "operator" leaves the approver nothing to decide/);
+    assert.ok(norm({ roles, approval: { mode: "thresholds" } }).team.roles["approver"]);
+  });
+
   test("older [rule, reason] and [title, command] arrays are accepted", () => {
     const { team, problems } = norm({
       never: [["\\bx\\b", "no x"]],

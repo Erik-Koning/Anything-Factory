@@ -23,6 +23,7 @@ import {
   type Team,
 } from "./config.ts";
 import { contactInForce, messageKind, waitReason } from "./contact.ts";
+import { machineBusy } from "./load.ts";
 import { paceAllowance } from "./pace.ts";
 import { A6G_HOME } from "./paths.ts";
 import { issueCreateLabels, PLANNER_LABEL, PLANNER_TAG } from "./labels.ts";
@@ -1149,6 +1150,9 @@ export function check(input: HookInput): void {
     // No subscription open to the role on this machine (lib/steer.ts): its members wait until one opens.
     const waits = waitRefusal(run, childRole);
     if (waits) refuse(waits);
+    // The machine itself, which other teams share: past what it can run, one more member slows them all (lib/load.ts).
+    const busy = machineBusy();
+    if (busy) refuse(`this machine is too busy to start another member now (${busy}): start the ${childRole} at your next wake.`);
     const child = team.roles[childRole];
     // Each role runs on the model the team's rules give it. T3 Code reads it from the target; without one there, the
     // member would run on whichever model the instance lists first.

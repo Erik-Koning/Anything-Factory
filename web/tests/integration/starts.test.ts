@@ -132,6 +132,8 @@ test("an ask to start a team stands where its machine last said, until the team 
     (await starts(new Set(["shop-two"]))).map((s) => s.team),
     ["site"]
   );
+  // Stopped, then registered by hand at its machine: its own row takes over from the reason it stopped.
+  assert.deepEqual(await starts(new Set(["shop-two", "site"])), []);
   // Cleared from the page: a start control with nothing in it.
   await startFromWeb("site", null, "s1");
   assert.equal(await startFor("site"), null);

@@ -18,6 +18,8 @@ process.env.T3CODE_HOME = tmp("a6g-t3-");
 process.env.HOME = tmp("a6g-user-");
 // No test downloads a browser: self-install skips the factory's Chromium (lib/browser.ts).
 process.env.A6G_SKIP_BROWSER = "1";
+// The machine reads as idle, whatever else runs on it: the guard refuses to start members on a busy one (lib/load.ts).
+process.env.A6G_MACHINE_LOAD = "0";
 for (const key of ["A6G_TEAM", "A6G_HOME_DIR", "A6G_RUN", "A6G_ROLE", "A6G_SETUP", "A6G_VERSION", "A6G_MERGE_QUEUED", "CLAUDE_PROJECT_DIR"])
   delete process.env[key];
 // Nor does a test register a team on the Docker engine of whoever runs the tests (lib/docker.ts).

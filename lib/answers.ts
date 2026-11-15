@@ -1,12 +1,12 @@
-// The operator's answers from the web app or a6g task answer (lib/tasks/answer.ts), passed to the team's planner once
-// each, in one message per watchdog run, so it acts on them within a minute instead of at its next wake. A marker in the
-// run folder's replies/ says which went, as for the operator's replies by email; answers older than a day aren't passed
-// on (the planner reads those notes on its own wakes).
+// The operator's answers from the web app or a6g task answer (lib/tasks/answer.ts), and their decisions on proposals,
+// passed to the team's planner once each, in one message per watchdog run, so it acts on them within a minute instead
+// of at its next wake. A marker in the run folder's replies/ says which went, as for the operator's replies by email;
+// those older than a day aren't passed on (the planner reads them on its own wakes).
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Reply } from "./channels.ts";
 import type { RegistryEntry } from "./paths.ts";
-import { answer, answerKey, answersMessage, answersSince } from "./tasks/answer.ts";
+import { answer, answerKey, answersMessage, answersSince, decisionsMessage, decisionsSince } from "./tasks/answer.ts";
 import { designOpen, OPERATOR } from "./tasks/model.ts";
 import { openStore } from "./tasks/store.ts";
 
@@ -33,15 +33,27 @@ export async function relayAnswers(
     return;
   }
   const dir = join(entry.run, "replies");
-  const fresh = answersSince(tasks, new Date(now - DAY_MS).toISOString()).filter((a) => !existsSync(join(dir, a.key)));
-  if (!fresh.length) return;
-  if (!tell(answersMessage(fresh))) {
-    log(`couldn't pass the operator's answers on ${fresh.map((a) => `#${a.task.id}`).join(", ")} to the planner; trying again next run`);
+  const since = new Date(now - DAY_MS).toISOString();
+  const fresh = answersSince(tasks, since).filter((a) => !existsSync(join(dir, a.key)));
+  if (fresh.length) {
+    if (!tell(answersMessage(fresh)))
+      log(`couldn't pass the operator's answers on ${fresh.map((a) => `#${a.task.id}`).join(", ")} to the planner; trying again next run`);
+    else {
+      mkdirSync(dir, { recursive: true });
+      for (const a of fresh) writeFileSync(join(dir, a.key), "");
+      log(`passed the operator's answers on ${fresh.map((a) => `#${a.task.id}`).join(", ")} to the planner`);
+    }
+  }
+  // Their decisions on proposals, the same way (lib/tasks/answer.ts decisionsSince).
+  const decided = decisionsSince(tasks, since).filter((d) => !existsSync(join(dir, d.key)));
+  if (!decided.length) return;
+  if (!tell(decisionsMessage(decided))) {
+    log(`couldn't pass the operator's decisions on ${decided.map((d) => `#${d.task.id}`).join(", ")} to the planner; trying again next run`);
     return;
   }
   mkdirSync(dir, { recursive: true });
-  for (const a of fresh) writeFileSync(join(dir, a.key), "");
-  log(`passed the operator's answers on ${fresh.map((a) => `#${a.task.id}`).join(", ")} to the planner`);
+  for (const d of decided) writeFileSync(join(dir, d.key), "");
+  log(`passed the operator's decisions on ${decided.map((d) => `#${d.task.id}`).join(", ")} to the planner`);
 }
 
 // A reply to the design check-in's message, which a channel checked came from the operator, is their answer on the

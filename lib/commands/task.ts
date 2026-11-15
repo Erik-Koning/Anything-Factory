@@ -1,6 +1,7 @@
 // a6g task …: the team's task graph (lib/tasks/). Every change goes through here, checked against the caller's role
 // and the task's status, written only if nobody changed the task meanwhile, and recorded in its history. Agents never
 // write the store themselves: it's in the run folder, which the guard refuses them.
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -62,6 +63,7 @@ import {
 import { asData, quoted } from "../untrusted.ts";
 import { blastRadius } from "../blast.ts";
 import { journeyProofFor } from "./e2e.ts";
+import { testLaneProblems } from "./harness.ts";
 import { branchRef, isLead, multiMachine, prepareBranch, pushTaskBranch, refreshCheckout, remoteOf } from "../tasks/machines.ts";
 import { claimMark, importBoard, leaseMinutes, markClaim, measurePace, openTeamStore } from "../tasks/ops.ts";
 import { writePace } from "../pace.ts";
@@ -869,6 +871,27 @@ const submit: Handler = async ({ team, run, store, who }, [id]) => {
   // the merge queue.
   const found = leaksInWorktree(worktree, `${base}..HEAD`);
   if (found.length) throw new Refused(leakRefusal(branch, found));
+  // A scaffolder's test and test-infra work stays in test and harness files, as the merge queue holds it to: said here,
+  // before a reviewer spends a round on a branch the merge would refuse.
+  if (who === "scaffolder" && task.kind !== "scaffold") {
+    const changed = spawnSync("git", ["diff", "--name-only", "--no-renames", "-z", `${base}...HEAD`], { cwd: worktree, encoding: "utf8" })
+      .stdout.split("\0")
+      .filter(Boolean);
+    const start = git(worktree, "merge-base", base, "HEAD");
+    const at = (ref: string, path: string): string | null => {
+      const blob = spawnSync("git", ["cat-file", "blob", `${ref}:${path}`], { cwd: worktree, encoding: "utf8" });
+      return blob.status === 0 ? blob.stdout : null;
+    };
+    const outside = testLaneProblems(
+      changed,
+      team.harness.lane.map((rule) => new RegExp(rule)),
+      (path) => ({ before: at(start, path), after: at("HEAD", path) })
+    );
+    if (outside.length)
+      throw new Refused(
+        `${branch} is ${task.kind} work, which changes test and harness files only, and it changes ${outside.slice(0, 5).join(" ")}: the merge would refuse it. Undo it with a commit (git revert, or put the file back as ${base} has it; the branch is judged by what it changes in all, and its history stays), and leave a product change to a builder's task (a6g task add)`
+      );
+  }
   // A rework builds on the round it was sent back with, never beside it (a rebase after a conflict starts afresh: the
   // merge queue clears the round it sent back). The one other rework that doesn't: a round that held a secret, rebuilt
   // without it.
