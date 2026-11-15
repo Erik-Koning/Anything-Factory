@@ -5,10 +5,9 @@ import { Sideways } from "../../../../components/sideways.tsx";
 import { TaskCard } from "../../../../components/task-card.tsx";
 import { Ago, Notice, param, type SearchParams } from "../../../../components/ui.tsx";
 import { can } from "../../../../server/access.ts";
-import { storeFor } from "../../../../server/factory.ts";
 import { originsFor } from "../../../../server/origin.ts";
 import { kanban } from "../../../../server/views.ts";
-import { teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -16,9 +15,10 @@ export const metadata: Metadata = { title: "Board" };
 // says about it. It shows; the moves stay the team's (claims, reviews, the merge queue) and the Decisions page's.
 export default async function BoardPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:board", team.name)) notFound();
-  const [tasks, origins] = await Promise.all([storeFor(team.name).tasks.all(), originsFor(team.name, viewer)]);
+  const [tasks, origins] = await Promise.all([tasksOf(team.name), originsFor(team.name, viewer)]);
   const journeys = new Map(tasks.filter((t) => t.kind === "journey").map((t) => [t.id, { id: t.id, title: t.title }]));
   // ?done=all shows every done task, and a lane of the rejected ones.
   const everything = param((await searchParams)["done"]) === "all";

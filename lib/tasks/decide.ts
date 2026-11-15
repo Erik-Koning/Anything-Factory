@@ -50,11 +50,13 @@ export async function decide(
     topic,
   }: { who: Actor; approval: ApprovalRules; text?: string; recommendation?: string; topic?: string | undefined }
 ): Promise<Task> {
-  const task = await store.tasks.get(id.replace(/^#/, ""));
+  // The move rules read the whole graph, the task among it: one read, and the write tries that copy first.
+  const all = await store.tasks.all();
+  const task = all.find((t) => t.id === id.replace(/^#/, ""));
   if (!task) throw new Refused(`no task ${id}`);
   const to = TO[decision];
   const via: Via = decision;
-  const ctx = { all: await store.tasks.all(), approval };
+  const ctx = { all, approval };
   const refusal = moveRefusal(task, to, via, who, ctx);
   if (refusal) throw new Refused(refusal);
   if (decision !== "approve" && !text.trim()) throw new Refused("say why");
@@ -64,26 +66,30 @@ export async function decide(
   const about: { topic?: Topic } = isTopic(topic) ? { topic } : {};
   const rule = decision === "escalate" ? escalationRule(task, who, approval) : undefined;
   const why: { rule?: string } = rule ? { rule } : {};
-  return update(store.tasks, task.id, (t) =>
-    decision === "approve"
-      ? move(t, to, via, who, ctx, { fields: { approval: { by: who, at: nowIso(), note: text } }, why: text || undefined })
-      : move(t, to, via, who, ctx, {
-          fields: {
-            notes: [...t.notes, { at: nowIso(), by: who, text }],
-            ...(decision === "escalate"
-              ? {
-                  ask: {
-                    reason: text.trim(),
-                    recommendation: recommendation.trim(),
-                    by: who,
-                    at: nowIso(),
-                    ...about,
-                    ...why,
-                  },
-                }
-              : {}),
-          },
-          why: text,
-        })
+  return update(
+    store.tasks,
+    task.id,
+    (t) =>
+      decision === "approve"
+        ? move(t, to, via, who, ctx, { fields: { approval: { by: who, at: nowIso(), note: text } }, why: text || undefined })
+        : move(t, to, via, who, ctx, {
+            fields: {
+              notes: [...t.notes, { at: nowIso(), by: who, text }],
+              ...(decision === "escalate"
+                ? {
+                    ask: {
+                      reason: text.trim(),
+                      recommendation: recommendation.trim(),
+                      by: who,
+                      at: nowIso(),
+                      ...about,
+                      ...why,
+                    },
+                  }
+                : {}),
+            },
+            why: text,
+          }),
+    task
   );
 }

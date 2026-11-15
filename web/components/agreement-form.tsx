@@ -134,7 +134,7 @@ export function AgreementForm({ team, initial, never }: { team: string; initial:
         {length.toLocaleString("en")} of {NOTES_MAX.toLocaleString("en")} characters
       </p>
       <div className="inline">
-        <button type="submit" className="primary" disabled={pending}>
+        <button type="submit" className="primary" disabled={pending} data-pending={pending || undefined}>
           {pending ? "Saving…" : "Change the agreement"}
         </button>
         <span className="hint">The team follows it from now on; the planner is told within a minute.</span>

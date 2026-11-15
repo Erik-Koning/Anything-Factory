@@ -266,6 +266,78 @@ code:where(:not(.level-graph *)) {
   line-height: 1.5;
 }
 
+/* --- Waiting for a page ------------------------------------------------------------------------------------------ */
+/* The line along the top from a click until the next page is there (components/nav-progress.tsx): the solid's colour,
+   above the header. */
+.nav-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 30;
+  height: 3px;
+  pointer-events: none;
+}
+.nav-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--solid);
+  transform-origin: left;
+  opacity: 0;
+  transition:
+    transform 200ms linear,
+    opacity 160ms ease;
+}
+.nav-progress[data-state="loading"] > span {
+  opacity: 1;
+}
+.nav-progress[data-state="done"] > span {
+  opacity: 0;
+  transition:
+    transform 120ms ease-out,
+    opacity 160ms ease 100ms;
+}
+/* The page being left, while the next one comes: it stays up, faded a little after a moment (a quick page never shows
+   it), under a team's heading and tabs, which stay as they are. No outline in its place: React holds a fallback on
+   screen for at least 300 ms, so one would make every page that's quicker than that wait for it. */
+html[data-navigating] main > :not(.team-head, nav) {
+  opacity: 0.55;
+  transition: opacity 200ms ease 150ms;
+}
+/* The link clicked (components/link-pending.tsx): only a mark for the menu and the tabs to show it by. */
+.link-pending {
+  display: none;
+}
+/* A key whose action is on its way (components/submit-button.tsx, the answer form): a turning mark before its words. */
+button[data-pending]::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: turn 700ms linear infinite;
+}
+/* A question being answered or decided, in Waiting on you: all but the form that's sending fades. */
+li.waiting:has(button[data-pending]) > :not(:has(button[data-pending])) {
+  opacity: 0.55;
+  transition: opacity 160ms ease;
+}
+@keyframes turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress > span {
+    transition: opacity 160ms ease;
+  }
+  button[data-pending]::before {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
+}
+
 /* --- The frame -------------------------------------------------------------------------------------------------- */
 .top:where(:not(.level-graph *)) {
   position: sticky;
@@ -348,13 +420,23 @@ code:where(:not(.level-graph *)) {
   color: var(--ink);
   font-weight: 600;
 }
-.top nav a[aria-current="page"] {
+.top nav a[aria-current="page"],
+.top nav a:has(.link-pending) {
   background: var(--well);
   box-shadow:
     var(--sink),
     0 0 0 1px var(--line);
   color: var(--ink);
   font-weight: 600;
+}
+/* From the click on another (components/link-pending.tsx): the page it leaves is no longer the one pressed in. */
+.top nav:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending)) {
+  background: none;
+  box-shadow: none;
+}
+.top nav:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending), .attention) {
+  color: var(--ink-2);
+  font-weight: 500;
 }
 .who {
   display: inline-flex;
@@ -414,7 +496,8 @@ main:focus {
   background: color-mix(in srgb, var(--surface) 60%, transparent);
   color: var(--ink);
 }
-.tabs a[aria-current="page"] {
+.tabs a[aria-current="page"],
+.tabs a:has(.link-pending) {
   background: var(--key);
   box-shadow:
     var(--rim),
@@ -422,6 +505,13 @@ main:focus {
     0 0 0 1px var(--line);
   color: var(--ink);
   font-weight: 600;
+}
+/* From the click on another tab (components/link-pending.tsx): it rises at once, and the one it leaves sinks back. */
+.tabs:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending)) {
+  background: none;
+  box-shadow: none;
+  color: var(--ink-2);
+  font-weight: 500;
 }
 
 /* The other teams, from a team's heading. */
@@ -3535,10 +3625,20 @@ ol.setup > li > * {
   input[type="radio"] {
     appearance: auto;
   }
+  .nav-progress > span {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
   .top nav a[aria-current="page"],
+  .top nav a:has(.link-pending),
   .tabs a[aria-current="page"],
+  .tabs a:has(.link-pending),
   .segmented input:checked + span {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+  .top nav:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending)),
+  .tabs:has(.link-pending) a[aria-current="page"]:not(:has(.link-pending)) {
+    outline: none;
   }
 }

@@ -14,16 +14,14 @@ import { unlinkMachineAction } from "./actions.ts";
 export const metadata: Metadata = { title: "Machines" };
 
 export default async function MachinesPage({ searchParams }: { searchParams: SearchParams }) {
-  const viewer = await requireViewer();
+  // The machines, and the teams taken off the site (a Mac that reports one since puts it back: views.ts offSite), read
+  // beside the session and shown only as the person may see them.
+  const [viewer, linked, every, retired] = await Promise.all([requireViewer(), linkedMachines(), allTeams({ retired: true }), retirements()]);
   const everyone = can(viewer, "machines:all");
   const now = Date.now();
   // Those reporting first, then by name.
-  const machines = visibleMachines(viewer, await linkedMachines()).sort(
-    (a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name)
-  );
+  const machines = visibleMachines(viewer, linked).sort((a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name));
   const owners = everyone ? await ownersOf(machines) : null;
-  // The teams taken off the site (a Mac that reports one since puts it back: views.ts offSite).
-  const [every, retired] = await Promise.all([allTeams({ retired: true }), retirements()]);
   const off = new Set(every.filter((team) => offSite(team, retired.get(team.name) ?? null)).map((team) => team.name));
   return (
     <>

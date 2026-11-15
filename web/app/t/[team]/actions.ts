@@ -3,6 +3,7 @@
 // it reads or writes anything, then calls the factory's own code.
 import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import type { ActionResult } from "../../../components/action-result.ts";
 import { clip, withNotice } from "../../../components/ui.tsx";
 import { agreementFrom, isReserved, sameAgreement, TOPICS } from "../../../../lib/tasks/agreement.ts";
@@ -59,6 +60,10 @@ const text = (form: FormData, key: string): string => {
   return typeof value === "string" ? value : "";
 };
 
+// What an action did, into the audit log beside the page it renders rather than before it: the write starts at once,
+// and after() holds the request open until it's in (audit() logs one that fails, as before).
+const logged = (...entry: Parameters<typeof record>): void => after(record(...entry));
+
 // A refusal in words; anything else is logged and said plainly.
 function reasonOf(error: unknown): string {
   if (error instanceof NotAllowed || error instanceof Refused) return error.message;
@@ -90,7 +95,7 @@ export async function sendRequestAction(_previous: RequestFormState, form: FormD
     const label = viewer.admin ? "operator" : ((await memberships({ userId: viewer.userId, team }))[0]?.label ?? "stakeholder");
     const from = await stakeholderOf(team, viewer, label);
     id = (await sendRequest(team, { title, body, from: from.id, admin: viewer.admin })).id;
-    await record(viewer, { action: "request.sent", outcome: "ok", team, target: `${id} ${title.trim()}` });
+    logged(viewer, { action: "request.sent", outcome: "ok", team, target: `${id} ${title.trim()}` });
   } catch (error) {
     return again(reasonOf(error));
   }
@@ -157,7 +162,7 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
       },
       { admin, from }
     );
-    await record(viewer, {
+    logged(viewer, {
       action: admin ? "task.added" : "task.suggested",
       outcome: "ok",
       team,
@@ -192,13 +197,15 @@ export async function decideAction(form: FormData): Promise<ActionResult> {
     const problem = decisionProblem(decision, note);
     if (problem) throw new Refused(problem);
     // The page's own copy of the task (its version, in the form): the planner can edit a proposal while the page is
-    // open, and a decision is on what was read. The page comes back with the task as it stands.
+    // open, and a decision is on what was read. The page comes back with the task as it stands. The task is read
+    // beside the team's approval rules.
     const seen = text(form, "seen");
-    if (seen && String((await storeFor(team).tasks.get(id))?.version) !== seen)
+    const [current, settings] = await Promise.all([seen ? storeFor(team).tasks.get(id) : Promise.resolve(null), teamDoc(team)]);
+    if (seen && String(current?.version) !== seen)
       throw new Refused(`#${id} changed after this page was loaded. It's shown as it stands now: read it again, then decide.`);
-    const task = await decideAsOperator(team, id, decision, note);
+    const task = await decideAsOperator(team, id, decision, note, settings);
     result = { ok: `#${task.id} ${DONE[decision]}.` };
-    await record(viewer, {
+    logged(viewer, {
       action: "task.decided",
       outcome: "ok",
       team,
@@ -208,7 +215,7 @@ export async function decideAction(form: FormData): Promise<ActionResult> {
   } catch (error) {
     result = { error: reasonOf(error) };
     // A refusal to someone allowed to decide is worth keeping (the move table said no); one to anyone else, too.
-    await record(viewer ?? (await getViewer()), {
+    logged(viewer ?? (await getViewer()), {
       action: "task.decided",
       outcome: "refused",
       team,
@@ -240,19 +247,23 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
   const again = (error: string): AnswerFormState => ({ error, pick, extra });
   if (!TEAM_PARAM.test(team)) return again("No such team.");
   let viewer = null;
+  // A team no Mac runs gets it once one does (server/views.ts quietSince).
+  let waits = false;
   try {
     viewer = await allowed("proposals:decide", team);
     if (!TASK_ID.test(id)) return again("That isn't a task.");
     if (extra.length > LIMITS.note) return again(`Keep it to ${LIMITS.note.toLocaleString("en")} characters.`);
-    const task = await storeFor(team).tasks.get(id);
+    // The task, and the team's settings for what the page says after, read together.
+    const [task, doc] = await Promise.all([storeFor(team).tasks.get(id), teamDoc(team).catch(() => null)]);
     if (!task) return again(`There's no task #${id} on this team.`);
+    waits = doc ? quietSince(doc) !== null : false;
     const waiting = waitingOf(task, [task]);
     // The form answers the question it was drawn with (its token; the form for adding to an answer offers nothing
     // and sends none). One the team changed since comes back as it stands, with nothing chosen: the options an answer
     // is read against here would otherwise be ones the operator never saw.
     const shown = text(form, "shown");
     if ((pick || shown) && shown !== shownAs(waiting)) {
-      await record(viewer, {
+      logged(viewer, {
         action: "task.answered",
         outcome: "refused",
         team,
@@ -268,8 +279,8 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     // words; the recommendation, or the option it names, with nothing added) is answered as that: the factory writes
     // its words and marks the answer so. Anything else is the operator's own answer, in the form's words.
     const recommended = waiting.recommendationFrom === "asked" && asRecommended(pick, extra, waiting);
-    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended, waiting.recommendation ?? undefined);
-    await record(viewer, {
+    const answered = await answerAsOperator(team, id, recommended ? "" : said.text, recommended, waiting.recommendation ?? undefined, task);
+    logged(viewer, {
       action: "task.answered",
       outcome: "ok",
       team,
@@ -278,7 +289,7 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
     });
   } catch (error) {
     const reason = reasonOf(error);
-    await record(viewer ?? (await getViewer()), {
+    logged(viewer ?? (await getViewer()), {
       action: "task.answered",
       outcome: "refused",
       team,
@@ -289,9 +300,6 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
   }
   revalidatePath("/", "layout");
   refresh();
-  // A team no Mac runs gets it once one does (server/views.ts quietSince).
-  const doc = await teamDoc(team).catch(() => null);
-  const waits = doc ? quietSince(doc) !== null : false;
   return {
     error: null,
     pick: "",
@@ -339,10 +347,10 @@ export async function controlAction(form: FormData): Promise<ActionResult> {
       kind !== "resume" && isHoldScope(scope) ? await pauseFromWeb(team, { scope, journeys, note, from }) : await resumeFromWeb(team, { note, from });
     const what = controlWords(control);
     result = { ok: `Asked to ${what}. ${await applies(team)}` };
-    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });
+    logged(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${result.error}`.trim() });
+    logged(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind} ${scope}: ${result.error}`.trim() });
   }
   revalidatePath("/", "layout");
   refresh();
@@ -379,10 +387,10 @@ export async function teamAction(form: FormData): Promise<ActionResult> {
           ? `Deleted from the site, and stopped. ${await applies(team)} It's taken off its Mac then, its files and history kept.`
           : `${ACTION_WORDS[action].asked}. ${await applies(team)}`,
     };
-    await record(viewer, { action: audit, outcome: "ok", team, target: control.id, detail: note || ACTION_WORDS[action].asked });
+    logged(viewer, { action: audit, outcome: "ok", team, target: control.id, detail: note || ACTION_WORDS[action].asked });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action: audit, outcome: "refused", team, target: null, detail: result.error ?? "" });
+    logged(viewer ?? (await getViewer()), { action: audit, outcome: "refused", team, target: null, detail: result.error ?? "" });
   }
   revalidatePath("/", "layout");
   refresh();
@@ -412,10 +420,10 @@ export async function siteAction(form: FormData): Promise<ActionResult> {
           ? "Taken off the site. Its pages still open from a link, and you can put it back from here."
           : "Back on the site: on Teams, and in Waiting on you when it asks.",
     };
-    await record(viewer, { action, outcome: "ok", team, target: control.id, detail: kind === "retire" ? note || "taken off the site" : "put back" });
+    logged(viewer, { action, outcome: "ok", team, target: control.id, detail: kind === "retire" ? note || "taken off the site" : "put back" });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind}: ${result.error}` });
+    logged(viewer ?? (await getViewer()), { action, outcome: "refused", team, target: null, detail: `${kind}: ${result.error}` });
   }
   revalidatePath("/", "layout");
   refresh();
@@ -462,10 +470,10 @@ export async function budgetAction(form: FormData): Promise<ActionResult> {
       ? `${money(limits.daily)} a day, ${money(limits.weekly)} a week, ${money(limits.total)} in all${unit === "subscription" ? " of a subscription's week" : ""}`
       : "no budget";
     result = { ok: `The budget is ${said}. The team's Mac holds it to that from its next run.` };
-    await record(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
+    logged(viewer, { action: "team.budget", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: result.error ?? "" });
+    logged(viewer ?? (await getViewer()), { action: "team.budget", outcome: "refused", team, target: null, detail: result.error ?? "" });
   }
   refresh();
   return result;
@@ -499,10 +507,10 @@ export async function subscriptionsAction(form: FormData): Promise<ActionResult>
         ? `${whose} ${role === "planner" ? "follows" : "follow"} the team's list`
         : "The team runs on its Mac's own login";
     result = { ok: `${said}. The team's Mac applies it within a minute, and moves each role once nothing of it is at work.` };
-    await record(viewer, { action: "team.subscriptions", outcome: "ok", team, target: control.id, detail: said });
+    logged(viewer, { action: "team.subscriptions", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), { action: "team.subscriptions", outcome: "refused", team, target: null, detail: result.error ?? "" });
+    logged(viewer ?? (await getViewer()), { action: "team.subscriptions", outcome: "refused", team, target: null, detail: result.error ?? "" });
   }
   refresh();
   return result;
@@ -532,7 +540,7 @@ export async function reviewAction(form: FormData): Promise<ActionResult> {
     result = {
       ok: verdict === "agreed" ? `Agreed with ${id}.` : `Overturned ${id}. The planner gets what you wrote within a minute, and undoes it.`,
     };
-    await record(viewer, {
+    logged(viewer, {
       action: "decision.reviewed",
       outcome: "ok",
       team,
@@ -541,7 +549,7 @@ export async function reviewAction(form: FormData): Promise<ActionResult> {
     });
   } catch (error) {
     result = { error: reasonOf(error) };
-    await record(viewer ?? (await getViewer()), {
+    logged(viewer ?? (await getViewer()), {
       action: "decision.reviewed",
       outcome: "refused",
       team,
@@ -596,10 +604,10 @@ export async function agreementAction(_previous: AgreementFormState, form: FormD
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const { control, changes } = await agreementFromWeb(team, { level, topics, notes, contact: often.contact, from });
     said = changes.join("; ");
-    await record(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
+    logged(viewer, { action: "team.agreement", outcome: "ok", team, target: control.id, detail: said });
   } catch (error) {
     const reason = reasonOf(error);
-    await record(viewer ?? (await getViewer()), { action: "team.agreement", outcome: "refused", team, target: null, detail: reason });
+    logged(viewer ?? (await getViewer()), { action: "team.agreement", outcome: "refused", team, target: null, detail: reason });
     return again(reason);
   }
   revalidatePath("/", "layout");

@@ -4,20 +4,20 @@ import Link from "next/link";
 import { TaskCard } from "../../../../components/task-card.tsx";
 import { Notice, type SearchParams } from "../../../../components/ui.tsx";
 import { can } from "../../../../server/access.ts";
-import { storeFor } from "../../../../server/factory.ts";
 import { originsFor } from "../../../../server/origin.ts";
 import { kanban } from "../../../../server/views.ts";
-import { teamFor } from "../team.ts";
+import { readAhead, tasksOf, teamFor } from "../team.ts";
 import { TaskForm } from "./task-form.tsx";
 
 export const metadata: Metadata = { title: "Add a task" };
 
 export default async function AddTaskPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name);
   const { viewer, team } = await teamFor(name);
   const admin = can(viewer, "tasks:add", team.name);
   if (!admin && !can(viewer, "tasks:suggest", team.name)) notFound();
-  const [tasks, origins] = await Promise.all([storeFor(team.name).tasks.all(), originsFor(team.name, viewer)]);
+  const [tasks, origins] = await Promise.all([tasksOf(team.name), originsFor(team.name, viewer)]);
   const journeys = tasks.filter((t) => t.kind === "journey" && t.status !== "done" && t.status !== "rejected").map((t) => ({ id: t.id, title: t.title }));
   const triage = kanban(tasks).columns.find((c) => c.lane === "triage")?.cards ?? [];
   return (

@@ -7,24 +7,24 @@ import { SubscriptionsPanel } from "../../../components/subscriptions-panel.tsx"
 import { TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
 import { can } from "../../../server/access.ts";
-import { controlsOf, limitsOf, retiredOf, storeFor, usageOf } from "../../../server/factory.ts";
+import { limitsOf, retiredOf, storeFor, usageOf } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
 import { journeys, merges, offSite, progress } from "../../../server/views.ts";
-import { teamFor } from "./team.ts";
+import { controlsFor, readAhead, tasksOf, teamFor } from "./team.ts";
 
 export const metadata: Metadata = { title: "Overview" };
 
 export default async function OverviewPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
+  readAhead(name, "controls");
   // Which form a refused control reopens (actions.ts).
   const open = param((await searchParams)["open"]);
   const { viewer, team } = await teamFor(name);
-  const store = storeFor(team.name);
   const control = can(viewer, "team:control", team.name);
   const [tasks, cycles, controls] = await Promise.all([
-    store.tasks.all(),
-    team.mode === "cycles" ? store.cycles.all() : Promise.resolve([]),
-    control ? controlsOf(team.name) : Promise.resolve([]),
+    tasksOf(team.name),
+    team.mode === "cycles" ? storeFor(team.name).cycles.all() : Promise.resolve([]),
+    control ? controlsFor(team.name) : Promise.resolve([]),
   ]);
   const limits = limitsOf(controls);
   // Every day counted since the budget began (or ever), and at least the chart's last 14.
