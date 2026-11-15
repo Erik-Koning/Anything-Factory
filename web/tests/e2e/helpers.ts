@@ -132,12 +132,12 @@ export async function signInAsAdmin(page: Page, { backupCode, confirm = false }:
 // A server action's id, from a form on a page that has it: the same id answers wherever it's posted.
 export async function actionIdOn(page: Page, path: string): Promise<string> {
   await page.goto(path);
-  const name = await page.locator('form input[type="hidden"][name^="$ACTION_ID_"]').first().getAttribute("name");
+  // The page's own forms, not the team's controls beside its name, which every team page has first.
+  const name = await page.locator('main form:not(.team-head form) input[type="hidden"][name^="$ACTION_ID_"]').first().getAttribute("name");
   expect(name).toBeTruthy();
   return name ?? "";
 }
 
-// What a server action's redirect says went wrong (?error=…), or "" when it went to no error.
 // What the newest refusal of `action` in the audit log says: what a browser without scripts posting an in-place action
 // was refused for (the action says it in a toast, not in the address). Written once the response has gone, so it's
 // polled for.
@@ -146,4 +146,5 @@ export async function refusalOf(action: string): Promise<string> {
   const [entry] = await accounts.collection("audit").find({ action, outcome: "refused" }).sort({ at: -1 }).limit(1).toArray();
   return String(entry?.detail ?? "");
 }
+// What a server action's redirect says went wrong (?error=…), or "" when it went to no error.
 export const errorOf = (response: APIResponse): string => new URL(response.headers()["location"] ?? "/", state().baseURL).searchParams.get("error") ?? "";

@@ -734,8 +734,9 @@ test("the admin sees what waits on them and answers a question with one of its o
   expect(answersMessage(answersSince([task], "2000-01-01T00:00:00.000Z"))).toContain(
     `1. #${question} "Q: who sees a customer's past orders?" (question): (b)`
   );
-  const logged = await accounts.collection("audit").findOne({ action: "task.answered", outcome: "ok" });
-  expect(logged).toMatchObject({ team: "shop", target: `#${question} Q: who sees a customer's past orders?` });
+  await expect
+    .poll(() => accounts.collection("audit").findOne({ action: "task.answered", outcome: "ok" }))
+    .toMatchObject({ team: "shop", target: `#${question} Q: who sees a customer's past orders?` });
 });
 
 test("the admin approves blocked work again from the inbox, and comes back to it", async () => {
@@ -1007,16 +1008,19 @@ test("the admin pauses the team after the work under way, reads where it stands,
   // Beside the team's name, on every one of its pages; the pause's choices open over the page, not in it.
   await expect(head.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
   await expect(pausing).toBeHidden();
-  await page.evaluate(() => window.scrollTo(0, 300));
-  const scrolled = await page.evaluate(() => window.scrollY);
   await head.getByRole("button", { name: "Pause…" }).click();
   await expect(pausing.getByText("After the work under way")).toBeVisible();
+  // Over a page read further down: the dialog lies over it, and the pause leaves it where it was.
+  await page.evaluate(() => window.scrollTo(0, 300));
+  const scrolled = await page.evaluate(() => window.scrollY);
+  expect(scrolled).toBeGreaterThan(0);
   await pausing.getByLabel("Note (optional, for the record and the report)").fill("Let me check the board");
   await pausing.getByRole("button", { name: "Pause", exact: true }).click();
   // Done at once, said in a toast, and the page stays where it was.
   await expect(page.getByRole("status")).toContainText("Asked to pause after the work under way");
   await expect(pausing).toBeHidden();
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  // Within a line or so: the browser keeps what's in view where it was as the header above it changes.
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - scrolled)).toBeLessThan(40);
   await expect(panel.getByText("waiting for the team's Mac")).toBeVisible();
   // The header offers Resume from the moment it's asked, and a stop at once while it waits for the work.
   await expect(head.getByRole("button", { name: "Resume" })).toBeVisible();
@@ -1054,12 +1058,15 @@ test("the admin pauses the team after the work under way, reads where it stands,
     ["pause", "Let me check the board"],
     ["resume", "Looks right. Carry on with checkout."],
   ]);
-  const audit = await accounts
-    .collection("audit")
-    .find({ team: "shop", action: { $in: ["team.paused", "team.resumed"] } })
-    .sort({ at: 1 })
-    .toArray();
-  expect(audit.map((e) => [e.action, e.outcome])).toEqual([
+  const audit = async () =>
+    (
+      await accounts
+        .collection("audit")
+        .find({ team: "shop", action: { $in: ["team.paused", "team.resumed"] } })
+        .sort({ at: 1 })
+        .toArray()
+    ).map((e) => [e.action, e.outcome]);
+  await expect.poll(audit).toEqual([
     ["team.paused", "ok"],
     ["team.resumed", "ok"],
   ]);
@@ -1113,7 +1120,7 @@ test("the admin restarts a team's planner from ⋯ and deletes the team, each at
     await deleting.getByLabel(/Type blog to confirm/).fill("blgo");
     await deleting.getByLabel("Code from your authenticator").fill("123456");
     await deleting.getByRole("button", { name: "Delete the team" }).click();
-    await expect(page.getByRole("alert")).toContainText("Type the team's name, blog, to delete it.");
+    await expect(page.locator(".toast.error")).toContainText("Type the team's name, blog, to delete it.");
     await expect(deleting).toBeVisible();
     await deleting.getByLabel(/Type blog to confirm/).fill("blog");
     await deleting.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
@@ -1127,7 +1134,7 @@ test("the admin restarts a team's planner from ⋯ and deletes the team, each at
       ["pause", "now"],
       ["action", "unregister"],
     ]);
-    expect(await accounts.collection("audit").findOne({ team: "blog", action: "team.unregister", outcome: "ok" })).toBeTruthy();
+    await expect.poll(() => accounts.collection("audit").findOne({ team: "blog", action: "team.unregister", outcome: "ok" })).toBeTruthy();
     // Off Teams at once, whatever its Mac reports in the minute before it takes it off.
     await graph.collection("teams").updateOne({ _id: "blog" as never }, { $set: { "status.at": new Date(Date.now() + 1000).toISOString() } });
     await page.goto("/");
@@ -1250,9 +1257,11 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
   await expect(page.getByRole("status")).toContainText("The budget is $12 a day, none a week, $300 in all.");
   const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
   expect(budget).toMatchObject({ by: expect.stringMatching(/^web:s\d+$/), limits: { daily: 12, weekly: null, total: 300, autoResume: true } });
-  expect(await accounts.collection("audit").findOne({ team: "shop", action: "team.budget", outcome: "ok" })).toMatchObject({
-    detail: "$12 a day, none a week, $300 in all",
-  });
+  await expect
+    .poll(() => accounts.collection("audit").findOne({ team: "shop", action: "team.budget", outcome: "ok" }))
+    .toMatchObject({
+      detail: "$12 a day, none a week, $300 in all",
+    });
   // The tiles measure against it at once.
   await expect(panel.locator(".tiles li").first()).toContainText("of $12 a day");
 
@@ -1386,15 +1395,20 @@ test("the admin reviews what the team decided for them: agrees with one call, an
   await expect(overturned.getByText("with the planner")).toHaveCount(0);
   await expect(overturned.getByText("The price list takes euros now; nothing was priced in dollars only.")).toBeVisible();
 
-  const audit = await accounts.collection("audit").find({ team: "shop", action: "decision.reviewed" }).sort({ at: 1 }).toArray();
-  expect(audit.map((e) => [e.outcome, e.target, e.detail])).toEqual([
+  const audit = async () =>
+    (await accounts.collection("audit").find({ team: "shop", action: "decision.reviewed" }).sort({ at: 1 }).toArray()).map((e) => [
+      e.outcome,
+      e.target,
+      e.detail,
+    ]);
+  await expect.poll(audit).toEqual([
     ["refused", decisions.agree, "agreed: You can't do that here."],
     ["ok", `${decisions.agree} Do guests check out without an account?`, "agreed"],
     ["ok", `${decisions.overturn} Which currencies at launch?`, "overturned: Add euros too: the first customers are in Ireland."],
   ]);
 });
 
-test("the admin changes the working agreement with a code: the level, a topic and standing instructions", async () => {
+test("the admin changes the working agreement at once: the level, a topic and standing instructions", async () => {
   const { page } = admin;
   const { accounts } = await databases();
   await page.goto("/t/shop/decided");
@@ -1460,8 +1474,14 @@ test("the admin changes the working agreement with a code: the level, a topic an
     headers: { origin: state().baseURL },
   });
   expect(await shopControls("agreement")).toHaveLength(1);
-  const audit = await accounts.collection("audit").find({ team: "shop", action: "team.agreement" }).sort({ at: 1 }).toArray();
-  expect(audit.map((e) => [e.outcome, e.target, e.detail])).toEqual([
+  // Each written once its response has gone (after()).
+  const audit = async () =>
+    (await accounts.collection("audit").find({ team: "shop", action: "team.agreement" }).sort({ at: 1 }).toArray()).map((e) => [
+      e.outcome,
+      e.target,
+      e.detail,
+    ]);
+  await expect.poll(audit).toEqual([
     ["ok", made?.id, changes],
     ["refused", null, "Nothing changed: the agreement says that already."],
     ["refused", null, "You can't do that here."],
@@ -1685,7 +1705,8 @@ test("an answer or a decision on a task the team changed after the page was load
     await tasks.updateOne({ _id: "shop:912" as never }, { $set: { body: "Wrap every order, at no charge.", updatedAt: changed }, $inc: { version: 1 } });
     await page.locator("#reject-912").fill("Not this quarter");
     await page.getByRole("button", { name: "Reject #912" }).click();
-    await expect(page.locator("main").getByRole("alert")).toContainText(
+    // Refused in place, in a toast; the task is shown as it stands.
+    await expect(page.locator(".toast.error")).toContainText(
       "#912 changed after this page was loaded. It's shown as it stands now: read it again, then decide."
     );
     expect(await stored("912")).toMatchObject({ status: "proposed" });
@@ -1839,9 +1860,11 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
       .find({ team: "blog", kind: { $in: ["retire", "restore"] } })
       .toArray();
     expect(recorded.map((c) => [c.kind, c.by.startsWith("web:"), c.note])).toEqual([["retire", true, "A trial that's over"]]);
-    expect(await accounts.collection("audit").findOne({ team: "blog", action: "team.retired", outcome: "ok" })).toMatchObject({
-      detail: "A trial that's over",
-    });
+    await expect
+      .poll(() => accounts.collection("audit").findOne({ team: "blog", action: "team.retired", outcome: "ok" }))
+      .toMatchObject({
+        detail: "A trial that's over",
+      });
 
     // And back on, from its overview.
     await page.goto("/t/blog");
@@ -1905,22 +1928,24 @@ test("the admin chooses a team's subscriptions with a code, from what its Mac re
   // A wrong code changes nothing, and the form stays as it was, the order chosen kept.
   await panel.getByLabel(/Code from your authenticator/).fill("000000");
   await panel.getByRole("button", { name: "Save this order" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.locator(".toast.error")).toBeVisible();
   expect(await shopControls("subscriptions")).toHaveLength(0);
   await expect(panel.getByRole("button", { name: "Save this order" })).toBeVisible();
 
   await panel.getByLabel(/Code from your authenticator/).fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Save this order" }).click();
-  await expect(page.getByRole("status").first()).toContainText("The team runs on default, then work, then spare.");
+  await expect(page.locator(".toast")).toContainText("The team runs on default, then work, then spare.");
   // The newest by when it was asked: ids sort as text, so k10 comes before k9.
   const newest = () => graph.collection("controls").findOne({ team: "shop", kind: "subscriptions" }, { sort: { at: -1 } });
   expect(await newest()).toMatchObject({
     by: expect.stringMatching(/^web:s\d+$/),
     subscriptions: { role: null, use: ["default", "work", "spare"] },
   });
-  expect(await accounts.collection("audit").findOne({ team: "shop", action: "team.subscriptions", outcome: "ok" })).toMatchObject({
-    detail: "The team runs on default, then work, then spare",
-  });
+  await expect
+    .poll(() => accounts.collection("audit").findOne({ team: "shop", action: "team.subscriptions", outcome: "ok" }))
+    .toMatchObject({
+      detail: "The team runs on default, then work, then spare",
+    });
   // Until the Mac says it has it, the panel says what was asked.
   await expect(panel).toContainText("default, then work, then spare. The team's Mac applies it within a minute.");
 
@@ -1931,7 +1956,7 @@ test("the admin chooses a team's subscriptions with a code, from what its Mac re
   await panel.getByRole("button", { name: "Take default off the list" }).click();
   await panel.getByLabel(/Code from your authenticator/).fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Save this order" }).click();
-  await expect(page.getByRole("status").first()).toContainText("The reviewers follow the team's list.");
+  await expect(page.locator(".toast")).toContainText("The reviewers follow the team's list.");
   expect(await newest()).toMatchObject({ subscriptions: { role: "reviewer", use: [] } });
 
   // Blog is published as an older factory version publishes: its subscriptions are chosen on its Mac.
@@ -2004,7 +2029,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
 
   await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
   await send.click();
-  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Shop two.");
+  await expect(page.locator(".toast")).toContainText("Asked attic to start Shop two.");
   // Said once, in a toast, then gone from the address.
   await expect(page).toHaveURL(/\/$/);
   const asked = await graph.collection("controls").findOne({ team: "shop-two", kind: "start" });
@@ -2022,7 +2047,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
       use: ["default"],
     },
   });
-  expect(await accounts.collection("audit").findOne({ team: "shop-two", action: "project.asked", outcome: "ok" })).toBeTruthy();
+  await expect.poll(() => accounts.collection("audit").findOne({ team: "shop-two", action: "project.asked", outcome: "ok" })).toBeTruthy();
   const starting = page.locator("#start-shop-two");
   await expect(starting.getByRole("heading", { name: "Shop two" })).toBeVisible();
   await expect(starting).toContainText("waiting for the Mac");
@@ -2076,7 +2101,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   // Cleared, it's gone from the page: a start with nothing in it.
   await page.goto("/");
   await starting.getByRole("button", { name: "Clear Shop two" }).click();
-  await expect(page.getByRole("status").first()).toContainText("Cleared Shop two from this page.");
+  await expect(page.locator(".toast")).toContainText("Cleared Shop two from this page.");
   await expect(page.locator("#start-shop-two")).toHaveCount(0);
   expect(await graph.collection("controls").findOne({ team: "shop-two", kind: "start" }, { sort: { at: -1 } })).toMatchObject({ start: null });
 
@@ -2089,7 +2114,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   await page.getByText("The team chooses").click();
   await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
   await page.getByRole("button", { name: "Start the project" }).click();
-  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Blog engine.");
+  await expect(page.locator(".toast")).toContainText("Asked attic to start Blog engine.");
   expect(await graph.collection("controls").findOne({ team: "blog-engine", kind: "start" })).toMatchObject({
     start: { repo: { existing: "blog-engine" }, technical: false, limits: null, use: [] },
   });
@@ -2103,7 +2128,7 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/");
   await page.locator("#start-blog-engine").getByRole("button", { name: "Withdraw Blog engine" }).click();
-  await expect(page.getByRole("status").first()).toContainText("Withdrawn: attic won't start Blog engine.");
+  await expect(page.locator(".toast")).toContainText("Withdrawn: attic won't start Blog engine.");
   await expect(page.getByRole("heading", { name: /^Being started/ })).toHaveCount(0);
   expect(await accounts.collection("audit").countDocuments({ action: "project.withdrawn", outcome: "ok" })).toBe(2);
 
@@ -2178,7 +2203,7 @@ test("the admin starts a project from someone else's GitHub repository, with the
   await expect(page.getByText("needed to start")).toHaveCount(0);
   await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill(await freshCode(page, state().admin.totpURI));
   await page.getByRole("button", { name: "Set up the project" }).click();
-  await expect(page.getByRole("status").first()).toContainText("Asked attic to start Hello.");
+  await expect(page.locator(".toast")).toContainText("Asked attic to start Hello.");
   expect(await graph.collection("controls").findOne({ team: "hello", kind: "start" })).toMatchObject({
     start: {
       repo: { github: "someone/hello" },
@@ -2191,9 +2216,11 @@ test("the admin starts a project from someone else's GitHub repository, with the
       hold: true,
     },
   });
-  expect(await accounts.collection("audit").findOne({ team: "hello", action: "project.asked", outcome: "ok" })).toMatchObject({
-    detail: "on attic, from GitHub someone/hello, to wait once set up",
-  });
+  await expect
+    .poll(() => accounts.collection("audit").findOne({ team: "hello", action: "project.asked", outcome: "ok" }))
+    .toMatchObject({
+      detail: "on attic, from GitHub someone/hello, to wait once set up",
+    });
 
   // What the Mac did, as it says it: forked, then set up and waiting.
   const starting = page.locator("#start-hello");
