@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { type MachineTeam, online } from "../../../lib/fleet.ts";
+import { type MachineSubscription, type MachineTeam, online } from "../../../lib/fleet.ts";
 import { Command } from "../../components/command.tsx";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
 import { can, roleIn, type Viewer, visibleMachines } from "../../server/access.ts";
 import { allTeams, retirements } from "../../server/factory.ts";
-import { linkedMachines, type Machine, ownersOf } from "../../server/machines.ts";
+import { linkedMachines, type Machine, machineSubscriptions, ownersOf } from "../../server/machines.ts";
 import { requireViewer } from "../../server/viewer.ts";
 import { offSite } from "../../server/views.ts";
 import { unlinkMachineAction } from "./actions.ts";
@@ -22,7 +22,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
   const now = Date.now();
   // Those reporting first, then by name.
   const machines = visibleMachines(viewer, linked).sort((a, b) => Number(online(b, now)) - Number(online(a, now)) || a.name.localeCompare(b.name));
-  const owners = everyone ? await ownersOf(machines) : null;
+  const [owners, subscriptions] = await Promise.all([everyone ? ownersOf(machines) : null, machineSubscriptions(machines.map((m) => m.id))]);
   const off = new Set(every.filter((team) => offSite(team, retired.get(team.name) ?? null)).map((team) => team.name));
   return (
     <>
@@ -42,6 +42,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Sea
               owner={owners ? (owners.get(machine.userId)?.email ?? "a removed account") : null}
               up={online(machine, now)}
               off={off}
+              subscriptions={subscriptions.get(machine.id) ?? null}
             />
           ))}
         </ul>
@@ -75,12 +76,15 @@ function MachineCard({
   owner,
   up,
   off,
+  subscriptions,
 }: {
   machine: Machine;
   viewer: Viewer;
   owner: string | null;
   up: boolean;
   off: ReadonlySet<string>;
+  // What it reports of its Claude subscriptions, from a factory version that does.
+  subscriptions: MachineSubscription[] | null;
 }) {
   // Only its own person asks it to start a project, or turns that on at its terminal.
   const mine = machine.userId === viewer.userId;
@@ -110,6 +114,17 @@ function MachineCard({
           <>
             <dt>Factory</dt>
             <dd>{machine.factory}</dd>
+          </>
+        ) : null}
+        {subscriptions?.length ? (
+          <>
+            <dt>Subscriptions</dt>
+            <dd>
+              {subscriptions.map((s) => `${s.name}${s.weekly ? ` (${Math.round(100 - s.weekly.percent)}% of its week left)` : ""}`).join(", ")} ·{" "}
+              <Link className="nowrap" href={`/subscriptions?machine=${encodeURIComponent(machine.name)}`}>
+                Limits and usage
+              </Link>
+            </dd>
           </>
         ) : null}
         <dt>Starts projects</dt>
