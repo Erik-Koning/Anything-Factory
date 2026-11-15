@@ -15,6 +15,7 @@
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { accountClosures } from "./budget.ts";
+import { restartAsked } from "./actions.ts";
 import { applied, markApplied, readLimits, whoAsked } from "./holds.ts";
 import type { RegistryEntry } from "./paths.ts";
 import {
@@ -62,6 +63,10 @@ const named = (name: string | null): string => name ?? "this Mac's own login";
 // Why no member of `role` can start now (the guard, a worker's watchdog), or null: none of its subscriptions is open,
 // or it's moving to another once those at work have finished.
 export function waitRefusal(run: string | null, role: string): string | null {
+  // The operator asked to restart the planner: nothing new starts, so those at work finish and it can be.
+  const restart = run && role !== "planner" ? restartAsked(run) : null;
+  if (restart)
+    return `no ${role} can start now: the operator asked to restart the planner (${restart}), and it restarts once those at work have finished and you're idle. Start no one; you carry on from a fresh thread right after.`;
   const steering = run ? readSteering(run) : null;
   const wait = steering?.waiting[role];
   if (wait)
@@ -73,6 +78,9 @@ export function waitRefusal(run: string | null, role: string): string | null {
 
 // For the planner's ticks: the members that wait or are moving, so it starts none of them yet.
 export function steeringNote(run: string): string {
+  const restart = restartAsked(run);
+  if (restart)
+    return ` The operator asked to restart your thread (${restart}): start no members; once those at work have reported and you're idle, the watchdog restarts you on a fresh thread, and you carry on from your log.`;
   const steering = readSteering(run);
   const waiting = Object.entries(steering?.waiting ?? {})
     .filter(([role]) => role !== "planner")

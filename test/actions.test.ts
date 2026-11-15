@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { ACTION_EXPIRES_MIN, applyActions } from "../lib/actions.ts";
+import { ACTION_EXPIRES_MIN, applyActions, restartAsked } from "../lib/actions.ts";
+import { steeringNote, waitRefusal } from "../lib/steer.ts";
 import { applied, applyControls } from "../lib/holds.ts";
 import type { RegistryEntry } from "../lib/paths.ts";
 import { actedControl, actionControl, actionsOf, type Control, restoreControl, retireControl, retiredOf } from "../lib/tasks/controls.ts";
@@ -51,6 +52,36 @@ describe("the operator's actions on a team's lead", () => {
     assert.equal(rotate?.outcome, "failed");
     assert.match(rotate?.said ?? "", /too long ago to act on now\. Ask again/);
     assert.equal(applied(run)(old.id), true, "and it isn't tried again");
+  });
+
+  test("a planner restart that waits starts no new member, goes on waiting past the hour, and starts once the planner is free", async () => {
+    const run = tmp("a6g-run-");
+    const store = fileStore(run, "fixture");
+    const asked = await store.controls.create(actionControl("fixture", "web:s1", "rotate", "", minutesAgo(5)));
+    const started: string[] = [];
+    const start = (_e: RegistryEntry, c: Control) => void started.push(c.id);
+    const members = () => "the planner has 2 members running; they report to it, so it restarts once they've finished";
+    const log = await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: members });
+    assert.match(log[0] ?? "", /waiting, as the planner has 2 members running; .*no new member starts until it's done/);
+    assert.equal(restartAsked(run), asked.id);
+    assert.match(waitRefusal(run, "builder") ?? "", /no builder can start now: the operator asked to restart the planner \(k1\)/);
+    assert.equal(waitRefusal(run, "planner"), null, "the planner itself isn't held");
+    assert.match(steeringNote(run), /The operator asked to restart your thread \(k1\): start no members/);
+
+    // Seventy minutes on, still waiting: it was seen in time, so it isn't too old.
+    const later = Date.now() + 70 * 60_000;
+    await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: members, now: later });
+    assert.deepEqual(started, []);
+    assert.deepEqual(
+      actionsOf(await store.controls.all()).map((s) => s.outcome),
+      ["waiting"]
+    );
+
+    // Free: it starts, and members may start again.
+    await applyActions(entryAt(run), store, await store.controls.all(), "mac", { start, busy: () => null, now: later });
+    assert.deepEqual(started, [asked.id]);
+    assert.equal(restartAsked(run), null);
+    assert.equal(waitRefusal(run, "builder"), null);
   });
 
   test("a job that won't start says why", async () => {

@@ -21,8 +21,9 @@ keeps whatever version it pins, since the watchdog does this work.
 - **Under ⋯: restart the planner or the environment, upgrade the factory, wake it, delete it.** A new control,
   `action` (`lib/tasks/controls.ts` `TEAM_ACTIONS`), asks the team's lead; its watchdog's minute starts each as a job
   of its own (`a6g act`, `lib/actions.ts`), and the job writes what came of it back (`acted`), which the overview's
-  Controls panel shows. A planner restart waits until the planner is idle with no member running, saying why; one
-  asked over an hour before its Mac picked it up is passed over and says so. An upgrade moves the team to the newest
+  Controls panel shows. A planner restart waits until the planner is idle with no member running, saying why, and no new
+  member starts meanwhile, so the team drains to it; one its Mac first sees over an hour after it was asked is passed
+  over and says so. An upgrade moves the team to the newest
   version installed on its Mac and commits the pin under the merge lock. An action already asked isn't offered again
   until its Mac says how it went.
 - **Deleting a team** takes its name, typed, and a code: it's paused now and off the site at once, whatever its Mac

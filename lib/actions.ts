@@ -1,11 +1,13 @@
 // The operator's actions from the web app (lib/tasks/controls.ts TEAM_ACTIONS), on the team's lead. The watchdog's
 // minute starts each new one as a job of its own (a6g act, lib/commands/act.ts), so it never waits on a restart or an
 // upgrade, and marks it applied so it starts once; the job writes what came of it to the store (acted), which the web
-// app shows. A planner restart waits until the planner is idle with no member running, saying why once per reason. One
-// asked longer ago than ACTION_EXPIRES_MIN (this Mac asleep, or the team run nowhere meanwhile) isn't acted on, and
-// says so: a restart then would surprise whoever is at work now. Deleting the team is the exception: it still holds.
+// app shows. A planner restart waits until the planner is idle with no member running, saying why once per reason;
+// while it waits, no new member starts (restartAsked, the guard), so the team drains to it. One this Mac first sees
+// more than ACTION_EXPIRES_MIN after it was asked (this Mac asleep, or the team run nowhere meanwhile) isn't acted on,
+// and says so: a restart then would surprise whoever is at work now. Deleting the team is the exception: it still
+// holds. One that has waited here that long, saying why, goes on waiting.
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applied, markApplied, whoAsked } from "./holds.ts";
 import { entryOf, FACTORY_ROOT, type RegistryEntry } from "./paths.ts";
@@ -26,6 +28,17 @@ const STARTED: Record<TeamAction, string> = {
 
 // The job's log, beside the watchdog's: what each job printed.
 export const actionsLog = (run: string): string => join(run, "actions.log");
+
+// A planner restart that waits for those at work (the run folder's restart-asked, its control's id): the guard starts no
+// member meanwhile (lib/steer.ts waitRefusal), so the team drains to it. Null when none waits.
+const restartFile = (run: string): string => join(run, "restart-asked");
+export function restartAsked(run: string): string | null {
+  try {
+    return existsSync(restartFile(run)) ? readFileSync(restartFile(run), "utf8").trim() || null : null;
+  } catch {
+    return null;
+  }
+}
 
 // Starts `a6g act <team> <control>` as a job of its own, on this version of the factory, its output in actions.log.
 export function startJob(entry: RegistryEntry, control: Control): void {
@@ -49,14 +62,18 @@ const sentence = (text: string): string => {
   return /[.!?]$/.test(said) ? said : `${said}.`;
 };
 
-// Starts the actions not applied yet, oldest first. Resolves to lines for the team's log. `start` and `now` are for
-// tests.
+// Starts the actions not applied yet, oldest first. Resolves to lines for the team's log. `start`, `now` and `busy`
+// (why the planner can't be restarted now) are for tests.
 export async function applyActions(
   entry: RegistryEntry,
   store: Store,
   controls: Control[],
   machine: string,
-  { start = startJob, now = Date.now() }: { start?: (entry: RegistryEntry, control: Control) => void; now?: number } = {}
+  {
+    start = startJob,
+    now = Date.now(),
+    busy = (run: string) => plannerBusy(run, "it restarts"),
+  }: { start?: (entry: RegistryEntry, control: Control) => void; now?: number; busy?: (run: string) => string | null } = {}
 ): Promise<string[]> {
   const done = applied(entry.run);
   const words = new Map<string, Acted>();
@@ -64,12 +81,14 @@ export async function applyActions(
   const say = (control: Control, outcome: ActedOutcome, said: string) =>
     store.controls.create(actedControl(entry.name, machine, { of: control.id, outcome, said }));
   const log: string[] = [];
+  let waiting: string | null = null;
   for (const control of controls) {
     if (control.kind !== "action" || !control.action || done(control.id)) continue;
     const action = control.action;
     const what = ACTION_WORDS[action].asked.replace(/^Asked/, "asked");
     const minutes = Math.round((now - Date.parse(control.at)) / 60_000);
-    if (action !== "unregister" && minutes > ACTION_EXPIRES_MIN) {
+    // Too old only when this Mac first sees it: one it has said it waits on goes on waiting.
+    if (action !== "unregister" && minutes > ACTION_EXPIRES_MIN && !words.has(control.id)) {
       markApplied(entry.run, [control.id]);
       await say(
         control,
@@ -80,13 +99,14 @@ export async function applyActions(
       continue;
     }
     if (action === "rotate") {
-      const busy = plannerBusy(entry.run, "it restarts");
-      if (busy) {
-        const said = sentence(busy);
+      const why = busy(entry.run);
+      if (why) {
+        const said = sentence(why);
         if (words.get(control.id)?.said !== said) {
           await say(control, "waiting", said);
-          log.push(`${whoAsked(control.by)} ${what} (${control.id}): waiting, as ${busy}`);
+          log.push(`${whoAsked(control.by)} ${what} (${control.id}): waiting, as ${why}; no new member starts until it's done`);
         }
+        waiting ??= control.id;
         continue;
       }
     }
@@ -102,5 +122,7 @@ export async function applyActions(
       log.push(`${whoAsked(control.by)} ${what} (${control.id}): the job didn't start: ${why}`);
     }
   }
+  if (waiting) writeFileSync(restartFile(entry.run), waiting);
+  else rmSync(restartFile(entry.run), { force: true });
   return log;
 }
