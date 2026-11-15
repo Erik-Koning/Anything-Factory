@@ -7,7 +7,12 @@ import { auth } from "./auth.ts";
 const adapter = async () => (await auth().$context).internalAdapter;
 
 export async function setAuthenticatorDue(userId: string, due: boolean): Promise<void> {
-  await (await adapter()).updateUser(userId, { authenticatorDue: due });
+  await (await adapter()).updateUser(userId, { authenticatorDue: due, authenticatorLater: null });
+}
+
+// "Set it up later": the authenticator stays due, put off for the session `sessionId` only.
+export async function putOffAuthenticator(userId: string, sessionId: string): Promise<void> {
+  await (await adapter()).updateUser(userId, { authenticatorLater: sessionId });
 }
 
 export async function setIpCheck(userId: string, on: boolean): Promise<void> {

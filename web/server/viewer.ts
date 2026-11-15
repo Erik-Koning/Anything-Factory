@@ -54,6 +54,7 @@ export const getViewer = cache(async (): Promise<Person | null> => {
     // Accounts from before these two were kept read as: checked, nothing due.
     ipCheck: current.user.ipCheck !== false,
     authenticatorDue: current.user.authenticatorDue === true,
+    authenticatorPutOff: current.user.authenticatorDue === true && current.user.authenticatorLater === current.session.id,
     sessionId: current.session.id,
     ip,
     teams,

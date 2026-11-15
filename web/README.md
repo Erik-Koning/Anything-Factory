@@ -261,8 +261,9 @@ emails a sign-in link. An invited account has no password; one that signed up is
   afterwards, signed in to the confirmed account, through the app's own server actions; no endpoint takes either.
   - **Two-factor authentication**: once the address is confirmed the person lands on `/welcome` and sets up an
     authenticator app before anything else opens: their password, the QR code (or its key), a code to prove it, ten
-    backup codes shown once, then on to Teams. **Set it up later** there puts it off (audited); the account page
-    offers it from then on.
+    backup codes shown once, then on to Teams. **Set it up later** there puts it off for that sign-in only
+    (`authenticatorLater`, the session's id; audited): the next sign-in asks again, until it's set up or the account
+    page's **Stop asking me** turns the asking off (audited).
   - **Check new IP addresses**: a sign-in from an address they haven't used asks them by email first (below). Without
     it no address is asked about. It can be changed on the account page: turning it off takes a sign-in from the last
     ten minutes and a code from the authenticator when one is on, is audited, and emails the person that it was

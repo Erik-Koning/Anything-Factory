@@ -207,6 +207,9 @@ function makeAuth() {
     user: {
       additionalFields: {
         authenticatorDue: { type: "boolean", required: false, defaultValue: false, input: false },
+        // The session the authenticator was put off for ("Set it up later"): due still, and asked again at the next
+        // sign-in.
+        authenticatorLater: { type: "string", required: false, input: false },
         ipCheck: { type: "boolean", required: false, defaultValue: true, input: false },
       },
     },

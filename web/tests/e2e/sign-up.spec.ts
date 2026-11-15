@@ -157,7 +157,9 @@ test("from then on the password asks for the authenticator's code; new backup co
   await context.close();
 });
 
-test("the authenticator can wait: “Set it up later” goes on to Teams; the account page turns the IP check off and on", async ({ browser }) => {
+test("the authenticator can wait: “Set it up later” goes on to Teams for this sign-in; the account page stops the asking, and turns the IP check off and on", async ({
+  browser,
+}) => {
   const home = await newPage(browser, { ip: "203.0.113.62" });
   await home.page.goto("/sign-up");
   const seen = mailsTo(LEE).length;
@@ -169,15 +171,22 @@ test("the authenticator can wait: “Set it up later” goes on to Teams; the ac
   const { accounts } = await databases();
   const users = accounts.collection("user");
   const user = await users.findOne({ email: LEE });
-  expect(user).toMatchObject({ authenticatorDue: false, ipCheck: true });
+  // Put off for this sign-in only: still due, and the next sign-in asks again.
+  const session = await accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } });
+  expect(user).toMatchObject({ authenticatorDue: true, authenticatorLater: String(session?._id), ipCheck: true });
   expect(user?.twoFactorEnabled ?? false).toBe(false);
   expect(await accounts.collection("audit").findOne({ email: LEE, action: "authenticator.later" })).toMatchObject({ outcome: "ok", ip: "203.0.113.62" });
-  // Nothing is owed any more; the account page offers the authenticator whenever they like.
   await home.page.goto("/welcome");
   await expect(home.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
+  // The account page sets it up whenever they like, or stops the asking: their call, made there.
   await home.page.goto("/account");
-  await expect(home.page.getByRole("region", { name: "Authenticator" }).getByRole("button", { name: "Set up an authenticator" })).toBeVisible();
+  const authenticator = home.page.getByRole("region", { name: "Authenticator" });
+  await expect(authenticator.getByRole("button", { name: "Set up an authenticator" })).toBeVisible();
   await expect(home.page.getByRole("region", { name: "Recent activity" }).getByText("Authenticator put off at sign-up")).toBeVisible();
+  await authenticator.getByRole("button", { name: "Stop asking me" }).click();
+  await expect(home.page.getByRole("status")).toContainText("We won't ask you to set up an authenticator again.");
+  await expect(authenticator.getByRole("button", { name: "Stop asking me" })).toHaveCount(0);
+  expect(await users.findOne({ email: LEE })).toMatchObject({ authenticatorDue: false, authenticatorLater: null });
 
   // The IP check, on as they signed up. A sign-in older than ten minutes doesn't turn it off.
   const addresses = home.page.getByRole("region", { name: "Your IP addresses" });
@@ -238,7 +247,7 @@ test("nothing sent with a sign-up turns a protection off: the account starts wit
   await expect(first.page).toHaveURL(/\/welcome$/);
   await first.page.getByRole("button", { name: "Set it up later" }).click();
   await expect(first.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
-  expect(await accounts.collection("user").findOne({ email: UMA })).toMatchObject({ emailVerified: true, authenticatorDue: false, ipCheck: true });
+  expect(await accounts.collection("user").findOne({ email: UMA })).toMatchObject({ emailVerified: true, authenticatorDue: true, ipCheck: true });
   umasSession = await first.context.storageState();
 
   // The link confirms once: opened again, somewhere else, it signs nobody in.

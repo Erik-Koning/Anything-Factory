@@ -163,6 +163,16 @@ export async function authenticatorAction(previous: AuthenticatorState, form: Fo
   return { stage: "done", error: null, qr: null, key: null, backupCodes: scanning.backupCodes };
 }
 
+// Stops asking for the authenticator every sign-up starts with, for someone who hasn't set one up: their own call,
+// made here on their account page once signed in, never at sign-up.
+export async function stopAskingAuthenticatorAction(): Promise<ActionResult> {
+  const viewer = await self();
+  if (viewer.admin || viewer.twoFactor || !viewer.authenticatorDue) return done({});
+  await setAuthenticatorDue(viewer.userId, false);
+  await record(viewer, { action: "authenticator.not-asked", outcome: "ok" });
+  return done({ ok: "We won't ask you to set up an authenticator again. You can still set one up here." });
+}
+
 // Turning it off takes a code from it (and the password of an account that has one), so a session left open somewhere
 // can't quietly remove it.
 export async function turnOffAuthenticatorAction(form: FormData): Promise<ActionResult> {

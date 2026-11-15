@@ -47,7 +47,7 @@ export default async function WelcomePage() {
           <div>
             <SubmitButton>Set it up later</SubmitButton>
           </div>
-          <p className="hint">You can turn it on from your account page whenever you like.</p>
+          <p className="hint">We&apos;ll ask again the next time you sign in. Your account page sets it up whenever you like, or stops the asking.</p>
         </form>
       )}
       <p>

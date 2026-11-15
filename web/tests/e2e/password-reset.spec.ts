@@ -104,6 +104,9 @@ test("someone who forgot their password asks from the sign-in page, sets a new o
   await expect(page.locator("main").getByRole("alert")).toBeVisible();
   await form.getByLabel("Password").fill(NEW_PASSWORD);
   await form.getByRole("button", { name: "Continue" }).click();
+  // She put her authenticator off at sign-up for that sign-in only: this one asks again.
+  await expect(page).toHaveURL(/\/welcome$/);
+  await page.getByRole("button", { name: "Set it up later" }).click();
   await expect(page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
 
   // It is on her account page and in the log, and she was told by email.
