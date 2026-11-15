@@ -1,6 +1,6 @@
 // The Teams page's rows, after the main story: what waits on the operator, answered on Waiting on you or discarded from
 // the row itself, and the team's own keys (stop, pause, ⋯) beside it.
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { newTask, type Task } from "../../../lib/tasks/model.ts";
 import { closeDatabases, databases, signInAsAdmin } from "./helpers.ts";
 
@@ -8,6 +8,18 @@ test.describe.configure({ mode: "serial" });
 test.afterAll(async () => {
   await closeDatabases();
 });
+
+// The main story signs the admin in many times from this address just before: past the sign-in's limit, wait it out.
+async function signIn(page: Page): Promise<void> {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await signInAsAdmin(page);
+    } catch (error) {
+      if (tries >= 2 || !(await page.getByText("Too many tries").isVisible())) throw error;
+      await page.waitForTimeout(61_000);
+    }
+  }
+}
 
 test("a question waiting on the operator is answered from its team's row, or discarded there with words the team reads", async ({ page }) => {
   const { graph } = await databases();
@@ -26,8 +38,9 @@ test("a question waiting on the operator is answered from its team's row, or dis
       ask: { reason: "what the shop gives away is the operator's", recommendation: "(a) not now", by: "planner", at },
     }),
   ]);
+  test.setTimeout(240_000);
   try {
-    await signInAsAdmin(page);
+    await signIn(page);
     const row = page.locator("li.team-row").filter({ has: page.locator("#shop") });
     // Shop has things waiting on the operator, so its row opens with them in it.
     const waiting = row.getByRole("region", { name: "Shop: waiting on you" });
