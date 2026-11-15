@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: a start from the web app that finishes on its own, and a team that loses less time
+## 0.8.7: A start from the web app that finishes on its own, and a team that loses less time
 
 Found watching the first starts from the web app, which stopped at a step a person had to finish by hand.
 
@@ -16,7 +16,6 @@ Found watching the first starts from the web app, which stopped at a step a pers
   started does, instead of showing its old reason and command for a fortnight.
 - **The setup agent runs on the subscription chosen on the form** (the first of them the Mac has), as the team's roles
   do, not on the Mac's own login.
-- **A budget in shares of a subscription's week** is said that way in the team's log (`90% a day`), not as dollars.
 
 Found watching the first team started this way at work:
 
