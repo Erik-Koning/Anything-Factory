@@ -63,6 +63,17 @@ function Mark() {
   );
 }
 
+// Who is signed in, and the way out: at the right of the top bar, or under the links in a narrow window's menu.
+function Who({ viewer }: { viewer: Person }) {
+  return (
+    <>
+      <span>{viewer.name || viewer.email}</span>
+      {viewer.admin ? <span className="chip">admin</span> : null}
+      <SignOutButton className="quiet s" />
+    </>
+  );
+}
+
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const viewer = await getViewer();
   const signedIn = viewer !== null && !blocked(viewer);
@@ -97,15 +108,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     : []),
                   { href: "/account", label: "Account" },
                 ]}
+                who={<Who viewer={viewer} />}
               />
             ) : (
               <span className="spacer" />
             )}
             {viewer ? (
               <span className="who">
-                <span>{viewer.name || viewer.email}</span>
-                {viewer.admin ? <span className="chip">admin</span> : null}
-                <SignOutButton className="quiet s" />
+                <Who viewer={viewer} />
               </span>
             ) : null}
           </div>

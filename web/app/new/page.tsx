@@ -133,22 +133,28 @@ export default async function StartPage({ searchParams }: { searchParams: Search
           </aside>
         </div>
       ) : (
+        // Until a Mac starts projects there's no form: what the operator does next comes first, said as an action,
+        // then the commands in order; why it's done at the Mac and not here is under its own heading.
         <section className="panel how" aria-labelledby="no-mac">
-          <h2 id="no-mac">{linked.length ? "None of your Macs starts projects yet" : "Link a Mac first"}</h2>
-          <p>
-            A Mac starts projects from here only once you've said so at its own terminal. It can't be turned on from this page, so nobody who gets into
-            your account can start work on your Mac without having been at it.
+          <p className="how-state">
+            {linked.length ? "None of your Macs starts projects yet" : "No Mac is linked to your account yet"}, so there&apos;s no form here yet.
           </p>
-          <p>On the Mac that should start projects:</p>
+          <h2 id="no-mac">{linked.length ? "Turn it on at one of your Macs" : "Link a Mac, then turn it on there"}</h2>
+          <p>
+            Run these in a terminal on the Mac that should start projects. The form to say what to build shows here by itself once that Mac reports, within
+            five minutes.
+          </p>
           <ol className="setup">
             <li>
               <span>Check its factory version knows how. This prints whether the Mac starts projects, and in which folder.</span>
               <Command>a6g projects</Command>
-              <span>
-                If it answers that it doesn&apos;t know the command, update the factory first. Run this in the folder you installed it from on that Mac
-                (your clone of Anything Factory), and nowhere else:
-              </span>
-              <Command>git pull && npm install && node bin/a6g.ts self-install</Command>
+              <details className="how-update">
+                <summary>It doesn&apos;t know the command?</summary>
+                <p>
+                  Update the factory first. Run this in the folder you installed it from on that Mac (your clone of Anything Factory), and nowhere else:
+                </p>
+                <Command>git pull && npm install && node bin/a6g.ts self-install</Command>
+              </details>
             </li>
             {linked.length ? null : (
               <li>
@@ -167,14 +173,18 @@ export default async function StartPage({ searchParams }: { searchParams: Search
               <Command>a6g connect app --projects ~/code</Command>
             </li>
           </ol>
-          <p>
-            This page shows the form by itself once the Mac has reported, within five minutes.{" "}
-            {linked.length ? (
-              <Link className="nowrap" href="/machines">
-                See your Macs
-              </Link>
-            ) : null}
-          </p>
+          {linked.length ? (
+            <p className="small">
+              <Link href="/machines">See your Macs</Link> and what each one reports.
+            </p>
+          ) : null}
+          <details>
+            <summary>Why it&apos;s turned on at the Mac</summary>
+            <p className="small">
+              A Mac starts projects from here only once you&apos;ve said so at its own terminal. It can&apos;t be turned on from this page, so nobody who
+              gets into your account can start work on your Mac without having been at it.
+            </p>
+          </details>
           <Refresh every={20} forMinutes={20} />
         </section>
       )}

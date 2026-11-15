@@ -34,8 +34,9 @@ const METHODS: { id: Method; label: string; title: string; about: string; go: st
 ];
 
 // The sign-in page under the top bar: a team at work drawn on the sheet, what the page is asking at the foot of it,
-// and a bar along the bottom with the way in on its left and what that way takes on its right. `problem` is what the
-// page was opened with (a link that didn't work), said until the next try.
+// and a bar along the bottom that holds the way in as one group, read from the left: what the chosen way takes (and
+// anything that went wrong), then the toggle, its fields and its button on one line. `problem` is what the page was
+// opened with (a link that didn't work), said until the next try.
 export function SignInForm({ next, problem: opened }: { next: string; problem: string | null }) {
   const [step, setStep] = useState<Step>("choose");
   const [method, setMethod] = useState<Method>("link");
@@ -125,146 +126,148 @@ export function SignInForm({ next, problem: opened }: { next: string; problem: s
             </>
           )}
         </div>
-        <div className="sign-in-how">
-          <div aria-live="polite">
-            {step === "sent" ? (
-              <p className="hint">
-                An admin gets a note in place of the link: admins sign in with a passkey, or a password and their authenticator&apos;s code.
-              </p>
-            ) : step === "choose" ? (
-              <div key={method} className="sign-in-swap">
-                <h2 id="sign-in-how">{how.title}</h2>
-                <p className="hint">{how.about}</p>
-                {method === "password" ? (
-                  <p className="hint">
-                    <Link href="/forgot-password">Forgot your password?</Link>
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          {problem ? (
-            <p className="notice error" role="alert">
-              {problem}
-            </p>
-          ) : null}
-        </div>
       </div>
       <form className="sign-in-bar" onSubmit={submit}>
-        {step === "sent" ? (
-          <div className="sign-in-bar-inner">
-            <p className="sign-in-readout">
-              <span>Link for</span> {email.trim()}
-            </p>
-            <button type="button" className="quiet" onClick={() => setStep("choose")}>
-              Use another way
-            </button>
-          </div>
-        ) : (
-          <div className="sign-in-bar-inner">
-            {step === "code" ? (
-              <fieldset>
-                <legend className="sr">The code is from</legend>
-                <div className="segmented">
-                  {[false, true].map((kind) => (
-                    <label key={String(kind)}>
-                      <input
-                        type="radio"
-                        name="kind"
-                        checked={backup === kind}
-                        onChange={() => {
-                          setBackup(kind);
-                          setCode("");
-                        }}
-                      />
-                      <span>{kind ? "Backup code" : "Authenticator"}</span>
-                    </label>
-                  ))}
+        <div className="sign-in-bar-inner">
+          <div className="sign-in-how">
+            <div aria-live="polite">
+              {step === "sent" ? (
+                <p className="hint">
+                  An admin gets a note in place of the link: admins sign in with a passkey, or a password and their authenticator&apos;s code.
+                </p>
+              ) : step === "choose" ? (
+                <div key={method} className="sign-in-swap">
+                  <h2 id="sign-in-how">{how.title}</h2>
+                  <p className="hint">{how.about}</p>
+                  {method === "password" ? (
+                    <p className="hint">
+                      <Link href="/forgot-password">Forgot your password?</Link>
+                    </p>
+                  ) : null}
                 </div>
-              </fieldset>
-            ) : (
-              <fieldset>
-                <legend className="sr">Sign in with</legend>
-                <div className="segmented">
-                  {METHODS.map(({ id, label }) => (
-                    <label key={id}>
-                      <input
-                        type="radio"
-                        name="method"
-                        checked={method === id}
-                        onChange={() => {
-                          setMethod(id);
-                          setPassword("");
-                        }}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            )}
-            <div className="sign-in-fields" role="group" aria-labelledby="sign-in-how">
-              {step === "code" ? (
-                <label key="code">
-                  <span>{backup ? "Backup code" : "6-digit code"}</span>
-                  <input
-                    name="code"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    required
-                    autoFocus
-                    autoComplete="one-time-code"
-                    inputMode={backup ? "text" : "numeric"}
-                    pattern={backup ? undefined : "[0-9]{6}"}
-                    maxLength={backup ? 32 : 6}
-                  />
-                </label>
-              ) : (
-                // Both fields stay in the bar, so that one the chosen way doesn't take can close up and open again:
-                // closed, it's out of reach and out of the form.
-                <>
-                  <label key="email" className={method === "passkey" ? "off" : undefined} inert={method === "passkey"}>
-                    <span>Email</span>
-                    <input
-                      name="email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      required
-                      disabled={method === "passkey"}
-                      autoComplete={method === "password" ? "username" : "email"}
-                    />
-                  </label>
-                  <label key="password" className={method === "password" ? undefined : "off"} inert={method !== "password"}>
-                    <span>Password</span>
-                    <input
-                      name="password"
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      required
-                      disabled={method !== "password"}
-                      autoComplete="current-password"
-                    />
-                  </label>
-                </>
-              )}
-              <button type="submit" className="primary" disabled={busy}>
-                {step === "code" ? (
-                  "Verify"
-                ) : (
-                  <span className="sign-in-go">
-                    {METHODS.map(({ id, go }) => (
-                      <span key={id} className={id === method ? undefined : "off"} aria-hidden={id === method ? undefined : true}>
-                        {go}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </button>
+              ) : null}
             </div>
+            {problem ? (
+              <p className="notice error" role="alert">
+                {problem}
+              </p>
+            ) : null}
           </div>
-        )}
+          {step === "sent" ? (
+            <>
+              <p className="sign-in-readout">
+                <span>Link for</span> {email.trim()}
+              </p>
+              <button type="button" className="quiet" onClick={() => setStep("choose")}>
+                Use another way
+              </button>
+            </>
+          ) : (
+            <>
+              {step === "code" ? (
+                <fieldset>
+                  <legend className="sr">The code is from</legend>
+                  <div className="segmented">
+                    {[false, true].map((kind) => (
+                      <label key={String(kind)}>
+                        <input
+                          type="radio"
+                          name="kind"
+                          checked={backup === kind}
+                          onChange={() => {
+                            setBackup(kind);
+                            setCode("");
+                          }}
+                        />
+                        <span>{kind ? "Backup code" : "Authenticator"}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : (
+                <fieldset>
+                  <legend className="sr">Sign in with</legend>
+                  <div className="segmented">
+                    {METHODS.map(({ id, label }) => (
+                      <label key={id}>
+                        <input
+                          type="radio"
+                          name="method"
+                          checked={method === id}
+                          onChange={() => {
+                            setMethod(id);
+                            setPassword("");
+                          }}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+              <div className="sign-in-fields" role="group" aria-labelledby="sign-in-how">
+                {step === "code" ? (
+                  <label key="code">
+                    <span>{backup ? "Backup code" : "6-digit code"}</span>
+                    <input
+                      name="code"
+                      value={code}
+                      onChange={(event) => setCode(event.target.value)}
+                      required
+                      autoFocus
+                      autoComplete="one-time-code"
+                      inputMode={backup ? "text" : "numeric"}
+                      pattern={backup ? undefined : "[0-9]{6}"}
+                      maxLength={backup ? 32 : 6}
+                    />
+                  </label>
+                ) : (
+                  // Both fields stay in the bar, so that one the chosen way doesn't take can close up and open again:
+                  // closed, it's out of reach and out of the form.
+                  <>
+                    <label key="email" className={method === "passkey" ? "off" : undefined} inert={method === "passkey"}>
+                      <span>Email</span>
+                      <input
+                        name="email"
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                        disabled={method === "passkey"}
+                        autoComplete={method === "password" ? "username" : "email"}
+                      />
+                    </label>
+                    <label key="password" className={method === "password" ? undefined : "off"} inert={method !== "password"}>
+                      <span>Password</span>
+                      <input
+                        name="password"
+                        type="password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        required
+                        disabled={method !== "password"}
+                        autoComplete="current-password"
+                      />
+                    </label>
+                  </>
+                )}
+                <button type="submit" className="primary" disabled={busy}>
+                  {step === "code" ? (
+                    "Verify"
+                  ) : (
+                    <span className="sign-in-go">
+                      {METHODS.map(({ id, go }) => (
+                        <span key={id} className={id === method ? undefined : "off"} aria-hidden={id === method ? undefined : true}>
+                          {go}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </form>
     </div>
   );

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Refresh } from "../components/refresh.tsx";
 import { StartCard } from "../components/start-card.tsx";
 import { TeamFolds } from "../components/team-folds.tsx";
@@ -33,12 +33,18 @@ const LANES_SHORT = ["Triage", "To decide", "To build", "Building", "In review",
 // Every team the person follows, each a row that folds (components/team-folds.tsx): shut, it says how the team is; open,
 // where its work stands and the ways in. Above them, for an admin: the projects their Macs are starting (app/new).
 // Why a team a linked Mac runs isn't on this page: what the site reads is a team's store in MongoDB.
-const unshownWhy = (store: MachineTeam["store"]): string =>
-  store === "files"
-    ? "its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
-    : store === "mongo"
-      ? "not published yet (a6g register publishes it)"
-      : "it keeps no task graph the site reads";
+const unshownWhy = (store: MachineTeam["store"]): ReactNode =>
+  store === "files" ? (
+    <>
+      keeps its tasks in files there (<code>a6g task migrate --to mongo</code> brings them here)
+    </>
+  ) : store === "mongo" ? (
+    <>
+      isn&apos;t published yet (<code>a6g register</code> publishes it)
+    </>
+  ) : (
+    "keeps no task graph the site reads"
+  );
 
 export default async function TeamsPage({ searchParams }: { searchParams: SearchParams }) {
   // Every team that published its settings, those taken off the site among them (server/factory.ts retirements), and
@@ -143,7 +149,8 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <Chip>{status?.state ?? "no status yet"}</Chip>
                         {quiet ? <QuietMark last={quiet.last} /> : null}
                       </span>
-                      {/* The same four figures in the same places on every row, a dash where there's nothing to say. */}
+                      {/* The same four figures in the same places on every row, each saying what it counts, so a row
+                          needs no column headings. */}
                       <span className="glance">
                         <span className="glance-item waits">
                           {decides && teamAsks ? (
@@ -154,7 +161,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                               {`${teamAsks} waiting on you`}
                             </Link>
                           ) : (
-                            <span className="muted">nothing waiting</span>
+                            <span className="muted">nothing waiting on you</span>
                           )}
                         </span>
                         <span className="glance-item">
@@ -163,10 +170,10 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <span className="glance-item">
                           {spend ? (
                             <>
-                              <b>{dollars(spend.today)}</b> today
+                              <b>{dollars(spend.today)}</b> spent today
                             </>
                           ) : control ? (
-                            <span className="muted">not counted yet</span>
+                            <span className="muted">spend not counted yet</span>
                           ) : null}
                         </span>
                         <span className="glance-item muted">
@@ -272,17 +279,23 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                           </section>
                         ) : null}
                       </div>
-                      {/* The team's pages this person may open, each a small key along the row's foot. */}
+                      {/* The team's pages this person may open, each a small quiet key along the row's foot; the one
+                          with something waiting on the operator carries the same light as the row's figure. What's to
+                          decide is named as its count above is. */}
                       <p className="shortcuts">
                         {can(viewer, "tasks:add", team.name) ? (
                           <Link href={`/t/${team.name}/add`}>Add a task</Link>
                         ) : can(viewer, "tasks:suggest", team.name) ? (
                           <Link href={`/t/${team.name}/add`}>Suggest a task</Link>
                         ) : null}
-                        {decides ? <Link href={`/t/${team.name}/inbox`}>Waiting on you{teamAsks ? ` (${teamAsks})` : ""}</Link> : null}
+                        {decides ? (
+                          <Link className={teamAsks ? "attention" : undefined} href={`/t/${team.name}/inbox`}>
+                            Waiting on you{teamAsks ? ` (${teamAsks})` : ""}
+                          </Link>
+                        ) : null}
                         {board ? <Link href={`/t/${team.name}/board`}>Board</Link> : null}
                         <Link href={`/t/${team.name}/requests`}>Requests</Link>
-                        {decides ? <Link href={`/t/${team.name}/proposals`}>Decisions{waiting ? ` (${waiting})` : ""}</Link> : null}
+                        {decides ? <Link href={`/t/${team.name}/proposals`}>To decide{waiting ? ` (${waiting})` : ""}</Link> : null}
                         {control && status?.subscriptions ? <Link href={`/t/${team.name}#subscriptions`}>Subscriptions</Link> : null}
                       </p>
                     </div>
@@ -309,14 +322,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
         <div className="teams-foot small muted">
           {unshown.length ? (
             <p>
-              Also on the linked Macs, not shown here:{" "}
+              Not shown:{" "}
               {unshown.map(({ machine, team }, i) => (
                 <Fragment key={`${machine.id}:${team.name}`}>
                   {i ? "; " : ""}
-                  <b>{team.title || team.name}</b> on {machine.name}: {unshownWhy(team.store)}
+                  <b>{team.title || team.name}</b> on {machine.name} {unshownWhy(team.store)}
                 </Fragment>
               ))}
-              . <Link href="/machines">Machines</Link> lists what each runs.
+              . <Link href="/machines">Machines</Link> lists what each Mac runs.
             </p>
           ) : null}
           {offTeams.length ? (

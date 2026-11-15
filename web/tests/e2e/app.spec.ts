@@ -1826,7 +1826,7 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
     await expect(page.locator("details#shop summary")).not.toContainText("no Mac runs it");
     // A team a linked Mac runs with its tasks in files is named under the rows, and why it isn't one.
     await expect(page.locator(".teams-foot")).toContainText(
-      "Notes on attic: its tasks are in files on that Mac (a6g task migrate --to mongo moves them here)"
+      "Notes on attic keeps its tasks in files there (a6g task migrate --to mongo brings them here)"
     );
     await page.goto("/t/blog/inbox");
     await expect(page.locator(".team-head")).toContainText("no Mac runs it");
@@ -1975,7 +1975,8 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   const field = (name: string) => page.getByRole("textbox", { name, exact: true });
   // No Mac of theirs starts projects until it's said at its terminal: the page says how.
   await page.goto("/new");
-  await expect(page.getByRole("heading", { name: "None of your Macs starts projects yet" })).toBeVisible();
+  await expect(page.getByText("None of your Macs starts projects yet, so there's no form here yet.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Turn it on at one of your Macs" })).toBeVisible();
   await expect(page.getByText("a6g connect app --projects ~/code")).toBeVisible();
 
   // Their Mac reports that it does, with what it offers.
