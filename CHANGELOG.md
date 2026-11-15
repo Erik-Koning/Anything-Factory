@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.8: An innovator that brings someone new, bets on value, and has its pass argued with
+
+Two more judged innovation passes scored 5 and 6 of 10. Their research held up, but they brought no one new to the
+product, measured clicks rather than outcomes, left the side the direction puts first with "nothing filed" pass after
+pass, pointed at an old income idea instead of a new one, and named a build risk as the riskiest assumption.
+
+- **Someone new arrives.** A pass files at least one bet by which a new user, customer or organisation arrives, from
+  where they already look (a directory, a list, a season, a partner's channel).
+- **A bet on value, not use.** Each idea says what outcome it moves, not whether people click it. Where a question or a
+  count can test it before launch, that is the test. An idea built on unproven work says what survives if that work
+  fails.
+- **A pre-mortem finds the risk.** The riskiest assumption names who said no a year from now, and why; whether a page
+  can be built is rarely it. Each bet states its upside at a year's scale, and one whose upside is a polish is filed as
+  a UX finding.
+- **No side skipped, and an income bet every pass.** A side with no idea gets its best test filed as a task, not a line
+  in the report. Where how the product pays for itself is open, each pass files or sharpens an income bet: who pays,
+  about how much, and a test within weeks, looking first at who already gains from what the product does.
+- **Quote or drop, then argue.** A claim about a document, the code or a task quotes what it relies on, or goes. Before
+  filing, a subagent that hasn't seen the reasoning argues with the drafts as a hard founder would, and the report says
+  what that changed.
+
+The innovator's new words reach a team at `a6g upgrade` and `a6g rotate`.
+
 ## 0.8.7: A start from the web app that finishes on its own, and a team that loses less time
 
 Found watching the first starts from the web app, which stopped at a step a person had to finish by hand.
