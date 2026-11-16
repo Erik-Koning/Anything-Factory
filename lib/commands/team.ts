@@ -27,6 +27,7 @@ import { readHold, readLimits } from "../holds.ts";
 import {
   accounts,
   chooseFor,
+  describeFallback,
   describeWait,
   SUBSCRIPTION_NAME,
   subscriptionLimits,
@@ -34,7 +35,7 @@ import {
   subscriptionWeek,
   teamUses,
 } from "../subscriptions.ts";
-import { plannerBusy, readSteering, retirePlanner, steer } from "../steer.ts";
+import { heldFallbacks, plannerBusy, readSteering, retirePlanner, steer } from "../steer.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
@@ -318,7 +319,7 @@ function registerTeam(
   // The subscriptions each role runs on, chosen now rather than at the watchdog's next run (else at that run).
   let steered: ReturnType<typeof steer> = null;
   try {
-    steered = steer({ name: team.name, run, worker });
+    steered = steer({ name: team.name, run, worker, model: entry.model, models });
   } catch (error) {
     console.warn(`  note: couldn't choose the subscriptions now (${(error as Error).message.split("\n")[0]}); the watchdog does at its next run`);
   }
@@ -339,12 +340,15 @@ export function describeModels(models: Record<string, string>): string {
   return [...on].map(([model, roles]) => `${model} for the ${roles.join(", ")}`).join("; ");
 }
 
-// Each role's subscription on this machine, and those that wait, in a line (lib/steer.ts).
+// Each role's subscription on this machine (and the model it runs on, while that isn't its own), and those that wait,
+// in a line (lib/steer.ts).
 export function describeSteering(steering: ReturnType<typeof readSteering>): string {
   if (!steering) return "not chosen yet";
+  const models = heldFallbacks(steering);
   const on = Object.entries(steering.roles).map(([role, name]) => {
     const moving = Object.hasOwn(steering.moving, role) ? `, moving to ${steering.moving[role] ?? "this Mac's own login"} once it's free` : "";
-    return `${role} on ${name ?? "this Mac's own login"}${moving}`;
+    const fallback = models[role];
+    return `${role} on ${name ?? "this Mac's own login"}${moving}${fallback ? `, ${describeFallback(fallback)}` : ""}`;
   });
   const waiting = Object.entries(steering.waiting).map(([role, wait]) => `${role} waits: ${describeWait(wait)}`);
   return [...on, ...waiting].join("; ");
@@ -719,7 +723,9 @@ export async function status(argv: string[]): Promise<number> {
       existsSync(join(entry.run, "complete")) ? "complete" : null,
     ].filter((flag) => flag !== null);
     console.info(`== ${name} (${entry.title}) ${flags.length ? flags.join(", ") : "active"} · factory ${entry.version} · ${entry.home}`);
-    console.info(`   planner ${planner ?? "none"}${thread ? ` (${thread.status})` : ""}`);
+    console.info(
+      `   planner ${planner ?? "none"}${thread ? ` (${[thread.status, thread.model ? `on ${thread.model}` : null].filter(Boolean).join(", ")})` : ""}`
+    );
     const counts = planner ? t3.childCounts(planner) : [];
     console.info(
       `   members running: ${counts.length ? counts.map((row) => `${row.instance.replace(`a6g-${name}-`, "")} ${row.n}`).join(", ") : planner ? "none" : "-"}`

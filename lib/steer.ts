@@ -12,11 +12,17 @@
 // builders, and a waiting planner gets no tick, no message (they're kept for it) and no new thread. What's running
 // finishes. It lifts by itself when a subscription opens. What each role runs on, what moves once it can, and what
 // waits: <run>/subscription.json, written by the factory alone.
+//
+// A role whose model's own weekly limit (Fable's, on some plans) is used up on the subscription it runs on runs on Opus
+// there until that limit resets (lib/subscriptions.ts fallbackFor): its members and the watchdog's threads start on
+// Opus, and the guard holds the planner to it. A planner thread keeps the model it started on, so one on Fable then is
+// retired once it's free, as for a move, and the watchdog starts the next on Opus; and back on Fable once it resets.
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { accountClosures } from "./budget.ts";
 import { restartAsked } from "./actions.ts";
 import { applied, markApplied, readLimits, whoAsked } from "./holds.ts";
+import { fallbackModel, familyOf, modelName } from "./models.ts";
 import type { RegistryEntry } from "./paths.ts";
 import {
   type Account,
@@ -24,13 +30,18 @@ import {
   accounts,
   type Choice,
   chooseFor,
+  describeFallback,
   describeWait,
+  type Fallback,
+  fallbackFor,
   gate,
   listFor,
+  owns,
   setTeamUses,
   subscriptionLimits,
   subscriptionState,
   teamUses,
+  untilWords,
 } from "./subscriptions.ts";
 import * as t3 from "./t3.ts";
 import type { Control } from "./tasks/controls.ts";
@@ -45,6 +56,9 @@ export interface Steering {
   moving: Record<string, string | null>;
   // Roles no subscription is open to: why, and until when as far as the readings say.
   waiting: Choice["waiting"];
+  // Roles on another model than their own for now (lib/subscriptions.ts fallbackFor). Missing in a file written
+  // before there were any.
+  models?: Record<string, Fallback>;
   at: string;
 }
 
@@ -58,7 +72,28 @@ export function readSteering(run: string): Steering | null {
 }
 
 const who = (role: string): string => (role === "planner" ? "planner" : `${role}s`);
+const runs = (role: string): string => (role === "planner" ? "runs" : "run");
 const named = (name: string | null): string => name ?? "this Mac's own login";
+
+// The roles' fallbacks as the last steering chose them that still hold: a limit whose reset has passed holds none, before
+// the watchdog next says so. A role that waits starts nothing, so it has none.
+export function heldFallbacks(steering: Steering | null, now = new Date()): Record<string, Fallback> {
+  return Object.fromEntries(
+    Object.entries(steering?.models ?? {}).filter(
+      ([role, fallback]) => !steering?.waiting[role] && (!fallback.until || Date.parse(fallback.until) > now.getTime())
+    )
+  );
+}
+
+// A role's fallback while it holds: none when the role's own model is another than the one it fell back from
+// (team.json changed since).
+export function fallbackOf(run: string | null, role: string, own: string, now = new Date()): Fallback | null {
+  const fallback = run ? heldFallbacks(readSteering(run), now)[role] : undefined;
+  return fallback && fallback.from === own ? fallback : null;
+}
+
+// The model a role's members and the watchdog's threads of it start on now: its own, or its fallback.
+export const modelNow = (run: string | null, role: string, own: string, now = new Date()): string => fallbackOf(run, role, own, now)?.model ?? own;
 
 // Why no member of `role` can start now (the guard, a worker's watchdog), or null: none of its subscriptions is open,
 // or it's moving to another once those at work have finished.
@@ -76,7 +111,8 @@ export function waitRefusal(run: string | null, role: string): string | null {
   return null;
 }
 
-// For the planner's ticks: the members that wait or are moving, so it starts none of them yet.
+// For the planner's ticks: the members that wait or are moving, so it starts none of them yet, and those that start on
+// another model than its table's for now.
 export function steeringNote(run: string): string {
   const restart = restartAsked(run);
   if (restart)
@@ -88,7 +124,12 @@ export function steeringNote(run: string): string {
   const moving = Object.entries(steering?.moving ?? {})
     .filter(([role]) => role !== "planner")
     .map(([role, to]) => `${who(role)} (moving to ${named(to)} once those at work finish)`);
-  return waiting.length || moving.length ? ` Waiting for a subscription, so start none of them yet: ${[...waiting, ...moving].join("; ")}.` : "";
+  const fallbacks = Object.entries(heldFallbacks(steering))
+    .filter(([role]) => role !== "planner")
+    .map(([role, fallback]) => `${who(role)} with target.model "${fallback.model}" ${untilWords(fallback.until)} (${fallback.why})`);
+  return `${waiting.length || moving.length ? ` Waiting for a subscription, so start none of them yet: ${[...waiting, ...moving].join("; ")}.` : ""}${
+    fallbacks.length ? ` On another model than your table's for now, which the guard holds you to: start ${fallbacks.join("; ")}.` : ""
+  }`;
 }
 
 // Why the planner can't be retired now (members running, a turn under way, a person to answer), or null when it can.
@@ -131,8 +172,13 @@ export interface SteerResult {
   steering: Steering;
 }
 
-// Chooses each role's subscription and moves those that should and can. Null when T3 Code's settings can't be read.
-export function steer(entry: Pick<RegistryEntry, "name" | "run" | "worker">, now = new Date()): SteerResult | null {
+// The team's registry entry as steering reads it: each role's model, which an entry registered before roles had their
+// own lacks (`model` for all), and register's call before it writes the entry may leave out.
+export type SteerEntry = Pick<RegistryEntry, "name" | "run" | "worker"> & Partial<Pick<RegistryEntry, "model" | "models">>;
+
+// Chooses each role's subscription and moves those that should and can, and each role's model while its own model's
+// limit is used up there. Null when T3 Code's settings can't be read.
+export function steer(entry: SteerEntry, now = new Date()): SteerResult | null {
   const instances = t3.teamInstances(entry.name);
   if (!instances) return null;
   const list = accounts();
@@ -143,10 +189,11 @@ export function steer(entry: Pick<RegistryEntry, "name" | "run" | "worker">, now
     spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
   } catch {}
   const use = teamUses()[entry.name];
+  const state = subscriptionState();
   const choice = chooseFor(roles, current, {
     use,
     accounts: list,
-    state: subscriptionState(),
+    state,
     limits: subscriptionLimits(),
     closedFor: accountClosures(readLimits(entry.run), spend),
     now,
@@ -222,12 +269,61 @@ export function steer(entry: Pick<RegistryEntry, "name" | "run" | "worker">, now
       changes.push(`${who(role)} can start again, on ${named(choice.roles[role] ?? null)}`);
       signature.push(`${role}:open:${choice.roles[role] ?? ""}`);
     }
-  const steering: Steering = {
-    roles: Object.fromEntries(roles.map((role) => [role, Object.hasOwn(homes, role) ? (choice.roles[role] ?? null) : (current[role] ?? null)])),
-    moving,
-    waiting: choice.waiting,
-    at: now.toISOString(),
-  };
+  const on: Record<string, string | null> = Object.fromEntries(
+    roles.map((role) => [role, Object.hasOwn(homes, role) ? (choice.roles[role] ?? null) : (current[role] ?? null)])
+  );
+  // Each role's model for now: its own, or its fallback while the subscription its instance runs on has used up its own
+  // model's limit. A role that waits starts nothing, so it needs none.
+  const ownModel = (role: string): string | null => entry.models?.[role] ?? entry.model ?? null;
+  const models: Record<string, Fallback> = {};
+  for (const role of roles) {
+    const own = ownModel(role);
+    const fallback = own && !choice.waiting[role] ? fallbackFor(own, on[role] ?? null, state, now) : null;
+    if (fallback) models[role] = fallback;
+  }
+  // News when a role falls back or comes back, not when only a reading's figures changed.
+  const had = previous?.models ?? {};
+  const turned = new Set<string>();
+  for (const [role, fallback] of Object.entries(models))
+    if (had[role]?.model !== fallback.model || had[role]?.subscription !== fallback.subscription) {
+      said.push(`the ${who(role)} ${runs(role)} ${describeFallback(fallback)}`);
+      changes.push(`${who(role)} ${runs(role)} ${describeFallback(fallback)}`);
+      signature.push(`${role}:model:${fallback.subscription}:${fallback.model}`);
+      turned.add(role);
+    }
+  for (const [role, fallback] of Object.entries(had))
+    if (!models[role] && roles.includes(role) && !choice.waiting[role]) {
+      const back = `${who(role)} ${runs(role)} on ${modelName(fallback.from)} again${on[role] === fallback.subscription ? `: ${owns(fallback.subscription)} ${modelName(fallback.from)} limit has room again` : ""}`;
+      said.push(`the ${back}`);
+      changes.push(back);
+      signature.push(`${role}:model:${fallback.from}`);
+      turned.add(role);
+    }
+  // The planner's thread keeps the model it started on: one on its own model while that's used up, or on its fallback
+  // once its own has room again, is retired when it's free (as for a move), and the watchdog starts the next one on the
+  // model it runs on now.
+  const plannerOwn = ownModel("planner");
+  const thread = existsSync(join(entry.run, "planner-thread")) ? readFileSync(join(entry.run, "planner-thread"), "utf8").trim() : "";
+  if (
+    plannerOwn &&
+    fallbackModel(plannerOwn) &&
+    thread &&
+    roles.includes("planner") &&
+    !Object.hasOwn(homes, "planner") &&
+    !Object.hasOwn(moving, "planner") &&
+    !choice.waiting["planner"]
+  ) {
+    const want = models["planner"]?.model ?? plannerOwn;
+    const started = t3.threadModel(thread);
+    const wrong =
+      started !== null && started !== want && (models["planner"] ? familyOf(started) === familyOf(plannerOwn) : started === fallbackModel(plannerOwn));
+    if (wrong) {
+      const busy = plannerBusy(entry.run, `it restarts on ${modelName(want)}`);
+      if (!busy) said.push(`retired planner ${retirePlanner(entry.run)}, on ${started}: the next one starts on ${modelName(want)}`);
+      else if (turned.has("planner")) said.push(`the planner restarts on ${modelName(want)} once it's free: ${busy}`);
+    }
+  }
+  const steering: Steering = { roles: on, moving, waiting: choice.waiting, models, at: now.toISOString() };
   writeJson(steeringFile(entry.run), steering);
   const tell = changes.length ? { key: `subscriptions-${hash(...signature)}`, text: `Subscriptions: the team's ${changes.join("; the ")}.` } : null;
   return { said, plannerMoved: Object.hasOwn(homes, "planner"), tell, steering };
@@ -237,7 +333,7 @@ export function steer(entry: Pick<RegistryEntry, "name" | "run" | "worker">, now
 // writes the list itself): each one's list is written where that command writes it, oldest first, and the team is
 // steered once. A subscription this machine doesn't have, or a role the team doesn't, is refused whole and said in
 // the log: the list stays as it was. Resolves to lines for the team's log; empty when there was none.
-export function applySubscriptionControls(entry: Pick<RegistryEntry, "name" | "run" | "worker">, controls: Control[], now = new Date()): string[] {
+export function applySubscriptionControls(entry: SteerEntry, controls: Control[], now = new Date()): string[] {
   const done = applied(entry.run);
   const fresh = controls.filter((c) => c.kind === "subscriptions" && !done(c.id));
   if (!fresh.length) return [];
@@ -313,5 +409,8 @@ export function subscriptionsView(entry: Pick<RegistryEntry, "name" | "run">, no
     roles: steering?.roles ?? {},
     moving: steering?.moving ?? {},
     waiting: Object.fromEntries(Object.entries(steering?.waiting ?? {}).map(([role, wait]) => [role, { why: wait.why, until: wait.until }])),
+    models: Object.fromEntries(
+      Object.entries(heldFallbacks(steering, now)).map(([role, fallback]) => [role, { model: fallback.model, until: fallback.until, why: fallback.why }])
+    ),
   };
 }

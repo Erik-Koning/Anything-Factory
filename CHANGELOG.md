@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: Fable falls back to Opus
+
+- **A role on Fable runs on Opus while its subscription has used up Fable's own weekly limit,** and on Fable again once
+  it resets: its members start on Opus, and a planner on Fable restarts on Opus once it's free rather than failing every
+  wake until then. `a6g status`, `a6g subscriptions`, the watchdog's log and the Subscriptions panel say which roles,
+  until when, and why. A role that names another model keeps it.
+
 ## 0.8.13: A check that becomes overdue mid-run holds its turn, and a covered merge leaves no mark
 
 - **A check becomes overdue while it runs.** It decided only at its start, so one that crossed 90 minutes while its
