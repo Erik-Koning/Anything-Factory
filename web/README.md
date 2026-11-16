@@ -188,9 +188,9 @@ request (Article 8).
   their role's defaults apply (an admin hears of questions at once, and of blocked work and flagged calls in the
   digest); a kind of event added after they saved has their role's default until they choose. It shows the last
   email sent and what's waiting to go, and sends a test email (three an hour).
-- `/account`: passkeys; the authenticator (on for admins; anyone else turns it on or off) and backup codes; where
-  you're signed in, with each session's address; the IP addresses you've confirmed, and whether new ones are checked
-  (always, for an admin); your recent activity; sign out.
+- `/account`: passkeys; the authenticator (on for admins; anyone else turns it on, and once on it stays on) and
+  backup codes; where you're signed in, with each session's address, and **Keep this device signed in**; the IP
+  addresses you've confirmed, and whether new ones are checked; your recent activity; sign out.
 - `/sign-up`: a name, an email address and a password. It states the two protections every new account starts
   with, two-factor authentication and the check of new IP addresses, and offers no way to turn either off.
   `/sign-up/confirmed` is where the emailed link lands when it couldn't sign anyone in (used already, expired).
@@ -257,17 +257,16 @@ emails a sign-in link. An invited account has no password; one that signed up is
   admin in. From one IP address: three sign-ups and three requests for the link again a minute.
 - **Two protections are on for every account that signs up**, whatever its request says (`authenticatorDue`,
   `ipCheck`). Whoever fills in a sign-up hasn't proven the address is theirs, so nothing they send turns either off:
-  someone who signs up with another person's address can't leave that account unguarded. Only the person can,
-  afterwards, signed in to the confirmed account, through the app's own server actions; no endpoint takes either.
+  someone who signs up with another person's address can't leave that account unguarded.
   - **Two-factor authentication**: once the address is confirmed the person lands on `/welcome` and sets up an
     authenticator app before anything else opens: their password, the QR code (or its key), a code to prove it, ten
-    backup codes shown once, then on to Teams. **Set it up later** there puts it off for that sign-in only
-    (`authenticatorLater`, the session's id; audited): the next sign-in asks again, until it's set up or the account
-    page's **Stop asking me** turns the asking off (audited).
+    backup codes shown once, then on to Teams. In the account's first 7 days **Set it up later** there puts it off for
+    that sign-in only (`authenticatorLater`, the session's id; audited): the next sign-in asks again, and after those
+    days it's set up before anything opens. Once on, an authenticator stays on: nothing turns it off.
   - **Check new IP addresses**: a sign-in from an address they haven't used asks them by email first (below). Without
-    it no address is asked about. It can be changed on the account page: turning it off takes a sign-in from the last
-    ten minutes and a code from the authenticator when one is on, is audited, and emails the person that it was
-    turned off; turning it on confirms the address it's turned on from. An admin's addresses are always checked.
+    it no address is asked about. Only the person changes it, an admin too, on the account page: turning it off takes
+    a code from the authenticator (or, without one yet, a sign-in from the last ten minutes), is audited, and emails
+    the person that it was turned off; turning it on confirms the address it's turned on from.
   - Accounts from before these were kept read as: new addresses checked, nothing due. An account that signed up
     while the page still had two boxes keeps what it chose.
 - An account whose address is first proven by a sign-in link, not by its confirmation link, loses the password it was
@@ -305,9 +304,13 @@ emails a sign-in link. An invited account has no password; one that signed up is
     anyone, so without the note nothing would say why no link came.
 - **Anyone else may turn on an authenticator**, at `/welcome` once their sign-up is confirmed or from their account
   page (a QR code, a code to prove it, ten backup codes shown once; Better Auth's two-factor plugin). From then on
-  every sign-in, by passkey, link or password, also asks for its code. Turning it off takes a current code. An
-  account with a password gives it too, to turn the authenticator on or off and to make new backup codes (Better Auth
-  asks it of any account that has one); an invited account has none to give.
+  every sign-in, by passkey, link or password, also asks for its code, and it stays on: nothing turns it off. An
+  account with a password gives it too, to turn the authenticator on and to make new backup codes (Better Auth asks
+  it of any account that has one); an invited account has none to give.
+- **A session lasts 7 days without use**, renewed as it's used (Better Auth keeps sessions up to 90 days, renewing
+  them daily; `server/viewer.ts` ends one unused for a week). **Keep this device signed in**, on the account page,
+  marks the session in hand (`session.kept`, audited): it lasts 90 days of use, and a new network doesn't ask about a
+  new address, since the device was confirmed when it was kept. Only from a session that owes nothing.
 - Each session records **whether it has its second factor** (`session.secondFactor`): set by the server from how the
   session was made, or once a code is entered for it at `/second-factor` (an admin whose passkey didn't verify them,
   anyone with an authenticator after a link). Five wrong codes end the session. The client can't set it.
@@ -318,8 +321,10 @@ emails a sign-in link. An invited account has no password; one that signed up is
   list) and **It wasn't me** (every session on the account ends). A button answers, not the link, so a mail scanner
   that opens links answers nothing; the link works once, for 30 minutes, and a new one goes out at most every 10
   minutes. Signing in by an email link, or confirming a sign-up's address, confirms the address it's opened from, since
-  opening it already proves the inbox. The account page lists your addresses (with Forget) and each session's
-  address. Someone who isn't an admin may turn the check off for their own account (above).
+  opening it already proves the inbox. The page waiting for the answer goes on by itself once it's given, wherever
+  the email was opened: it asks `/api/sign-in/step` every few seconds and loads the page the session may open next.
+  The account page lists your addresses (with Forget) and each session's address. Anyone may turn the check off for
+  their own account (above).
 - **The audit log** keeps every sign-up, sign-in (by method, or why it failed), sign-out and ended session, second
   factor, new address (asked, confirmed, denied, forgotten), the check of new addresses turned off or on, passkey and
   authenticator change (and one put off at sign-up), invitation, role change, removal,
@@ -422,8 +427,8 @@ address and the origin secret as CloudFront does (`playwright.config.ts`), and `
 signing in: a request without the secret refused, an admin's new address confirmed by email (the link once), a session
 taken elsewhere and “it wasn't me”, a member's authenticator and every sign-in after it asking for a code, and the
 audit log. `sign-up.spec.ts` signs three people up: one through the confirmation email and the authenticator at
-`/welcome` to an empty Teams page, one who puts the authenticator off and turns the IP check off and on from the
-account page, one whose sign-up asks for both protections off and still starts with both on, whom an admin then
+`/welcome` to an empty Teams page, one who puts the authenticator off, keeps the device signed in and turns the IP
+check off and on from the account page, one whose sign-up asks for both protections off and still starts with both on, whom an admin then
 adds to a team. Playwright's Chromium must be installed (`npx playwright install chromium`).
 
 `npm run test:e2e:atlas` runs the same suite against a real cluster: it reads `DB_USER`, `DB_PASSWORD` and `DB_HOST`

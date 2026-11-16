@@ -1,12 +1,12 @@
 // Who's asking: the session's person, their roles per team, whether the session has its second factor, whether the
-// request comes from an IP address they've confirmed (and whether they have that checked), and whether they still owe
-// the authenticator every sign-up starts with. Every page and server action starts here; access.ts says what
+// request comes from an IP address they've confirmed (and whether they have that checked, or keep this device signed
+// in), and whether they still owe the authenticator every sign-up starts with. Every page and server action starts here; access.ts says what
 // they may do.
 import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { type Ability, can, isTeamRole, pendingStep, type TeamRole, type Viewer } from "./access.ts";
+import { type Ability, can, isTeamRole, pendingStep, SESSION_DAYS, type TeamRole, type Viewer } from "./access.ts";
 import { audit, type AuditEntry } from "./audit.ts";
 import { auth, clientIp, isAdminRole } from "./auth.ts";
 import { config } from "./config.ts";
@@ -39,6 +39,13 @@ export const getViewer = cache(async (): Promise<Person | null> => {
   if (!originAllowed(requestHeaders, config().originSecret)) return null;
   const current = await auth().api.getSession({ headers: requestHeaders });
   if (!current) return null;
+  // A session lasts 90 days of use as Better Auth keeps it, renewing it at most daily; one not kept signed in ends once
+  // it has gone a week without that.
+  const kept = current.session.kept === true;
+  if (!kept && Date.now() - new Date(current.session.updatedAt).getTime() > SESSION_DAYS.usual * 86_400_000) {
+    await (await auth().$context).internalAdapter.deleteSession(current.session.token).catch(() => {});
+    return null;
+  }
   const ip = clientIp(requestHeaders);
   const [rows, ipConfirmed] = await Promise.all([memberships({ userId: current.user.id }), isKnownIp(current.user.id, ip)]);
   const teams: Record<string, TeamRole> = {};
@@ -53,6 +60,8 @@ export const getViewer = cache(async (): Promise<Person | null> => {
     ipConfirmed,
     // Accounts from before these two were kept read as: checked, nothing due.
     ipCheck: current.user.ipCheck !== false,
+    kept,
+    signedUpAt: new Date(current.user.createdAt).toISOString(),
     authenticatorDue: current.user.authenticatorDue === true,
     authenticatorPutOff: current.user.authenticatorDue === true && current.user.authenticatorLater === current.session.id,
     sessionId: current.session.id,

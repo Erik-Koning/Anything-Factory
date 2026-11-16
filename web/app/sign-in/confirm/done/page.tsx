@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { param, type SearchParams } from "../../../../components/ui.tsx";
 
 export const metadata: Metadata = { title: "Thanks" };
 
 const SAID = {
-  yes: { title: "Confirmed", text: "That IP address is yours now. Go back to where you were signing in and continue." },
+  yes: { title: "Confirmed", text: "That IP address is yours now. Where you were signing in goes on by itself: you can close this." },
   no: {
     title: "Every session has ended",
     text: "Nobody is signed in to your account any more. Sign in again yourself, and tell the operator someone else got in.",
@@ -20,8 +19,9 @@ export default async function DonePage({ searchParams }: { searchParams: SearchP
     <div className="narrow stack">
       <h1>{said.title}</h1>
       <p role="status">{said.text}</p>
+      {/* A full load: a page here may have been sent to the confirmation a moment ago. */}
       <p>
-        <Link href="/">Go to Anything Factory</Link>
+        <a href="/">Go to Anything Factory</a>
       </p>
     </div>
   );

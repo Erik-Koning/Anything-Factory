@@ -57,6 +57,7 @@ test("an admin signing in from a new IP address confirms it by email first; the 
   await signInAsAdmin(away.page, { confirm: true });
   await expect(away.page).toHaveURL(/\/confirm-sign-in$/);
   await expect(away.page.getByText("203.0.113.20")).toBeVisible();
+  await expect(away.page.getByRole("status").filter({ hasText: "goes on by itself" })).toBeVisible();
 
   // Nothing opens meanwhile: pages, server actions, Better Auth over HTTP.
   await away.page.goto("/t/shop");
@@ -75,8 +76,9 @@ test("an admin signing in from a new IP address confirms it by email first; the 
   await expect(phone.page.getByRole("heading", { name: "This link has expired" })).toBeVisible();
   await phone.context.close();
 
-  await away.page.getByRole("link", { name: "continue" }).click();
-  await expect(away.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
+  // The window that signed in goes on by itself, nothing pressed: the page asks every few seconds.
+  await expect(away.page).toHaveURL(/\/confirm-sign-in$/);
+  await expect(away.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible({ timeout: 15_000 });
   adminState = await away.context.storageState();
 
   // Recorded: the sign-in by its method and address, the email, the answer and where it came from.

@@ -6,7 +6,9 @@ import {
   blocked,
   can,
   canSeeRequest,
+  AUTHENTICATOR_GRACE_DAYS,
   checksIp,
+  mayPutOffAuthenticator,
   decisionProblem,
   invitationProblem,
   pendingStep,
@@ -287,16 +289,21 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep(member), null, "no authenticator, no code asked for");
     assert.equal(pendingStep(null), null);
   });
-  test("of someone who turned the IP check off isn't asked about a new address; an admin always is", () => {
+  test("of someone who turned the IP check off isn't asked about a new address, an admin too; nor a device kept signed in", () => {
     const unchecked = { ...member, ipCheck: false, ipConfirmed: false };
     assert.equal(checksIp(unchecked), false);
     assert.equal(pendingStep(unchecked), null);
     assert.deepEqual(allowedOn(unchecked, "shop"), allowedOn(member, "shop"));
     assert.equal(pendingStep({ ...unchecked, twoFactor: true }), "second-factor", "their authenticator's code is still asked for");
     const adminAway = { ...admin, ipCheck: false, ipConfirmed: false };
-    assert.equal(checksIp(adminAway), true, "an admin's choice isn't asked");
-    assert.equal(pendingStep(adminAway), "confirm-ip");
+    assert.equal(checksIp(adminAway), false, "an admin's own choice, as anyone's");
+    assert.equal(pendingStep(adminAway), null);
+    assert.equal(pendingStep({ ...adminAway, secondFactor: false }), "second-factor", "an admin's code is still asked for");
+    assert.equal(pendingStep({ ...admin, ipConfirmed: false, secondFactor: true }), "confirm-ip", "on by default");
     assert.equal(checksIp(member), true);
+    // A device kept signed in was confirmed when it was kept: a new network doesn't ask again.
+    assert.equal(pendingStep({ ...member, ipConfirmed: false, kept: true }), null);
+    assert.equal(pendingStep({ ...member, ipConfirmed: false, kept: true, twoFactor: true }), "second-factor");
   });
   test("who signed up sets up the authenticator, or puts it off, before anything opens", () => {
     const due = { ...member, authenticatorDue: true };
@@ -310,7 +317,13 @@ describe("a session that still owes a step", () => {
     assert.equal(pendingStep({ ...due, twoFactor: true, secondFactor: true }), null);
     assert.equal(pendingStep({ ...due, authenticatorPutOff: true }), null, "put off for this sign-in");
     assert.equal(pendingStep({ ...due, authenticatorPutOff: false }), "set-up-authenticator", "the next sign-in asks again");
-    assert.equal(pendingStep({ ...due, authenticatorDue: false }), null, "turned off on the account page: nothing owed");
+    // Put off only in the account's first days: after them it's set up before anything opens.
+    const now = Date.parse("2026-11-16T12:00:00Z");
+    const days = (n: number) => new Date(now - n * 86_400_000).toISOString();
+    assert.equal(pendingStep({ ...due, authenticatorPutOff: true, signedUpAt: days(AUTHENTICATOR_GRACE_DAYS - 1) }, now), null);
+    assert.equal(pendingStep({ ...due, authenticatorPutOff: true, signedUpAt: days(AUTHENTICATOR_GRACE_DAYS + 1) }, now), "set-up-authenticator");
+    assert.equal(mayPutOffAuthenticator(days(AUTHENTICATOR_GRACE_DAYS + 1), now), false);
+    assert.equal(pendingStep({ ...due, authenticatorDue: false }), null, "set up already, or an account from before: nothing owed");
     assert.equal(pendingStep({ ...admin, authenticatorDue: true, twoFactor: false }), null, "admins get theirs from create-admin");
   });
 });

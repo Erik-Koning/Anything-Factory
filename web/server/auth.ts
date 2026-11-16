@@ -9,13 +9,13 @@
 // password, which signs in by link. A new account is on no team until an admin puts it on one.
 //
 // Two protections are on for every account that signs up, whatever the request says (authenticatorDue, ipCheck).
-// Whoever fills in a sign-up hasn't proven the address is theirs, so nothing they send turns either off. Only the
-// person can, afterwards, signed in to the confirmed account: from the app's own server actions
-// (account-choices.ts), since no endpoint takes either.
+// Whoever fills in a sign-up hasn't proven the address is theirs, so nothing they send turns either off.
 //   - Two-factor authentication: the person sets up an authenticator app as soon as their address is confirmed
-//     (/welcome), or puts it off there; the account page turns one off.
-//   - Check new IP addresses: a sign-in from an address they haven't used asks them by email first (below); the
-//     account page turns it off.
+//     (/welcome), or puts it off for a sign-in in their first days (access.ts AUTHENTICATOR_GRACE_DAYS). Once on it
+//     stays on: nothing turns an authenticator off.
+//   - Check new IP addresses: a sign-in from an address they haven't used asks them by email first (below). Only the
+//     person turns it off, an admin too, signed in to the confirmed account: from the app's own server actions
+//     (account-choices.ts), since no endpoint takes it.
 // An account whose address is first proven by a sign-in link, not its confirmation link, loses the password it was
 // signed up with (Better Auth's rule: whoever chose it hadn't proven the inbox) and has its IP check on.
 //
@@ -29,6 +29,8 @@
 //     is refused for an admin. Nobody becomes an admin by signing up.
 // Anyone else may turn on an authenticator too (at /welcome once their sign-up is confirmed, or from the account page);
 // from then on their sessions need its code as well, whichever way they signed in.
+// A session lasts 7 days without use (viewer.ts ends an older one), or 90 on a device its person keeps signed in from
+// the account page (session.kept): such a device isn't asked about a new IP address either, having been confirmed.
 // A forgotten password is set again from a link by email (password-reset.ts): the link signs nobody in, an account
 // with an authenticator gives its code as well, so an admin's inbox alone changes nothing, and every session of the
 // account ends. Asking answers the same for every address; the app's own page sets the password, never an endpoint here.
@@ -40,8 +42,8 @@
 // Every session also records its IP address, as the CDN in front of the app reports it (CLIENT_IP_HEADER, trusted
 // because the app refuses requests without the CDN's ORIGIN_SECRET, proxy.ts). A session used from an address its
 // person hasn't confirmed can do nothing until they confirm it from an email (known-ips.ts); a sign-in link or a
-// confirmation link confirms the address it's opened from. An admin's addresses are always checked; anyone else may
-// turn the check off for their own account (access.ts checksIp). Sign-ups, sign-ins, failures, sign-outs and changes
+// confirmation link confirms the address it's opened from. Anyone, an admin too, may turn the check off for their own
+// account (access.ts checksIp). Sign-ups, sign-ins, failures, sign-outs and changes
 // to passkeys and backup codes go to the audit log (audit.ts).
 //
 // Better Auth's own admin endpoints aren't served over HTTP at all: the app calls them from its server actions, after
@@ -53,7 +55,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { admin, magicLink, twoFactor } from "better-auth/plugins";
-import { checksIp } from "./access.ts";
+import { checksIp, SESSION_DAYS } from "./access.ts";
 import { audit } from "./audit.ts";
 import { ensureAuthIndexes } from "./auth-indexes.ts";
 import { config } from "./config.ts";
@@ -92,8 +94,8 @@ const LOCKED_OUT =
 
 // Whether a new IP address is checked for this account (access.ts checksIp): accounts from before the choice read as on.
 function checksIpOf(user: object | null | undefined): boolean {
-  const { role, ipCheck } = (user ?? {}) as { role?: unknown; ipCheck?: unknown };
-  return checksIp({ admin: isAdminRole(role), ipCheck: ipCheck !== false });
+  const { ipCheck } = (user ?? {}) as { ipCheck?: unknown };
+  return checksIp({ ipCheck: ipCheck !== false });
 }
 
 // Why a request failed, for the audit log. A link's own endpoint answers with a redirect either way: only one that
@@ -217,8 +219,14 @@ function makeAuth() {
     // limits count by it, and the new-IP check compares it. IPv6 by its /64. A session is read with its person in one
     // query ($lookup), not two: every page starts with it.
     advanced: { ipAddress: { ipAddressHeaders: [config().ipHeader], ipv6Subnet: 64 }, database: { joins: true } },
+    // Up to 90 days, renewed a day at a time while used; viewer.ts ends one unused for 7 days unless it's kept.
     session: {
-      additionalFields: { secondFactor: { type: "boolean", required: false, defaultValue: false, input: false } },
+      expiresIn: SESSION_DAYS.kept * 86_400,
+      updateAge: 86_400,
+      additionalFields: {
+        secondFactor: { type: "boolean", required: false, defaultValue: false, input: false },
+        kept: { type: "boolean", required: false, defaultValue: false, input: false },
+      },
     },
     // Kept in the database, so the limits hold across serverless instances.
     rateLimit: {
@@ -273,7 +281,7 @@ function makeAuth() {
             return { data: { ...session, secondFactor } };
           },
           // A new session from an address its person hasn't confirmed: they're asked by email, unless they've turned
-          // the check off (never an admin). An email link's own session, a sign-in link's or a confirmation's,
+          // the check off. An email link's own session, a sign-in link's or a confirmation's,
           // confirms where it was opened. Only sessions made by a request over HTTP: the ones the app's own
           // server code makes (create-admin's, the one Better Auth swaps in when an authenticator is turned on, from a
           // session already at a confirmed address) are asked about where they're used, like any other.
@@ -341,7 +349,13 @@ function makeAuth() {
         const current = await getSessionFromCtx(ctx);
         if (current && (isAdminRole(current.user.role) || current.user.twoFactorEnabled === true) && current.session.secondFactor !== true)
           throw new APIError("FORBIDDEN", { message: "Enter your authenticator's code first." });
-        if (current && checksIpOf(current.user) && !(await isKnownIp(current.user.id, getIP(ctx.request, ctx.context.options))))
+        // A device kept signed in was confirmed when it was kept: a new network doesn't ask again (access.ts pendingStep).
+        if (
+          current &&
+          checksIpOf(current.user) &&
+          current.session.kept !== true &&
+          !(await isKnownIp(current.user.id, getIP(ctx.request, ctx.context.options)))
+        )
           throw new APIError("FORBIDDEN", { message: "Confirm this sign-in from the email we sent first." });
         // A new passkey for an admin needs a sign-in from the last ten minutes, so a stolen session can't make itself last.
         if (current && isAdminRole(current.user.role) && ctx.path.startsWith("/passkey/generate-register-options"))

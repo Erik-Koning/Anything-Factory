@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
-import { checksIp } from "../../server/access.ts";
+import { AUTHENTICATOR_GRACE_DAYS, checksIp, SESSION_DAYS } from "../../server/access.ts";
 import { hasPassword } from "../../server/account-choices.ts";
 import { ACTION_LABEL, listAudit } from "../../server/audit.ts";
 import { auth } from "../../server/auth.ts";
@@ -11,15 +11,7 @@ import { knownIps } from "../../server/known-ips.ts";
 import { authHeaders, requireViewer } from "../../server/viewer.ts";
 import { SignOutButton } from "../sign-out-button.tsx";
 import { BackupCodes, Passkeys } from "./account-parts.tsx";
-import {
-  forgetIpAction,
-  revokeOtherSessionsAction,
-  revokeSessionAction,
-  stopAskingAuthenticatorAction,
-  turnOffAuthenticatorAction,
-  turnOffIpCheckAction,
-  turnOnIpCheckAction,
-} from "./actions.ts";
+import { forgetIpAction, keepDeviceAction, revokeOtherSessionsAction, revokeSessionAction, turnOffIpCheckAction, turnOnIpCheckAction } from "./actions.ts";
 import { AuthenticatorSetup } from "./authenticator.tsx";
 import { ActionForm } from "../../components/action-form.tsx";
 
@@ -81,38 +73,20 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             </>
           ) : (
             <>
+              {/* Once on, it stays on: two-factor authentication can't be turned off (auth.ts). */}
               <AuthenticatorSetup enabled={viewer.twoFactor} password={password}>
-                <p className="hint">Every sign-in asks for its code too, however you sign in.</p>
+                <p className="hint">Every sign-in asks for its code too, however you sign in. It stays on: it can&apos;t be turned off.</p>
                 <BackupCodes password={password} />
-                <div className="sub-form" role="group" aria-labelledby="turn-off">
-                  <h3 id="turn-off">Turn it off</h3>
-                  <ActionForm action={turnOffAuthenticatorAction} className="inline">
-                    {password ? (
-                      <label>
-                        Password, to turn it off
-                        <input name="password" type="password" required autoComplete="current-password" />
-                      </label>
-                    ) : null}
-                    <label>
-                      A code from it, to turn it off
-                      <input name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} />
-                    </label>
-                    <SubmitButton className="danger">Turn it off</SubmitButton>
-                  </ActionForm>
-                </div>
               </AuthenticatorSetup>
-              {/* Two-factor authentication every sign-up starts with: asked for at each sign-in until it's set up, or until
-              the person says to stop here. */}
-              {!viewer.twoFactor && viewer.authenticatorDue ? (
-                <div className="sub-form" role="group" aria-labelledby="stop-asking">
-                  <h3 id="stop-asking">Asked at every sign-in</h3>
-                  <p className="hint">
-                    Two-factor authentication is on for every new account, so each sign-in asks you to set up an authenticator until you do.
-                  </p>
-                  <ActionForm action={stopAskingAuthenticatorAction} className="inline">
-                    <SubmitButton className="quiet">Stop asking me</SubmitButton>
-                  </ActionForm>
-                </div>
+              {!viewer.twoFactor && viewer.authenticatorDue && viewer.signedUpAt ? (
+                <p className="hint">
+                  Two-factor authentication is on for every new account: set it up by{" "}
+                  {new Date(Date.parse(viewer.signedUpAt) + AUTHENTICATOR_GRACE_DAYS * 86_400_000).toLocaleDateString("en-CA", {
+                    month: "long",
+                    day: "numeric",
+                  })}
+                  . After that, signing in asks for it before anything else.
+                </p>
               ) : null}
             </>
           )}
@@ -120,6 +94,21 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
       </div>
       <section className="panel" aria-labelledby="sessions">
         <h2 id="sessions">Where you&apos;re signed in</h2>
+        {/* This device, kept signed in or not: 90 days of use and no new-network check, or the usual week. */}
+        <div className="sub-form" role="group" aria-labelledby="this-device">
+          <h3 id="this-device">This device</h3>
+          <p className="hint">
+            {viewer.kept
+              ? `Kept signed in: it stays signed in for ${SESSION_DAYS.kept} days of use, and a new network doesn't ask you again.`
+              : `Signed out after ${SESSION_DAYS.usual} days unused, and asked by email when it's on a new network. Keep it signed in on a device only you use.`}
+          </p>
+          <ActionForm action={keepDeviceAction} className="inline">
+            <input type="hidden" name="keep" value={viewer.kept ? "no" : "yes"} />
+            <SubmitButton className={viewer.kept ? undefined : "primary"}>
+              {viewer.kept ? "Stop keeping it signed in" : "Keep this device signed in"}
+            </SubmitButton>
+          </ActionForm>
+        </div>
         <ul className="plain rows">
           {sessions.map((s) => (
             <li key={s.id} className="head">
@@ -132,6 +121,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 ) : null}
                 signed in <Ago at={new Date(s.createdAt).toISOString()} />
               </span>
+              {(s as { kept?: boolean }).kept ? <Chip>kept signed in</Chip> : null}
               {s.id === viewer.sessionId ? (
                 <Chip tone="ok">this one</Chip>
               ) : (
@@ -160,7 +150,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </p>
           <p className="hint">
             {checked
-              ? `A sign-in from any other address asks you to confirm it by email first.${viewer.admin ? " For an admin that's always so." : ""}`
+              ? "A sign-in from any other address asks you to confirm it by email first. On a device kept signed in, a new network doesn't ask again."
               : "A sign-in from an address you haven't used goes ahead without asking you. The ones here are those you confirmed before."}
           </p>
           {addresses.length ? (
@@ -185,13 +175,13 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           ) : (
             <p className="empty">None yet.</p>
           )}
-          {viewer.admin ? null : viewer.ipCheck ? (
+          {viewer.ipCheck ? (
             <details>
               <summary>Turn the check off</summary>
               <ActionForm action={turnOffIpCheckAction} className="stack">
                 <p className="hint">
-                  Then a sign-in from anywhere goes ahead without an email to you. It takes a sign-in from the last ten minutes
-                  {viewer.twoFactor ? " and a code from your authenticator" : ""}, and we email you that it was turned off.
+                  Then a sign-in from anywhere goes ahead without an email to you. It takes{" "}
+                  {viewer.twoFactor ? "a code from your authenticator" : "a sign-in from the last ten minutes"}, and we email you that it was turned off.
                 </p>
                 {viewer.twoFactor ? (
                   <label>
