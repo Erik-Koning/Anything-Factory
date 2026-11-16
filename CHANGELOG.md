@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.13: A check that becomes overdue mid-run holds its turn, and a covered merge leaves no mark
+
+- **A check becomes overdue while it runs.** It decided only at its start, so one that crossed 90 minutes while its
+  suite ran still gave way to a merge queued behind it. The suite now asks whether its check is overdue each time it
+  asks whether a merge is queued.
+- **A merge the check already covered leaves no mark behind.** A merge that landed while a check waited for the merge
+  lock left its due mark after that check ran on a commit that held it, so the next checks were "due since" a time the
+  branch had been checked after, and with nothing queued the same commit was checked twice. A merge now marks the
+  commit it landed, and a check that runs to the end, whatever it files, clears a mark whose commit it checked.
+
 ## 0.8.12: The check after merges keeps its due time while it waits its turn
 
 - **A merge that lands while a check waits for the merge lock keeps when that check became due.** A check takes the
