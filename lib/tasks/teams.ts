@@ -47,6 +47,9 @@ export interface TeamSubscriptions {
   roles: Record<string, string | null>;
   moving: Record<string, string | null>;
   waiting: Record<string, { why: string; until: string | null }>;
+  // The roles on another model than their own for now (Opus, while the subscription has used up Fable's own limit):
+  // the model, until when, and why. Missing from a lead whose factory version doesn't fall back.
+  models?: Record<string, { model: string; until: string | null; why: string }>;
 }
 export interface TeamDoc extends TeamSettings {
   status: TeamState | null;

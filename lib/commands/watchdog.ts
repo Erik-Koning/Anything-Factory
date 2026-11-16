@@ -52,7 +52,7 @@ import { machineName } from "../machine.ts";
 import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task, waitsOnlyOnOperator } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
-import { applySubscriptionControls, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
+import { applySubscriptionControls, modelNow, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
 import {
   accounts,
   describeWait,
@@ -746,9 +746,10 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
       writeFileSync(threadFile, `${orphan}\n`);
       return log(`adopted planner thread ${orphan}, which an earlier run started (${why})`);
     }
+    // Its own model, or Opus while the subscription it runs on has used up Fable's own limit (lib/steer.ts).
     const { id, error } = t3.threadStart(entry.project, entry.startPrompt, {
       instance: entry.plannerInstance,
-      model: entry.models?.["planner"] ?? entry.model,
+      model: modelNow(run, "planner", entry.models?.["planner"] ?? entry.model),
       title: plannerTitle,
     });
     if (id) {
@@ -1242,7 +1243,7 @@ async function fillWorkerSlots(entry: RegistryEntry, log: (text: string) => void
     for (let i = 0; i < n; i++) {
       const { id, error } = t3.threadStart(entry.project, WORKER_PROMPT, {
         instance: `a6g-${entry.name}-${role}`,
-        model: entry.models?.[role] ?? entry.model,
+        model: modelNow(entry.run, role, entry.models?.[role] ?? entry.model),
         title: `${entry.title} · ${role} (${machineName()})`,
         worktree: entry.branch ?? "HEAD",
       });

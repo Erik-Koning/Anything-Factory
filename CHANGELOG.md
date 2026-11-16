@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: signing in that keeps out of your way, and two-factor that stays on
+## 0.8.14: Signing in that keeps out of your way, two-factor that stays on, and Fable that falls back to Opus
 
 - **A new network no longer strands the window you signed in from.** The page waiting for the email's "Yes, it was
   me" goes on by itself once you answer, wherever you opened the email. Before, its "continue" could reuse a copy of the
@@ -15,6 +15,10 @@
 - **A query can't hang a page.** The site closes database connections idle for a minute and gives any call 20
   seconds, so a connection a network dropped quietly is replaced instead of waited on, and a slow database shows an
   error page rather than CloudFront's blank one after 30 seconds.
+- **A role on Fable runs on Opus while its subscription has used up Fable's own weekly limit,** and on Fable again once
+  it resets: its members start on Opus, and a planner on Fable restarts on Opus once it's free rather than failing every
+  wake until then. `a6g status`, `a6g subscriptions`, the watchdog's log and the Subscriptions panel say which roles,
+  until when, and why. A role that names another model keeps it.
 
 ## 0.8.13: A check that becomes overdue mid-run holds its turn, and a covered merge leaves no mark
 

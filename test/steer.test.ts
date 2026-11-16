@@ -8,6 +8,8 @@ import {
   type Account,
   choose,
   chooseFor,
+  describeFallback,
+  fallbackFor,
   gate,
   listFor,
   loginDirs,
@@ -104,6 +106,46 @@ describe("what a subscription allows", () => {
     assert.equal(nearLimit(state(reading("one", 91)), {}, ["one"], NOW), true);
     assert.equal(nearLimit(state(reading("one", 71)), { one: { weekly: 80 } }, ["one"], NOW), true);
     assert.equal(nearLimit(state(reading("one", 60), reading("two", 61)), { all: { weekly: 130 } }, ["one", "two"], NOW), true);
+  });
+});
+
+describe("a role on Fable while its subscription has used up Fable's own limit", () => {
+  const FABLE = "claude-fable-5-2";
+  const OPUS = "claude-opus-5-5";
+  const fable = (percent: number, resetsAt: string | null = later(30)) => ({ model: "Fable", percent, ...(resetsAt ? { resetsAt } : {}) });
+
+  test("it runs on Opus until that limit resets; the subscription stays open for the rest", () => {
+    const used = state(reading("refdocs", 71, { scoped: [fable(100)] }));
+    const fallback = fallbackFor(FABLE, "refdocs", used, NOW);
+    assert.deepEqual(fallback, { from: FABLE, model: OPUS, subscription: "refdocs", until: later(30), why: "refdocs' Fable limit is used up" });
+    assert.equal(describeFallback(fallback!), `on Opus until ${later(30).slice(0, 16).replace("T", " ")} UTC: refdocs' Fable limit is used up`);
+    assert.equal(fallbackFor("claude-fable-5-2[1m]", "refdocs", used, NOW)?.model, OPUS);
+    assert.equal(gate("refdocs", used, {}, ["refdocs"], NOW).open, true);
+    assert.equal(fallbackFor(FABLE, "default", state(reading("default", 76, { scoped: [fable(100)] })), NOW)?.why, "default's Fable limit is used up");
+  });
+
+  test("a role on another model, a limit not used up, one since reset, or no reading: its own model", () => {
+    const used = state(reading("one", 40, { scoped: [fable(100)] }));
+    assert.equal(fallbackFor(OPUS, "one", used, NOW), null);
+    assert.equal(fallbackFor("claude-sonnet-5-5", "one", used, NOW), null);
+    assert.equal(fallbackFor(FABLE, "one", state(reading("one", 40, { scoped: [fable(99)] })), NOW), null);
+    assert.equal(fallbackFor(FABLE, "one", state(reading("one", 40, { scoped: [fable(100, later(-1))] })), NOW), null);
+    assert.equal(fallbackFor(FABLE, "one", state(reading("one", 40, { scoped: [{ model: "Opus", percent: 100 }] })), NOW), null);
+    assert.equal(fallbackFor(FABLE, "two", used, NOW), null);
+    assert.equal(fallbackFor(FABLE, null, used, NOW), null);
+    // A report that didn't say when it resets: until a reading says otherwise, within the week it was read in.
+    const unsaid = state(reading("one", 40, { scoped: [fable(100, null)] }));
+    assert.deepEqual(
+      [fallbackFor(FABLE, "one", unsaid, NOW)?.until, describeFallback(fallbackFor(FABLE, "one", unsaid, NOW)!)],
+      [null, "on Opus for now: one's Fable limit is used up"]
+    );
+    assert.equal(fallbackFor(FABLE, "one", state(reading("one", 40, { resetsAt: later(-1), scoped: [fable(100, null)] })), NOW), null);
+  });
+
+  test("near a model's own limit, the watchdog reads every five minutes", () => {
+    assert.equal(nearLimit(state(reading("one", 20, { scoped: [fable(80)] })), {}, ["one"], NOW), false);
+    assert.equal(nearLimit(state(reading("one", 20, { scoped: [fable(91)] })), {}, ["one"], NOW), true);
+    assert.equal(nearLimit(state(reading("one", 20, { scoped: [fable(100, later(-1))] })), {}, ["one"], NOW), false);
   });
 });
 
@@ -649,6 +691,124 @@ describe("a6g subscriptions use and limit, the guard and the watchdog", () => {
       assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
       assert.equal(readLimits(w.run)?.accounts?.["default"]?.weekly, 10);
       assert.deepEqual(homes(), { builder: second });
+    } finally {
+      await w.close();
+    }
+  });
+});
+
+describe("the watchdog, status and the guard while a subscription has used up Fable's own limit", () => {
+  const FABLE = "claude-fable-5-2";
+  const OPUS = "claude-opus-5-5";
+  const roles = ["planner", "builder", "scaffolder"];
+
+  test("Fable roles start on Opus, a Fable planner restarts on Opus once it's free, and both go back once it resets", async () => {
+    const { fakeWorld } = await import("./fake-t3.ts");
+    const { baseTeam } = await import("./helpers.ts");
+    const w = await fakeWorld(baseTeam({ roles: { planner: {}, builder: { limit: 2 }, scaffolder: {} } }));
+    try {
+      const file = join(w.a6gHome, "teams", "fixture.json");
+      write(join(w.a6gHome, "teams"), {
+        "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), model: FABLE, models: { planner: FABLE, builder: OPUS, scaffolder: FABLE } },
+      });
+      write(join(w.t3Home, "userdata"), {
+        "settings.json": {
+          providerInstances: Object.fromEntries(
+            roles.map((role) => [
+              `a6g-fixture-${role}`,
+              instance({ displayName: role, launchArgs: "", environment: { A6G_TEAM: "fixture", A6G_ROLE: role } }),
+            ])
+          ),
+        },
+      });
+      const resets = new Date(Date.now() + 2 * 86_400_000).toISOString();
+      const fable = (percent: number) =>
+        write(join(w.a6gHome, "subscriptions"), {
+          "state.json": {
+            readings: {
+              default: {
+                account: "default",
+                at: new Date().toISOString(),
+                percent: 76,
+                resetsAt: new Date(Date.now() + 5 * 86_400_000).toISOString(),
+                scoped: [{ model: "Fable", percent, resetsAt: resets }],
+                spent: 0,
+              },
+            },
+            estimates: [],
+            week: null,
+          },
+        });
+      // A planner thread as T3 Code's database has it, with the model it started on.
+      const planner = (id: string, model: string) => {
+        w.thread({ id, instance: "a6g-fixture-planner" });
+        w.sql(
+          `update orchestration_v2_projection_threads set payload_json = '${JSON.stringify({ modelSelection: { model } })}' where thread_id = '${id}'`
+        );
+      };
+      const log = () => readFileSync(join(w.run, "watchdog.log"), "utf8");
+      const starts = () => w.calls().filter((call) => call.startsWith("t3 thread start"));
+      const until = `until ${resets.slice(0, 16).replace("T", " ")} UTC`;
+      fable(100);
+      write(w.run, { "planner-thread": "mcp:planner\n" });
+      planner("mcp:planner", FABLE);
+      // In the middle of a turn: it keeps it, and restarts once it's free.
+      w.show({ status: "running", model: FABLE, updatedAt: new Date().toISOString(), pendingRequestCount: 0 });
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.match(log(), new RegExp(`the planner runs on Opus ${until}: default's Fable limit is used up`));
+      assert.match(log(), new RegExp(`the scaffolders run on Opus ${until}: default's Fable limit is used up`));
+      assert.doesNotMatch(log(), /the builders run on/);
+      assert.match(log(), /the planner restarts on Opus once it's free: the planner is in the middle of a turn \(running\)/);
+      assert.deepEqual(starts(), []);
+      // Failed on its limit, as a planner on a used-up Fable does: retired, and the next one starts on Opus at once.
+      w.show({ status: "failed", model: FABLE, updatedAt: new Date().toISOString(), pendingRequestCount: 0 });
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.match(log(), /retired planner mcp:planner, on claude-fable-5-2: the next one starts on Opus/);
+      assert.match(readFileSync(join(w.run, "planner-thread.retired"), "utf8"), /mcp:planner/);
+      assert.equal(starts().length, 1, starts().join("\n"));
+      assert.match(starts()[0] ?? "", /--provider a6g-fixture-planner --model claude-opus-5-5 /);
+      // What a person sees.
+      planner("mcp:new-planner", OPUS);
+      w.show({ status: "idle", model: OPUS, updatedAt: new Date().toISOString(), pendingRequestCount: 0 });
+      const status = (await w.a6g("status", "fixture")).out;
+      assert.match(status, /planner mcp:new-planner \(idle, on claude-opus-5-5\)/);
+      assert.match(
+        status,
+        new RegExp(
+          `subscriptions: planner on default, on Opus ${until}: default's Fable limit is used up; builder on default; scaffolder on default, on Opus ${until}: default's Fable limit is used up`
+        )
+      );
+      assert.match(
+        (await w.a6g("subscriptions")).out,
+        /\n {6}default's Fable limit is used up: its roles on Fable run on Opus until .+; now fixture \(planner, scaffolder\)\n/
+      );
+      // The planner's next tick says which members start on Opus, and the guard holds it to that.
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.match(
+        w.calls().find((call) => call.startsWith("t3 thread send mcp:new-planner tick")) ?? "",
+        new RegExp(`start scaffolders with target\\.model "claude-opus-5-5" ${until} \\(default's Fable limit is used up\\)`)
+      );
+      const env = { A6G_HOME: w.a6gHome, T3CODE_HOME: w.t3Home, HOME: w.env["HOME"] ?? "" };
+      const scaffolder = (model: string) =>
+        guard(
+          w.home,
+          "planner",
+          "mcp__t3-code__delegate_task",
+          { target: { providerInstanceId: "a6g-fixture-scaffolder", model }, isolation: "worktree" },
+          { run: w.run, env }
+        );
+      assert.equal(scaffolder(FABLE).outcome, "refuse");
+      assert.equal(scaffolder(OPUS).outcome, "allow");
+      // A new reading under 100%: Fable again, the planner once it's free.
+      fable(30);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.match(log(), /the planner runs on Fable again: default's Fable limit has room again/);
+      assert.match(log(), /the scaffolders run on Fable again: default's Fable limit has room again/);
+      assert.match(log(), /retired planner mcp:new-planner, on claude-opus-5-5: the next one starts on Fable/);
+      assert.match(starts().at(-1) ?? "", /--provider a6g-fixture-planner --model claude-fable-5-2 /);
+      assert.deepEqual(JSON.parse(readFileSync(join(w.run, "subscription.json"), "utf8")).models, {});
+      assert.equal(scaffolder(FABLE).outcome, "allow");
+      assert.doesNotMatch((await w.a6g("status", "fixture")).out, /on Opus/);
     } finally {
       await w.close();
     }

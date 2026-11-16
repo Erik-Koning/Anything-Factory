@@ -247,8 +247,9 @@ member started on any other, or on none. A change takes effect at the next `a6g 
 it run on the new model, and the planner at its next `a6g rotate`.
 
 What a model costs is in `lib/prices.ts`: Fable is 2.5 times Opus per token, and a Claude subscription counts it
-against a weekly limit of its own (`a6g subscriptions` shows it). A model the price table doesn't know still runs,
-with a warning, and its tokens count for nothing in `a6g usage` or a budget.
+against a weekly limit of its own (`a6g subscriptions` shows it). While the subscription a role runs on has used that
+up, a role on Fable runs on Opus until it resets, and `a6g status` says so. A model the price table doesn't know still
+runs, with a warning, and its tokens count for nothing in `a6g usage` or a budget.
 
 ## `pages`
 
