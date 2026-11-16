@@ -118,7 +118,7 @@ describe("the check after merges", () => {
       const lately = new Date(Date.now() - 10 * 60_000).toISOString();
       writeJson(join(state, "verify-due.json"), { at: lately, after: "a6g/b1-first" });
       await verifyAfterMerge(home, team, run, "a6g/b2-second", { wake });
-      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b2-second" });
+      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b2-second", commit: git(home, "rev-parse", "HEAD") });
       assert.ok(!existsSync(join(state, "verify.log")), "it gave way");
 
       // Due longer than OVERDUE_MIN: it runs with a merge still queued behind it.
@@ -133,7 +133,7 @@ describe("the check after merges", () => {
       // A check took the mark and waits for the merge lock: a merge landing meanwhile keeps when that mark became due.
       writeJson(join(state, "verify-checking.json"), { at: lately, pid: process.pid, started: startOf(process.pid) });
       await verifyAfterMerge(home, team, run, "a6g/b4-fourth", { wake });
-      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b4-fourth" });
+      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b4-fourth", commit: git(home, "rev-parse", "HEAD") });
       // One whose process is gone says nothing: the clock starts at this merge.
       rmSync(join(state, "verify-due.json"));
       writeJson(join(state, "verify-checking.json"), { at: lately, pid: 999_999_999, started: null });
@@ -143,6 +143,25 @@ describe("the check after merges", () => {
       other.kill("SIGKILL");
     }
     await gone;
+  });
+
+  test("a merge that lands while the check waits for the merge lock is in the commit it checks: its mark goes with the check", async () => {
+    const home = makeRepo(baseTeam({ board: "tasks", roles: plain }));
+    const [team, run, state] = [loadTeam(home), tmp("a6g-run-"), stateDir(home)];
+    writeJson(join(state, "verify-due.json"), { at: new Date().toISOString(), after: "a6g/b1-first", commit: git(home, "rev-parse", "HEAD") });
+    const held = await acquire(home, "merge", { slots: 1, waitMin: 1, holder: "a merge that lands" });
+    assert.ok(held);
+    const check = verifyAfterMerge(home, team, run, "a6g/b1-first", { wake: () => assert.fail("nothing new to say"), merged: false });
+    // The check has taken the mark and waits: the merge lands, and marks its commit due.
+    await new Promise((done) => setTimeout(done, 300));
+    assert.ok(existsSync(join(state, "verify-checking.json")));
+    const landed = commit(home, { "landed.txt": "b2" });
+    writeJson(join(state, "verify-due.json"), { at: new Date().toISOString(), after: "a6g/b2-landed", commit: landed });
+    held();
+    await check;
+    assert.equal(readJson<{ commit?: string }>(join(state, "verify-last.json"), {}).commit, landed, "it checked the merge's commit");
+    assert.equal(checkDue(home), null, "so nothing is due");
+    assert.equal(logOf(home).trim().split("\n").length, 1, "and nothing was checked twice");
   });
 
   test("a merge that didn't land runs the check a landed one left due, and marks none of its own", async () => {
