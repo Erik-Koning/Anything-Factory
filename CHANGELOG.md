@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.12: The check after merges keeps its due time while it waits its turn
+
+- **A merge that lands while a check waits for the merge lock keeps when that check became due.** A check takes the
+  due mark before it waits for the lock, so merges landing in that wait found none and started the 90-minute clock
+  again: on a busy team the check gave way three times in two hours after one that passed, and `a6g status` said
+  "due since" the latest merge. The running check now notes when the mark it took became due, and a merge that finds
+  no mark keeps that time while the check's process lives.
+
 ## 0.8.11: A team's ⋯ menu on a phone
 
 - **On a phone, a team's ⋯ menu is a sheet from the bottom of the screen,** its title over keys a thumb can press, over
