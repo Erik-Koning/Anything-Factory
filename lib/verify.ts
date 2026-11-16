@@ -31,6 +31,8 @@ import type { Store } from "./tasks/store.ts";
 import { answers, localTime, readJson, writeJson } from "./util.ts";
 
 const dueFile = (state: string): string => join(state, "verify-due.json");
+// The check that took the due mark: when that mark became due, and the process running it.
+const checkingFile = (state: string): string => join(state, "verify-checking.json");
 const filedFile = (state: string): string => join(state, "verify-filed.json");
 const lastFile = (state: string): string => join(state, "verify-last.json");
 const baselineFile = (state: string): string => join(state, "verify-suite.json");
@@ -667,7 +669,11 @@ export async function verifyAfterMerge(
 ): Promise<void> {
   const state = stateDir(home);
   mkdirSync(state, { recursive: true });
-  if (merged) writeJson(dueFile(state), { at: parsed<{ at?: string }>(dueFile(state))?.at ?? new Date().toISOString(), after: branch });
+  // A check takes the mark before it waits for the merge lock, so a merge that lands meanwhile finds none: it keeps when
+  // the taken mark became due, while the check that took it still runs, rather than starting the clock again.
+  const checking = parsed<{ at?: string; pid?: number; started?: string | null }>(checkingFile(state));
+  const since = typeof checking?.pid === "number" && sameProcess(checking.pid, checking.started) ? checking.at : undefined;
+  if (merged) writeJson(dueFile(state), { at: parsed<{ at?: string }>(dueFile(state))?.at ?? since ?? new Date().toISOString(), after: branch });
   let retried = false;
   // A merge that finished while a check held the lock, and found it taken, left its mark: that's the next round.
   for (let round = 0; round < 4 && existsSync(dueFile(state)); round++) {
@@ -679,7 +685,12 @@ export async function verifyAfterMerge(
     try {
       const due = parsed<{ at?: string; after?: string }>(dueFile(state));
       rmSync(dueFile(state), { force: true });
-      checked = await checkOnce(home, team, run, options, holds);
+      writeJson(checkingFile(state), { at: due?.at, pid: process.pid, started: startOf(process.pid) });
+      try {
+        checked = await checkOnce(home, team, run, options, holds);
+      } finally {
+        rmSync(checkingFile(state), { force: true });
+      }
       if (checked.due && !existsSync(dueFile(state)))
         writeJson(dueFile(state), {
           at: due?.at ?? new Date().toISOString(),

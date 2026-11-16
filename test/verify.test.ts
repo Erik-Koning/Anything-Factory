@@ -1,7 +1,7 @@
 import { baseTeam, commit, git, makeRepo, ROOT, tmp } from "./helpers.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { userInfo } from "node:os";
 import { join } from "node:path";
@@ -128,6 +128,17 @@ describe("the check after merges", () => {
       assert.ok(othersQueued(state), "the merge behind it is still queued");
       assert.match(logOf(home), /[0-9a-f]{9} nothing to check\n$/);
       assert.equal(checkDue(home), null);
+      assert.ok(!existsSync(join(state, "verify-checking.json")), "the check that ran leaves no mark of itself");
+
+      // A check took the mark and waits for the merge lock: a merge landing meanwhile keeps when that mark became due.
+      writeJson(join(state, "verify-checking.json"), { at: lately, pid: process.pid, started: startOf(process.pid) });
+      await verifyAfterMerge(home, team, run, "a6g/b4-fourth", { wake });
+      assert.deepEqual(checkDue(home), { at: lately, after: "a6g/b4-fourth" });
+      // One whose process is gone says nothing: the clock starts at this merge.
+      rmSync(join(state, "verify-due.json"));
+      writeJson(join(state, "verify-checking.json"), { at: lately, pid: 999_999_999, started: null });
+      await verifyAfterMerge(home, team, run, "a6g/b5-fifth", { wake });
+      assert.ok(Date.parse(checkDue(home)?.at ?? "") > Date.now() - 60_000);
     } finally {
       other.kill("SIGKILL");
     }
