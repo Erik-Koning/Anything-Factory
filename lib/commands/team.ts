@@ -47,6 +47,7 @@ import { answers, applyTeamControls, ensureWatchdog, keptWorktrees, reportTeamSt
 import { machineName } from "../machine.ts";
 import { isLead, multiMachine } from "../tasks/machines.ts";
 import {
+  actionControl,
   budgetControl,
   type Control,
   describeHold,
@@ -845,5 +846,20 @@ export async function upgrade(argv: string[]): Promise<number> {
   const team = loadTeam(entry.home);
   for (const role of Object.keys(team.roles)) writePrompt(team, role, entry.run);
   console.info(`a6g: ${entry.name} now pins Anything Factory ${version}. Commit .a6g/team.json on the integration branch.`);
+  // A planner already running keeps the version it started on, and its guard with it, until a fresh one starts: so a
+  // new rule (Opus while Fable is used up) can be refused by the old guard. Ask the lead for the restart the web app's
+  // "Restart the planner" asks for: the members under way finish, nothing new starts, and the next planner runs this
+  // version.
+  if (!entry.worker && existsSync(join(entry.run, "planner-thread"))) {
+    try {
+      const store = await openStore(team, entry.run);
+      await store.controls.create(actionControl(entry.name, OPERATOR, "rotate", `upgraded to ${version}`));
+      console.info(`a6g: asked for the planner to restart on ${version} once the members under way have finished; a6g status shows it`);
+    } catch (error) {
+      console.warn(
+        `a6g: couldn't ask for the planner's restart (${(error as Error).message.split("\n")[0]}): a6g rotate ${entry.name} once its members are idle`
+      );
+    }
+  }
   return 0;
 }

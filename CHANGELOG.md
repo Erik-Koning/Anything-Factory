@@ -15,6 +15,9 @@
   1, when it sees an AI agent's variables (`CLAUDECODE`, `AI_AGENT` and others), so a merge's restart could leave a
   team's app down. What the factory runs for a team's project (its env adapter, gate, finish, after-merge step,
   `a6g env use`, its Playwright suite) now runs without them, and so does a new team's `env.sh`.
+- **An upgrade restarts the planner on the new version,** once the members under way have finished. A planner that
+  kept running on the old one kept its old guard, which refused 0.8.14's "start it on Opus" while Fable was used up,
+  so members couldn't start at all. `a6g upgrade` now asks for the restart the web app's "Restart the planner" asks for.
 - **A builder starts its own preview without them,** and is told the notice is output, not its task. Next.js has no
   switch in the environment to turn it off, only `experimental.agentUpgrade: false` in the project's config.
 

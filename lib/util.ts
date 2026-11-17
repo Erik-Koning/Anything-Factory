@@ -60,7 +60,7 @@ export const AGENT_MARKERS = [
 // The environment for a team's own app and scripts (its env adapter, gate, finish, after-merge step, its Playwright
 // suite and what a member runs against the app): this process's, with `extra` over it, without the agent markers,
 // since the app isn't the agent. Never for what runs Claude itself (a member, the setup agent).
-export function teamEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+export function teamEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
   for (const name of AGENT_MARKERS) delete env[name];
   return env;
