@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../components/ui.tsx";
-import { AUTHENTICATOR_GRACE_DAYS, checksIp, SESSION_DAYS } from "../../server/access.ts";
+import { AUTHENTICATOR_GRACE_DAYS, checksIp, keepDaysOf, SESSION_DAYS } from "../../server/access.ts";
 import { hasPassword } from "../../server/account-choices.ts";
 import { ACTION_LABEL, listAudit } from "../../server/audit.ts";
 import { auth } from "../../server/auth.ts";
@@ -17,6 +17,13 @@ import { ActionForm } from "../../components/action-form.tsx";
 
 export const metadata: Metadata = { title: "Account" };
 
+// What each length a device may stay signed in says of itself (access.ts SESSION_DAYS.choices).
+const KEEP_WORDS: Record<number, string> = {
+  7: "The usual. A new network asks you by email.",
+  30: "A month: a laptop or phone of your own.",
+  90: "Three months: a computer only you use.",
+};
+
 export default async function AccountPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await requireViewer();
   const requestHeaders = await authHeaders();
@@ -29,6 +36,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
     hasPassword(viewer.userId),
   ]);
   const teams = Object.entries(viewer.teams);
+  const here = sessions.find((s) => s.id === viewer.sessionId);
   const checked = checksIp(viewer);
   return (
     <>
@@ -94,21 +102,29 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
       </div>
       <section className="panel" aria-labelledby="sessions">
         <h2 id="sessions">Where you&apos;re signed in</h2>
-        {/* This device, kept signed in or not: 90 days of use and no new-network check, or the usual week. */}
-        <div className="sub-form" role="group" aria-labelledby="this-device">
-          <h3 id="this-device">This device</h3>
+        {/* How long this device stays signed in without use: the usual week, or longer on a device only they use, which a
+          new network then doesn't ask about again. */}
+        <ActionForm action={keepDeviceAction} className="sub-form stack keep-device">
+          <fieldset className="choices keep-choices">
+            <legend>{`Keep this device${here ? ` (${deviceOf(here.userAgent)})` : ""} signed in for`}</legend>
+            {SESSION_DAYS.choices.map((days) => (
+              <label key={days} className="check choice">
+                <input type="radio" name="days" value={days} defaultChecked={days === (viewer.keepDays ?? SESSION_DAYS.usual)} />
+                <span>
+                  <b>{days} days</b>
+                  <span className="hint">{KEEP_WORDS[days] ?? ""}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <p className="hint">
-            {viewer.kept
-              ? `Kept signed in: it stays signed in for ${SESSION_DAYS.kept} days of use, and a new network doesn't ask you again.`
-              : `Signed out after ${SESSION_DAYS.usual} days unused, and asked by email when it's on a new network. Keep it signed in on a device only you use.`}
+            Counted from the last time you used it. Kept longer than the usual week, a new network doesn&apos;t ask you again: choose that only on a device
+            only you use.
           </p>
-          <ActionForm action={keepDeviceAction} className="inline">
-            <input type="hidden" name="keep" value={viewer.kept ? "no" : "yes"} />
-            <SubmitButton className={viewer.kept ? undefined : "primary"}>
-              {viewer.kept ? "Stop keeping it signed in" : "Keep this device signed in"}
-            </SubmitButton>
-          </ActionForm>
-        </div>
+          <div>
+            <SubmitButton>Save for this device</SubmitButton>
+          </div>
+        </ActionForm>
         <ul className="plain rows">
           {sessions.map((s) => (
             <li key={s.id} className="head">
@@ -121,7 +137,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 ) : null}
                 signed in <Ago at={new Date(s.createdAt).toISOString()} />
               </span>
-              {(s as { kept?: boolean }).kept ? <Chip>kept signed in</Chip> : null}
+              {keepDaysOf((s as { keepDays?: unknown }).keepDays) > SESSION_DAYS.usual ? (
+                <Chip>{`kept ${keepDaysOf((s as { keepDays?: unknown }).keepDays)} days`}</Chip>
+              ) : null}
               {s.id === viewer.sessionId ? (
                 <Chip tone="ok">this one</Chip>
               ) : (

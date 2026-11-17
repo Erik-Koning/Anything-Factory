@@ -15,7 +15,7 @@ import { branchRef, isLead } from "../tasks/machines.ts";
 import { nowIso, type Risk, RISKS, ticketOf, withEvent } from "../tasks/model.ts";
 import { changesRequested, openTeamStore } from "../tasks/ops.ts";
 import { update } from "../tasks/store.ts";
-import { git, list, localTime, minutes, parseArgs, readJson, text as optionText, writeJson } from "../util.ts";
+import { git, list, localTime, minutes, parseArgs, readJson, teamEnv, text as optionText, writeJson } from "../util.ts";
 
 // On a team, some commands are the planner's alone (the guard says so too; this holds when it's bypassed).
 const plannerOnly = (what: string): boolean => {
@@ -23,9 +23,10 @@ const plannerOnly = (what: string): boolean => {
   console.error(`${what}: only the planner does this`);
   return true;
 };
-// Runs a team command with sh. Arguments go to it as "$@", so nothing in them is run as shell.
+// Runs a team command with sh, in the team's own environment (teamEnv). Arguments go to it as "$@", so nothing in
+// them is run as shell.
 const runIn = (cwd: string, command: string, args: string[] = []): number =>
-  spawnSync("sh", ["-c", args.length ? `${command} "$@"` : command, "sh", ...args], { cwd, stdio: "inherit" }).status ?? 1;
+  spawnSync("sh", ["-c", args.length ? `${command} "$@"` : command, "sh", ...args], { cwd, stdio: "inherit", env: teamEnv() }).status ?? 1;
 
 // The full id of the commit `ref` names, or null.
 const commitOf = (home: string, ref: string): string | null => {
@@ -437,7 +438,7 @@ async function envUse(argv: string[]): Promise<number> {
   try {
     const { status, ended } = await runLimited(command, {
       cwd: here,
-      env: { ...process.env, A6G_APP_LOCK: "held", A6G_NAMESPACE: namespace, ...(appUrl ? { PLAYWRIGHT_BASE_URL: appUrl } : {}) },
+      env: teamEnv({ A6G_APP_LOCK: "held", A6G_NAMESPACE: namespace, ...(appUrl ? { PLAYWRIGHT_BASE_URL: appUrl } : {}) }),
       maxMin,
     });
     if (ended)

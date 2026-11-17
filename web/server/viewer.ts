@@ -6,7 +6,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { type Ability, can, isTeamRole, pendingStep, SESSION_DAYS, type TeamRole, type Viewer } from "./access.ts";
+import { type Ability, can, isTeamRole, keepDaysOf, pendingStep, SESSION_DAYS, type TeamRole, type Viewer } from "./access.ts";
 import { audit, type AuditEntry } from "./audit.ts";
 import { auth, clientIp, isAdminRole } from "./auth.ts";
 import { config } from "./config.ts";
@@ -39,10 +39,11 @@ export const getViewer = cache(async (): Promise<Person | null> => {
   if (!originAllowed(requestHeaders, config().originSecret)) return null;
   const current = await auth().api.getSession({ headers: requestHeaders });
   if (!current) return null;
-  // A session lasts 90 days of use as Better Auth keeps it, renewing it at most daily; one not kept signed in ends once
-  // it has gone a week without that.
-  const kept = current.session.kept === true;
-  if (!kept && Date.now() - new Date(current.session.updatedAt).getTime() > SESSION_DAYS.usual * 86_400_000) {
+  // A session lasts 90 days of use as Better Auth keeps it, renewing it at most daily; it ends once it has gone the days
+  // its device chose without that (a week, unless its person keeps it signed in longer).
+  const keepDays = keepDaysOf(current.session.keepDays);
+  const kept = keepDays > SESSION_DAYS.usual;
+  if (Date.now() - new Date(current.session.updatedAt).getTime() > keepDays * 86_400_000) {
     await (await auth().$context).internalAdapter.deleteSession(current.session.token).catch(() => {});
     return null;
   }
@@ -60,6 +61,7 @@ export const getViewer = cache(async (): Promise<Person | null> => {
     ipConfirmed,
     // Accounts from before these two were kept read as: checked, nothing due.
     ipCheck: current.user.ipCheck !== false,
+    keepDays,
     kept,
     signedUpAt: new Date(current.user.createdAt).toISOString(),
     authenticatorDue: current.user.authenticatorDue === true,

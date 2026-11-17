@@ -23,7 +23,9 @@ export default async function AddTaskPage({ params, searchParams }: { params: Pr
   return (
     <>
       <p className="small">
-        <Link href={`/t/${team.name}/board`}>← Board</Link>
+        <Link className="way" href={`/t/${team.name}/board`}>
+          ← Board
+        </Link>
       </p>
       <Notice searchParams={searchParams} />
       <div className="add-layout">

@@ -13,6 +13,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, wri
 import { uptime } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { locksDir } from "./paths.ts";
+import { teamEnv } from "./util.ts";
 
 export const TIMED_OUT = 75;
 
@@ -233,7 +234,8 @@ export async function withLock(
     return TIMED_OUT;
   }
   return new Promise<number>((done) => {
-    const child = spawn(command[0] ?? "", command.slice(1), { stdio, env: { ...process.env, ...env }, ...(cwd === undefined ? {} : { cwd }) });
+    // What runs under a team's lock is the team's own (its gate, its app, its after-merge step), never an agent.
+    const child = spawn(command[0] ?? "", command.slice(1), { stdio, env: teamEnv(env), ...(cwd === undefined ? {} : { cwd }) });
     if (onOutput) for (const stream of [child.stdout, child.stderr]) stream?.on("data", onOutput);
     const forward = (signal: NodeJS.Signals) => child.kill(signal);
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, forward);

@@ -6,7 +6,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
 import type { ActionResult } from "../../components/action-result.ts";
-import { pendingStep, SESSION_DAYS } from "../../server/access.ts";
+import { keepDaysOf, pendingStep, SESSION_DAYS } from "../../server/access.ts";
 import { hasPassword, keepSession, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
 import { auth } from "../../server/auth.ts";
 import { CODE_TRIES, clearCodeAttempts, takeCodeAttempt } from "../../server/code-attempts.ts";
@@ -163,21 +163,22 @@ export async function authenticatorAction(previous: AuthenticatorState, form: Fo
   return { stage: "done", error: null, qr: null, key: null, backupCodes: scanning.backupCodes };
 }
 
-// Keeps this device signed in, or stops: kept, its session lasts 90 days of use and a new network doesn't ask again
-// (access.ts SESSION_DAYS, pendingStep). Only from a session that owes nothing, so a device is kept from a confirmed
-// address with its second factor.
+// How long this device stays signed in without use: the usual week, or 30 or 90 days, when a new network doesn't ask
+// again either (access.ts SESSION_DAYS, pendingStep). Only from a session that owes nothing, so a device is kept
+// longer from a confirmed address with its second factor.
 export async function keepDeviceAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
-  const keep = form.get("keep") === "yes";
-  if (keep === (viewer.kept === true)) return done({});
+  const days = keepDaysOf(form.get("days"));
+  if (days === (viewer.keepDays ?? SESSION_DAYS.usual)) return done({});
   const current = await auth().api.getSession({ headers: await headers() });
   if (!current) redirect("/sign-in");
-  await keepSession(current.session.token, keep);
-  await record(viewer, { action: keep ? "device.kept" : "device.unkept", outcome: "ok" });
+  await keepSession(current.session.token, days);
+  const longer = days > SESSION_DAYS.usual;
+  await record(viewer, { action: longer ? "device.kept" : "device.unkept", outcome: "ok", detail: `${days} days` });
   return done({
-    ok: keep
-      ? `This device stays signed in for ${SESSION_DAYS.kept} days of use, and a new network doesn't ask you again.`
-      : `This device goes back to the usual: signed out after ${SESSION_DAYS.usual} days unused, and asked about a new network.`,
+    ok: longer
+      ? `This device stays signed in for ${days} days without use, and a new network doesn't ask you again.`
+      : `This device is back to the usual: signed out after ${days} days without use, and asked about a new network.`,
   });
 }
 

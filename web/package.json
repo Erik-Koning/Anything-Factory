@@ -29,7 +29,7 @@
     "@mosphere/better-diagrams": "0.1.0",
     "better-auth": "1.7.20",
     "mongodb": "7.7.0",
-    "next": "16.4.3",
+    "next": "16.4.5",
     "qrcode": "^1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",

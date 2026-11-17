@@ -51,7 +51,9 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   return (
     <>
       <p className="small">
-        <Link href="/account">← Account</Link>
+        <Link className="way" href="/account">
+          ← Account
+        </Link>
       </p>
       <h1>Notifications</h1>
       <p className="lede">

@@ -38,7 +38,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   return (
     <>
       <p className="small">
-        <Link href={`${base}/board`}>← Board</Link>
+        <Link className="way" href={`${base}/board`}>
+          ← Board
+        </Link>
         {task.status === "rejected" ? null : (
           <>
             {" "}

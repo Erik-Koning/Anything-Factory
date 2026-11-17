@@ -9,6 +9,9 @@
 #
 #   .a6g/adapters/env.sh up|down|restart|reset|status
 set -uo pipefail
+# The app isn't an AI agent, even when one runs this: under one (CLAUDECODE, AI_AGENT), Next.js stops `next dev` and
+# `next build` once, with exit 1, to show the agent an upgrade notice.
+unset CLAUDECODE CLAUDE_CODE AI_AGENT
 ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 cd "$ROOT" || exit 2
 RUN="$ROOT/.a6g/run/env"

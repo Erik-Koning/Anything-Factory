@@ -11,6 +11,7 @@ import { choose, clashes, type Container, containersOn, contexts, type Engine, f
 import { memberEnvironment } from "../lib/commands/team.ts";
 import { PACKAGE, type RegistryEntry } from "../lib/paths.ts";
 import { fakeWorld, type World } from "./fake-t3.ts";
+import { openStore } from "../lib/tasks/store.ts";
 
 const COLIMA = "unix:///Users/op/.colima/default/docker.sock";
 const RANCHER = "unix:///Users/op/.rd/docker.sock";
@@ -352,10 +353,18 @@ describe("register", () => {
       assert.equal(pin(), undefined, "the pin doesn't move");
       assert.equal(entryOf(w).docker, undefined);
 
+      // A planner is running: the upgrade asks for it to restart on the new version once its members are done.
+      writeFileSync(join(w.run, "planner-thread"), "thread-1\n");
       const said = await a6g(["upgrade", "fixture", "--docker", "colima"], { cwd: w.root, env });
       assert.equal(said.code, 0, said.out);
       assert.equal(pin(), PACKAGE.version);
       assert.deepEqual(entryOf(w).docker, { host: COLIMA, context: "colima" });
+      assert.match(said.out, /asked for the planner to restart on .* once the members under way have finished/);
+      const controls = await (await openStore(loadTeam(w.home), w.run)).controls.all();
+      assert.deepEqual(
+        controls.filter((c) => c.kind === "action").map((c) => [c.action, c.note]),
+        [["rotate", `upgraded to ${PACKAGE.version}`]]
+      );
 
       assert.equal((await a6g(["upgrade", "fixture", "0.2.0", "--docker", "rancher-desktop"], { cwd: w.root, env })).code, 0);
       assert.equal(readFileSync(oldRan, "utf8"), "upgrade fixture 0.2.0 --docker rancher-desktop\n");

@@ -15,6 +15,8 @@ const OPEN = [
   /^\/reset-password(\/|$)/,
   /^\/api\/auth\//,
   /^\/api\/health$/,
+  // The outside uptime check's, through the CDN (app/api/health/deep).
+  /^\/api\/health\/deep$/,
   /^\/api\/machines\/(link|token|report|self)$/,
 ];
 

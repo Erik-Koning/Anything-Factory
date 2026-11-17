@@ -2042,7 +2042,8 @@ test("the admin asks a Mac of theirs to start a project: each step as the Mac sa
   // A wrong code keeps what was typed.
   await page.getByRole("textbox", { name: /Code from your authenticator/ }).fill("000000");
   await send.click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  // The page's own alert, not Next's route announcer (an alert too, since 16.4.5).
+  await expect(page.locator("main").getByRole("alert")).toBeVisible();
   await expect(field("What should exist when the team is done")).toHaveValue("A shop that takes orders.\n\nIt ships to Canada.");
   await expect(field("Title")).toHaveValue("Shop two");
   expect(await graph.collection("controls").countDocuments({ team: "shop-two" })).toBe(0);

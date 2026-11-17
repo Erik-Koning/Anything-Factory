@@ -138,7 +138,9 @@ export default async function OverviewPage({ params, searchParams }: { params: P
           </ul>
           {details ? (
             <p className="small">
-              <Link href={`/t/${team.name}/board`}>Open the board →</Link>
+              <Link className="way" href={`/t/${team.name}/board`}>
+                Open the board →
+              </Link>
             </p>
           ) : null}
         </section>
@@ -174,7 +176,9 @@ export default async function OverviewPage({ params, searchParams }: { params: P
             <h2 id="graph">Graph</h2>
             <TaskGraph tasks={tasks} />
             <p className="small">
-              <Link href={`/t/${team.name}/graph`}>Open it by level →</Link>
+              <Link className="way" href={`/t/${team.name}/graph`}>
+                Open it by level →
+              </Link>
             </p>
           </section>
         </div>

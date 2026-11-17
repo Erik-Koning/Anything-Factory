@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { readJson } from "./util.ts";
+import { readJson, teamEnv } from "./util.ts";
 
 // The repository's Playwright command-line entry, or null when it has none installed: the nearest node_modules from
 // `from` (the configuration's folder) upward, as Node finds it. So a monorepo's apps/web/node_modules is found before
@@ -113,7 +113,8 @@ export async function runPlaywright(
     cwd: dir,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile, CI: "1", FORCE_COLOR: "0" },
+    // The team's own: the app its config may start (webServer) runs as it would without an agent.
+    env: teamEnv({ ...env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile, CI: "1", FORCE_COLOR: "0" }),
   });
   const signalGroup = (signal: NodeJS.Signals): void => {
     try {

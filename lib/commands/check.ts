@@ -22,7 +22,7 @@ import { FACTORY_ROOT, findHome, versionDir } from "../paths.ts";
 import { ALLOWED_EXAMPLES, policyStates } from "../policies.ts";
 import { compile } from "../prompts.ts";
 import * as t3 from "../t3.ts";
-import { die, parseArgs, which } from "../util.ts";
+import { die, parseArgs, teamEnv, which } from "../util.ts";
 import { unknownSignIns } from "./pages.ts";
 import { githubRepo, remoteUrl, shownUrl } from "./pr.ts";
 
@@ -456,7 +456,7 @@ function committed(team: Team, required: string[], others: string[], line: (leve
 
 async function live(team: LoadedTeam, line: (level: Level, text: string) => void): Promise<void> {
   const home = team.home;
-  const sh = (command: string, cwd: string, timeout = 20 * 60_000) => spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", timeout });
+  const sh = (command: string, cwd: string, timeout = 20 * 60_000) => spawnSync("sh", ["-c", command], { cwd, encoding: "utf8", timeout, env: teamEnv() });
   if (team.environment.script) {
     const up = sh(`${team.environment.script} up`, home);
     line(up.status === 0 ? "ok" : "FAIL", `environment up: ${(up.stdout + up.stderr).trim().split("\n").pop() ?? ""}`);
