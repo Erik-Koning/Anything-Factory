@@ -410,7 +410,10 @@ export function subscriptionsView(entry: Pick<RegistryEntry, "name" | "run">, no
     moving: steering?.moving ?? {},
     waiting: Object.fromEntries(Object.entries(steering?.waiting ?? {}).map(([role, wait]) => [role, { why: wait.why, until: wait.until }])),
     models: Object.fromEntries(
-      Object.entries(heldFallbacks(steering, now)).map(([role, fallback]) => [role, { model: fallback.model, until: fallback.until, why: fallback.why }])
+      Object.entries(heldFallbacks(steering, now)).map(([role, fallback]) => [
+        role,
+        { model: fallback.model, name: modelName(fallback.model), until: fallback.until, why: fallback.why },
+      ])
     ),
   };
 }

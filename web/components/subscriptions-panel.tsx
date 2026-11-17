@@ -4,7 +4,6 @@
 // that changes the order (a control the Mac applies within a minute, lib/steer.ts). A team whose Mac doesn't report
 // its subscriptions is told where they're chosen instead, and the command that chooses them there.
 import { Fragment } from "react";
-import { modelName } from "../../lib/models.ts";
 import type { Control, TeamDoc } from "../server/factory.ts";
 import { askedBy } from "../server/views.ts";
 import { Command } from "./command.tsx";
@@ -134,7 +133,7 @@ export function SubscriptionsPanel({ team, controls, open = false }: { team: Tea
                           <b>{on ?? "the Mac's own login"}</b>
                           {moving !== undefined ? `, moving to ${moving ?? "the Mac's own login"} once nothing of it is at work` : ""}
                           {fallback
-                            ? `, on ${modelName(fallback.model)} ${fallback.until ? `until ${day.format(new Date(fallback.until))}` : "for now"}: ${fallback.why}`
+                            ? `, on ${fallback.name ?? fallback.model} ${fallback.until ? `until ${day.format(new Date(fallback.until))}` : "for now"}: ${fallback.why}`
                             : ""}
                         </>
                       )}
