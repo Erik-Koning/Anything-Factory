@@ -169,45 +169,96 @@ export default $config({
     });
     const url = domain ? `https://${domain}` : cdn.url;
 
-    // Watching it from outside: Route 53 asks the app's deep health check (app/api/health/deep: the server and its
-    // database) through the CDN every 30 seconds from several regions, and an alarm emails A6G_WEB_ALERTS once it has
-    // failed for two minutes running, and again when it answers. Route 53's figures are kept in us-east-1, so the alarm
-    // and its topic are there too. About $2 a month; without the setting nothing watches.
+    // Watching it from outside: a small function in this region asks the app's deep health check (app/api/health/deep:
+    // the server and its database) through the CDN every minute and records 1 or 0, and an alarm emails A6G_WEB_ALERTS
+    // once it has read 0 (or nothing) for two minutes running, and again when it answers. All in the app's own region:
+    // the organization's policy refuses SNS in us-east-1, where Route 53's health checks keep their figures. Pennies a
+    // month; without the setting nothing watches.
     const alerts = process.env.A6G_WEB_ALERTS || undefined;
     if (alerts) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(alerts)) throw new Error("A6G_WEB_ALERTS: the address told when the app stops answering");
-      const usEast1 = new aws.Provider("UsEast1", { region: "us-east-1" });
-      const uptime = new aws.route53.HealthCheck("WebUptime", {
-        type: "HTTPS",
-        fqdn: domain ?? cdn.url.apply((address) => new URL(address).hostname),
-        port: 443,
-        resourcePath: "/api/health/deep",
-        requestInterval: 30,
-        failureThreshold: 3,
-        enableSni: true,
-        tags: { Name: `a6g-web-${$app.stage}` },
+      const name = `a6g-web-${$app.stage}-uptime`;
+      const role = new aws.iam.Role("WebUptimeRole", {
+        name,
+        assumeRolePolicy: JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }],
+        }),
       });
-      const topic = new aws.sns.Topic("WebAlerts", { name: `a6g-web-${$app.stage}-alerts` }, { provider: usEast1 });
-      new aws.sns.TopicSubscription("WebAlertsEmail", { topic: topic.arn, protocol: "email", endpoint: alerts }, { provider: usEast1 });
-      new aws.cloudwatch.MetricAlarm(
-        "WebDown",
-        {
-          name: `a6g-web-${$app.stage}-down`,
-          alarmDescription: $interpolate`Anything Factory (${$app.stage}) isn't answering at ${url}/api/health/deep: the app or its database. Lightsail's own log and the database's status say which.`,
-          namespace: "AWS/Route53",
-          metricName: "HealthCheckStatus",
-          dimensions: { HealthCheckId: uptime.id },
-          statistic: "Minimum",
-          period: 60,
-          evaluationPeriods: 2,
-          threshold: 1,
-          comparisonOperator: "LessThanThreshold",
-          treatMissingData: "breaching",
-          alarmActions: [topic.arn],
-          okActions: [topic.arn],
-        },
-        { provider: usEast1 }
-      );
+      new aws.iam.RolePolicyAttachment("WebUptimeLogs", {
+        role: role.name,
+        policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+      });
+      new aws.iam.RolePolicy("WebUptimeMetric", {
+        role: role.id,
+        policy: JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Action: "cloudwatch:PutMetricData",
+              Resource: "*",
+              Condition: { StringEquals: { "cloudwatch:namespace": "AnythingFactory" } },
+            },
+          ],
+        }),
+      });
+      // The probe: one GET, ten seconds at most, 1 for a 200 that says "ok", else 0. The runtime's own SDK records it.
+      const probe = new aws.lambda.Function("WebUptimeProbe", {
+        name,
+        role: role.arn,
+        runtime: "nodejs22.x",
+        handler: "index.handler",
+        timeout: 20,
+        memorySize: 128,
+        environment: { variables: { TARGET: $interpolate`${url}/api/health/deep`, STAGE: $app.stage } },
+        code: new $util.asset.AssetArchive({
+          "index.mjs": new $util.asset.StringAsset(
+            [
+              'import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwatch";',
+              "const cloudwatch = new CloudWatchClient({});",
+              "export async function handler() {",
+              "  let up = 0;",
+              "  try {",
+              '    const answer = await fetch(process.env.TARGET, { signal: AbortSignal.timeout(10000), headers: { "user-agent": "a6g-uptime" } });',
+              '    up = answer.status === 200 && (await answer.text()).trim() === "ok" ? 1 : 0;',
+              "  } catch {}",
+              "  await cloudwatch.send(new PutMetricDataCommand({",
+              '    Namespace: "AnythingFactory",',
+              '    MetricData: [{ MetricName: "Up", Dimensions: [{ Name: "Stage", Value: process.env.STAGE }], Value: up, Unit: "Count" }],',
+              "  }));",
+              "  return { up };",
+              "}",
+            ].join("\n")
+          ),
+        }),
+      });
+      const everyMinute = new aws.cloudwatch.EventRule("WebUptimeEveryMinute", { name, scheduleExpression: "rate(1 minute)" });
+      new aws.cloudwatch.EventTarget("WebUptimeTarget", { rule: everyMinute.name, arn: probe.arn });
+      new aws.lambda.Permission("WebUptimeInvoke", {
+        action: "lambda:InvokeFunction",
+        function: probe.name,
+        principal: "events.amazonaws.com",
+        sourceArn: everyMinute.arn,
+      });
+      const topic = new aws.sns.Topic("WebAlerts", { name: `a6g-web-${$app.stage}-alerts` });
+      new aws.sns.TopicSubscription("WebAlertsEmail", { topic: topic.arn, protocol: "email", endpoint: alerts });
+      new aws.cloudwatch.MetricAlarm("WebDown", {
+        name: `a6g-web-${$app.stage}-down`,
+        alarmDescription: $interpolate`Anything Factory (${$app.stage}) isn't answering at ${url}/api/health/deep: the app or its database. Lightsail's own log and the database's status say which.`,
+        namespace: "AnythingFactory",
+        metricName: "Up",
+        dimensions: { Stage: $app.stage },
+        statistic: "Minimum",
+        period: 60,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        threshold: 1,
+        comparisonOperator: "LessThanThreshold",
+        treatMissingData: "breaching",
+        alarmActions: [topic.arn],
+        okActions: [topic.arn],
+      });
     }
 
     // The running app: the image pushed above (a new build deploys a new version), the settings it reads at start.
