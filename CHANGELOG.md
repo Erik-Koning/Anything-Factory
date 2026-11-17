@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased: Next.js's agent nudge can't stop a team's app
+
+- **A team's app starts as it would without an agent.** Next.js 16.4 stops `next dev` and `next build` once, with exit
+  1, when it sees an AI agent's variables (`CLAUDECODE`, `AI_AGENT` and others), so a merge's restart could leave a
+  team's app down. What the factory runs for a team's project (its env adapter, gate, finish, after-merge step,
+  `a6g env use`, its Playwright suite) now runs without them, and so does a new team's `env.sh`.
+- **A builder starts its own preview without them,** and is told the notice is output, not its task. Next.js has no
+  switch in the environment to turn it off, only `experimental.agentUpgrade: false` in the project's config.
+
 ## 0.8.14: Signing in that keeps out of your way, two-factor that stays on, and Fable that falls back to Opus
 
 - **A new network no longer strands the window you signed in from.** The page waiting for the email's "Yes, it was

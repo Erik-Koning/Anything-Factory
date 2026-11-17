@@ -18,7 +18,7 @@ import { stateDir } from "../../lib/paths.ts";
 import { promptFile, promptStale, writePrompt } from "../../lib/prompts.ts";
 import { type HookInput, inTeam, teamSession } from "../../lib/session.ts";
 import { lastFinished, runningByInstance } from "../../lib/t3.ts";
-import { localTime } from "../../lib/util.ts";
+import { localTime, teamEnv } from "../../lib/util.ts";
 
 if (!inTeam()) process.exit(0);
 const input = JSON.parse(readFileSync(0, "utf8")) as HookInput;
@@ -34,7 +34,7 @@ const paused = existsSync(join(run, "paused")) ? "The operator paused the team: 
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max)}\n(… cut at ${max} characters)` : text);
 const runCommand = (command: string): string => {
   try {
-    return execFileSync("sh", ["-c", command], { cwd: home, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync("sh", ["-c", command], { cwd: home, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"], env: teamEnv() }).trim();
   } catch (error) {
     return `(${command.split(" ").slice(0, 3).join(" ")} failed: ${String((error as Error).message).split("\n")[0]})`;
   }

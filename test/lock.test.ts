@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { acquire, TIMED_OUT, withLock } from "../lib/lock.ts";
+import { AGENT_MARKERS, teamEnv } from "../lib/util.ts";
 
 describe("lock", { concurrency: true }, () => {
   test("one slot: the second holder waits for the first", async () => {
@@ -54,6 +55,26 @@ describe("lock", { concurrency: true }, () => {
     held?.();
     assert.equal(await withLock(home, "journeys", ["sh", "-c", "exit 3"], { slots: 1, waitMin: 0.01, stdio: "ignore" }), 3, "the command's own exit code");
   });
+
+  // Next.js 16.4 stops `next dev` and `next build` once under an agent; a team's app and scripts aren't one.
+  test("a team's own command runs without the variables that say an agent started it", async () => {
+    const markers = { CLAUDECODE: "1", CLAUDE_CODE: "1", AI_AGENT: "claude-code_2-1-311_agent", CURSOR_AGENT: "1" };
+    const env = teamEnv({ ...markers, AFTER: "abc" });
+    for (const name of AGENT_MARKERS) assert.equal(env[name], undefined, name);
+    assert.equal(env["AFTER"], "abc", "what the caller adds stays");
+    assert.equal(env["PATH"], process.env["PATH"], "and so does the rest");
+
+    // withLock runs the team's command so, whatever its caller has or passes.
+    const home = tmp();
+    let out = "";
+    const status = await withLock(home, "app", ["sh", "-c", 'echo "agent=[${CLAUDECODE-}${CLAUDE_CODE-}${AI_AGENT-}${CURSOR_AGENT-}] after=$AFTER"'], {
+      env: { ...markers, AFTER: "abc" },
+      stdio: ["ignore", "pipe", "pipe"],
+      onOutput: (chunk) => (out += chunk),
+    });
+    assert.equal(status, 0, out);
+    assert.equal(out.trim(), "agent=[] after=abc");
+  });
 });
 
 describe("a6g env use", () => {
@@ -102,6 +123,17 @@ describe("a6g env use", () => {
     assert.match(much.out, /env use: --max-min 121 is more than the 120 minutes anything may hold the team's app/);
     assert.match((await use(home, "--max-min", "soon", "--", "true")).out, /env use: not a duration: soon/);
   });
+
+  test("runs its command without the variables that say an agent started it", async () => {
+    const home = makeRepo();
+    const agent = { ...as(home).env, CLAUDECODE: "1", CLAUDE_CODE: "1", AI_AGENT: "claude-code", KEPT: "yes" };
+    const ran = await a6g(["env", "use", "--", "sh", "-c", 'echo "agent=[${CLAUDECODE-}${CLAUDE_CODE-}${AI_AGENT-}] kept=$KEPT held=$A6G_APP_LOCK"'], {
+      cwd: home,
+      env: agent,
+    });
+    assert.equal(ran.code, 0, ran.out);
+    assert.match(ran.out, /^agent=\[\] kept=yes held=held$/m);
+  });
 });
 
 describe("a6g env", () => {
@@ -133,5 +165,25 @@ describe("a6g env", () => {
     merge?.();
     assert.equal(inside.code, 0, inside.out);
     assert.match(calls(), /up held=held\n$/);
+  });
+
+  test("the env adapter runs without the variables that say an agent started it, under the app lock or not", async () => {
+    const home = makeRepo(baseTeam({ environment: { script: "sh .a6g/adapters/env.sh" } }), {
+      ".a6g/adapters/env.sh": 'echo "$1 agent=[${CLAUDECODE-}${CLAUDE_CODE-}${AI_AGENT-}]"\n',
+    });
+    const env = {
+      A6G_HOME_DIR: home,
+      A6G_TEAM: "fixture",
+      A6G_ROLE: "planner",
+      A6G_RUN: `${home}-run`,
+      CLAUDECODE: "1",
+      CLAUDE_CODE: "1",
+      AI_AGENT: "claude-code",
+    };
+    const restart = await a6g(["env", "restart"], { cwd: home, env });
+    assert.equal(restart.code, 0, restart.out);
+    assert.match(restart.out, /^restart agent=\[\]$/m);
+    const status = await a6g(["env", "status"], { cwd: home, env });
+    assert.match(status.out, /^status agent=\[\]$/m);
   });
 });
