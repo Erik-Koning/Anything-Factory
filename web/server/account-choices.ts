@@ -16,9 +16,9 @@ export async function putOffAuthenticator(userId: string, sessionId: string): Pr
   await (await adapter()).updateUser(userId, { authenticatorLater: sessionId });
 }
 
-// Keeps the session `token` signed in for 90 days of use, or not (access.ts SESSION_DAYS).
-export async function keepSession(token: string, kept: boolean): Promise<void> {
-  await (await adapter()).updateSession(token, { kept });
+// Keeps the session `token` signed in for `days` without use: one of access.ts SESSION_DAYS.choices.
+export async function keepSession(token: string, days: number): Promise<void> {
+  await (await adapter()).updateSession(token, { keepDays: days });
 }
 
 export async function setIpCheck(userId: string, on: boolean): Promise<void> {

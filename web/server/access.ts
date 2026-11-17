@@ -31,8 +31,10 @@ export interface Viewer {
   // The person's own choice, an admin's too: a sign-in from an address they haven't used asks them by email first. On
   // unless they turned it off on their account page.
   ipCheck: boolean;
-  // This device is kept signed in (the account page's "Keep this device signed in"): its session lasts 90 days of
-  // use, and moving to another network doesn't ask again, since the device was confirmed when it was kept.
+  // How long this device stays signed in without use, in days, as its person chose on the account page
+  // (SESSION_DAYS): the usual week, or longer on a device they keep signed in. A device kept longer isn't asked about
+  // a new network again (kept), since it was confirmed when it was kept.
+  keepDays?: number;
   kept?: boolean;
   // The person signed up (two-factor authentication is on for every sign-up) and hasn't set up their authenticator yet.
   authenticatorDue: boolean;
@@ -87,8 +89,11 @@ const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
 // Whether a new IP address is checked for this person: unless they turned it off, an admin as anyone.
 export const checksIp = (person: Pick<Viewer, "ipCheck">): boolean => person.ipCheck;
 
-// How long a session lasts without use: a week, or 90 days on a device its person keeps signed in.
-export const SESSION_DAYS = { usual: 7, kept: 90 } as const;
+// How long a session lasts without use: the usual week, or what its person chose for the device on the account page.
+export const SESSION_DAYS = { usual: 7, choices: [7, 30, 90], longest: 90 } as const;
+// A session's chosen days as stored, or the usual week for one that chose nothing (or something not offered).
+export const keepDaysOf = (value: unknown): number =>
+  (SESSION_DAYS.choices as readonly number[]).includes(Number(value)) ? Number(value) : SESSION_DAYS.usual;
 
 // How long after signing up the authenticator may be put off: two-factor authentication can't be turned off, only
 // set up a little later.

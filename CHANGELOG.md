@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.15: You hear when the site is down, choose how long a device stays signed in, and Next.js can't stop a team's app
+
+- **The site tells you when it's down.** An outside check calls the app and its database through the CDN every 30
+  seconds from several regions (`/api/health/deep`), and an alarm emails you once it has failed for two minutes, and
+  again when it's back. Production's deploy sets who hears (`A6G_WEB_ALERTS`); AWS asks that address to confirm once.
+- **Choose how long this device stays signed in:** the usual 7 days, 30 or 90 days without use, on the account page,
+  which names the device. Kept longer than a week, a new network doesn't ask you again.
+- **Easier on a phone:** a card on the board opens its task wherever it's pressed; a link on a line of its own ("←
+  Board", "Open the board →") has a finger's height to press; the audit log's filters sit two by two, so the log
+  starts on the first screen.
+- **Next.js 16.4.5** for the web app, past an advisory about `'use cache'` the app doesn't use.
+
 ## 0.8.14: Signing in that keeps out of your way, two-factor that stays on, and Fable that falls back to Opus
 
 - **A new network no longer strands the window you signed in from.** The page waiting for the email's "Yes, it was

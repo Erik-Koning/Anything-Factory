@@ -513,9 +513,11 @@ test("a device kept signed in isn't asked about a new network; the same session 
     return elsewhere;
   };
   assert.equal(await statusOf(moved().fetch("/list-sessions")), 403, "not kept: the new address is asked about");
-  await keepSession(me.session.token, true);
-  assert.equal(await statusOf(moved().fetch("/list-sessions")), 200, "kept: confirmed when it was kept");
-  await keepSession(me.session.token, false);
+  await keepSession(me.session.token, 90);
+  assert.equal(await statusOf(moved().fetch("/list-sessions")), 200, "kept 90 days: confirmed when it was kept");
+  await keepSession(me.session.token, 30);
+  assert.equal(await statusOf(moved().fetch("/list-sessions")), 200, "kept 30 days, as well");
+  await keepSession(me.session.token, 7);
   assert.equal(await statusOf(moved().fetch("/list-sessions")), 403);
 });
 

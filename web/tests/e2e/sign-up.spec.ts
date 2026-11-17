@@ -181,15 +181,20 @@ test("the authenticator can wait a few days: “Set it up later” goes on to Te
   await expect(authenticator.getByRole("button", { name: "Stop asking me" })).toHaveCount(0);
   await expect(home.page.getByRole("region", { name: "Recent activity" }).getByText("Authenticator put off at sign-up")).toBeVisible();
 
-  // This device, kept signed in: 90 days of use, and a new network doesn't ask again; and back to the usual.
+  // This device, kept signed in longer: 90 days without use, and a new network doesn't ask again; and back to the usual.
   const signedIn = home.page.getByRole("region", { name: "Where you're signed in" });
-  await signedIn.getByRole("button", { name: "Keep this device signed in" }).click();
-  await expect(home.page.getByRole("status")).toContainText("This device stays signed in for 90 days of use");
-  await expect(signedIn.getByText("kept signed in", { exact: true })).toBeVisible();
-  expect((await accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } }))?.kept).toBe(true);
-  await signedIn.getByRole("button", { name: "Stop keeping it signed in" }).click();
-  await expect(signedIn.getByRole("button", { name: "Keep this device signed in" })).toBeVisible();
-  expect((await accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } }))?.kept).toBe(false);
+  const keepFor = signedIn.getByRole("group", { name: /^Keep this device .*signed in for$/ });
+  await expect(keepFor.getByRole("radio", { name: /^7 days/ })).toBeChecked();
+  await keepFor.getByRole("radio", { name: /^90 days/ }).check();
+  await signedIn.getByRole("button", { name: "Save for this device" }).click();
+  await expect(home.page.getByRole("status")).toContainText("This device stays signed in for 90 days without use");
+  await expect(signedIn.getByText("kept 90 days", { exact: true })).toBeVisible();
+  const latest = () => accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } });
+  expect((await latest())?.keepDays).toBe(90);
+  await keepFor.getByRole("radio", { name: /^7 days/ }).check();
+  await signedIn.getByRole("button", { name: "Save for this device" }).click();
+  await expect(signedIn.getByText("kept 90 days", { exact: true })).toHaveCount(0);
+  expect((await latest())?.keepDays).toBe(7);
 
   // The IP check, on as they signed up. A sign-in older than ten minutes doesn't turn it off.
   const addresses = home.page.getByRole("region", { name: "Your IP addresses" });

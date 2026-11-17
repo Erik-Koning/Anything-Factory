@@ -29,8 +29,9 @@
 //     is refused for an admin. Nobody becomes an admin by signing up.
 // Anyone else may turn on an authenticator too (at /welcome once their sign-up is confirmed, or from the account page);
 // from then on their sessions need its code as well, whichever way they signed in.
-// A session lasts 7 days without use (viewer.ts ends an older one), or 90 on a device its person keeps signed in from
-// the account page (session.kept): such a device isn't asked about a new IP address either, having been confirmed.
+// A session lasts 7 days without use (viewer.ts ends an older one), or 30 or 90 on a device its person keeps signed in
+// longer from the account page (session.keepDays): such a device isn't asked about a new IP address either, having
+// been confirmed.
 // A forgotten password is set again from a link by email (password-reset.ts): the link signs nobody in, an account
 // with an authenticator gives its code as well, so an admin's inbox alone changes nothing, and every session of the
 // account ends. Asking answers the same for every address; the app's own page sets the password, never an endpoint here.
@@ -55,7 +56,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { admin, magicLink, twoFactor } from "better-auth/plugins";
-import { checksIp, SESSION_DAYS } from "./access.ts";
+import { checksIp, keepDaysOf, SESSION_DAYS } from "./access.ts";
 import { audit } from "./audit.ts";
 import { ensureAuthIndexes } from "./auth-indexes.ts";
 import { config } from "./config.ts";
@@ -219,13 +220,13 @@ function makeAuth() {
     // limits count by it, and the new-IP check compares it. IPv6 by its /64. A session is read with its person in one
     // query ($lookup), not two: every page starts with it.
     advanced: { ipAddress: { ipAddressHeaders: [config().ipHeader], ipv6Subnet: 64 }, database: { joins: true } },
-    // Up to 90 days, renewed a day at a time while used; viewer.ts ends one unused for 7 days unless it's kept.
+    // Up to 90 days, renewed a day at a time while used; viewer.ts ends one sooner, unused for the days its device chose.
     session: {
-      expiresIn: SESSION_DAYS.kept * 86_400,
+      expiresIn: SESSION_DAYS.longest * 86_400,
       updateAge: 86_400,
       additionalFields: {
         secondFactor: { type: "boolean", required: false, defaultValue: false, input: false },
-        kept: { type: "boolean", required: false, defaultValue: false, input: false },
+        keepDays: { type: "number", required: false, defaultValue: SESSION_DAYS.usual, input: false },
       },
     },
     // Kept in the database, so the limits hold across serverless instances.
@@ -353,7 +354,7 @@ function makeAuth() {
         if (
           current &&
           checksIpOf(current.user) &&
-          current.session.kept !== true &&
+          keepDaysOf(current.session.keepDays) <= SESSION_DAYS.usual &&
           !(await isKnownIp(current.user.id, getIP(ctx.request, ctx.context.options)))
         )
           throw new APIError("FORBIDDEN", { message: "Confirm this sign-in from the email we sent first." });

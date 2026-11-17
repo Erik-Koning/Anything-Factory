@@ -106,7 +106,9 @@ export default async function StartPage({ searchParams }: { searchParams: Search
   return (
     <>
       <p className="small">
-        <Link href="/">← Teams</Link>
+        <Link className="way" href="/">
+          ← Teams
+        </Link>
       </p>
       <h1>Start a project</h1>
       <p className="lede">

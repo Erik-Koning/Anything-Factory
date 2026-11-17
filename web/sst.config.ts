@@ -27,6 +27,9 @@
 //                    and it's near the database's region).
 //   A6G_WEB_POWER    the container's size: nano, micro (1 GB, the default), small, medium, large, xlarge.
 //   A6G_WEB_SCALE    how many containers (1).
+//   A6G_WEB_ALERTS   who is emailed when the app stops answering (optional; production's deploy sets it): an outside
+//                    check watches the app and its database, and an alarm emails this address when it fails and when
+//                    it's back. Set at deploy time, never in the repository. AWS asks the address to confirm it once.
 export default $config({
   app(input) {
     return {
@@ -165,6 +168,47 @@ export default $config({
       ],
     });
     const url = domain ? `https://${domain}` : cdn.url;
+
+    // Watching it from outside: Route 53 asks the app's deep health check (app/api/health/deep: the server and its
+    // database) through the CDN every 30 seconds from several regions, and an alarm emails A6G_WEB_ALERTS once it has
+    // failed for two minutes running, and again when it answers. Route 53's figures are kept in us-east-1, so the alarm
+    // and its topic are there too. About $2 a month; without the setting nothing watches.
+    const alerts = process.env.A6G_WEB_ALERTS || undefined;
+    if (alerts) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(alerts)) throw new Error("A6G_WEB_ALERTS: the address told when the app stops answering");
+      const usEast1 = new aws.Provider("UsEast1", { region: "us-east-1" });
+      const uptime = new aws.route53.HealthCheck("WebUptime", {
+        type: "HTTPS",
+        fqdn: domain ?? cdn.url.apply((address) => new URL(address).hostname),
+        port: 443,
+        resourcePath: "/api/health/deep",
+        requestInterval: 30,
+        failureThreshold: 3,
+        enableSni: true,
+        tags: { Name: `a6g-web-${$app.stage}` },
+      });
+      const topic = new aws.sns.Topic("WebAlerts", { name: `a6g-web-${$app.stage}-alerts` }, { provider: usEast1 });
+      new aws.sns.TopicSubscription("WebAlertsEmail", { topic: topic.arn, protocol: "email", endpoint: alerts }, { provider: usEast1 });
+      new aws.cloudwatch.MetricAlarm(
+        "WebDown",
+        {
+          name: `a6g-web-${$app.stage}-down`,
+          alarmDescription: $interpolate`Anything Factory (${$app.stage}) isn't answering at ${url}/api/health/deep: the app or its database. Lightsail's own log and the database's status say which.`,
+          namespace: "AWS/Route53",
+          metricName: "HealthCheckStatus",
+          dimensions: { HealthCheckId: uptime.id },
+          statistic: "Minimum",
+          period: 60,
+          evaluationPeriods: 2,
+          threshold: 1,
+          comparisonOperator: "LessThanThreshold",
+          treatMissingData: "breaching",
+          alarmActions: [topic.arn],
+          okActions: [topic.arn],
+        },
+        { provider: usEast1 }
+      );
+    }
 
     // The running app: the image pushed above (a new build deploys a new version), the settings it reads at start.
     // Lightsail keeps a deployment's environment in the deployment (the database's connection string, the auth secret,

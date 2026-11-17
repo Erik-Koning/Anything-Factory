@@ -2,6 +2,7 @@
 // a new IP address confirmed by email (and "it wasn't me"), an authenticator for someone who isn't an admin, and the
 // audit log. Each test comes from addresses of its own, so the main story's rate limits don't reach it.
 import { expect, test } from "@playwright/test";
+import { ORIGIN_SECRET } from "../../playwright.config.ts";
 import { databases, freshCode, mailsTo, newPage, nextLink, nextLinkLike, signInAsAdmin, state } from "./helpers.ts";
 import { closeDatabases } from "./helpers.ts";
 
@@ -48,6 +49,12 @@ test("only requests through the CDN reach the app; its health check is open", as
   const health = await fetch(`${base}/api/health`);
   expect(health.status).toBe(200);
   expect(await health.text()).toBe("ok");
+  // The outside uptime check's: through the CDN only, and it answers for the database too.
+  expect((await fetch(`${base}/api/health/deep`)).status).toBe(403);
+  const deep = await fetch(`${base}/api/health/deep`, { headers: { "x-a6g-origin": ORIGIN_SECRET, "x-a6g-viewer-ip": "10.9.8.7" } });
+  expect(deep.status).toBe(200);
+  expect(await deep.text()).toBe("ok");
+  expect(deep.headers.get("cache-control")).toBe("no-store");
 });
 
 test("an admin signing in from a new IP address confirms it by email first; the link works once", async ({ browser }) => {
