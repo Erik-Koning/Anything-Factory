@@ -54,7 +54,7 @@ test("only requests through the CDN reach the app; its health check is open", as
   const deep = await fetch(`${base}/api/health/deep`, { headers: { "x-a6g-origin": ORIGIN_SECRET, "x-a6g-viewer-ip": "10.9.8.7" } });
   expect(deep.status).toBe(200);
   expect(await deep.text()).toBe("ok");
-  expect(deep.headers.get("cache-control")).toBe("no-store");
+  expect(deep.headers.get("cache-control")).toMatch(/\bno-store\b/);
 });
 
 test("an admin signing in from a new IP address confirms it by email first; the link works once", async ({ browser }) => {
