@@ -10,13 +10,15 @@
 //                                                 subscriptions' weekly percentages added up; 0 removes a limit
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { FALLBACKS, MODEL_ALIASES, modelName } from "../models.ts";
 import { readRegistry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
-import { readSteering, steer } from "../steer.ts";
+import { heldFallbacks, readSteering, steer } from "../steer.ts";
 import {
   type Account,
   ALL,
   accounts,
+  fallbackFor,
   gate,
   listFor,
   loginOf,
@@ -55,6 +57,21 @@ function teamsOn(): Map<string, string[]> {
   return on;
 }
 
+// The roles of each registered team on another model than their own for now, by the subscription whose own limit for
+// theirs is used up (lib/steer.ts).
+function fallenOn(): Map<string, string[]> {
+  const on = new Map<string, string[]>();
+  for (const team of existsSync(teamsDir) ? teamNames() : []) {
+    const entry = readRegistry(team);
+    const steering = entry ? readSteering(entry.run) : null;
+    const by = new Map<string, string[]>();
+    for (const [role, fallback] of Object.entries(heldFallbacks(steering)))
+      by.set(fallback.subscription, [...(by.get(fallback.subscription) ?? []), role]);
+    for (const [name, roles] of by) on.set(name, [...(on.get(name) ?? []), `${team} (${roles.join(", ")})`]);
+  }
+  return on;
+}
+
 function limitWords(limit: SubscriptionLimit | undefined): string {
   const parts = [limit?.weekly ? `${limit.weekly}% a week` : "", limit?.session ? `${limit.session}% of five hours` : ""].filter(Boolean);
   return parts.length ? `limit ${parts.join(", ")}` : "no limit of yours (closed only when used up)";
@@ -66,6 +83,7 @@ function show(): void {
   const list = accounts();
   const names = list.map((a) => a.name);
   const on = teamsOn();
+  const fallen = fallenOn();
   console.info("Subscriptions, as Claude Code's usage report says (the watchdog reads them every quarter hour, every five minutes near a limit):");
   for (const account of list) {
     const r = state.readings[account.name];
@@ -84,6 +102,15 @@ function show(): void {
     );
     const teams = on.get(account.name);
     if (teams) console.info(`      runs: ${teams.join(", ")}`);
+    // A model's own limit used up (Fable's): the roles on it run on its fallback here until it resets.
+    for (const family of Object.keys(FALLBACKS)) {
+      const fallback = fallbackFor(MODEL_ALIASES[family] ?? family, account.name, state);
+      if (!fallback) continue;
+      const now = fallen.get(account.name);
+      console.info(
+        `      ${fallback.why}: its roles on ${modelName(fallback.from)} run on ${modelName(fallback.model)} ${fallback.until ? `until ${when(fallback.until)}` : "for now"}${now ? `; now ${now.join(", ")}` : ""}`
+      );
+    }
   }
   const allCap = limits[ALL]?.weekly;
   if (allCap) {

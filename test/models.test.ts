@@ -1,13 +1,13 @@
 // Which model each role runs on: team.json's settings and the defaults (lib/models.ts), the planner's table, the
 // guard's check on a member's start, and what register and the watchdog start threads with.
-import { baseTeam, holds, makeRepo, tool, write } from "./helpers.ts";
+import { baseTeam, guard, holds, makeRepo, tmp, tool, write } from "./helpers.ts";
 import { fakeWorld } from "./fake-t3.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { loadTeam, modelsOf, normalize, type RawTeam } from "../lib/config.ts";
-import { defaultModel, MODEL_ALIASES, modelId } from "../lib/models.ts";
+import { defaultModel, fallbackModel, familyOf, MODEL_ALIASES, modelId, modelName } from "../lib/models.ts";
 import { priced } from "../lib/prices.ts";
 import { compile } from "../lib/prompts.ts";
 import { newTask } from "../lib/tasks/model.ts";
@@ -114,6 +114,71 @@ describe("a role's model", () => {
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-scaffolder", model: OPUS }, isolation: "worktree" }, "refuse"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: "claude-sonnet-5-5" } }, "allow"),
       tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: OPUS } }, "refuse"),
+    ]);
+  });
+
+  test("a model's family, and the model a role on it runs on while its family's own limit is used up", () => {
+    assert.deepEqual([FABLE, "Fable", "claude-fable-5-2[1m]", OPUS, "claude-sonnet-5-5", "fabled", "m"].map(familyOf), [
+      "fable",
+      "fable",
+      "fable",
+      "opus",
+      "sonnet",
+      null,
+      null,
+    ]);
+    assert.equal(fallbackModel(FABLE), OPUS);
+    assert.equal(fallbackModel("claude-fable-5-2[1m]"), OPUS);
+    // Only Fable falls back: a role that names another model keeps it.
+    assert.deepEqual([OPUS, "claude-sonnet-5-5", "m"].map(fallbackModel), [null, null, null]);
+    assert.deepEqual([OPUS, FABLE, "claude-opus-5"].map(modelName), ["Opus", "Fable", "claude-opus-5"]);
+  });
+
+  test("while the subscription a role runs on has used up Fable's own limit, the guard starts it on Opus", async () => {
+    const home = makeRepo(baseTeam({ roles: { planner: {}, builder: { limit: 2 }, scaffolder: {}, reviewer: { model: "sonnet" } } }));
+    const run = tmp("a6g-run-");
+    const steering = (until: string) =>
+      write(run, {
+        "subscription.json": {
+          roles: { planner: "default", builder: "default", scaffolder: "default", reviewer: "default" },
+          moving: {},
+          waiting: {},
+          models: { scaffolder: { from: FABLE, model: OPUS, subscription: "default", until, why: "default's Fable limit is used up" } },
+          at: new Date().toISOString(),
+        },
+      });
+    steering(new Date(Date.now() + 86_400_000).toISOString());
+    const scaffolder = (model: string) => ({ target: { providerInstanceId: "a6g-fixture-scaffolder", model }, isolation: "worktree" });
+    await holds([
+      tool(home, "planner", delegate, scaffolder(OPUS), "allow", { run }),
+      tool(home, "planner", delegate, scaffolder(FABLE), "refuse", { run }),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-builder", model: OPUS }, isolation: "worktree" }, "allow", { run }),
+      tool(home, "planner", delegate, { target: { providerInstanceId: "a6g-fixture-reviewer", model: "claude-sonnet-5-5" } }, "allow", { run }),
+    ]);
+    assert.match(
+      guard(home, "planner", delegate, scaffolder(FABLE), { run }).said,
+      /start a scaffolder with target\.model: "claude-opus-5-5" \(beside target\.providerInstanceId\), the model it runs on until \d{4}-\d\d-\d\d \d\d:\d\d UTC instead of its own claude-fable-5-2, since default's Fable limit is used up; claude-fable-5-2 isn't it/
+    );
+    // Once the limit's reset has passed, it's Fable again, before the watchdog next says so.
+    steering(new Date(Date.now() - 60_000).toISOString());
+    await holds([
+      tool(home, "planner", delegate, scaffolder(FABLE), "allow", { run }),
+      tool(home, "planner", delegate, scaffolder(OPUS), "refuse", { run }),
+    ]);
+    // A role team.json has moved off Fable since isn't held to the fallback chosen for it.
+    const moved = makeRepo(baseTeam({ roles: { planner: {}, scaffolder: { model: "sonnet" } } }));
+    steering(new Date(Date.now() + 86_400_000).toISOString());
+    await holds([
+      tool(
+        moved,
+        "planner",
+        delegate,
+        { target: { providerInstanceId: "a6g-fixture-scaffolder", model: "claude-sonnet-5-5" }, isolation: "worktree" },
+        "allow",
+        {
+          run,
+        }
+      ),
     ]);
   });
 

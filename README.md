@@ -123,7 +123,9 @@ between, which is soon: each does one task), and the planner once it's idle with
 is retired and a fresh one starts on the new subscription at the next run. A role goes back up its list once the
 earlier subscription is five points under its limits. A role none is open to waits: the guard starts none of its
 members, a waiting planner gets no ticks and keeps its messages for when it can work, the roles still open carry on,
-and it picks up by itself when one opens. You're told of every move and wait; `a6g subscriptions` shows each one's usage, limits and
+and it picks up by itself when one opens. A subscription that has used up Fable's own weekly limit stays open: its roles
+on Fable run on Opus there until that limit resets (a planner thread on Fable restarts on Opus once it's free, and on
+Fable again after). You're told of every move and wait; `a6g subscriptions` shows each one's usage, limits and
 the teams on it, and `a6g status` each team's. On the web app, **Subscriptions** shows every linked Mac's: how much of
 each window is left (the five hours, the week, a model's own week, extra usage), how fast it's going against the
 window, and where the teams stop; and what each used over the last day, week, 30 or 90 days, in API-equivalent dollars

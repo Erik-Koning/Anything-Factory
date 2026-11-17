@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SubmitButton } from "../../components/submit-button.tsx";
 import { Notice, type SearchParams } from "../../components/ui.tsx";
+import { WaitForStep } from "../../components/wait-for-step.tsx";
 import { pendingStep } from "../../server/access.ts";
 import { challenge, UNKNOWN_IP } from "../../server/known-ips.ts";
 import { getViewer, STEP_PAGE } from "../../server/viewer.ts";
@@ -13,7 +13,8 @@ import { resendAction } from "./actions.ts";
 export const metadata: Metadata = { title: "Confirm it's you" };
 
 // Where a session lands that's used from an IP address its person hasn't confirmed: at sign-in, or when a session
-// moves to a new address. Nothing else opens until they confirm it from their email.
+// moves to a new address. Nothing else opens until they confirm it from their email; once they have, wherever they
+// opened it, this page goes on by itself (components/wait-for-step.tsx).
 export default async function ConfirmSignInPage({ searchParams }: { searchParams: SearchParams }) {
   const viewer = await getViewer();
   if (!viewer) redirect("/sign-in");
@@ -45,9 +46,10 @@ export default async function ConfirmSignInPage({ searchParams }: { searchParams
         <li>Open the email &ldquo;Confirm it&apos;s you signing in to Anything Factory&rdquo;, on any device.</li>
         <li>Choose &ldquo;Yes, it was me&rdquo;.</li>
         <li>
-          Come back and <Link href="/">continue</Link>.
+          This page goes on by itself. If it doesn&apos;t, <a href="/">continue</a>.
         </li>
       </ol>
+      <WaitForStep step="confirm-ip" />
       <Notice searchParams={searchParams} />
       <form action={resendAction}>
         <SubmitButton>Email the link again</SubmitButton>

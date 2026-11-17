@@ -43,9 +43,9 @@ import {
   unwrap,
   withoutExcludes,
 } from "./shell.ts";
-import { waitRefusal } from "./steer.ts";
+import { fallbackOf, waitRefusal } from "./steer.ts";
 import { CLAIMANTS } from "./tasks/model.ts";
-import { accounts } from "./subscriptions.ts";
+import { accounts, untilWords } from "./subscriptions.ts";
 import { runningByInstance, startedByInstance, T3_HOME, TOOLS } from "./t3.ts";
 import { escapeRegex } from "./util.ts";
 
@@ -1154,12 +1154,15 @@ export function check(input: HookInput): void {
     const busy = machineBusy();
     if (busy) refuse(`this machine is too busy to start another member now (${busy}): start the ${childRole} at your next wake.`);
     const child = team.roles[childRole];
-    // Each role runs on the model the team's rules give it. T3 Code reads it from the target; without one there, the
-    // member would run on whichever model the instance lists first.
+    // Each role runs on the model the team's rules give it, or on its fallback while the subscription it runs on has
+    // used up that model's own limit (lib/steer.ts). T3 Code reads it from the target; without one there, the member
+    // would run on whichever model the instance lists first.
     const model = named(typeof target === "object" && target !== null ? (target as Record<string, unknown>).model : undefined);
-    if (child && model !== child.model)
+    const fallback = child ? fallbackOf(run, childRole, child.model) : null;
+    const want = fallback?.model ?? child?.model;
+    if (child && model !== want)
       refuse(
-        `start a ${childRole} with target.model: "${child.model}" (beside target.providerInstanceId), the model the team's rules give the role; ${model ? `${model} isn't it` : "without it, it would run on whichever model T3 Code lists first"}.`
+        `start a ${childRole} with target.model: "${want}" (beside target.providerInstanceId), ${fallback ? `the model it runs on ${untilWords(fallback.until)} instead of its own ${child.model}, since ${fallback.why}` : "the model the team's rules give the role"}; ${model ? `${model} isn't it` : "without it, it would run on whichever model T3 Code lists first"}.`
       );
     if (child?.worktree && args.isolation !== "worktree")
       refuse(

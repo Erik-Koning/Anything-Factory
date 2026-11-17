@@ -1,7 +1,8 @@
 // The two protections every sign-up starts with, kept on the account (auth.ts): whether its authenticator is still
-// due (set up at /welcome, or put off there), and whether a sign-in from an IP address the person hasn't used asks
-// them by email first. Changed only from here, by the app's own server actions after their checks, for someone signed
-// in to a confirmed account: no endpoint of Better Auth's takes either, and no sign-up can.
+// due (set up at /welcome, or put off there for a sign-in), and whether a sign-in from an IP address the person hasn't
+// used asks them by email first; and whether a device is kept signed in. Changed only from here, by the app's own
+// server actions after their checks, for someone signed in to a confirmed account: no endpoint of Better Auth's takes
+// any of them, and no sign-up can.
 import { auth } from "./auth.ts";
 
 const adapter = async () => (await auth().$context).internalAdapter;
@@ -13,6 +14,11 @@ export async function setAuthenticatorDue(userId: string, due: boolean): Promise
 // "Set it up later": the authenticator stays due, put off for the session `sessionId` only.
 export async function putOffAuthenticator(userId: string, sessionId: string): Promise<void> {
   await (await adapter()).updateUser(userId, { authenticatorLater: sessionId });
+}
+
+// Keeps the session `token` signed in for 90 days of use, or not (access.ts SESSION_DAYS).
+export async function keepSession(token: string, kept: boolean): Promise<void> {
+  await (await adapter()).updateSession(token, { kept });
 }
 
 export async function setIpCheck(userId: string, on: boolean): Promise<void> {

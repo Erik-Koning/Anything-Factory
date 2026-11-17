@@ -79,6 +79,8 @@ export interface T3Thread {
   archived?: boolean;
   updatedAt?: string;
   pendingRequestCount?: number;
+  // The model it was started on.
+  model?: string;
   [key: string]: unknown;
 }
 
@@ -188,6 +190,14 @@ export const liveThreadsOn = (project: string, instance: string, title: string, 
   query<{ id: string }>(
     `select thread_id as id from orchestration_v2_projection_threads where project_id = '${q(project)}' and provider_instance_id = '${q(instance)}' and title = '${q(title)}' and archived_at is null and deleted_at is null and created_at >= ${ago(sinceMin)} order by created_at desc`
   )?.map((row) => row.id) ?? null;
+
+// The model a thread was started on, from the database (a thread keeps it); null when it isn't there or can't be read.
+export function threadModel(id: string): string | null {
+  const model = query<{ model: string | null }>(
+    `select json_extract(payload_json, '$.modelSelection.model') as model from orchestration_v2_projection_threads where thread_id = '${q(id)}'`
+  )?.[0]?.model;
+  return typeof model === "string" && model ? model : null;
+}
 
 export const runningChildren = (parent: string): number | null =>
   query<{ n: number }>(`select count(*) as n from orchestration_v2_projection_subagents where thread_id = '${q(parent)}' and status in ${RUNNING}`)?.[0]

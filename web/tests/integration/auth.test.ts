@@ -10,7 +10,7 @@ import { after, before, mock, test } from "node:test";
 import type { BetterAuthOptions } from "better-auth";
 import { getSessionCookie } from "better-auth/cookies";
 import { MongoMemoryReplSet } from "mongodb-memory-server-core";
-import { hasPassword, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
+import { hasPassword, keepSession, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
 import { auth, isAdminRole } from "../../server/auth.ts";
 import { createAdmin, type NewAdmin } from "../../server/bootstrap.ts";
 import { authDb, closeMongo } from "../../server/db.ts";
@@ -459,7 +459,7 @@ test("the two protections are the account's own: no request changes them or rais
   assert.equal((await auth().api.getSession({ headers: browser.headers() }))?.user.ipCheck, false, "and the session's person reads as changed");
 });
 
-test("someone who turned the IP check off from their account isn't asked about a new address; someone who left it on is, and an admin always", async () => {
+test("someone who turned the IP check off from their account isn't asked about a new address, an admin too; someone who left it on is", async () => {
   // Both signed up with it on, whatever one of them asked for; that one then turns it off, signed in, from their account.
   const [off, on] = await Promise.all([aSignedUpPerson({ checkNewIps: false }), aSignedUpPerson()]);
   assert.deepEqual([(await accountOf(off.email))?.["ipCheck"], (await accountOf(on.email))?.["ipCheck"]], [true, true]);
@@ -485,16 +485,38 @@ test("someone who turned the IP check off from their account isn't asked about a
   assert.equal(mailFor(on.email, NEW_ADDRESS, seen), undefined);
   assert.equal(await statusOf(later.fetch("/list-sessions")), 200);
 
-  // An admin's addresses are checked whatever their account says.
+  // An admin's addresses as anyone's: checked by default, and not once they turn it off.
   const admin = await createAdmin({ email: anAddress("admin"), name: "Ada Admin" });
   const context = await auth().$context;
+  const signInAsAdmin = async (): Promise<{ browser: Browser; asked: boolean }> => {
+    const adminBrowser = new Browser();
+    const before = mails.length;
+    await adminBrowser.fetch("/sign-in/email", { body: { email: admin.email, password: admin.password } });
+    assert.equal(await statusOf(adminBrowser.fetch("/two-factor/verify-totp", { body: { code: totpCode(admin.totpURI) } })), 200);
+    return { browser: adminBrowser, asked: Boolean(mailFor(admin.email, NEW_ADDRESS, before)) };
+  };
+  const checked = await signInAsAdmin();
+  assert.equal(checked.asked, true, "the admin is asked, the check on");
+  assert.equal(await statusOf(checked.browser.fetch("/list-sessions")), 403);
   await setIpCheck((await context.internalAdapter.findUserByEmail(admin.email))?.user.id ?? "", false);
-  const adminBrowser = new Browser();
-  const before = mails.length;
-  await adminBrowser.fetch("/sign-in/email", { body: { email: admin.email, password: admin.password } });
-  assert.equal(await statusOf(adminBrowser.fetch("/two-factor/verify-totp", { body: { code: totpCode(admin.totpURI) } })), 200);
-  assert.ok(mailFor(admin.email, NEW_ADDRESS, before), "the admin is asked");
-  assert.equal(await statusOf(adminBrowser.fetch("/list-sessions")), 403);
+  const unchecked = await signInAsAdmin();
+  assert.equal(unchecked.asked, false, "turned off, the admin isn't asked");
+  assert.equal(await statusOf(unchecked.browser.fetch("/list-sessions")), 200);
+});
+
+test("a device kept signed in isn't asked about a new network; the same session not kept is", async () => {
+  const { browser, me } = await aSignedUpPerson();
+  // The same session's cookie, used from another address: as a phone moving from Wi-Fi to its carrier.
+  const moved = (): Browser => {
+    const elsewhere = new Browser();
+    for (const [name, value] of browser.cookies) elsewhere.cookies.set(name, value);
+    return elsewhere;
+  };
+  assert.equal(await statusOf(moved().fetch("/list-sessions")), 403, "not kept: the new address is asked about");
+  await keepSession(me.session.token, true);
+  assert.equal(await statusOf(moved().fetch("/list-sessions")), 200, "kept: confirmed when it was kept");
+  await keepSession(me.session.token, false);
+  assert.equal(await statusOf(moved().fetch("/list-sessions")), 403);
 });
 
 test("a password is refused until the address is confirmed, and sends the confirmation again: one a minute, and none to a stranger", async () => {

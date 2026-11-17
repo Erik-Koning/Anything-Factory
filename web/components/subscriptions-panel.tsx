@@ -1,8 +1,8 @@
 // Which Claude subscriptions a team runs on, a row of the overview's How it runs (admins only): the subscriptions on
 // the team's Mac with how much of each one's week is used, the order the team takes them in and whose order that is,
-// what each role runs on now, and the form that changes the order (a control the Mac applies within a minute,
-// lib/steer.ts). A team whose Mac doesn't report its subscriptions is told where they're chosen instead, and the
-// command that chooses them there.
+// what each role runs on now (and the roles on Opus while a subscription has used up Fable's own limit), and the form
+// that changes the order (a control the Mac applies within a minute, lib/steer.ts). A team whose Mac doesn't report
+// its subscriptions is told where they're chosen instead, and the command that chooses them there.
 import { Fragment } from "react";
 import type { Control, TeamDoc } from "../server/factory.ts";
 import { askedBy } from "../server/views.ts";
@@ -117,6 +117,8 @@ export function SubscriptionsPanel({ team, controls, open = false }: { team: Tea
               {roles.map(([role, on]) => {
                 const wait = reported.waiting[role];
                 const moving = Object.hasOwn(reported.moving, role) ? reported.moving[role] : undefined;
+                // On another model than its own for now: Opus while the subscription has used up Fable's own limit.
+                const fallback = reported.models?.[role];
                 return (
                   <Fragment key={role}>
                     <dt>{plural(role)}</dt>
@@ -130,6 +132,9 @@ export function SubscriptionsPanel({ team, controls, open = false }: { team: Tea
                         <>
                           <b>{on ?? "the Mac's own login"}</b>
                           {moving !== undefined ? `, moving to ${moving ?? "the Mac's own login"} once nothing of it is at work` : ""}
+                          {fallback
+                            ? `, on ${fallback.name ?? fallback.model} ${fallback.until ? `until ${day.format(new Date(fallback.until))}` : "for now"}: ${fallback.why}`
+                            : ""}
                         </>
                       )}
                     </dd>

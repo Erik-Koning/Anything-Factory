@@ -6,8 +6,8 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
 import type { ActionResult } from "../../components/action-result.ts";
-import { pendingStep } from "../../server/access.ts";
-import { hasPassword, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
+import { pendingStep, SESSION_DAYS } from "../../server/access.ts";
+import { hasPassword, keepSession, setAuthenticatorDue, setIpCheck } from "../../server/account-choices.ts";
 import { auth } from "../../server/auth.ts";
 import { CODE_TRIES, clearCodeAttempts, takeCodeAttempt } from "../../server/code-attempts.ts";
 import { config } from "../../server/config.ts";
@@ -64,21 +64,21 @@ export async function forgetIpAction(form: FormData): Promise<ActionResult> {
   return done({ ok: `${ip} is forgotten: a sign-in from it will ask by email again.` });
 }
 
-// Stops checking new IP addresses, for one's own account; never an admin's. It takes a sign-in from the last ten
-// minutes, and a code from the authenticator when one is on, so a session left open somewhere can't quietly drop the
-// check; and the person is told by email first, so if the email can't go the check stays.
+// Stops checking new IP addresses, for one's own account, an admin's too. A session left open somewhere can't quietly
+// drop the check: it takes a code from the authenticator, or, for someone without one yet, a sign-in from the last ten
+// minutes; and the person is told by email first, so if the email can't go the check stays.
 export async function turnOffIpCheckAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
-  if (viewer.admin) return done({ error: "An admin's IP addresses are always checked." });
   if (!viewer.ipCheck) return done({});
   const requestHeaders = await headers();
-  const current = await auth().api.getSession({ headers: requestHeaders });
-  if (!current) redirect("/sign-in");
-  if (Date.now() - new Date(current.session.createdAt).getTime() > FRESH_MINUTES * 60_000) {
-    await record(viewer, { action: "ip-check.off", outcome: "refused", detail: `the sign-in is older than ${FRESH_MINUTES} minutes` });
-    return done({ error: `Sign out and in again, then do this within ${FRESH_MINUTES} minutes. New IP addresses are still checked.` });
-  }
-  if (viewer.twoFactor) {
+  if (!viewer.twoFactor) {
+    const current = await auth().api.getSession({ headers: requestHeaders });
+    if (!current) redirect("/sign-in");
+    if (Date.now() - new Date(current.session.createdAt).getTime() > FRESH_MINUTES * 60_000) {
+      await record(viewer, { action: "ip-check.off", outcome: "refused", detail: `the sign-in is older than ${FRESH_MINUTES} minutes` });
+      return done({ error: `Sign out and in again, then do this within ${FRESH_MINUTES} minutes. New IP addresses are still checked.` });
+    }
+  } else {
     const wrong = await checkCode(viewer.userId, String(form.get("code") ?? "").replace(/\s+/g, ""), requestHeaders);
     if (wrong) {
       await record(viewer, { action: "ip-check.off", outcome: "failed", detail: wrong });
@@ -163,40 +163,22 @@ export async function authenticatorAction(previous: AuthenticatorState, form: Fo
   return { stage: "done", error: null, qr: null, key: null, backupCodes: scanning.backupCodes };
 }
 
-// Stops asking for the authenticator every sign-up starts with, for someone who hasn't set one up: their own call,
-// made here on their account page once signed in, never at sign-up.
-export async function stopAskingAuthenticatorAction(): Promise<ActionResult> {
+// Keeps this device signed in, or stops: kept, its session lasts 90 days of use and a new network doesn't ask again
+// (access.ts SESSION_DAYS, pendingStep). Only from a session that owes nothing, so a device is kept from a confirmed
+// address with its second factor.
+export async function keepDeviceAction(form: FormData): Promise<ActionResult> {
   const viewer = await self();
-  if (viewer.admin || viewer.twoFactor || !viewer.authenticatorDue) return done({});
-  await setAuthenticatorDue(viewer.userId, false);
-  await record(viewer, { action: "authenticator.not-asked", outcome: "ok" });
-  return done({ ok: "We won't ask you to set up an authenticator again. You can still set one up here." });
-}
-
-// Turning it off takes a code from it (and the password of an account that has one), so a session left open somewhere
-// can't quietly remove it.
-export async function turnOffAuthenticatorAction(form: FormData): Promise<ActionResult> {
-  const viewer = await self();
-  if (viewer.admin) return done({ error: "An admin's authenticator stays on." });
-  const requestHeaders = await headers();
-  const wrong = await checkCode(viewer.userId, String(form.get("code") ?? "").replace(/\s+/g, ""), requestHeaders);
-  if (wrong) {
-    await record(viewer, { action: "authenticator.off", outcome: "failed", detail: wrong });
-    return done({ error: `${wrong} The authenticator is still on.` });
-  }
-  const password = String(form.get("password") ?? "");
-  const off = await auth()
-    .api.disableTwoFactor({ body: (await hasPassword(viewer.userId)) ? { password } : {}, headers: requestHeaders })
-    .then(
-      () => true,
-      () => false
-    );
-  if (!off) {
-    await record(viewer, { action: "authenticator.off", outcome: "failed", detail: "password" });
-    return done({ error: "That password isn't right. The authenticator is still on." });
-  }
-  await record(viewer, { action: "authenticator.off", outcome: "ok" });
-  return done({ ok: "The authenticator is off. Sign-ins no longer ask for its code." });
+  const keep = form.get("keep") === "yes";
+  if (keep === (viewer.kept === true)) return done({});
+  const current = await auth().api.getSession({ headers: await headers() });
+  if (!current) redirect("/sign-in");
+  await keepSession(current.session.token, keep);
+  await record(viewer, { action: keep ? "device.kept" : "device.unkept", outcome: "ok" });
+  return done({
+    ok: keep
+      ? `This device stays signed in for ${SESSION_DAYS.kept} days of use, and a new network doesn't ask you again.`
+      : `This device goes back to the usual: signed out after ${SESSION_DAYS.usual} days unused, and asked about a new network.`,
+  });
 }
 
 export interface BackupCodesState {

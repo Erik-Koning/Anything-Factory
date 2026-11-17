@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.14: Signing in that keeps out of your way, two-factor that stays on, and Fable that falls back to Opus
+
+- **A new network no longer strands the window you signed in from.** The page waiting for the email's "Yes, it was
+  me" goes on by itself once you answer, wherever you opened the email. Before, its "continue" could reuse a copy of the
+  page that had sent it there, and land you back on it.
+- **Keep this device signed in,** on the account page: the device you're on stays signed in for 90 days of use, and
+  moving to another network doesn't ask again. Other sessions last 7 days unused, as before.
+- **The new-IP check is yours to turn off, an admin's too.** It's on by default; turning it off takes a code from your
+  authenticator (no more signing in again within ten minutes), and emails you that it was turned off.
+- **Two-factor authentication can't be turned off.** The account page has no off switch. A new account may put the
+  authenticator off for a sign-in in its first 7 days ("Set it up later", which now says by when); after that it's
+  set up before anything opens.
+- **A query can't hang a page.** The site closes database connections idle for a minute and gives any call 20
+  seconds, so a connection a network dropped quietly is replaced instead of waited on, and a slow database shows an
+  error page rather than CloudFront's blank one after 30 seconds.
+- **A role on Fable runs on Opus while its subscription has used up Fable's own weekly limit,** and on Fable again once
+  it resets: its members start on Opus, and a planner on Fable restarts on Opus once it's free rather than failing every
+  wake until then. `a6g status`, `a6g subscriptions`, the watchdog's log and the Subscriptions panel say which roles,
+  until when, and why. A role that names another model keeps it.
+
 ## 0.8.13: A check that becomes overdue mid-run holds its turn, and a covered merge leaves no mark
 
 - **A check becomes overdue while it runs.** It decided only at its start, so one that crossed 90 minutes while its

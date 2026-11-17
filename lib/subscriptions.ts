@@ -6,7 +6,8 @@
 // the operator's own count against the same limit), that says what a subscription's week comes to in API-equivalent
 // dollars, so a budget can be a share of one (tasks/controls.ts Limits, unit "subscription"): over 100% for a team that
 // runs on more than one. The weekly limit across all models is the one measured; a model's own weekly limit (Fable's,
-// on some plans) is reported, not budgeted; the five-hour window counts when the report has one.
+// on some plans) is reported, not budgeted, and once it's used up the roles on that model run on Opus there until it
+// resets (fallbackFor); the five-hour window counts when the report has one.
 //
 // Accounts: ~/.a6g/subscriptions.json, [{ name, configDir }]; with none listed, this Mac's own Claude Code login
 // (~/.claude). Another account has a Claude Code config folder of its own (CLAUDE_CONFIG_DIR), as Claude Code's docs
@@ -23,6 +24,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
+import { fallbackModel, familyOf, modelName } from "./models.ts";
 import { A6G_HOME } from "./paths.ts";
 import { dayOf, OWN_LOGIN, round } from "./tasks/spend.ts";
 import { type AccountUsage, allTranscriptDirs, collectHours, emptyTally, type Tally, TALLY_FIELDS } from "./usage.ts";
@@ -447,8 +449,38 @@ export function chooseFor(
   return choice;
 }
 
-// Whether a subscription is closed or within NEAR points of one of its limits (or the limit across all), so the
-// watchdog reads them every five minutes rather than every quarter hour.
+// A role on another model than its own for now: the subscription it runs on has used up its own model's weekly limit
+// (Fable's, on some plans), so it runs on that model's fallback (lib/models.ts FALLBACKS) until the limit resets, or a
+// reading says it's under 100% again. The subscription stays open: its limit across all models has room.
+export interface Fallback {
+  // The role's own model, and the one it runs on meanwhile.
+  from: string;
+  model: string;
+  // The subscription whose limit is used up, and when that limit resets (null: the report didn't say).
+  subscription: string;
+  until: string | null;
+  why: string;
+}
+
+// "default's", "refdocs'".
+export const owns = (name: string): string => `${name}'${name.endsWith("s") ? "" : "s"}`;
+
+// The fallback for a role on `model` that runs on `subscription`, from its latest reading; null when it runs on its own.
+// A used-up limit is 100%, as a used-up week is (gate); one whose reset has passed says nothing, as a window's doesn't.
+export function fallbackFor(model: string, subscription: string | null, state: SubscriptionState, now = new Date()): Fallback | null {
+  const to = fallbackModel(model);
+  const reading = subscription ? state.readings[subscription] : undefined;
+  if (!to || !subscription || !reading) return null;
+  const family = familyOf(model);
+  const used = reading.scoped.find(
+    (limit) => familyOf(limit.model) === family && limit.percent >= 100 && Date.parse(limit.resetsAt ?? reading.resetsAt) > now.getTime()
+  );
+  if (!used) return null;
+  return { from: model, model: to, subscription, until: used.resetsAt ?? null, why: `${owns(subscription)} ${used.model} limit is used up` };
+}
+
+// Whether a subscription is closed or within NEAR points of one of its limits (or the limit across all), or of a model's
+// own, so the watchdog reads them every five minutes rather than every quarter hour.
 const NEAR = 10;
 export function nearLimit(state: SubscriptionState, limits: Record<string, SubscriptionLimit>, names: string[], now = new Date()): boolean {
   const shifted = (cap: number | null | undefined): number => (cap ?? 100) - NEAR;
@@ -456,11 +488,22 @@ export function nearLimit(state: SubscriptionState, limits: Record<string, Subsc
     [...names, ALL].map((name) => [name, { weekly: shifted(limits[name]?.weekly), session: shifted(limits[name]?.session) }])
   );
   if (limits[ALL]?.weekly == null) delete nearer[ALL];
-  return names.some((name) => !gate(name, state, nearer, names, now).open);
+  const t = now.getTime();
+  const ownNear = (name: string): boolean => {
+    const reading = state.readings[name];
+    return !!reading?.scoped.some((limit) => limit.percent >= 100 - NEAR && Date.parse(limit.resetsAt ?? reading.resetsAt) > t);
+  };
+  return names.some((name) => !gate(name, state, nearer, names, now).open || ownNear(name));
 }
 
 // A role's wait, in words: why, and until when.
 export const describeWait = (wait: Wait): string => `${wait.why}${wait.until ? ` (until ${when(wait.until)})` : ""}`;
+
+// How long a fallback lasts, in words: "until 2026-11-22 16:00 UTC", or "for now" when the report didn't say.
+export const untilWords = (until: string | null): string => (until ? `until ${when(until)}` : "for now");
+
+// A role's fallback, in words: "on Opus until 2026-11-22 16:00 UTC: refdocs' Fable limit is used up".
+export const describeFallback = (fallback: Fallback): string => `on ${modelName(fallback.model)} ${untilWords(fallback.until)}: ${fallback.why}`;
 
 // --- The web app's Subscriptions page ----------------------------------------------------------------------------
 

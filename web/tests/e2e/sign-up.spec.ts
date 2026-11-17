@@ -144,20 +144,15 @@ test("from then on the password asks for the authenticator's code; new backup co
   await authenticator.getByRole("button", { name: "Make new backup codes" }).click();
   await expect(authenticator.locator(".codes span")).toHaveCount(10);
 
-  await authenticator.getByLabel("Password, to turn it off").fill(PASSWORD);
-  await authenticator.getByLabel("A code from it, to turn it off").fill(await freshCode(page, samsAuthenticator));
-  await authenticator.getByRole("button", { name: "Turn it off" }).click();
-  await expect(page.locator(".toast")).toContainText("The authenticator is off.");
-  await expect(authenticator.getByText("off", { exact: true })).toBeVisible();
-  // Off by their own choice: nothing is due again.
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
+  // Once on, it stays on: nothing turns it off.
+  await expect(authenticator.getByText("It stays on: it can't be turned off.")).toBeVisible();
+  await expect(authenticator.getByRole("button", { name: "Turn it off" })).toHaveCount(0);
   const { accounts } = await databases();
-  expect(await accounts.collection("user").findOne({ email: SAM })).toMatchObject({ twoFactorEnabled: false, authenticatorDue: false });
+  expect(await accounts.collection("user").findOne({ email: SAM })).toMatchObject({ twoFactorEnabled: true, authenticatorDue: false });
   await context.close();
 });
 
-test("the authenticator can wait: “Set it up later” goes on to Teams for this sign-in; the account page stops the asking, and turns the IP check off and on", async ({
+test("the authenticator can wait a few days: “Set it up later” goes on to Teams for this sign-in; the account page keeps the device signed in, and turns the IP check off and on", async ({
   browser,
 }) => {
   const home = await newPage(browser, { ip: "203.0.113.62" });
@@ -178,15 +173,23 @@ test("the authenticator can wait: “Set it up later” goes on to Teams for thi
   expect(await accounts.collection("audit").findOne({ email: LEE, action: "authenticator.later" })).toMatchObject({ outcome: "ok", ip: "203.0.113.62" });
   await home.page.goto("/welcome");
   await expect(home.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
-  // The account page sets it up whenever they like, or stops the asking: their call, made there.
+  // The account page sets it up whenever they like, and says by when; nothing stops the asking.
   await home.page.goto("/account");
   const authenticator = home.page.getByRole("region", { name: "Authenticator" });
   await expect(authenticator.getByRole("button", { name: "Set up an authenticator" })).toBeVisible();
-  await expect(home.page.getByRole("region", { name: "Recent activity" }).getByText("Authenticator put off at sign-up")).toBeVisible();
-  await authenticator.getByRole("button", { name: "Stop asking me" }).click();
-  await expect(home.page.getByRole("status")).toContainText("We won't ask you to set up an authenticator again.");
+  await expect(authenticator.getByText(/set it up by \w+ \d+/)).toBeVisible();
   await expect(authenticator.getByRole("button", { name: "Stop asking me" })).toHaveCount(0);
-  expect(await users.findOne({ email: LEE })).toMatchObject({ authenticatorDue: false, authenticatorLater: null });
+  await expect(home.page.getByRole("region", { name: "Recent activity" }).getByText("Authenticator put off at sign-up")).toBeVisible();
+
+  // This device, kept signed in: 90 days of use, and a new network doesn't ask again; and back to the usual.
+  const signedIn = home.page.getByRole("region", { name: "Where you're signed in" });
+  await signedIn.getByRole("button", { name: "Keep this device signed in" }).click();
+  await expect(home.page.getByRole("status")).toContainText("This device stays signed in for 90 days of use");
+  await expect(signedIn.getByText("kept signed in", { exact: true })).toBeVisible();
+  expect((await accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } }))?.kept).toBe(true);
+  await signedIn.getByRole("button", { name: "Stop keeping it signed in" }).click();
+  await expect(signedIn.getByRole("button", { name: "Keep this device signed in" })).toBeVisible();
+  expect((await accounts.collection("session").findOne({ userId: user?._id }, { sort: { createdAt: -1 } }))?.kept).toBe(false);
 
   // The IP check, on as they signed up. A sign-in older than ten minutes doesn't turn it off.
   const addresses = home.page.getByRole("region", { name: "Your IP addresses" });

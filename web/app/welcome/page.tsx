@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { SubmitButton } from "../../components/submit-button.tsx";
-import { pendingStep } from "../../server/access.ts";
+import { AUTHENTICATOR_GRACE_DAYS, mayPutOffAuthenticator, pendingStep } from "../../server/access.ts";
 import { hasPassword } from "../../server/account-choices.ts";
 import { getViewer, STEP_PAGE } from "../../server/viewer.ts";
 import { AuthenticatorSetup } from "../account/authenticator.tsx";
@@ -42,12 +42,19 @@ export default async function WelcomePage() {
           </p>
         </AuthenticatorSetup>
       </section>
-      {viewer.twoFactor ? null : (
+      {viewer.twoFactor || !mayPutOffAuthenticator(viewer.signedUpAt) ? null : (
         <form action={laterAction} className="stack">
           <div>
             <SubmitButton>Set it up later</SubmitButton>
           </div>
-          <p className="hint">We&apos;ll ask again the next time you sign in. Your account page sets it up whenever you like, or stops the asking.</p>
+          <p className="hint">
+            We&apos;ll ask again the next time you sign in. Set it up by{" "}
+            {new Date(Date.parse(viewer.signedUpAt ?? "") + AUTHENTICATOR_GRACE_DAYS * 86_400_000).toLocaleDateString("en-CA", {
+              month: "long",
+              day: "numeric",
+            })}
+            : after that, signing in asks for it before anything else. It can&apos;t be turned off once it&apos;s on.
+          </p>
         </form>
       )}
       <p>

@@ -28,14 +28,19 @@ export interface Viewer {
   twoFactor: boolean;
   // The request comes from an IP address the person has confirmed.
   ipConfirmed: boolean;
-  // The person's own choice: a sign-in from an address they haven't used asks them by email first. On unless they
-  // turned it off; an admin's addresses are checked whatever this says (checksIp).
+  // The person's own choice, an admin's too: a sign-in from an address they haven't used asks them by email first. On
+  // unless they turned it off on their account page.
   ipCheck: boolean;
-  // The person signed up (two-factor authentication is on for every sign-up) and hasn't set up their authenticator
-  // yet, nor turned it off on their account page.
+  // This device is kept signed in (the account page's "Keep this device signed in"): its session lasts 90 days of
+  // use, and moving to another network doesn't ask again, since the device was confirmed when it was kept.
+  kept?: boolean;
+  // The person signed up (two-factor authentication is on for every sign-up) and hasn't set up their authenticator yet.
   authenticatorDue: boolean;
-  // They put it off for this sign-in ("Set it up later"): the next one asks again.
+  // They put it off for this sign-in ("Set it up later"), which they may in their first AUTHENTICATOR_GRACE_DAYS: the
+  // next sign-in asks again, and after those days it's set up before anything opens.
   authenticatorPutOff?: boolean;
+  // When the account was made (ISO), for that grace.
+  signedUpAt?: string;
   // The person's role on each team they belong to.
   teams: Readonly<Record<string, TeamRole>>;
 }
@@ -79,18 +84,28 @@ const ROLE_ABILITIES: Record<TeamRole, readonly Ability[]> = {
   contributor: ["team:overview", "requests:send"],
 };
 
-// Whether a new IP address is checked for this person: always for an admin, for anyone else unless they turned it off.
-export const checksIp = (person: Pick<Viewer, "admin" | "ipCheck">): boolean => person.admin || person.ipCheck;
+// Whether a new IP address is checked for this person: unless they turned it off, an admin as anyone.
+export const checksIp = (person: Pick<Viewer, "ipCheck">): boolean => person.ipCheck;
+
+// How long a session lasts without use: a week, or 90 days on a device its person keeps signed in.
+export const SESSION_DAYS = { usual: 7, kept: 90 } as const;
+
+// How long after signing up the authenticator may be put off: two-factor authentication can't be turned off, only
+// set up a little later.
+export const AUTHENTICATOR_GRACE_DAYS = 7;
+export const mayPutOffAuthenticator = (signedUpAt: string | undefined, now = Date.now()): boolean =>
+  !signedUpAt || Date.parse(signedUpAt) + AUTHENTICATOR_GRACE_DAYS * 86_400_000 > now;
 
 // What a session must still do before anything opens: enter an authenticator's code, then confirm its IP address by
-// email, then set up the authenticator every sign-up starts with (or put it off for this sign-in). Null when nothing's
-// left.
+// email (not on a device kept signed in), then set up the authenticator every sign-up starts with (or put it off for
+// this sign-in, in the first days). Null when nothing's left.
 export type PendingStep = "second-factor" | "confirm-ip" | "set-up-authenticator";
-export function pendingStep(viewer: Viewer | null): PendingStep | null {
+export function pendingStep(viewer: Viewer | null, now = Date.now()): PendingStep | null {
   if (!viewer) return null;
   if ((viewer.admin || viewer.twoFactor) && !viewer.secondFactor) return "second-factor";
-  if (checksIp(viewer) && !viewer.ipConfirmed) return "confirm-ip";
-  if (!viewer.admin && viewer.authenticatorDue && !viewer.twoFactor && !viewer.authenticatorPutOff) return "set-up-authenticator";
+  if (checksIp(viewer) && !viewer.ipConfirmed && !viewer.kept) return "confirm-ip";
+  const putOff = viewer.authenticatorPutOff === true && mayPutOffAuthenticator(viewer.signedUpAt, now);
+  if (!viewer.admin && viewer.authenticatorDue && !viewer.twoFactor && !putOff) return "set-up-authenticator";
   return null;
 }
 export const blocked = (viewer: Viewer | null): boolean => pendingStep(viewer) !== null;
