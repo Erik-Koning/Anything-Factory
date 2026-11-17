@@ -38,6 +38,34 @@ export function gitOk(cwd: string, ...args: string[]): boolean {
   return spawnSync("git", args, { cwd, stdio: "ignore" }).status === 0;
 }
 
+// The variables by which a program tells an AI agent started it (the ones @vercel/detect-agent reads). Claude Code
+// sets CLAUDECODE and AI_AGENT, and everything a member or the factory starts inherits them. Next.js 16.4 reads them
+// too: under an agent, `next dev` and `next build` stop once with exit 1 to show an upgrade notice meant for the agent.
+export const AGENT_MARKERS = [
+  "AI_AGENT",
+  "CLAUDECODE",
+  "CLAUDE_CODE",
+  "CURSOR_TRACE_ID",
+  "CURSOR_AGENT",
+  "CURSOR_EXTENSION_HOST_ROLE",
+  "GEMINI_CLI",
+  "CODEX_SANDBOX",
+  "CODEX_CI",
+  "CODEX_THREAD_ID",
+  "ANTIGRAVITY_AGENT",
+  "AUGMENT_AGENT",
+  "OPENCODE_CLIENT",
+] as const;
+
+// The environment for a team's own app and scripts (its env adapter, gate, finish, after-merge step, its Playwright
+// suite and what a member runs against the app): this process's, with `extra` over it, without the agent markers,
+// since the app isn't the agent. Never for what runs Claude itself (a member, the setup agent).
+export function teamEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  for (const name of AGENT_MARKERS) delete env[name];
+  return env;
+}
+
 // Run a shell command, returning { code, out } with stdout and stderr together.
 export function sh(
   command: string,
