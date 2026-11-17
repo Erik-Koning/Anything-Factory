@@ -2,9 +2,10 @@
 
 ## 0.8.15: You hear when the site is down, choose how long a device stays signed in, and Next.js can't stop a team's app
 
-- **The site tells you when it's down.** An outside check calls the app and its database through the CDN every 30
-  seconds from several regions (`/api/health/deep`), and an alarm emails you once it has failed for two minutes, and
-  again when it's back. Production's deploy sets who hears (`A6G_WEB_ALERTS`); AWS asks that address to confirm once.
+- **The site tells you when it's down.** A small function calls the app and its database through the CDN every minute
+  (`/api/health/deep`), and an alarm emails you once it has failed for two minutes, and again when it's back.
+  Production's deploy sets who hears (`A6G_WEB_ALERTS`); AWS asks that address to confirm once. It all runs in the
+  app's own region, since the organization's policy refuses SNS in us-east-1, where Route 53's checks report.
 - **Choose how long this device stays signed in:** the usual 7 days, 30 or 90 days without use, on the account page,
   which names the device. Kept longer than a week, a new network doesn't ask you again.
 - **Easier on a phone:** a card on the board opens its task wherever it's pressed; a link on a line of its own ("←
