@@ -48,6 +48,7 @@ import {
   stakeholderOf,
   storeFor,
   subscriptionsFromWeb,
+  tasksFor,
   teamDoc,
 } from "../../../server/factory.ts";
 import { answerText, asRecommended, shownAs, waitingOf } from "../../../server/inbox.ts";
@@ -141,7 +142,7 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
     if (!(await teamDoc(team))) return again("No such team.");
     const after = admin ? (taskIds(fields.after) ?? []) : [];
     if (after.length) {
-      const known = new Set((await storeFor(team).tasks.all()).map((t) => t.id));
+      const known = new Set((await tasksFor(team)).map((t) => t.id));
       const missing = after.filter((id) => !known.has(id));
       if (missing.length) return again(`There's no task ${missing.map((id) => `#${id}`).join(", ")} on this team.`);
     }
