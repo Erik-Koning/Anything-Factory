@@ -40,10 +40,17 @@ export interface HarnessPage {
 export interface Harness {
   // The suite: the repository's Playwright configuration, and how long a whole run may take.
   e2e?: { config: string; timeoutMin: number };
-  // The Playwright project in that configuration that signs in and saves each state, by name.
-  auth?: { project: string; states: Record<string, string> };
+  // The Playwright project in that configuration that signs in and saves each state, by name; and, for a state the app
+  // ends sooner than the factory's 12 hours (an idle sign-out), the minutes after which a page run makes it again.
+  auth?: HarnessAuth;
   pages: HarnessPage[];
   schemes: Record<string, SchemeSetup>;
+}
+
+export interface HarnessAuth {
+  project: string;
+  states: Record<string, string>;
+  maxAgeMin?: Record<string, number>;
 }
 
 const ID = /^[\w-]+$/;
@@ -80,7 +87,7 @@ export function parseHarness(input: unknown): { harness: Harness; problems: stri
     if (!(typeof timeout === "number" && Number.isInteger(timeout) && timeout >= 1 && timeout <= 240)) bad("e2e.timeoutMin", "whole minutes, 1 to 240");
     else if (config) harness.e2e = { config, timeoutMin: timeout };
   }
-  const auth = record(root.auth, "auth", ["project", "states"]);
+  const auth = record(root.auth, "auth", ["project", "states", "maxAgeMin"]);
   if (auth) {
     const project =
       typeof auth.project === "string" && ID.test(auth.project) ? auth.project : bad("auth.project", "the name of the Playwright project that signs in");
@@ -92,7 +99,16 @@ export function parseHarness(input: unknown): { harness: Harness; problems: stri
     }
     if (!Object.keys(states).length) bad("auth.states", 'at least one sign-in state, by name ({"staff": "e2e/.auth/staff.json"})');
     if (!harness.e2e) bad("auth", "sign-ins are made by a project in e2e.config, so the manifest needs e2e");
-    if (project && Object.keys(states).length) harness.auth = { project, states };
+    // A sign-in the app ends on its own (an idle sign-out) is made again once it's this old, mid-run too.
+    const maxAgeMin: Record<string, number> = {};
+    for (const [name, minutes] of Object.entries(record(auth.maxAgeMin, "auth.maxAgeMin", null) ?? {})) {
+      if (!Object.hasOwn(states, name))
+        bad(`auth.maxAgeMin.${name}`, `a sign-in state auth.states names (${Object.keys(states).join(", ") || "none yet"})`);
+      else if (!(typeof minutes === "number" && Number.isInteger(minutes) && minutes >= 2 && minutes <= 720))
+        bad(`auth.maxAgeMin.${name}`, "whole minutes, 2 to 720: a little under the time the app ends the sign-in on its own");
+      else maxAgeMin[name] = minutes;
+    }
+    if (project && Object.keys(states).length) harness.auth = { project, states, ...(Object.keys(maxAgeMin).length ? { maxAgeMin } : {}) };
   }
   if (root.pages !== undefined && !Array.isArray(root.pages)) bad("pages", "a list of pages");
   const stateNames = Object.keys(harness.auth?.states ?? {});
@@ -250,7 +266,7 @@ export interface PagePlan extends PagesSettings {
   list: PageCheck[];
   schemeSetup: Record<string, SchemeSetup>;
   minTarget: number;
-  auth?: { project: string; states: Record<string, string> };
+  auth?: HarnessAuth;
   e2eConfig?: string;
   // The pages the manifest added (the team's own), by id.
   fromHarness: string[];

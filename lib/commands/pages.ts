@@ -140,8 +140,10 @@ export const DIFFERS = 0.001;
 const FOCUS_STOPS = 40;
 // Focus shows when at least this many pixels around a control change with it: a one-pixel underline under a word.
 const FOCUS_PIXELS = 8;
-// Sign-in states older than this are made again before a page needs one.
+// Sign-in states older than this are made again before a page needs one, unless the manifest gives a state a shorter
+// life (auth.maxAgeMin), for an app that ends it sooner on its own.
 const STATE_HOURS = 12;
+const maxAgeMs = (name: string): number => (plan.auth?.maxAgeMin?.[name] ?? STATE_HOURS * 60) * 60_000;
 // A refusal is the app's answer that the page isn't this visitor's: these, or sending them to another path.
 const REFUSED = [401, 403, 404];
 // How many of a state's pages are tried to show its sign-in is live.
@@ -179,11 +181,15 @@ export function unknownSignIns(pages: PagePlan): string[] {
   return pages.list.flatMap((page) => (page.as && !states.includes(page.as) ? [`page ${page.id}: as "${page.as}" names no sign-in state (${has})`] : []));
 }
 
-// Makes the sign-in states the chosen pages need (those they're seen as, and those they refuse), with the repository's
-// own Playwright (the manifest's auth project), when one is missing or older than STATE_HOURS. Returns what went wrong, by state. A sign-in that fails fails its
+// The sign-in states the chosen pages need: those they're seen as, and those they refuse.
+const statesOf = (chosen: PageCheck[]): string[] => [
+  ...new Set(chosen.flatMap((page) => [...(page.as ? [page.as] : []), ...(page.refuses ?? []).filter((state) => state !== SIGNED_OUT)])),
+];
+
+// Makes the sign-in states needed with the repository's own Playwright (the manifest's auth project), when one is
+// missing or older than its life (maxAgeMs). Returns what went wrong, by state. A sign-in that fails fails its
 // pages: the state an earlier run left may be a session the app has since ended, so it's never used in its place.
-async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<Record<string, string>> {
-  const needed = [...new Set(chosen.flatMap((page) => [...(page.as ? [page.as] : []), ...(page.refuses ?? []).filter((state) => state !== SIGNED_OUT)]))];
+async function signIn(dir: string, base: string, needed: string[]): Promise<Record<string, string>> {
   if (!needed.length) return {};
   const auth = plan.auth;
   const problems: Record<string, string> = {};
@@ -199,7 +205,7 @@ async function signIn(dir: string, base: string, chosen: PageCheck[]): Promise<R
   for (const name of needed) {
     if (!Object.hasOwn(auth.states, name))
       problems[name] = `as "${name}" names no sign-in state (the harness manifest's auth.states has ${Object.keys(auth.states).join(", ")})`;
-    else if (Date.now() - made(name) > STATE_HOURS * 3_600_000) stale.push(name);
+    else if (Date.now() - made(name) > maxAgeMs(name)) stale.push(name);
   }
   if (!stale.length) return problems;
   // A second's grace: some filesystems keep a file's time to the second.
@@ -243,17 +249,32 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
     { id: "phone", width: 390, height: 844, isMobile: true, deviceScaleFactor: 2 },
   ];
   const schemes = plan.schemes ?? ["light", "dark"];
-  const signInProblems = await signIn(dir, base, chosen);
+  const signInProblems = await signIn(dir, base, statesOf(chosen));
   const browser = await chromium.launch();
   const results: Record<string, PageResult> = {};
   // Where each page ended for each state it was asked for as, at the first size and scheme: asked once a run.
   const landings = new Map<string, Landing>();
   const landingKey = (page: PageCheck, state: string): string => `${page.id}\0${state}`;
+  // Whether each sign-in state showed itself live this run (the refusals below), by state.
+  const proofs = new Map<string, string | null>();
+  // A state with a short life (auth.maxAgeMin) is made again mid-run once it's that old, before a page uses it: a run
+  // can take longer than an app's idle sign-out, and a sign-in the app has ended reads every page as refused. What
+  // was seen with the old one (where its pages landed, whether it was live) is asked again with the new.
+  const renew = async (state: string): Promise<void> => {
+    if (!plan.auth?.maxAgeMin?.[state] || signInProblems[state]) return;
+    const path = join(dir, plan.auth.states[state] ?? "");
+    if (existsSync(path) && Date.now() - statSync(path).mtimeMs <= maxAgeMs(state)) return;
+    const problem = (await signIn(dir, base, [state]))[state];
+    if (problem) signInProblems[state] = problem;
+    for (const key of [...landings.keys()]) if (key.endsWith(`\0${state}`)) landings.delete(key);
+    proofs.delete(state);
+  };
   // A blank page for comparing screenshots, where no page's own security policy can refuse an image.
   const blank = await browser.newContext({});
   const comparer = await blank.newPage();
   try {
     for (const page of chosen) {
+      if (page.as) await renew(page.as);
       const runs: PageRun[] = [];
       const kept = outDir ? keptLooks(STATE, page.id) : null;
       for (const [vi, viewport] of viewports.entries()) {
@@ -424,7 +445,6 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
     // A session the app has ended is sent to sign in wherever it goes, which looks like a refusal. So a refusal counts
     // only from a sign-in this run shows to be live: one of the state's own pages lands signed in, and the same page
     // is refused signed out. Null, or why nothing showed it.
-    const proofs = new Map<string, string | null>();
     const live = async (state: string): Promise<string | null> => {
       const known = proofs.get(state);
       if (known !== undefined) return known;
@@ -458,6 +478,7 @@ async function check(base: string, chosen: PageCheck[], outDir: string | null, d
       if (!page.refuses?.length || !result) continue;
       const refusals: Refusal[] = [];
       for (const state of page.refuses) {
+        if (state !== SIGNED_OUT) await renew(state);
         const unchecked = state === SIGNED_OUT ? null : (signInProblems[state] ?? (await live(state)));
         if (unchecked) {
           refusals.push({ state, problem: `not checked: ${unchecked}` });
