@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/ui.tsx";
 import { can, canSeeRequest, REQUEST_ID, senderLabel } from "../../../../../server/access.ts";
-import { linkedStakeholder, storeFor } from "../../../../../server/factory.ts";
+import { linkedStakeholder, storeFor, tasksFor } from "../../../../../server/factory.ts";
 import { rejectionOf, requestState } from "../../../../../server/views.ts";
 import { teamFor } from "../../team.ts";
 
@@ -18,7 +18,7 @@ export default async function RequestPage({ params, searchParams }: { params: Pr
   const ownId = own?.id ?? null;
   // Someone else's request is as missing as one that isn't there.
   if (!request || !canSeeRequest(viewer, team.name, request, ownId)) notFound();
-  const [sender, tasks] = await Promise.all([request.from ? store.stakeholders.get(request.from) : null, store.tasks.all()]);
+  const [sender, tasks] = await Promise.all([request.from ? store.stakeholders.get(request.from) : null, tasksFor(team.name)]);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const became = request.tasks.map((tid) => ({ id: tid, task: byId.get(tid) ?? null }));
   const rejection = rejectionOf(request);

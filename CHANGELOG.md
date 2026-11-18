@@ -1,5 +1,13 @@
 # Changelog
 
+## Web app: pages read only what changed
+
+- **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
+  on you across all teams, so each page read every task of every team: megabytes a page, which the database's link
+  couldn't carry within a page's 30 seconds. The server now keeps each team's tasks and asks only for the ones changed
+  since its last read (and how many there are, so a removed one goes); it reads them whole when it starts and every
+  half hour in the background. The factory's code the app runs (deciding a proposal, adding a task) reads through it.
+
 ## Web app: the notifier reads only what changed
 
 - **The site no longer drains its database.** Each minute the notifier read every team's every task (6 MB and more)

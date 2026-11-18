@@ -40,6 +40,7 @@ import type { TeamDoc } from "../../lib/tasks/teams.ts";
 import { cache } from "react";
 import { config } from "./config.ts";
 import { graphDb, mongo } from "./db.ts";
+import { teamTasks } from "./task-cache.ts";
 import { offSite, quietSince } from "./views.ts";
 
 export { Refused };
@@ -67,10 +68,14 @@ export { limitDollars, percentOf, spendByWork, type Spend, type UsageDay } from 
 const stores = new Map<string, Store>();
 
 // A team's store, one per team for the life of the process (never closed: closing would close the shared client).
+// A team's store, whose every task is read from what this server keeps (task-cache.ts), with what changed since: the
+// factory's own code that reads a team's tasks (deciding a proposal, adding a task) reads no more than a page does.
+// Writes go to the database as they always did; the next read takes them in.
 export function storeFor(team: string): Store {
   let store = stores.get(team);
   if (!store) {
-    store = storeOver(mongo() as unknown as MongoClientLike, { name: team, tasks: { store: "mongo", database: config().a6gDatabase, lead: null } });
+    const own = storeOver(mongo() as unknown as MongoClientLike, { name: team, tasks: { store: "mongo", database: config().a6gDatabase, lead: null } });
+    store = { ...own, tasks: { ...own.tasks, all: () => teamTasks(team) } };
     stores.set(team, store);
   }
   return store;
@@ -91,8 +96,9 @@ export async function allTeams({ retired = false }: { retired?: boolean } = {}):
 
 const numbered = (id: string): number => Number(/^k(\d+)$/.exec(id)?.[1] ?? 0);
 
-// A team's tasks, its controls and what it decided for the operator, each read once per request.
-export const tasksFor = cache((team: string): Promise<Task[]> => storeFor(team).tasks.all());
+// A team's tasks, its controls and what it decided for the operator, each read once per request: the tasks from what
+// this server keeps of them, with what changed since (task-cache.ts).
+export const tasksFor = cache((team: string): Promise<Task[]> => teamTasks(team));
 export const controlsFor = cache((team: string): Promise<Control[]> => storeFor(team).controls.all());
 export const decisionsFor = cache((team: string): Promise<DecisionRecord[]> => storeFor(team).decisions.all());
 
@@ -186,7 +192,7 @@ export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journe
   // On the web the journeys are ticked, those under way to start with: none ticked is a mistake, not "the default".
   if (ask.scope === "journeys" && !ask.journeys.length) throw new Refused("Tick the journeys to finish before the team pauses.");
   const journeys = ask.scope === "journeys" ? ask.journeys : undefined;
-  return store.controls.create(pauseControl(await store.tasks.all(), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
+  return store.controls.create(pauseControl(await teamTasks(team), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
 }
 
 // A resume from the web; the note goes to the planner as the operator's feedback.
