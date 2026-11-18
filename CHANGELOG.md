@@ -1,5 +1,12 @@
 # Changelog
 
+## Web app: the notifier reads only what changed
+
+- **The site no longer drains its database.** Each minute the notifier read every team's every task (6 MB and more)
+  to find what was new, more than the database's link allows: it slowed every page that read the database, and once
+  0.8.15 gave each call 20 seconds, the notifier failed every minute and sent nothing. It now reads only the tasks
+  changed since it last looked, and what waits on someone only when a digest that reminds of it is due.
+
 ## 0.8.15: You hear when the site is down, choose how long a device stays signed in, and Next.js can't stop a team's app
 
 - **The site tells you when it's down.** A small function calls the app and its database through the CDN every minute

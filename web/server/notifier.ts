@@ -3,13 +3,17 @@
 // queues an email for each person and event their settings ask for (notifications.ts), sends what goes at once, and
 // each person's daily digest once its hour has come. A queued email's id is the person and the event, so each goes
 // once however often the graph is read; a team it sees for the first time has no news yet.
+//
+// It reads only what it needs: the tasks changed since it last looked (every change to a task writes its updatedAt,
+// lib/tasks/model.ts withEvent), and the tasks waiting on someone only when a digest that reminds of them is due.
+// Reading every team's every task each minute moved megabytes a minute from the database, more than its link allows.
 import { randomUUID } from "node:crypto";
 import { toReview } from "../../lib/tasks/decisions.ts";
 import type { Task } from "../../lib/tasks/model.ts";
 import { can, type TeamRole, type Viewer } from "./access.ts";
 import { isAdminRole } from "./auth.ts";
 import { config } from "./config.ts";
-import { authDb } from "./db.ts";
+import { authDb, graphDb } from "./db.ts";
 import { AUDIENCE, eventsOf, stateEvent, type TeamEvent } from "./events.ts";
 import { allTeams, storeFor } from "./factory.ts";
 import { inbox } from "./inbox.ts";
@@ -71,6 +75,17 @@ export async function ensureIndexes(): Promise<void> {
 
 const duplicate = (error: unknown): boolean => (error as { code?: number }).code === 11000;
 
+// A team's tasks as the graph's own collection holds them (lib/tasks/mongo.ts), read by what's asked: those changed
+// since `since` (ISO, as updatedAt is written), or those in `statuses`.
+const tasksWhere = async (team: string, filter: Record<string, unknown>): Promise<Task[]> =>
+  (await graphDb()
+    .collection("tasks")
+    .find({ team, ...filter }, { projection: { _id: 0 } })
+    .toArray()) as unknown as Task[];
+export const tasksChangedSince = (team: string, since: string): Promise<Task[]> => tasksWhere(team, { updatedAt: { $gte: since } });
+// What can wait on the operator (lib/tasks/answer.ts waitsOnOperator): a question, or blocked work raised to them.
+const waitingOn = (team: string): Promise<Task[]> => tasksWhere(team, { status: { $in: ["question", "blocked"] } });
+
 // The lease: this container's, renewed, unless another holds one that hasn't lapsed.
 async function lease(now: Date): Promise<boolean> {
   try {
@@ -128,29 +143,21 @@ export async function notifyOnce(now = new Date()): Promise<Run> {
   const [teams, everyone, rows, saved] = await Promise.all([allTeams(), people(), memberships(), allSavedPrefs()]);
   const titles = new Map(teams.map((t) => [t.name, t.title || t.name]));
   const viewers = new Map(everyone.map((p) => [p.userId, viewerOf(p, rows)]));
-  const graphs = new Map<string, Task[]>();
   // How many of each team's flagged calls nobody has reviewed yet, for the digest's reminder.
   const unreviewed = new Map<string, number>();
   let queued = 0;
   for (const team of teams) {
     const store = storeFor(team.name);
-    const [tasks, requests, stakeholders, decisions, controls] = await Promise.all([
-      store.tasks.all(),
-      store.requests.all(),
-      store.stakeholders.all(),
-      store.decisions.all(),
-      store.controls.all(),
-    ]);
-    graphs.set(team.name, tasks);
-    unreviewed.set(team.name, toReview(decisions, controls).length);
     const cursorId = `team:${team.name}`;
     const state = team.status?.state ?? null;
-    const cursor = await marks().findOne({ _id: cursorId });
+    const [cursor, decisions, controls] = await Promise.all([marks().findOne({ _id: cursorId }), store.decisions.all(), store.controls.all()]);
+    unreviewed.set(team.name, toReview(decisions, controls).length);
     if (!cursor?.through) {
       await marks().updateOne({ _id: cursorId }, { $set: { from: now.toISOString(), through: now.toISOString(), state } }, { upsert: true });
       continue;
     }
     const since = [new Date(Date.parse(cursor.through) - OVERLAP_MS).toISOString(), cursor.from ?? ""].sort().at(-1) ?? cursor.through;
+    const [tasks, requests, stakeholders] = await Promise.all([tasksChangedSince(team.name, since), store.requests.all(), store.stakeholders.all()]);
     const changed = stateEvent(team.name, titles.get(team.name) ?? team.name, team.status, cursor.state ?? null);
     const events = [...eventsOf(team.name, tasks, requests, since, decisions), ...(changed ? [changed] : [])];
     const owners = new Map(stakeholders.map((s) => [s.id, s.userId ?? null]));
@@ -183,7 +190,24 @@ export async function notifyOnce(now = new Date()): Promise<Run> {
     await marks().updateOne({ _id: cursorId }, { $set: { through: now.toISOString(), state } });
   }
   const sent = await sendNow(now, everyone, titles, settings.baseURL);
-  const digests = await sendDigests(now, everyone, viewers, saved, graphs, unreviewed, titles, settings);
+  // What waits on someone, read once a run and only when a digest that reminds of it is due.
+  const waiting = new Map<string, Promise<Task[]>>();
+  const waitingFor = (team: string): Promise<Task[]> => {
+    let tasks = waiting.get(team);
+    if (!tasks) waiting.set(team, (tasks = waitingOn(team)));
+    return tasks;
+  };
+  const digests = await sendDigests(
+    now,
+    everyone,
+    viewers,
+    saved,
+    teams.map((t) => t.name),
+    waitingFor,
+    unreviewed,
+    titles,
+    settings
+  );
   return { skipped: false, queued, sent, digests };
 }
 
@@ -239,7 +263,8 @@ async function sendDigests(
   everyone: Person[],
   viewers: ReadonlyMap<string, Viewer>,
   saved: ReadonlyMap<string, Prefs>,
-  graphs: ReadonlyMap<string, Task[]>,
+  teams: readonly string[],
+  waitingFor: (team: string) => Promise<Task[]>,
   unreviewed: ReadonlyMap<string, number>,
   titles: ReadonlyMap<string, string>,
   settings: { baseURL: string; notifyTimeZone: string }
@@ -259,16 +284,19 @@ async function sendDigests(
       .sort({ at: 1 })
       .toArray();
     const waiting: StillWaiting[] = prefs.reminder
-      ? [...graphs]
-          .filter(([team]) => can(viewer, "proposals:decide", team) && !prefs.muted.includes(team))
-          .map(([team, tasks]) => {
-            const box = inbox(tasks, { now: now.getTime() });
-            return {
-              team,
-              items: [...box.questions, ...box.blocked].map((w) => ({ id: w.task.id, title: w.task.title, status: w.task.status, since: w.since })),
-            };
-          })
-          .filter((w) => w.items.length)
+      ? (
+          await Promise.all(
+            teams
+              .filter((team) => can(viewer, "proposals:decide", team) && !prefs.muted.includes(team))
+              .map(async (team) => {
+                const box = inbox(await waitingFor(team), { now: now.getTime() });
+                return {
+                  team,
+                  items: [...box.questions, ...box.blocked].map((w) => ({ id: w.task.id, title: w.task.title, status: w.task.status, since: w.since })),
+                };
+              })
+          )
+        ).filter((w) => w.items.length)
       : [];
     // And the calls the team made for them that they haven't reviewed, on the teams where they review.
     const reviews: ToReview[] = prefs.reminder
