@@ -1,5 +1,16 @@
 # Changelog
 
+## Web app: a team's settings in one place, and when its week runs out
+
+- **⚙ Settings beside each team's name**, and a Settings tab in place of Agreement: the budget, the subscriptions it
+  runs on, the working agreement and its place on the site, on one page. The budget was the last thing on the
+  overview, folded away under the work and the graph; it's now the first thing on Settings, open, beside what the team
+  has spent against it. Stop, pause and the rest stay beside the name.
+- **When the week runs out, at its pace so far.** For admins, a team's Status says how much of each subscription's
+  week it spends on is used, when it resets, and when, at the week's pace so far, it would be used up, with a way to
+  the budget. Teams on one Claude account share its week, so a budget for each is what keeps one from using up the
+  others'.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
