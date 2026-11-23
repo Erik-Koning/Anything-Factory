@@ -603,7 +603,7 @@ otherwise (`--store` chooses), and refuses a name another team has used there; a
 teams the linked Macs run that it doesn't show. A team no Mac has reported for 15 minutes is marked so, there and in
 **Waiting on you**, where an answer to it waits until a Mac runs it again. `a6g unregister` on its lead takes a team off
 the app: its tasks and history stay, its name stays taken, and `a6g register` puts it back. An admin can take one off
-from its overview too, with their authenticator's code, once no Mac runs it, and put it back from there; a report from
+from its Settings too, with their authenticator's code, once no Mac runs it, and put it back from there; a report from
 its lead afterwards puts it back by itself.
 
 A team whose work is complete gets a nightly tick; work from outside it added after that (a task the operator adds or

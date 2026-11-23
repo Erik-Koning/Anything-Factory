@@ -386,7 +386,7 @@ export async function unregister(argv: string[]): Promise<number> {
         await store.close();
       }
     } catch (error) {
-      console.warn(`  couldn't take ${name} off the web app: ${(error as Error).message.split("\n")[0]}. An admin can, from its overview there.`);
+      console.warn(`  couldn't take ${name} off the web app: ${(error as Error).message.split("\n")[0]}. An admin can, from its Settings there.`);
     }
   return 0;
 }
