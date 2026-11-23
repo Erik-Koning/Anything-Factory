@@ -1,5 +1,16 @@
 # Changelog
 
+## Subscriptions by the address they sign in with, chosen one name at a time, in order of use
+
+- **The Subscriptions page names each Claude account by its email address**, not by its names in a6g joined together
+  ("default / refdocs"). Those names show beside it, and an account two folders sign in to says they share its
+  limits. A Mac sends the address with its report from this version on (`a6g self-install` there); until then its
+  subscriptions keep their a6g names. `a6g subscriptions` says the address too.
+- **Choose one of an account's names** beside it at the top of the page: what that name used, the teams on it and
+  where they stop. **Sort** by most used (of the week on Limits, of the cost or tokens over the window on the others)
+  or A to Z.
+- The cost and tokens chart's table for screen readers no longer widens the page on a phone.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
