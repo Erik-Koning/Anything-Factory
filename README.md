@@ -104,8 +104,7 @@ for several accounts); this Mac's own login (`~/.claude`) is `default`. A team's
 setting for it (each instance's `homePath`), so the factory never touches the login itself:
 
 ```bash
-CLAUDE_CONFIG_DIR=~/.claude-b claude auth login        # sign the second subscription in, once
-a6g subscriptions add b --config-dir ~/.claude-b
+a6g subscriptions add b                                 # a folder of a6g's for it (~/.a6g/logins/b), signed in here, once
 a6g subscriptions use app default,b                     # app runs on default, and on b when default closes
 a6g subscriptions use site b,default                    # site the other way round
 a6g subscriptions use app b --role builder              # or one role on a list of its own
@@ -131,6 +130,15 @@ each window is left (the five hours, the week, a model's own week, extra usage),
 window, and where the teams stop; and what each used over the last day, week, 30 or 90 days, in API-equivalent dollars
 and tokens, by subscription and by model, every session on the Mac counted. A team's spend is counted on the subscription each request ran on, and
 a budget in percent counts each against that subscription's own week.
+
+Each subscription keeps the Claude account it was added with (one added before this version, the account its first
+reading finds). `default` is the one a sign-in anywhere on this Mac moves (`/login` in any Claude Code session), and a
+folder of yours is moved by signing in there; a folder of a6g's (`a6g subscriptions add` without `--config-dir`) only by
+`a6g subscriptions signin`. Signed in to another account since, a subscription is held: its teams' roles move on down
+their list or wait, and its usage isn't read, since that report would be the other account's; `a6g subscriptions`,
+`a6g doctor` and the web app say so. `a6g subscriptions signin b` signs it in to its own account again (Claude Code's
+browser sign-in, its address filled in), and it runs again at the watchdog's next reading; `--switch` makes the account
+it's signed in to its own.
 
 The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
 list. The limits read each subscription's own usage, so they hold wherever it's used; what a week comes to in dollars

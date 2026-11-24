@@ -195,6 +195,25 @@ describe("choosing a role's subscription", () => {
     const unknown = chooseFor(["planner"], {}, { ...ctx, use: { "*": ["three"] } });
     assert.match(unknown.waiting["planner"]?.why ?? "", /three isn't a subscription on this Mac/);
   });
+
+  test("one signed in to another account than its own is closed, whatever its readings say: its roles move on or wait", () => {
+    const held = { ...state(reading("one", 10), reading("two", 20)), held: { one: NOW.toISOString() } };
+    assert.deepEqual(gate("one", held, {}, ["one", "two"], NOW), {
+      open: false,
+      exhausted: false,
+      room: false,
+      why: "one is signed in to another Claude account than its own (a6g subscriptions signin one)",
+      until: null,
+      kind: "account",
+    });
+    const choice = chooseFor(
+      ["planner", "builder"],
+      { planner: "one", builder: "one" },
+      { use: { "*": ["one", "two"], builder: ["one"] }, accounts: two, state: held, limits: {}, now: NOW }
+    );
+    assert.deepEqual(choice.roles, { planner: "two", builder: "one" });
+    assert.equal(choice.waiting["builder"]?.key, "one:account");
+  });
 });
 
 describe("what a subscription's week comes to", () => {

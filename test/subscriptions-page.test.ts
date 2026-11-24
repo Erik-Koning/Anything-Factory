@@ -1,11 +1,22 @@
 import { tmp } from "./helpers.ts";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { type MachineSubscription, parseReport, USAGE_FIELDS } from "../lib/fleet.ts";
 import { costOf, costParts } from "../lib/prices.ts";
-import { loginOf, parseUsageReport, sessionCounts, setAccounts, subscriptionsReport, usageBuckets } from "../lib/subscriptions.ts";
+import {
+  type Account,
+  keptLogins,
+  loginOf,
+  onOwn,
+  parseUsageReport,
+  sessionCounts,
+  setAccounts,
+  subscriptionsReport,
+  usageBuckets,
+} from "../lib/subscriptions.ts";
 import { collectAccountUsage, emptyTally, encodePath, type Tally } from "../lib/usage.ts";
 
 const close = (a: number | null | undefined, b: number) => assert.ok(a !== null && a !== undefined && Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
@@ -163,6 +174,52 @@ describe("the login in a subscription's folder", () => {
     } finally {
       setAccounts([]);
       rmSync(state, { force: true });
+    }
+  });
+
+  test("a subscription keeps its own account: the first it's signed in to, then that account's address as it changes", () => {
+    const logins: Record<string, { login: string; plan: null; email: string | null } | null> = {
+      new: { login: "u-1", plan: null, email: "one@example.com" },
+      own: { login: "u-2", plan: null, email: "two@example.com" },
+      moved: { login: "u-9", plan: null, email: "nine@example.com" },
+      out: null,
+    };
+    const list = [
+      { name: "new", configDir: "/a" },
+      { name: "own", configDir: "/b", login: "u-2", email: "old@example.com" },
+      { name: "moved", configDir: "/c", login: "u-3", email: "three@example.com" },
+      { name: "out", configDir: "/d", login: "u-4", email: "four@example.com" },
+    ];
+    assert.deepEqual(
+      keptLogins(list, (a) => logins[a.name] ?? null),
+      [
+        { name: "new", configDir: "/a", login: "u-1", email: "one@example.com" },
+        { name: "own", configDir: "/b", login: "u-2", email: "two@example.com" },
+        list[2],
+        list[3],
+      ]
+    );
+    assert.equal(
+      keptLogins([list[2] as Account], (a) => logins[a.name] ?? null),
+      null,
+      "nothing changed"
+    );
+    assert.deepEqual(
+      list.map((a) => onOwn(a, logins[a.name] ?? null)),
+      [true, true, false, false]
+    );
+  });
+
+  test("the report names a subscription by its own account while its folder is signed in to another", () => {
+    const dir = tmp("a6g-login-");
+    setAccounts([{ name: "work", configDir: dir, login: "u-1", email: "operator@example.com" }]);
+    try {
+      writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "u-2", emailAddress: "someone@example.com" } }));
+      const [sent] = subscriptionsReport({});
+      assert.equal(sent?.email, "operator@example.com");
+      assert.equal(sent?.login, createHash("sha256").update("a6g-login:u-1").digest("hex").slice(0, 16));
+    } finally {
+      setAccounts([]);
     }
   });
 });
