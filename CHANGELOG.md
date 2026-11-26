@@ -1,5 +1,12 @@
 # Changelog
 
+## An upgrade that ends
+
+- **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on
+  the new version, and for a team whose tasks are in Mongo it left that connection open: the command printed its last
+  line and never ended. Run under the team's merge lock, as a release's upgrades are, it held the lock, so nothing of
+  the team's merged until it was stopped. It now closes the store once it has asked.
+
 ## 0.8.16: A pause that ends when the usage limit resets, subscriptions that keep their account and go by its address, and a team's settings in one place
 
 ### A pause that ends when the usage limit resets
