@@ -5,7 +5,19 @@ import { test } from "node:test";
 import { type MachineSubscription, USAGE_FIELDS } from "../../../lib/fleet.ts";
 import { formatPercent, formatTokens, formatUsd, resetsIn } from "../../components/usage/format.ts";
 import { monotonePath, niceScale } from "../../components/usage/chart-math.ts";
-import { costSegments, paceOf, periodsOf, poolsOf, processed, speedSegments, subscriptionsOf, usageOf, usedUpAt } from "../../server/usage-view.ts";
+import {
+  costSegments,
+  paceOf,
+  periodsOf,
+  poolsOf,
+  processed,
+  sortedBy,
+  speedSegments,
+  subscriptionAs,
+  subscriptionsOf,
+  usageOf,
+  usedUpAt,
+} from "../../server/usage-view.ts";
 
 const NOW = new Date("2026-11-15T12:30:00Z");
 const row = (at: string, model: string, fields: Partial<Record<(typeof USAGE_FIELDS)[number], number>>): [string, string, ...number[]] => [
@@ -67,6 +79,86 @@ test("the same login on two machines is one subscription: its newest limits, its
   assert.equal(pooled?.latest.weekly?.percent, 60, "the newest reading");
   assert.equal(pooled?.days.get("2026-11-15")?.get("claude-opus-5-5")?.requests, 5);
   assert.deepEqual(pooled?.sessions, [2, 4, 6, 8]);
+});
+
+test("a login is named by its address, with its names in a6g; one name narrows it to what that name used, its teams and its limits", () => {
+  const reports = [
+    {
+      machine: { id: "m1", name: "studio" },
+      subscriptions: [
+        sub({
+          name: "refdocs",
+          email: "op@example.com",
+          days: [row("2026-11-15", "claude-opus-5-5", { requests: 2, cost: 1 })],
+          limits: { weekly: 80, session: null },
+          teams: [{ team: "edit-learning", roles: ["builder"] }],
+        }),
+        sub({
+          name: "default",
+          email: "op@example.com",
+          days: [row("2026-11-15", "claude-opus-5-5", { requests: 3, cost: 2 })],
+          teams: [{ team: "support", roles: ["planner"] }],
+        }),
+        sub({ name: "spare", login: "bbbbbbbbbbbbbbbb", email: null }),
+      ],
+    },
+    // An older factory sends no address.
+    { machine: { id: "m2", name: "laptop" }, subscriptions: [sub({ name: "work", login: "cccccccccccccccc" })] },
+  ];
+  const subs = subscriptionsOf(reports);
+  assert.deepEqual(
+    subs.map((s) => [s.name, s.email, s.names]),
+    [
+      ["op@example.com", "op@example.com", ["default", "refdocs"]],
+      ["spare", null, ["spare"]],
+      ["work", null, ["work"]],
+    ]
+  );
+  const account = subs[0];
+  assert.ok(account);
+  assert.equal(account.days.get("2026-11-15")?.get("claude-opus-5-5")?.requests, 5);
+  const refdocs = subscriptionAs(reports, account, "refdocs");
+  assert.deepEqual([refdocs.key, refdocs.name, refdocs.names, refdocs.colour], [account.key, "op@example.com", ["refdocs"], account.colour]);
+  assert.equal(refdocs.days.get("2026-11-15")?.get("claude-opus-5-5")?.requests, 2);
+  assert.deepEqual(
+    refdocs.teams.map((t) => t.team),
+    ["edit-learning"]
+  );
+  assert.equal(refdocs.latest.limits.weekly, 80);
+  assert.equal(subscriptionAs(reports, account, "nobody"), account, "a name it doesn't go by changes nothing");
+});
+
+test("in order of name, or most used first: of its week on the Limits view, of the cost or tokens over the window on the others", () => {
+  const live = "2026-11-16T12:30:00.000Z";
+  const subs = subscriptionsOf([
+    {
+      machine: { id: "m1", name: "studio" },
+      subscriptions: [
+        sub({
+          name: "alpha",
+          login: "aaaaaaaaaaaaaaaa",
+          weekly: { percent: 20, resetsAt: live },
+          days: [row("2026-11-15", "claude-opus-5-5", { requests: 1, cost: 9 })],
+        }),
+        sub({
+          name: "beta",
+          login: "bbbbbbbbbbbbbbbb",
+          weekly: { percent: 70, resetsAt: live },
+          days: [row("2026-11-15", "claude-opus-5-5", { requests: 1, cost: 1 })],
+        }),
+        sub({ name: "gamma", login: "cccccccccccccccc", weekly: { percent: 90, resetsAt: "2026-11-01T00:00:00.000Z" } }),
+      ],
+    },
+  ]);
+  const order = (sort: "used" | "name", metric: "limits" | "cost") => sortedBy(subs, sort, metric, 30, NOW).map((s) => s.name);
+  assert.deepEqual(order("name", "limits"), ["alpha", "beta", "gamma"]);
+  assert.deepEqual(order("used", "limits"), ["beta", "alpha", "gamma"], "gamma's week has reset since: none of it is used");
+  assert.deepEqual(order("used", "cost"), ["alpha", "beta", "gamma"]);
+  assert.deepEqual(
+    sortedBy(subs, "used", "limits", 30, NOW).map((s) => s.colour),
+    [1, 0, 2],
+    "each keeps its colour"
+  );
 });
 
 test("a window's periods: the last 24 hours to this one, or days to the newest machine's today", () => {

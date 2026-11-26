@@ -89,7 +89,9 @@ function show(): void {
     const r = state.readings[account.name];
     const login = loginOf(account);
     const where = account.configDir ? account.configDir : "this Mac's own login";
-    const signed = login ? `signed in${login.plan ? ` to ${login.plan}` : ""} (account ${login.login.slice(0, 8)})` : "not signed in";
+    const signed = login
+      ? `signed in${login.plan ? ` to ${login.plan}` : ""}${login.email ? ` as ${login.email}` : ""} (account ${login.login.slice(0, 8)})`
+      : "not signed in";
     const g = gate(account.name, state, limits, names);
     const week = weekFor(state, account.name);
     console.info(

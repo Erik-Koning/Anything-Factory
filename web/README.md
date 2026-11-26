@@ -65,15 +65,19 @@ request (Article 8).
   are in files is named, with no pages here); and Unlink. `/machines/link`: where `a6g connect app` sends you to look
   up its code, check it, and approve or refuse it.
 - `/subscriptions` Subscriptions: the Claude subscriptions on the machines you see (an admin, every linked one's), one
-  per login however many Macs report it, as T3 Code's Usage page shows them. **Limits** (the default): a card per
-  window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of the pool is
-  left, whether it's going faster than the window runs, and a bar with each subscription's part: what's left of it,
-  its used part hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams
-  stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed to them.
+  per login however many Macs report it, named by the address it signs in with (its names in a6g beside it, and said
+  to share its limits when two folders sign in to it), as T3 Code's Usage page shows them. **Limits** (the default):
+  a card per window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of
+  the pool is left, whether it's going faster than the window runs, and a bar with each subscription's part: what's
+  left of it, its used part hatched until it resets, where even use would be by now, and a dashed mark where the
+  factory's teams stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed
+  to them.
   **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's,
   a chart (read with the arrow keys too), processed, cached, uncached and output tokens and what the cache saved,
   dollars and tokens by type and by speed, and a breakdown by model (each opens its own figures) or by day. Narrowed
-  to one machine or one subscription; what's shown is in the address. Usage is every session on the Mac (the
+  to one machine, one subscription, or one of its names in a6g (what that name used, its teams and its limits);
+  most used first (of the week, or of the cost or tokens over the window) or A to Z; what's shown is in the address.
+  A Mac on a factory before the addresses names its subscriptions as a6g does. Usage is every session on the Mac (the
   operator's own too) at `lib/prices.ts`'s prices: a model with no price there counts its tokens and says so.
 - `/t/<team>/add`, as an admin, **Approve it now**: the task goes straight to the builders.
 - Beside a team's name on each of its pages, for admins: **Stop** (a pause now), **Pause…** (its choices in a dialog:

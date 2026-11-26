@@ -23,7 +23,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
+import { isEmail, type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
 import { fallbackModel, familyOf, modelName } from "./models.ts";
 import { A6G_HOME } from "./paths.ts";
 import { dayOf, OWN_LOGIN, round } from "./tasks/spend.ts";
@@ -140,17 +140,18 @@ export function accountAt(homePath: string | null | undefined, list = accounts()
   return list.find((a) => (path ? a.configDir === path : a.configDir === null))?.name ?? null;
 }
 
-// The login in a Claude Code config folder: its account id and plan, from Claude Code's own config (.claude.json,
-// beside the folder for this Mac's own login, inside it for another). Null when it holds none (signed out, or an
-// API key).
-export function loginOf(account: Account): { login: string; plan: string | null } | null {
+// The login in a Claude Code config folder: its account id, plan and the address it signs in with, from Claude Code's
+// own config (.claude.json, beside the folder for this Mac's own login, inside it for another). Null when it holds
+// none (signed out, or an API key).
+export function loginOf(account: Account): { login: string; plan: string | null; email: string | null } | null {
   const file = account.configDir ? join(account.configDir, ".claude.json") : join(homedir(), ".claude.json");
   try {
     const oauth = readJson<{ oauthAccount?: Record<string, unknown> }>(file, {}).oauthAccount;
     const login = oauth?.["accountUuid"];
     if (typeof login !== "string" || !login) return null;
     const plan = oauth?.["planDisplayName"] ?? oauth?.["organizationType"];
-    return { login, plan: typeof plan === "string" && plan ? plan : null };
+    const email = oauth?.["emailAddress"];
+    return { login, plan: typeof plan === "string" && plan ? plan : null, email: isEmail(email) ? email : null };
   } catch {
     return null;
   }
@@ -554,7 +555,8 @@ export function sessionCounts(sessions: Record<string, string>, now: Date): Mach
 
 // Every subscription here as the machine's report carries it (lib/fleet.ts): its limits as last read (a window that
 // has reset since says nothing), the operator's limits, whether it's closed to the teams, the roles of each team here
-// that run on it (`on`, by name), and what it used here. Its login goes as a hash only, the same on every machine.
+// that run on it (`on`, by name), and what it used here. Its login goes as a hash, the same on every machine, with the
+// address it signs in with, so the page can say whose it is.
 export function subscriptionsReport(on: Record<string, MachineSubscription["teams"]>, now = new Date()): MachineSubscription[] {
   const state = subscriptionState();
   const limits = subscriptionLimits();
@@ -577,11 +579,14 @@ export function subscriptionsReport(on: Record<string, MachineSubscription["team
     const { days, hours } = usageBuckets(usage.tallies ?? {}, now, room);
     room -= days.length + hours.length;
     const shut = gate(name, state, limits, names, now);
-    const login = reading?.login ?? loginOf(account)?.login ?? null;
+    const folder = loginOf(account);
+    const login = reading?.login ?? folder?.login ?? null;
     const week = weekFor(state, name);
     return {
       name,
       login: login ? createHash("sha256").update(`a6g-login:${login}`).digest("hex").slice(0, 16) : null,
+      // Its address while the folder is still signed in to the login last read: another account's isn't sent as its.
+      email: login && folder?.login === login ? folder.email : null,
       plan: reading?.plan?.slice(0, 40) ?? null,
       at: reading?.at ?? null,
       weekly: reading ? live(reading) : null,
