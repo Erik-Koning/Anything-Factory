@@ -46,12 +46,13 @@ import { offSite, quietSince } from "./views.ts";
 export { Refused };
 export type { Cycle, FeatureRequest, Stakeholder, Task } from "../../lib/tasks/model.ts";
 export type { TeamDoc, TeamSubscriptions } from "../../lib/tasks/teams.ts";
-export type { Control, HoldScope, HoldState, Limits, StartState } from "../../lib/tasks/controls.ts";
+export type { Control, HoldScope, HoldState, Limits, ResetAt, StartState } from "../../lib/tasks/controls.ts";
 export type { StartAsk } from "../../lib/tasks/start.ts";
 export {
   ACTION_WORDS,
   actionsOf,
   agreementOf,
+  budgetHolds,
   describeHold,
   holdOf,
   isHoldScope,
@@ -187,12 +188,19 @@ export function addTaskFromWeb(team: string, input: Omit<TaskInput, "from">, { a
 export const controlsOf = (team: string): Promise<Control[]> => storeFor(team).controls.all();
 
 // A pause from the web, by an admin's stakeholder id: its scope fixed against the graph as it is now (controls.ts).
-export async function pauseFromWeb(team: string, ask: { scope: HoldScope; journeys: string[]; note: string; from: string }): Promise<Control> {
+// `until` "reset" ends it when the usage limit the team waits on resets; asked of a team paused already, that's all it
+// changes.
+export async function pauseFromWeb(
+  team: string,
+  ask: { scope: HoldScope; journeys: string[]; note: string; from: string; until?: "reset" | null }
+): Promise<Control> {
   const store = storeFor(team);
   // On the web the journeys are ticked, those under way to start with: none ticked is a mistake, not "the default".
   if (ask.scope === "journeys" && !ask.journeys.length) throw new Refused("Tick the journeys to finish before the team pauses.");
   const journeys = ask.scope === "journeys" ? ask.journeys : undefined;
-  return store.controls.create(pauseControl(await teamTasks(team), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note }));
+  return store.controls.create(
+    pauseControl(await teamTasks(team), team, { scope: ask.scope, journeys, by: `web:${ask.from}`, note: ask.note, until: ask.until })
+  );
 }
 
 // A resume from the web; the note goes to the planner as the operator's feedback.

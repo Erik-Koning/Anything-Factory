@@ -496,6 +496,44 @@ export function nearLimit(state: SubscriptionState, limits: Record<string, Subsc
   return names.some((name) => !gate(name, state, nearer, names, now).open || ownNear(name));
 }
 
+// When the usage limit a team waits on resets, for a pause the operator asked to end then (lib/holds.ts keepReset).
+// `waiting` is its roles no subscription is open to (lib/steer.ts): the first of them to open again says when. With
+// none waiting, the readings may be behind (a limit reached between two of them), or the operator paused ahead of one,
+// so it's the limit nearest its end among the subscriptions the team's roles run on (`names`), a week's or five hours',
+// and a guess ("default's week, at 63%"). `at` is null when no reading says.
+export function nextReset(
+  names: string[],
+  waiting: Record<string, Wait>,
+  state: SubscriptionState,
+  limits: Record<string, SubscriptionLimit>,
+  now = new Date()
+): { at: string | null; why: string; guess: boolean } {
+  const t = now.getTime();
+  const first = Object.values(waiting)
+    .flatMap((wait) => (wait.until && Date.parse(wait.until) > t ? [{ at: wait.until, why: wait.why }] : []))
+    .sort((a, b) => a.at.localeCompare(b.at))[0];
+  if (first) return { ...first, guess: false };
+  const windows = names.flatMap((name) => {
+    const reading = state.readings[name];
+    if (!reading) return [];
+    const week = { why: `${owns(name)} week, at ${reading.percent}%`, left: (limits[name]?.weekly ?? 100) - reading.percent, at: reading.resetsAt };
+    const session = reading.session
+      ? [
+          {
+            why: `${owns(name)} five hours, at ${reading.session.percent}%`,
+            left: (limits[name]?.session ?? 100) - reading.session.percent,
+            at: reading.session.resetsAt,
+          },
+        ]
+      : [];
+    return [week, ...session].filter((window) => Date.parse(window.at) > t);
+  });
+  const nearest = windows.sort((a, b) => a.left - b.left || a.at.localeCompare(b.at))[0];
+  return nearest
+    ? { at: nearest.at, why: nearest.why, guess: true }
+    : { at: null, why: "no reading of the team's subscriptions says when a limit resets", guess: true };
+}
+
 // A role's wait, in words: why, and until when.
 export const describeWait = (wait: Wait): string => `${wait.why}${wait.until ? ` (until ${when(wait.until)})` : ""}`;
 

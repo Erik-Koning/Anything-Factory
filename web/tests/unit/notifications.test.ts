@@ -130,6 +130,13 @@ test("stateEvent: news only when the team pauses or finishes, never the first ti
   assert.equal(stateEvent("shop", "Shop", paused, "paused"), null);
   assert.equal(stateEvent("shop", "Shop", { ...paused, state: "active" }, "paused"), null);
   assert.equal(stateEvent("shop", "Shop", paused, "active")?.title, "Shop paused");
+  assert.equal(stateEvent("shop", "Shop", paused, "active")?.detail, "Nothing starts or merges until it's resumed.");
+  // One asked to end at the usage limit's reset says that it does.
+  const hold = { control: "k1", scope: "now" as const, tasks: [], journeys: [], since: paused.at, by: "web:s1", note: "", until: "reset" as const };
+  assert.equal(
+    stateEvent("shop", "Shop", { ...paused, hold: { ...hold, settledAt: paused.at, left: [], stuck: [], report: null } }, "active")?.detail,
+    "Nothing starts or merges until its usage limit resets, or it's resumed."
+  );
   assert.equal(stateEvent("shop", "Shop", { ...paused, state: "complete" }, "active")?.title, "Shop reached its finish line");
 });
 
