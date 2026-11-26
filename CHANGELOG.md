@@ -1,6 +1,6 @@
 # Changelog
 
-## An upgrade that ends
+## 0.8.17: An upgrade that ends
 
 - **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on
   the new version, and for a team whose tasks are in Mongo it left that connection open: the command printed its last
