@@ -1,5 +1,21 @@
 # Changelog
 
+## Subscriptions keep the Claude account they were added with
+
+- **A sign-in elsewhere no longer moves a team onto another Claude account.** `default` is this Mac's own Claude Code
+  login, so a `/login` in any Claude Code session here changed which account it was, and a6g followed: the teams on it
+  ran on the other account's week, beside any already there, while their own account's week went unused. Each
+  subscription now keeps the account it was added with (one added before this version, the account its first reading
+  finds). Signed in to another since, it's **held**: closed to the teams, whose roles move on down their list or wait,
+  and not read, since that report is the other account's. `a6g subscriptions`, `a6g doctor`, the watchdog's log and the
+  web app say so, and the web app names it by its own account's address.
+- **`a6g subscriptions signin <name>`** signs its folder in to its own account again (Claude Code's browser sign-in,
+  with its address filled in); once it's back, the watchdog's next reading lets its teams run on it. `--switch` makes
+  the account it's signed in to its own, on purpose.
+- **`a6g subscriptions add <name>` makes a folder of a6g's for it**, `~/.a6g/logins/<name>`, which no Claude Code session
+  of yours signs in to, and signs it in from the terminal; `--config-dir` still names one of yours. `a6g subscriptions`
+  notes when teams run on this Mac's own login.
+
 ## Web app: a team's settings in one place, and when its week runs out
 
 - **⚙ Settings beside each team's name**, and a Settings tab in place of Agreement: the budget, the subscriptions it
