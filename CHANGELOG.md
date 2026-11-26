@@ -1,5 +1,21 @@
 # Changelog
 
+## A pause that ends when the usage limit resets
+
+- **A team you paused because its subscription ran out can start again by itself.** A pause of yours stays until you
+  resume it, so a team stopped while it was out of usage stayed stopped after the limit reset. `a6g pause <team>
+--until-reset`, or a tick in the web app's Pause dialog, ends the pause when the limit the team waits on resets: its
+  lead's watchdog resumes it then, and tells you and the planner. For a team stopped already, ⋯ → Resume when its usage
+  limit resets (or the command again); ⋯ → Keep it paused until I resume it (or `a6g pause` without the flag) takes it
+  back.
+- **It says when, and which limit.** The pause, `a6g status` and the web app's Controls give the moment and the limit:
+  the week or the five hours that closed the team's subscriptions, the first to open again. With none closed as the
+  readings stand, it's the limit nearest its end, and a reading within half an hour that finds another reached,
+  resetting sooner, takes its place. With no reading at all, it says so and stays paused.
+- **The budget still decides for a team it paused.** A pause asked to end at the reset doesn't, of a team its budget
+  paused too: that one waits for the budget's own auto-resume, or for you.
+- The web app offers it where the team's Mac will read it: a lead on this version reports that it does.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
