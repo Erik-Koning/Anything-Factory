@@ -872,8 +872,14 @@ export async function upgrade(argv: string[]): Promise<number> {
   // version.
   if (!entry.worker && existsSync(join(entry.run, "planner-thread"))) {
     try {
+      // Closed once it's asked: a Mongo store left open keeps this process alive, and the team's merge lock with it
+      // when the upgrade runs under one (a6g lock merge -- a6g upgrade …).
       const store = await openStore(team, entry.run);
-      await store.controls.create(actionControl(entry.name, OPERATOR, "rotate", `upgraded to ${version}`));
+      try {
+        await store.controls.create(actionControl(entry.name, OPERATOR, "rotate", `upgraded to ${version}`));
+      } finally {
+        await store.close();
+      }
       console.info(`a6g: asked for the planner to restart on ${version} once the members under way have finished; a6g status shows it`);
     } catch (error) {
       console.warn(
