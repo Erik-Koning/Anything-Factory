@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { type MachineSubscription, USAGE_FIELDS } from "../../../lib/fleet.ts";
 import { formatPercent, formatTokens, formatUsd, resetsIn } from "../../components/usage/format.ts";
 import { monotonePath, niceScale } from "../../components/usage/chart-math.ts";
-import { costSegments, paceOf, periodsOf, poolsOf, processed, speedSegments, subscriptionsOf, usageOf } from "../../server/usage-view.ts";
+import { costSegments, paceOf, periodsOf, poolsOf, processed, speedSegments, subscriptionsOf, usageOf, usedUpAt } from "../../server/usage-view.ts";
 
 const NOW = new Date("2026-11-15T12:30:00Z");
 const row = (at: string, model: string, fields: Partial<Record<(typeof USAGE_FIELDS)[number], number>>): [string, string, ...number[]] => [
@@ -175,6 +175,20 @@ test("limit cards: session, weekly, a model's week, extra usage; weighted by pla
 
 test("pace: more used than the window has run is ahead of it, by over five points", () => {
   assert.deepEqual([paceOf(60, 0.5), paceOf(52, 0.5), paceOf(40, 0.5), paceOf(10, null)], ["ahead", "on", "under", null]);
+});
+
+test("a week used on at its pace so far: when it would be used up, said only once six hours of it have run", () => {
+  const now = NOW.getTime();
+  const hours = (n: number) => n * 3_600_000;
+  // A day into the week with a fifth of it used: used up four days later, three days before it resets.
+  const resets = new Date(now + hours(6 * 24)).toISOString();
+  assert.equal(usedUpAt(20, resets, now), now + hours(4 * 24));
+  // Under pace, or nothing used, it lasts the week; used up already, or with no reset known, there's nothing to say.
+  assert.deepEqual([usedUpAt(10, resets, now), usedUpAt(0, resets, now)], ["lasts", "lasts"]);
+  assert.deepEqual([usedUpAt(100, resets, now), usedUpAt(20, null, now), usedUpAt(20, NOW.toISOString(), now)], [null, null, null]);
+  // Five hours in, even 40% used is too soon to say; at six, it's said.
+  assert.equal(usedUpAt(40, new Date(now + hours(163)).toISOString(), now), null);
+  assert.equal(usedUpAt(40, new Date(now + hours(162)).toISOString(), now), now + hours(9));
 });
 
 test("figures as the page writes them", () => {

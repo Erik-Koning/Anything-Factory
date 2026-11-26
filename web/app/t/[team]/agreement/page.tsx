@@ -95,7 +95,10 @@ export default async function AgreementPage({ params, searchParams }: { params: 
   return (
     <>
       <Notice searchParams={searchParams} />
-      <p className="lede small">How readily the team brings a question to you, and what it decides in your place instead.</p>
+      <p className="lede small">
+        How readily the team brings a question to you, and what it decides in your place instead: one of the team&apos;s{" "}
+        <Link href={`${base}/settings`}>settings</Link>.
+      </p>
       <details className="guide">
         <summary>How this works</summary>
         <p>

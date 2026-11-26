@@ -273,6 +273,18 @@ export const paceOf = (used: number, elapsed: number | null): Pace | null => {
   return gap > 5 ? "ahead" : gap < -5 ? "under" : "on";
 };
 
+// A week used on at the pace it has gone so far: when it would be used up, or "lasts" when at that pace it lasts until
+// it resets. Null when that can't be said: less than six hours of it run, no reset known (or it has passed), or used
+// up already.
+const SURE_AFTER = 6 * 3_600_000;
+export function usedUpAt(used: number, resetsAt: string | null, now: number): number | "lasts" | null {
+  const resets = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  const start = resets - (DURATION.weekly ?? 0);
+  if (Number.isNaN(resets) || resets <= now || used >= 100 || now - start < SURE_AFTER) return null;
+  const at = used > 0 ? start + ((now - start) * 100) / used : Infinity;
+  return at < resets ? at : "lasts";
+}
+
 function pool(kind: WindowKind, label: string, parts: Omit<PoolPart, "weight">[], now: number): Pool {
   const weights = parts.map((p) => (kind === "session" ? planWeight(p.sub.plan) : 1));
   const known = weights.every((w) => w !== null);
