@@ -168,6 +168,17 @@ team page does the same for admins (Stop, Pause… and Resume beside the team's 
 within a minute. Under ⋯ there: restart the planner or the environment, upgrade the factory, wake the team, or delete it
 (its name typed and an authenticator code): its lead's watchdog runs each as a job of its own (`a6g act`).
 
+A pause of yours stays until you resume the team, even one you made because its subscription had run out. To have it
+start again by itself then, pause it with `--until-reset` (a tick in the web app's Pause dialog; for a team stopped
+already, `a6g pause my-app --until-reset` again, or ⋯ → Resume when its usage limit resets): the watchdog resumes the
+team once the limit it waits on has reset, and tells you and the planner. That's the reset of the week or the five
+hours that closed its subscriptions, the first of them to open again. With none closed as the readings stand (a limit
+reached since the last one, or a pause ahead of it), it's the limit nearest its end, and a reading within half an hour
+that finds another one reached, resetting sooner, takes its place. `a6g status`, the pause itself and the web app's
+Controls say when that is and which limit. `a6g pause my-app` without the flag (⋯ → Keep it paused until I resume it)
+takes it back. It needs a reading: a team on this Mac's own login when that isn't a listed subscription has none, and
+stays paused. And a team its budget paused too waits for the budget, or for you.
+
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
 ### What it asks you, and what it decides for you

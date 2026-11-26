@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { applyControls, clearNotes, holdNote, pendingNotes, progressHold, queueNote, readHold } from "../lib/holds.ts";
+import { applyControls, clearNotes, GUESS_MIN, holdNote, keepReset, pendingNotes, progressHold, queueNote, readHold, resetWords } from "../lib/holds.ts";
 import {
   budgetControl,
+  budgetHolds,
   type Control,
+  endsAtReset,
   type Hold,
   holdOf,
   holdReport,
@@ -332,6 +334,146 @@ describe("controls in the run folder", () => {
   });
 });
 
+describe("a pause that ends when the usage limit resets", () => {
+  const pause = (by: string, fields: { scope?: "now" | "tasks"; until?: "reset" } = {}) =>
+    control(pauseControl(graph(), "fixture", { scope: fields.scope ?? "now", by, until: fields.until }));
+  const budgetPause = () =>
+    control({ ...pauseControl(graph(), "fixture", { scope: "tasks", by: "budget", note: "$10 is spent" }), trigger: "daily:2026-11-09" });
+  const closed = { at: "2026-11-27T11:00:00.000Z", why: "default has used its week", guess: false };
+
+  test("the operator's latest pause says whether it does; the budget's pause never does, nor a team it paused too", () => {
+    const until = pause("operator", { until: "reset" });
+    assert.equal(until.until, "reset");
+    assert.equal(pause("operator").until, undefined, "a pause that didn't ask keeps no word of it");
+    assert.equal(endsAtReset([until]), true);
+    assert.equal(holdOf([until])?.until, "reset");
+    assert.equal(holdOf([pause("operator")])?.until, undefined);
+    // Asked of a team stopped already; and taken back the same way.
+    assert.equal(endsAtReset([pause("web:s1"), pause("web:s1", { until: "reset" })]), true);
+    assert.equal(endsAtReset([until, pause("operator")]), false);
+    // A graceful one that settled: the watchdog's record of it is nobody's ask.
+    const settled = control(settledControl("fixture", holdOf([pause("operator", { scope: "tasks", until: "reset" })]) as Hold));
+    assert.equal(endsAtReset([pause("operator", { scope: "tasks", until: "reset" }), settled]), true);
+    assert.equal(holdOf([pause("operator", { scope: "tasks", until: "reset" }), settled])?.scope, "now");
+    // The budget paused the team too: it waits for the budget, or the operator.
+    assert.equal(endsAtReset([budgetPause(), until]), false);
+    assert.equal(budgetHolds([budgetPause(), until]), true);
+    assert.equal(holdOf([budgetPause(), until])?.until, undefined);
+    // Resumed, nothing is left of it.
+    assert.equal(endsAtReset([until, control(resumeControl("fixture", "operator"))]), false);
+    assert.equal(budgetHolds([budgetPause(), control(resumeControl("fixture", "operator")), until]), false);
+  });
+
+  test("applied, the hold keeps it and the planner hears; asked of a paused team, only when the pause ends changes", () => {
+    const run = tmp("a6g-holds-");
+    const first = pause("operator");
+    applyControls(run, [first]);
+    assert.equal(readHold(run)?.until, undefined);
+    assert.equal(resetWords(readHold(run)), "");
+    const asked = pause("web:s1", { until: "reset" });
+    let applied = applyControls(run, [first, asked]);
+    assert.equal(applied.log[0], "the operator (web app) asked to pause now of a team paused already: the pause ends when its usage limit resets");
+    assert.equal(readHold(run)?.until, "reset");
+    assert.equal(readHold(run)?.since, first.at, "what it stopped after stays");
+    assert.ok(existsSync(join(run, "paused")));
+    // Taken back: it stays until they resume it, and the time worked out goes with it.
+    keepReset(run, closed, new Date("2026-11-26T12:00:00Z"));
+    assert.equal(readHold(run)?.reset?.at, closed.at);
+    const back = pause("operator");
+    applied = applyControls(run, [first, asked, back]);
+    assert.equal(applied.log[0], "the operator asked to pause now of a team paused already: the pause stays until they resume the team");
+    assert.deepEqual([readHold(run)?.until, readHold(run)?.reset], [undefined, undefined]);
+    assert.match(applyControls(run, [first, asked, back, pause("operator")]).log[0] ?? "", /but the team is paused already$/);
+
+    // A fresh pause that asks for it: in the log, the hold, and what the planner is told.
+    const fresh = tmp("a6g-holds-");
+    applied = applyControls(fresh, [pause("operator", { scope: "tasks", until: "reset" })]);
+    assert.equal(applied.log[0], "the operator paused the team after the work under way (#11, #12, #14), until its usage limit resets");
+    assert.equal(readHold(fresh)?.until, "reset");
+    assert.match(
+      applied.tell[0]?.text ?? "",
+      /the team pauses until its usage limit resets \(the watchdog starts it again then\) or the operator resumes it\./
+    );
+    // Settled, the report says so too.
+    const done = graph().map((t) => (["11", "12", "14"].includes(t.id) ? { ...t, status: "done" as const } : t));
+    assert.equal(progressHold(fresh, done, 0)?.settled, true);
+    assert.match(readHold(fresh)?.report ?? "", /Work stays stopped until the team's usage limit resets, as you asked, or until you resume it/);
+    assert.equal(readHold(fresh)?.until, "reset");
+
+    // Of a team the budget is pausing: the operator's stop holds, but it doesn't end at the reset, and the log says so.
+    const over = tmp("a6g-holds-");
+    const budget = budgetPause();
+    applyControls(over, [budget]);
+    applied = applyControls(over, [budget, pause("operator", { until: "reset" })]);
+    assert.equal(applied.log[0], "the operator paused the team now; it doesn't end at the usage limit's reset, as the budget paused the team too");
+    assert.equal(readHold(over)?.until, undefined);
+  });
+
+  test("when it ends is kept from the first reading that says; a guess gives way to a limit found reached soon after", () => {
+    const run = tmp("a6g-holds-");
+    const at = (minutes: number) => new Date(Date.parse("2026-11-26T12:00:00Z") + minutes * 60_000);
+    assert.equal(keepReset(run, closed, at(0)), null, "no pause");
+    applyControls(run, [pause("operator")]);
+    assert.equal(keepReset(run, closed, at(0)), null, "a pause that stays until they resume it");
+
+    const asked = tmp("a6g-holds-");
+    applyControls(asked, [pause("operator", { until: "reset" })]);
+    assert.match(resetWords(readHold(asked)), /^it starts again when its usage limit resets \(the watchdog works out when/);
+    // No reading says: it stays, and says why, once.
+    const none = { at: null, why: "no reading of the team's subscriptions says when a limit resets", guess: true };
+    assert.match(
+      keepReset(asked, none, at(0))?.said ?? "",
+      /but no reading of the team's subscriptions says when a limit resets: it stays until a reading does/
+    );
+    assert.deepEqual([keepReset(asked, none, at(5))?.said, keepReset(asked, none, at(5))?.due], [null, false]);
+    assert.match(resetWords(readHold(asked)), /^it was asked to start again when its usage limit resets, but no reading/);
+    // The first that can: the limit nearest its end, a guess.
+    const guess = { at: "2026-11-27T11:00:00.000Z", why: "default's week, at 90%", guess: true };
+    assert.match(
+      keepReset(asked, guess, at(60))?.said ?? "",
+      /the pause ends at 2026-11-27 11:00 UTC, when the limit nearest its end resets \(default's week, at 90%\): no subscription is closed/
+    );
+    assert.deepEqual(readHold(asked)?.reset, { ...guess, found: at(60).toISOString() });
+    assert.equal(
+      resetWords(readHold(asked)),
+      "it starts again at 2026-11-27 11:00 UTC, when the limit nearest its end resets (default's week, at 90% when that was worked out)"
+    );
+    // A reading then finds the five hours used up: that was the limit reached, and it resets sooner.
+    const session = { at: "2026-11-26T17:00:00.000Z", why: "default has used its five hours", guess: false };
+    assert.match(keepReset(asked, session, at(60 + GUESS_MIN))?.said ?? "", /ends at 2026-11-26 17:00 UTC, when the team's usage limit resets/);
+    assert.equal(resetWords(readHold(asked)), "it starts again at 2026-11-26 17:00 UTC, when its usage limit resets (default has used its five hours)");
+    // Kept from then on: a later reading's limit isn't the one it was paused for, and one that has reset isn't read again.
+    assert.equal(keepReset(asked, { ...session, at: "2026-11-26T15:00:00.000Z" }, at(100))?.reset.at, session.at);
+    assert.equal(keepReset(asked, none, at(200))?.reset.at, session.at);
+    assert.equal(keepReset(asked, none, at(299))?.due, false);
+    assert.equal(keepReset(asked, none, at(300))?.due, true);
+
+    // A guess older than two readings stays: a limit reached that long after isn't the one the pause was asked for.
+    const later = tmp("a6g-holds-");
+    applyControls(later, [pause("operator", { until: "reset" })]);
+    keepReset(later, guess, at(0));
+    assert.equal(keepReset(later, session, at(GUESS_MIN + 1))?.reset.at, guess.at);
+    // Nor does it give way to a limit that resets later than the guess.
+    const sooner = tmp("a6g-holds-");
+    applyControls(sooner, [pause("operator", { until: "reset" })]);
+    keepReset(sooner, { ...guess, at: "2026-11-26T14:00:00.000Z" }, at(0));
+    assert.equal(keepReset(sooner, session, at(5))?.reset.at, "2026-11-26T14:00:00.000Z");
+  });
+
+  test("the watchdog's resume at the reset lifts it, and tells the planner why", () => {
+    const run = tmp("a6g-holds-");
+    const asked = pause("operator", { until: "reset" });
+    applyControls(run, [asked]);
+    const resume = control(resumeControl("fixture", "reset", "its usage limit reset, and the operator's pause was to end then"));
+    const applied = applyControls(run, [asked, resume]);
+    assert.ok(!existsSync(join(run, "paused")) && readHold(run) === null);
+    assert.equal(applied.log[0], "the team's usage limit reset, so the pause asked to end then has: the team is resumed");
+    assert.deepEqual(applied.tell, [
+      { text: "The team starts again: its usage limit reset, and the operator's pause was to end then. Carry on.", wake: true },
+    ]);
+  });
+});
+
 describe("a6g pause and resume, and the watchdog", () => {
   async function world() {
     const { fakeWorld } = await import("./fake-t3.ts");
@@ -407,6 +549,34 @@ describe("a6g pause and resume, and the watchdog", () => {
     }
   });
 
+  test("pause --until-reset of a team its budget paused too doesn't end at the reset, and says so", async () => {
+    const { w, store } = await world();
+    try {
+      await store.controls.create({
+        ...pauseControl(graph(), "fixture", { scope: "now", by: "budget", note: "$11 of the $10 a day budget is spent, and more" }),
+        trigger: "daily:2026-11-09:hard",
+      });
+      const paused = await w.a6g("pause", "fixture", "--until-reset");
+      assert.equal(paused.code, 0, paused.out);
+      assert.match(paused.out, /it stays paused until a6g resume fixture: its budget paused it too/);
+      assert.doesNotMatch(paused.out, /it starts again/);
+      assert.equal(readHold(w.run)?.until, undefined);
+      assert.match(
+        readFileSync(join(w.run, "watchdog.log"), "utf8"),
+        /the operator asked to pause now, but the team is paused already; it doesn't end at the usage limit's reset, as the budget paused the team too/
+      );
+      // The reset comes and goes: the watchdog leaves it to the budget, or the operator.
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.deepEqual(
+        (await store.controls.all()).map((c) => `${c.kind} ${c.by}`),
+        ["pause budget", "pause operator"]
+      );
+    } finally {
+      await w.close();
+    }
+  });
+
   test("with the task graph out of reach, pause now still stops this machine, and resume still starts it", async () => {
     fakeKeychain();
     const { fakeWorld } = await import("./fake-t3.ts");
@@ -438,6 +608,7 @@ describe("a6g pause and resume, and the watchdog", () => {
       assert.ok(existsSync(join(w.run, "paused")));
       assert.deepEqual(await store.controls.all(), [], "the team isn't paused");
       assert.notEqual((await w.a6g("pause", "fixture", "--after", "tasks")).code, 0);
+      assert.match((await w.a6g("pause", "fixture", "--until-reset")).out, /or until its usage limit resets, from its lead/);
       assert.equal((await w.a6g("resume", "fixture")).code, 0);
       assert.ok(!existsSync(join(w.run, "paused")));
     } finally {

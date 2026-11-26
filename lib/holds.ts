@@ -5,12 +5,25 @@
 // ones on every run, and a6g pause, resume, budget and agreement at once. A new working agreement is told to the
 // planner, once, and kept in agreement.json for how often a message may go (the commands that ask or decide read the
 // one in force from the store). A review of a decision is written onto its record, which needs the store
-// (lib/reviews.ts).
+// (lib/reviews.ts). A pause asked to end at the usage limit's reset keeps when that is in hold.json (keepReset), and
+// the watchdog resumes the team once it has passed.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describeLimits, resumesWhen } from "./budget.ts";
 import { type Agreement, agreementChanges, agreementLines, normalised } from "./tasks/agreement.ts";
-import { agreementOf, type Control, describeHold, type HoldState, holdOf, holdReport, type Limits, settling } from "./tasks/controls.ts";
+import {
+  agreementOf,
+  type Control,
+  describeHold,
+  endsAtReset,
+  type HoldState,
+  holdOf,
+  holdReport,
+  type Limits,
+  RESET,
+  type ResetAt,
+  settling,
+} from "./tasks/controls.ts";
 import { nowIso, type Task } from "./tasks/model.ts";
 import { readJson, writeJson } from "./util.ts";
 
@@ -141,21 +154,49 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     const budget = control.by === "budget";
     // The watchdog's own record of a hold that settled: the run folder has it already.
     if (control.by === "watchdog") continue;
+    // Whether the pause, with those before it, ends by itself at the usage limit's reset (controls.ts endsAtReset):
+    // one asked to, but of a team the budget paused too, doesn't.
+    const ends = hold !== null && endsAtReset(controls.slice(0, index + 1));
+    const notAsAsked = control.until === "reset" && !ends ? "; it doesn't end at the usage limit's reset, as the budget paused the team too" : "";
     if (hold && existsSync(pausedFile(run))) {
-      // Stopped already: what it stopped after, and its report, stay as they are.
-      log.push(`${whoAsked(control.by)} asked to pause ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}, but the team is paused already`);
+      // Stopped already: what it stopped after, and its report, stay as they are. Whether it ends by itself is the
+      // newest ask's to say, so a team stopped for good can be left to start again at the reset, and the other way round.
+      const kept = readHold(run);
+      const asked = `${whoAsked(control.by)} asked to pause ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}`;
+      if ((kept?.until === "reset") === ends) log.push(`${asked}, but the team is paused already${notAsAsked}`);
+      else {
+        // A team paused with no hold kept (by a file alone, when the graph was out of reach) gets one for it.
+        const whole: HoldState = kept ?? { ...hold, scope: "now", tasks: [], journeys: [], settledAt: control.at, left: [], stuck: [], report: null };
+        const { until: _was, reset: _when, ...state } = whole;
+        writeJson(holdFile(run), ends ? { ...state, until: "reset" } : state);
+        log.push(
+          `${asked} of a team paused already: ${ends ? "the pause ends when its usage limit resets" : budget ? "the pause no longer ends at the usage limit's reset, as the budget paused the team too" : "the pause stays until they resume the team"}`
+        );
+      }
     } else if (hold) {
-      const state: HoldState = { ...hold, settledAt: hold.scope === "now" ? control.at : null, left: [], stuck: [], report: null };
+      const { until: _own, ...asked } = hold;
+      const state: HoldState = {
+        ...asked,
+        ...(ends ? { until: "reset" as const } : {}),
+        settledAt: hold.scope === "now" ? control.at : null,
+        left: [],
+        stuck: [],
+        report: null,
+      };
       writeJson(holdFile(run), state);
       if (hold.scope === "now") writeFileSync(pausedFile(run), control.at);
       log.push(
-        `${whoAsked(control.by)} paused the team ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}${budget ? ` (${hold.note})` : ""}`
+        `${whoAsked(control.by)} paused the team ${hold.scope === "now" ? "now" : `after ${describeHold(hold)}`}${budget ? ` (${hold.note})` : ""}${ends ? ", until its usage limit resets" : ""}${notAsAsked}`
       );
       // The budget's own pauses say so, and why, and when auto-resume starts the team again (at the earliest: another
       // limit may be over too): the planner's next report should say what it got done.
       const who = budget ? `The team's budget (${hold.note})` : "The operator";
       const when = budget ? resumesWhen([(control.trigger ?? "").split(":")[0] ?? ""], readLimits(run)) : null;
-      const until = when ? `the budget starts it again (auto-resume, ${when} at the earliest) or the operator resumes it` : "the operator resumes it";
+      const until = when
+        ? `the budget starts it again (auto-resume, ${when} at the earliest) or the operator resumes it`
+        : ends
+          ? "its usage limit resets (the watchdog starts it again then) or the operator resumes it"
+          : "the operator resumes it";
       tell.push(
         hold.scope === "now"
           ? { text: `${who} paused the team: merge nothing and start no members until ${until}. Finish your turn.`, wake: false }
@@ -170,12 +211,17 @@ export function applyControls(run: string, controls: Control[], operator: { tech
     } else if (control.kind === "resume") {
       rmSync(pausedFile(run), { force: true });
       rmSync(holdFile(run), { force: true });
-      log.push(`${whoAsked(control.by)} resumed the team`);
+      log.push(
+        control.by === RESET
+          ? "the team's usage limit reset, so the pause asked to end then has: the team is resumed"
+          : `${whoAsked(control.by)} resumed the team`
+      );
       tell.push({
-        text: budget
-          ? `The team starts again: ${control.note}. Carry on.`
-          : `The operator resumed the team${control.note ? `, and wrote:\n\n${control.note}\n\n` : ". "}` +
-            "Record what they said where it belongs (the tasks it concerns, decisions.md), then carry on.",
+        text:
+          budget || control.by === RESET
+            ? `The team starts again: ${control.note}. Carry on.`
+            : `The operator resumed the team${control.note ? `, and wrote:\n\n${control.note}\n\n` : ". "}` +
+              "Record what they said where it belongs (the tasks it concerns, decisions.md), then carry on.",
         wake: true,
       });
     } else if (control.kind === "budget") {
@@ -223,4 +269,49 @@ export function holdNote(run: string): string {
   const hold = readHold(run);
   if (!hold || hold.settledAt || hold.scope === "now") return "";
   return ` The operator is pausing the team after ${describeHold(hold)}: finish and merge that, and start nothing else${hold.left.length ? ` (left: ${hold.left.join("; ")})` : ""}.`;
+}
+
+// How long after a guess was made it gives way to a limit a reading then finds reached: two readings' time.
+export const GUESS_MIN = 30;
+
+const utc = (iso: string): string => `${iso.slice(0, 16).replace("T", " ")} UTC`;
+
+// For a pause asked to end at the usage limit's reset: keeps when that is in the hold, from `found` (lib/steer.ts
+// resetFor: what the readings say now), and says whether it has passed. The time kept stays, since a limit that has
+// reset isn't read again. But a guess gives way to an earlier time a subscription closed to the team says within
+// GUESS_MIN of it (the limit was reached between two readings), and one no reading could say to the first that can.
+// Null when no such pause is in force; `said` is a line for the team's log when what's kept changed.
+export function keepReset(run: string, found: Omit<ResetAt, "found">, now = new Date()): { reset: ResetAt; due: boolean; said: string | null } | null {
+  const hold = readHold(run);
+  if (!hold || hold.until !== "reset") return null;
+  const kept = hold.reset ?? null;
+  const sooner =
+    kept !== null &&
+    kept.guess &&
+    !found.guess &&
+    found.at !== null &&
+    (kept.at === null || found.at < kept.at) &&
+    now.getTime() - Date.parse(kept.found) <= GUESS_MIN * 60_000;
+  const reset: ResetAt = kept === null || (kept.at === null && found.at !== null) || sooner ? { ...found, found: now.toISOString() } : kept;
+  let said: string | null = null;
+  if (reset !== kept) {
+    writeJson(holdFile(run), { ...hold, reset });
+    said = !reset.at
+      ? `the pause was asked to end when the team's usage limit resets, but ${reset.why}: it stays until a reading does, or the operator resumes the team`
+      : reset.guess
+        ? `the pause ends at ${utc(reset.at)}, when the limit nearest its end resets (${reset.why}): no subscription is closed to the team as the readings stand`
+        : `the pause ends at ${utc(reset.at)}, when the team's usage limit resets (${reset.why})`;
+  }
+  return { reset, due: reset.at !== null && Date.parse(reset.at) <= now.getTime(), said };
+}
+
+// When a pause that ends at the usage limit's reset does, in words (`time` writes the moment); "" for one that doesn't.
+export function resetWords(hold: Pick<HoldState, "until" | "reset"> | null, time: (iso: string) => string = utc): string {
+  if (hold?.until !== "reset") return "";
+  const reset = hold.reset;
+  if (!reset) return "it starts again when its usage limit resets (the watchdog works out when at its next run)";
+  if (!reset.at) return `it was asked to start again when its usage limit resets, but ${reset.why}`;
+  return reset.guess
+    ? `it starts again at ${time(reset.at)}, when the limit nearest its end resets (${reset.why} when that was worked out)`
+    : `it starts again at ${time(reset.at)}, when its usage limit resets (${reset.why})`;
 }

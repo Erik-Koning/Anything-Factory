@@ -23,8 +23,9 @@ Set up and run a team (the operator)
                                       --worker on a machine other than a Mongo team's lead: builders and testers only
                                       --docker <context>: the Docker engine its containers run on, from then on
   a6g start <team>                    run the watchdog now (it starts the planner); a paused team stays paused
-  a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]
-                                      stop a team now, or once the work (or journeys) under way is merged
+  a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--until-reset] [--note "…"]
+                                      stop a team now, or once the work (or journeys) under way is merged;
+                                      --until-reset: it starts again by itself when its usage limit resets
   a6g resume <team> [--note "…"]      start it again; the note goes to the planner
   a6g budget <team> [--account <sub>] [--daily <$|%>] [--weekly <$|%>] [--total <$|%>] [--auto-resume] [--restart] [--clear]
                                       its spending limits, in API-equivalent $ or % of a subscription's week

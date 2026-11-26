@@ -1001,11 +1001,14 @@ test("a contributor neither sees the work nor adds to it, by page or by calling 
   expect(await graph.collection("tasks").findOne({ team: "shop", title: "Sneaky task" })).toBeNull();
 });
 
+// Controls oldest first, by the number in their ids: as text, k10 sorts before k9.
+const inOrder = (controls: Control[]): Control[] => controls.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+
 test("the admin pauses the team after the work under way, reads where it stands, and resumes it with feedback", async () => {
   const { page } = admin;
   const { graph, accounts } = await databases();
   const controls = async (): Promise<Control[]> =>
-    (await graph.collection("controls").find({ team: "shop" }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+    inOrder((await graph.collection("controls").find({ team: "shop" }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
   const tasks = async (): Promise<Task[]> =>
     (await graph.collection("tasks").find({ team: "shop" }).toArray()).map(({ _id, ...t }) => t as unknown as Task);
   // The lead's watchdog isn't running here: the test reports what it would, from the same functions.
@@ -1095,6 +1098,76 @@ test("the admin pauses the team after the work under way, reads where it stands,
   });
   await expect.poll(() => refusalOf("team.paused")).toContain("You can't do that here.");
   expect(await controls()).toHaveLength(2);
+  await report({ state: "active", hold: null });
+});
+
+test("the admin stops a team until its usage limit resets, reads when that is, and takes it back under ⋯", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const controls = async (): Promise<Control[]> =>
+    inOrder((await graph.collection("controls").find({ team: "shop" }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
+  // The lead's watchdog isn't running here: the test reports what it would.
+  const report = (status: Record<string, unknown>) =>
+    graph
+      .collection("teams")
+      .updateOne({ _id: "shop" as never }, { $set: { status: { members: {}, planner: "running", at: new Date().toISOString(), ...status } } });
+  const panel = page.getByRole("region", { name: "Controls" });
+  const head = page.locator(".team-head");
+  const more = head.locator("summary[aria-label='More for Shop']");
+  const pausing = page.getByRole("dialog", { name: "Pause Shop" });
+  const tick = pausing.getByLabel(/Resume by itself when its usage limit resets/);
+
+  // A Mac whose factory version can't end a pause at the reset isn't offered it.
+  await report({ state: "active", hold: null });
+  await page.goto("/t/shop");
+  await head.getByRole("button", { name: "Pause…" }).click();
+  await expect(pausing.getByText("After the work under way")).toBeVisible();
+  await expect(tick).toHaveCount(0);
+  await pausing.getByRole("button", { name: "Cancel" }).click();
+
+  // One that can: ticked in the dialog, here with a stop now.
+  await report({ state: "active", hold: null, untilReset: true });
+  await page.reload();
+  await head.getByRole("button", { name: "Pause…" }).click();
+  await pausing.getByLabel(/^Now:/).check();
+  await tick.check();
+  await pausing.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop, until its usage limit resets.");
+  expect((await controls()).at(-1)).toMatchObject({ kind: "pause", scope: "now", until: "reset" });
+  const hold = holdOf(await controls());
+  if (!hold) throw new Error("no hold");
+  expect(hold.until).toBe("reset");
+
+  // Its Mac says when, and which limit: the panel reads it in the reader's own time.
+  const at = new Date(Date.now() + 3 * 3_600_000).toISOString();
+  const reset = { at, why: "default has used its week", guess: false, found: new Date().toISOString() };
+  const paused = (fields: Record<string, unknown>) =>
+    report({ state: "paused", untilReset: true, hold: { ...hold, settledAt: hold.since, left: [], stuck: [], report: null, ...fields } });
+  await paused({ reset });
+  await page.reload();
+  await expect(
+    panel.getByText(/It resumes by itself .* when its usage limit resets \(default has used its week\)\. Resume it to start sooner\./)
+  ).toBeVisible();
+  await expect(panel.locator(`time[datetime="${at}"]`)).toBeVisible();
+  await expect(panel.getByText("Work stays stopped until you resume it.")).toHaveCount(0);
+
+  // Taken back under ⋯: it stays paused until it's resumed.
+  await more.click();
+  await head.getByRole("button", { name: "Keep it paused until I resume it" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop.");
+  expect(holdOf(await controls())?.until).toBeUndefined();
+  await paused({ until: null });
+  await page.reload();
+  await expect(panel.getByText("Work stays stopped until you resume it.")).toBeVisible();
+  // And asked of a team stopped already, the same way.
+  await more.click();
+  await head.getByRole("button", { name: "Resume when its usage limit resets" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop, until its usage limit resets.");
+  expect(holdOf(await controls())?.until).toBe("reset");
+  await expect(panel.getByText("Asked to pause now, until its usage limit resets").first()).toBeAttached();
+
+  await head.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to resume");
   await report({ state: "active", hold: null });
 });
 
@@ -1275,7 +1348,7 @@ test("the admin sets the budget with a code on Settings; a limit left blank is n
   await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Set the budget" }).click();
   await expect(page.getByRole("status")).toContainText("The budget is $12 a day, none a week, $300 in all.");
-  const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { at: -1 } });
   expect(budget).toMatchObject({ by: expect.stringMatching(/^web:s\d+$/), limits: { daily: 12, weekly: null, total: 300, autoResume: true } });
   await expect
     .poll(() => accounts.collection("audit").findOne({ team: "shop", action: "team.budget", outcome: "ok" }))
@@ -1293,7 +1366,7 @@ test("the admin sets the budget with a code on Settings; a limit left blank is n
   await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Change the budget" }).click();
   await expect(page.getByRole("status")).toContainText("The budget is none a day, 60% a week, 150% in all of a subscription's week.");
-  const shares = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  const shares = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { at: -1 } });
   expect(shares).toMatchObject({ limits: { daily: null, weekly: 60, total: 150, unit: "subscription" } });
   // 21.25 of a $1,000 week is 2.1% of 60%; 27.75 is 2.8% of 150%.
   await expect(panel.locator(".tiles li").nth(1)).toContainText("2.1%");
@@ -1305,7 +1378,7 @@ test("the admin sets the budget with a code on Settings; a limit left blank is n
 // The operator's controls of one kind on Shop, oldest first, as the store keeps them.
 async function shopControls(kind: Control["kind"]): Promise<Control[]> {
   const { graph } = await databases();
-  return (await graph.collection("controls").find({ team: "shop", kind }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+  return inOrder((await graph.collection("controls").find({ team: "shop", kind }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
 }
 
 test("a member reads what the team decided for the operator, and reviews none of it", async ({ browser }) => {
