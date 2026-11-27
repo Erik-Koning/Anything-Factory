@@ -360,7 +360,9 @@ claude --agent a6g:<role>                                 the role's prompt, fro
 Each role runs on its own model: Fable for the planner, the innovator and the scaffolder, who decide what gets built
 and on what, and Opus for the roles that build it and check it. `model` and `roles.<role>.model` in `team.json`
 change that ([docs/team.md](docs/team.md#models)); the planner passes each member's to T3 Code, and the guard refuses
-a member started on any other.
+a member started on any other. The short names (`fable`, `opus`, …) are this version's newest of each family; when your
+subscriptions use a newer one, or a team still runs an older one, the watchdog tells you once and `a6g doctor` keeps
+saying so.
 
 The appended prompt is **compiled**, never written by hand. It combines:
 

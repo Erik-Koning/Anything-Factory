@@ -17,7 +17,7 @@ interface Price {
   tier?: { over: number; input: number; output: number };
 }
 
-const PRICES: Record<string, Price> = {
+export const PRICES: Record<string, Price> = {
   "claude-fable-5-2": { input: 8, output: 40, cacheRead: 0.2 },
   "claude-mythos-5-2": { input: 8, output: 40, cacheRead: 0.2 },
   "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
