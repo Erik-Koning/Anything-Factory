@@ -55,6 +55,23 @@ describe("prompts", () => {
     assert.match(compile(team, "reviewer"), /change nothing in it/);
   });
 
+  test("a reviewer's copy is named for its team and gets its own dependencies, never the checkout's", () => {
+    const own = loadTeam(
+      makeRepo(
+        baseTeam({
+          worktreeSetup: "pnpm install --frozen-lockfile",
+          roles: { planner: {}, builder: {}, reviewer: {}, "security-reviewer": {} },
+        })
+      )
+    );
+    for (const role of ["reviewer", "security-reviewer"])
+      assert.match(
+        compile(own, role),
+        /`\/tmp\/review-fixture-<n>` \(other teams' reviewers work in \/tmp too\)\. Give it its own dependencies \(`pnpm install --frozen-lockfile`, run in the copy\), never the team checkout's/
+      );
+    assert.doesNotMatch(compile(own, "builder"), /\/tmp\/review-/);
+  });
+
   test("the scoring matrix goes to those who score, check or suggest a score; the innovator gets its research commands", () => {
     const withIdeas = loadTeam(
       makeRepo(
