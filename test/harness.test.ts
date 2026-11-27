@@ -41,7 +41,10 @@ describe("the harness manifest", () => {
     assert.match(said({ ...manifest, app: "https://example.com" }), /harness\.json\.app: not one of/);
     assert.match(said({ ...manifest, ignoreConsole: ["."] }), /ignoreConsole: not one of/);
     assert.match(said({ ...manifest, minTarget: 1 }), /minTarget: not one of/);
-    assert.match(said({ ...manifest, auth: { command: "sh login.sh", states: { staff: "x.json" } } }), /auth\.command: not one of project, states/);
+    assert.match(
+      said({ ...manifest, auth: { command: "sh login.sh", states: { staff: "x.json" } } }),
+      /auth\.command: not one of project, states, maxAgeMin/
+    );
     assert.match(
       said({ ...manifest, e2e: { config: "../elsewhere/playwright.config.ts" } }),
       /e2e\.config: the Playwright configuration file, a path inside/
@@ -61,6 +64,21 @@ describe("the harness manifest", () => {
     assert.match(said({ ...manifest, schemes: { dark: {} } }), /schemes\.dark: how the app switches to it/);
     assert.match(said({ ...manifest, schemes: { sepia: { htmlClass: "sepia" } } }), /schemes\.sepia: a colour scheme/);
     assert.match(said({ pages: [], auth: manifest.auth }), /auth: sign-ins are made by a project in e2e\.config/);
+  });
+
+  test("a sign-in the app ends on its own says how long it lives, in whole minutes, for a state it makes", () => {
+    const withLife = (maxAgeMin: unknown) => parseHarness({ ...manifest, auth: { ...manifest.auth, maxAgeMin } });
+    assert.deepEqual(withLife({ staff: 15 }).harness.auth, { ...manifest.auth, maxAgeMin: { staff: 15 } });
+    assert.deepEqual(withLife({}).harness.auth, manifest.auth);
+    const said = (maxAgeMin: unknown) => withLife(maxAgeMin).problems.join("\n");
+    assert.match(said({ person: 15 }), /auth\.maxAgeMin\.person: a sign-in state auth\.states names \(staff\)/);
+    assert.match(said({ staff: 1 }), /auth\.maxAgeMin\.staff: whole minutes, 2 to 720/);
+    assert.match(said({ staff: 12.5 }), /auth\.maxAgeMin\.staff: whole minutes/);
+    assert.match(said({ staff: "15" }), /auth\.maxAgeMin\.staff: whole minutes/);
+    assert.match(said([15]), /auth\.maxAgeMin: an object/);
+    // The page plan carries it to the runner.
+    const { team } = normalize(baseTeam() as RawTeam, "");
+    assert.deepEqual(pagePlan(team, withLife({ staff: 15 }).harness).auth?.maxAgeMin, { staff: 15 });
   });
 
   test("a page says who it refuses: states a page is seen as, and the signed-out; taking one out is checking less (29)", () => {

@@ -1,5 +1,14 @@
 # Changelog
 
+## Page checks: a sign-in the app ends on its own is made again mid-run
+
+- **A sign-in can say how long it lives.** The harness manifest's `auth.maxAgeMin` gives a state a life in minutes
+  (`{ "person": 15 }`), for an app that signs it out sooner than the factory's 12 hours. `a6g pages` makes it again
+  once it's that old, before each page seen as it and each refusal asked of it, so a run longer than the app's idle
+  sign-out no longer fails that state's later pages, and a refusal is never read from a session the app had already
+  ended: what the old sign-in showed (where its pages landed, whether it was live) is asked again with the new one.
+  Found on a team whose app signs its users out after 20 idle minutes and whose page runs take longer.
+
 ## 0.8.17: An upgrade that ends
 
 - **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on

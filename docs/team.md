@@ -301,7 +301,8 @@ that's a set of pages, `"finish": "a6g pages done"`.
   the page has been scrolled to the bottom and back so what loads late is there. Screenshots are taken with
   animations off, before the focus walk.
 - **Signed in:** a page with `as` is seen with that sign-in, made again by the manifest's `auth` project when its
-  saved state is missing or more than 12 hours old. A sign-in that fails fails its pages (an old state is never used
+  saved state is missing or more than 12 hours old (or older than the state's own `auth.maxAgeMin`, checked before
+  each page that uses it). A sign-in that fails fails its pages (an old state is never used
   in its place), and `a6g check` and `a6g pages run` refuse an `as` that names no state.
 - **`allowedChanges`:** where the branch may differ from `base` (`pages.base`, else the team's `base`). Anything
   else keeps the finish line from holding.
@@ -404,7 +405,9 @@ the repository's own Playwright with the configuration it names.
   the machine (`npx playwright install chromium`, which the scaffolder runs); a run whose tests find none counts as
   not run, and says so.
 - **`auth`:** the Playwright project in that configuration that signs in and saves each state; pages and specs use
-  them by name.
+  them by name. `maxAgeMin` gives a state the app ends on its own (an idle sign-out) a shorter life than the 12
+  hours, in whole minutes a little under the app's own: `"maxAgeMin": { "member": 15 }`. A page run makes such a state
+  again once it's that old, mid-run too, before a page is seen as it or asked to refuse it.
 - **`pages`:** pages to check beside the operator's (an id the operator listed stays theirs).
 - **`refuses`,** on a page: the sign-in states, and `signed-out`, that must not be served it. `a6g pages` asks for the
   page as each of them, once, and it has to be refused: sent to another path, or answered 401, 403 or 404. A page
