@@ -164,6 +164,40 @@ describe("the check after merges", () => {
     assert.equal(logOf(home).trim().split("\n").length, 1, "and nothing was checked twice");
   });
 
+  test("a commit of the team's notes alone under a running check leaves its run standing; any other runs it again", async () => {
+    const { start, stop, serve } = app();
+    const url = await start();
+    try {
+      const wake = (): void => assert.fail("nothing new to say");
+      const check = async (files: Record<string, string>): Promise<{ home: string; at: string; asked: number }> => {
+        const home = makeRepo({ ...baseTeam({ board: "tasks", roles: plain }), environment: { health: [`${url}/`] } } as RawTeam);
+        const at = git(home, "rev-parse", "HEAD");
+        let asked = 0;
+        // The check asks whether the app is up as it starts and again as it ends: the commit lands between.
+        serve["/"] = () => {
+          if (++asked === 2) commit(home, files);
+          return [200, "Fine"];
+        };
+        await verifyAfterMerge(home, loadTeam(home), tmp("a6g-run-"), "a6g/b1-first", { wake, healthWaitMs: 1 });
+        return { home, at, asked };
+      };
+      const last = (home: string): string | undefined => readJson<{ commit?: string }>(join(stateDir(home), "verify-last.json"), {}).commit;
+
+      const notes = await check({ ".a6g/lessons.md": "# Lessons\n\nRun the voice specs in the foreground.\n" });
+      assert.equal(notes.asked, 2, "one run");
+      assert.equal(last(notes.home), notes.at, "it stands for the commit it ran on");
+      assert.equal(checkDue(notes.home), null);
+
+      const code = await check({ ".a6g/lessons.md": "# Lessons\n", "src/app.ts": "export const a = 2;\n" });
+      assert.equal(code.asked, 4, "a run that says nothing of either commit, then one on the commit that moved");
+      assert.notEqual(last(code.home), code.at);
+      assert.equal(last(code.home), git(code.home, "rev-parse", "HEAD"));
+      assert.equal(checkDue(code.home), null);
+    } finally {
+      stop();
+    }
+  });
+
   test("a merge that didn't land runs the check a landed one left due, and marks none of its own", async () => {
     const home = makeRepo(baseTeam({ board: "tasks", roles: plain }));
     const [team, run, state] = [loadTeam(home), tmp("a6g-run-"), stateDir(home)];

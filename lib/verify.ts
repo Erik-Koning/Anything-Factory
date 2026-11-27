@@ -4,7 +4,8 @@
 // check already running takes the newer commit when it finishes). A check due for longer than OVERDUE_MIN holds its
 // turn instead, so a steady run of merges can't leave the branch unchecked. It holds the merge lock (nothing
 // fast-forwards the checkout), then the app lock (nothing restarts the app), then a gate slot, in that order, as every
-// holder of those locks takes them; and it throws a run away if the checkout's commit moved anyway.
+// holder of those locks takes them; and it throws a run away if the checkout's commit moved anyway (not for a commit
+// of the team's notes alone).
 //
 // The app's health comes first: an app that's down is one finding, nothing else runs, and the check stays due; one
 // that goes away while the checks run files nothing, and the check stays due too. Then
@@ -40,6 +41,15 @@ export const pendingDir = (state: string): string => join(state, "merges", "pend
 const head = (home: string): string => execFileSync("git", ["rev-parse", "HEAD"], { cwd: home, encoding: "utf8" }).trim();
 const contains = (home: string, ancestor: string, commit: string): boolean =>
   spawnSync("git", ["merge-base", "--is-ancestor", ancestor, commit], { cwd: home }).status === 0;
+// The team's own notes (the planner's decisions, lessons and direction, .a6g/*.md) change nothing a check runs. The
+// planner commits them on the integration branch whenever it likes, so a check that one landed under still stands for
+// the commit it ran on (a team's suite of almost two hours was thrown away for a lessons.md).
+const NOTES = /^\.a6g\/[^/]+\.md$/;
+function onlyNotes(home: string, from: string, to: string): boolean {
+  const diff = spawnSync("git", ["diff", "--name-only", from, to], { cwd: home, encoding: "utf8" });
+  const files = diff.status === 0 ? diff.stdout.split("\n").filter(Boolean) : [];
+  return files.length > 0 && files.every((file) => NOTES.test(file)) && contains(home, from, to);
+}
 const firstLine = (error: unknown): string => String((error as Error).message ?? error).split("\n")[0] ?? "";
 const parsed = <T>(file: string): T | null => {
   try {
@@ -562,7 +572,8 @@ async function checkOnce(
             due: "waiting",
           };
         }
-        if (head(home) !== at) {
+        const now = head(home);
+        if (now !== at && !onlyNotes(home, at, now)) {
           // A run on a checkout that moved under it says nothing of either commit.
           if (suite) forgetRun(home, suite);
           return { told: null, due: "moved" };
