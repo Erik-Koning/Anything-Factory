@@ -28,9 +28,18 @@ test("an admin sees each window's pool left, with each subscription's part, and 
   const sort = page.getByRole("navigation", { name: "Sort" });
   await expect(sort.getByRole("link", { name: "Most used" })).toHaveAttribute("aria-current", "true");
   await expect(facts.first()).toContainText("refdocs@example.com");
+  // The keys to choose one by stay A–Z whatever the order under them: "most used" is of the week here and of the cost
+  // on Cost, so they'd change places from one view to the next.
+  const keys = page.getByRole("navigation", { name: "Subscription" }).locator(".usage-filter-label");
+  const byName = ["All subscriptions", "operator@example.com", "default", "work", "refdocs@example.com"];
+  await expect(keys).toHaveText(byName);
+  await page.goto("/subscriptions?view=cost");
+  await expect(keys).toHaveText(byName);
+  await page.goto("/subscriptions");
   await sort.getByRole("link", { name: "A–Z" }).click();
   await expect(page).toHaveURL(/sort=name/);
   await expect(facts.first()).toContainText("operator@example.com");
+  await expect(keys).toHaveText(byName);
 
   // One of an account's names: what it used, its teams and its limits, the sort kept.
   const chooser = page.getByRole("navigation", { name: "Subscription" });
