@@ -9,10 +9,14 @@
 // on some plans) is reported, not budgeted, and once it's used up the roles on that model run on Opus there until it
 // resets (fallbackFor); the five-hour window counts when the report has one.
 //
-// Accounts: ~/.a6g/subscriptions.json, [{ name, configDir }]; with none listed, this Mac's own Claude Code login
-// (~/.claude). Another account has a Claude Code config folder of its own (CLAUDE_CONFIG_DIR), as Claude Code's docs
-// say to run several, and a team's T3 instances run on it through T3 Code's own setting for that (homePath, lib/t3.ts).
-// Each reading records the login in the folder (its account id and plan), so a name whose login changed is noticed.
+// Accounts: ~/.a6g/subscriptions.json, [{ name, configDir, login, email }]; with none listed, this Mac's own Claude Code
+// login (~/.claude). Another account has a Claude Code config folder of its own (CLAUDE_CONFIG_DIR), as Claude Code's
+// docs say to run several: one a6g adds is in ~/.a6g/logins/<name>, which no Claude Code session of the operator's signs
+// in to, as any of them does to this Mac's own. A team's T3 instances run on it through T3 Code's own setting for that
+// (homePath, lib/t3.ts). Each subscription keeps the Claude account it was added with (or first read on): a folder
+// signed in to another since is held, closed to the teams and not read, until it's signed in to its own again or the
+// operator makes the other its own (a6g subscriptions signin), so a sign-in elsewhere can't move a team's work, or its
+// usage, onto another account unnoticed.
 //
 // Choosing: the operator's limits per subscription and across all of them (subscriptions/limits.json) close a
 // subscription; one whose week or five-hour window is used up is closed until it resets, as T3 Code treats a used-up
@@ -23,7 +27,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
+import { isEmail, type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
 import { fallbackModel, familyOf, modelName } from "./models.ts";
 import { A6G_HOME } from "./paths.ts";
 import { dayOf, OWN_LOGIN, round } from "./tasks/spend.ts";
@@ -34,6 +38,9 @@ export interface Account {
   name: string;
   // Its Claude Code config folder, or null for this Mac's own login.
   configDir: string | null;
+  // Its own Claude account (its id) and the address it signs in with: the one it was added with, or its first reading's.
+  login?: string | null;
+  email?: string | null;
 }
 
 // A window of a subscription's usage: how much is used, 0 to 100, and when it resets.
@@ -76,6 +83,8 @@ export interface SubscriptionState {
   // The estimate in use across all of them: the median of the newest, or null before there's one. Each
   // subscription's own is weekFor's.
   week: number | null;
+  // Subscriptions whose folder is signed in to another account than their own, and since when: closed to the teams.
+  held?: Record<string, string>;
 }
 
 // A subscription's limits, each in percent of its window: the share of it the factory's teams may take.
@@ -100,6 +109,8 @@ const accountsFile = join(A6G_HOME, "subscriptions.json");
 const stateFile = join(SUBS, "state.json");
 const limitsFile = join(SUBS, "limits.json");
 const useFile = join(SUBS, "use.json");
+// The folders of the subscriptions a6g adds without one of the operator's.
+export const loginsDir = join(A6G_HOME, "logins");
 // A reading needs this much of the week used, and this much spent, to say what a week comes to: the report gives
 // whole percents, and a little use says little.
 const MIN_PERCENT = 5;
@@ -140,20 +151,40 @@ export function accountAt(homePath: string | null | undefined, list = accounts()
   return list.find((a) => (path ? a.configDir === path : a.configDir === null))?.name ?? null;
 }
 
-// The login in a Claude Code config folder: its account id and plan, from Claude Code's own config (.claude.json,
-// beside the folder for this Mac's own login, inside it for another). Null when it holds none (signed out, or an
-// API key).
-export function loginOf(account: Account): { login: string; plan: string | null } | null {
+// The login in a Claude Code config folder: its account id, plan and the address it signs in with, from Claude Code's
+// own config (.claude.json, beside the folder for this Mac's own login, inside it for another). Null when it holds
+// none (signed out, or an API key).
+export function loginOf(account: Account): { login: string; plan: string | null; email: string | null } | null {
   const file = account.configDir ? join(account.configDir, ".claude.json") : join(homedir(), ".claude.json");
   try {
     const oauth = readJson<{ oauthAccount?: Record<string, unknown> }>(file, {}).oauthAccount;
     const login = oauth?.["accountUuid"];
     if (typeof login !== "string" || !login) return null;
     const plan = oauth?.["planDisplayName"] ?? oauth?.["organizationType"];
-    return { login, plan: typeof plan === "string" && plan ? plan : null };
+    const email = oauth?.["emailAddress"];
+    return { login, plan: typeof plan === "string" && plan ? plan : null, email: isEmail(email) ? email : null };
   } catch {
     return null;
   }
+}
+
+// Whether a subscription's folder is signed in to its own account, from the login there now: yes for one that has none
+// kept yet.
+export const onOwn = (account: Account, login: { login: string } | null): boolean => !account.login || login?.login === account.login;
+
+// The list with each subscription's own account kept: one with none yet takes the account its folder is signed in to,
+// and one signed in to its own takes the address it signs in with now. Null when nothing changed.
+export function keptLogins(list: Account[], login = loginOf): Account[] | null {
+  let changed = false;
+  const kept = list.map((account) => {
+    const found = login(account);
+    if (!found || !onOwn(account, found)) return account;
+    const email = found.email ?? account.email ?? null;
+    if (account.login === found.login && (account.email ?? null) === email) return account;
+    changed = true;
+    return { ...account, login: found.login, email };
+  });
+  return changed ? kept : null;
 }
 
 interface ReportLimit {
@@ -281,31 +312,58 @@ export function sameLogins(list: Account[], login = loginOf): string[][] {
   return [...by.values()].filter((names) => names.length > 1);
 }
 
-// Reads every account's usage and folds it in (the watchdog, every quarter hour, or five minutes near a limit).
-// Resolves to lines for its log.
+// Reads every account's usage and folds it in (the watchdog, every quarter hour, or five minutes near a limit), holds
+// each one signed in to another account than its own, and keeps each one's own account. Resolves to lines for its log.
 export function observeSubscriptions(now = new Date()): string[] {
   let state = subscriptionState();
   const said: string[] = [];
   const list = accounts();
+  const held: Record<string, string> = {};
   for (const account of list) {
     const configDir = configDirOf(account);
+    const was = state.held?.[account.name];
     // No Claude Code here (or not under this home): nothing to read.
-    if (!existsSync(configDir)) continue;
+    if (!existsSync(configDir)) {
+      if (was) held[account.name] = was;
+      continue;
+    }
+    const login = loginOf(account);
+    // Signed in to another account (or signed out since): that account's report isn't this one's, and its teams
+    // mustn't run on it.
+    if (!onOwn(account, login) && (login || was)) {
+      held[account.name] = was ?? now.toISOString();
+      if (!was)
+        said.push(
+          `${account.name} is signed in to ${login?.email ?? "another Claude account"}, not ${account.email ?? "its own"}: its teams don't run on it until it's signed in to its own again (a6g subscriptions signin ${account.name})`
+        );
+      continue;
+    }
+    if (was) said.push(`${account.name} is signed in to its own account again: its teams run on it`);
     const hours = collectHours(join(SUBS, `${account.name}.hours.json`), allTranscriptDirs(configDir), now);
     const report = readUsage(account);
     if (!report) {
       said.push(`couldn't read the ${account.name} subscription's usage (claude -p /usage gave no usage report)`);
       continue;
     }
-    const login = loginOf(account);
     const before = state.readings[account.name]?.login;
     if (before && login && before !== login.login)
       said.push(`the ${account.name} subscription is signed in to another account than when it was last read; its estimates start again`);
     state = withReading(state, account.name, { ...report, login: login?.login ?? null, plan: login?.plan ?? null }, hours, now);
   }
   for (const names of sameLogins(list)) said.push(`${names.join(" and ")} are the same Claude account: its usage counts once per name`);
+  const { held: _held, ...rest } = state;
+  state = Object.keys(held).length ? { ...rest, held } : rest;
   mkdirSync(SUBS, { recursive: true });
   writeJson(stateFile, state);
+  // Read again: the operator may have changed the list meanwhile.
+  const listed = accounts();
+  const kept = keptLogins(listed);
+  if (kept) {
+    setAccounts(kept);
+    for (const account of kept)
+      if (account.login && !listed.find((a) => a.name === account.name)?.login)
+        said.push(`${account.name} keeps ${account.email ?? `account ${account.login.slice(0, 8)}`} as its own: signed in to another, it's held`);
+  }
   return said;
 }
 
@@ -326,8 +384,9 @@ export interface Gate {
   // When it opens again, as far as the readings say.
   until: string | null;
   // What closed it, without the figures that change with each reading: "used", "limit", "all", "budget" (the team's
-  // own on it) or "unknown" (no subscription of that name here).
-  kind?: "used" | "limit" | "all" | "budget" | "unknown";
+  // own on it), "account" (its folder signed in to another account than its own) or "unknown" (no subscription of that
+  // name here).
+  kind?: "used" | "limit" | "all" | "budget" | "account" | "unknown";
 }
 
 const OPEN: Gate = { open: true, exhausted: false, room: true, why: null, until: null };
@@ -350,6 +409,7 @@ export function gate(name: string, state: SubscriptionState, limits: Record<stri
     until,
     kind,
   });
+  if (state.held?.[name]) return closed(`${name} is signed in to another Claude account than its own (a6g subscriptions signin ${name})`, null, "account");
   if (week && week.percent >= 100) return closed(`${name} has used its week`, week.resetsAt, "used");
   if (session && session.percent >= 100) return closed(`${name} has used its five hours`, session.resetsAt, "used");
   if (week && week.percent >= weeklyCap) return closed(`${name} is at ${week.percent}% of its week, its limit is ${weeklyCap}%`, week.resetsAt, "limit");
@@ -496,6 +556,44 @@ export function nearLimit(state: SubscriptionState, limits: Record<string, Subsc
   return names.some((name) => !gate(name, state, nearer, names, now).open || ownNear(name));
 }
 
+// When the usage limit a team waits on resets, for a pause the operator asked to end then (lib/holds.ts keepReset).
+// `waiting` is its roles no subscription is open to (lib/steer.ts): the first of them to open again says when. With
+// none waiting, the readings may be behind (a limit reached between two of them), or the operator paused ahead of one,
+// so it's the limit nearest its end among the subscriptions the team's roles run on (`names`), a week's or five hours',
+// and a guess ("default's week, at 63%"). `at` is null when no reading says.
+export function nextReset(
+  names: string[],
+  waiting: Record<string, Wait>,
+  state: SubscriptionState,
+  limits: Record<string, SubscriptionLimit>,
+  now = new Date()
+): { at: string | null; why: string; guess: boolean } {
+  const t = now.getTime();
+  const first = Object.values(waiting)
+    .flatMap((wait) => (wait.until && Date.parse(wait.until) > t ? [{ at: wait.until, why: wait.why }] : []))
+    .sort((a, b) => a.at.localeCompare(b.at))[0];
+  if (first) return { ...first, guess: false };
+  const windows = names.flatMap((name) => {
+    const reading = state.readings[name];
+    if (!reading) return [];
+    const week = { why: `${owns(name)} week, at ${reading.percent}%`, left: (limits[name]?.weekly ?? 100) - reading.percent, at: reading.resetsAt };
+    const session = reading.session
+      ? [
+          {
+            why: `${owns(name)} five hours, at ${reading.session.percent}%`,
+            left: (limits[name]?.session ?? 100) - reading.session.percent,
+            at: reading.session.resetsAt,
+          },
+        ]
+      : [];
+    return [week, ...session].filter((window) => Date.parse(window.at) > t);
+  });
+  const nearest = windows.sort((a, b) => a.left - b.left || a.at.localeCompare(b.at))[0];
+  return nearest
+    ? { at: nearest.at, why: nearest.why, guess: true }
+    : { at: null, why: "no reading of the team's subscriptions says when a limit resets", guess: true };
+}
+
 // A role's wait, in words: why, and until when.
 export const describeWait = (wait: Wait): string => `${wait.why}${wait.until ? ` (until ${when(wait.until)})` : ""}`;
 
@@ -554,7 +652,8 @@ export function sessionCounts(sessions: Record<string, string>, now: Date): Mach
 
 // Every subscription here as the machine's report carries it (lib/fleet.ts): its limits as last read (a window that
 // has reset since says nothing), the operator's limits, whether it's closed to the teams, the roles of each team here
-// that run on it (`on`, by name), and what it used here. Its login goes as a hash only, the same on every machine.
+// that run on it (`on`, by name), and what it used here. Its login goes as a hash, the same on every machine, with the
+// address it signs in with, so the page can say whose it is: its own account's, while its folder is signed in to another.
 export function subscriptionsReport(on: Record<string, MachineSubscription["teams"]>, now = new Date()): MachineSubscription[] {
   const state = subscriptionState();
   const limits = subscriptionLimits();
@@ -577,11 +676,15 @@ export function subscriptionsReport(on: Record<string, MachineSubscription["team
     const { days, hours } = usageBuckets(usage.tallies ?? {}, now, room);
     room -= days.length + hours.length;
     const shut = gate(name, state, limits, names, now);
-    const login = reading?.login ?? loginOf(account)?.login ?? null;
+    const folder = loginOf(account);
+    const login = account.login ?? reading?.login ?? folder?.login ?? null;
     const week = weekFor(state, name);
     return {
       name,
       login: login ? createHash("sha256").update(`a6g-login:${login}`).digest("hex").slice(0, 16) : null,
+      // Its own account's address; else the folder's while it's still signed in to the login last read: another
+      // account's isn't sent as its.
+      email: account.login ? (isEmail(account.email) ? account.email : null) : login && folder?.login === login ? folder.email : null,
       plan: reading?.plan?.slice(0, 40) ?? null,
       at: reading?.at ?? null,
       weekly: reading ? live(reading) : null,
