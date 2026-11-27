@@ -12,7 +12,7 @@ import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
 import { promptFile, promptStale } from "../prompts.ts";
 import { readSteering } from "../steer.ts";
-import { accounts, configDirOf, describeWait, loginOf, modelNotices, sameLogins, teamUses } from "../subscriptions.ts";
+import { accounts, configDirOf, describeWait, loginOf, modelNotices, onOwn, sameLogins, teamUses } from "../subscriptions.ts";
 import * as t3 from "../t3.ts";
 import { localTime, readJson, which } from "../util.ts";
 import { readToken, whatsappSettings } from "../whatsapp.ts";
@@ -139,19 +139,23 @@ export async function doctor(): Promise<number> {
   const freeGb = df ? Math.round(Number(df[3]) / 1024 / 1024) : null;
   if (freeGb !== null) (freeGb >= 20 ? ok : warn)(`${freeGb} GB free (each member's worktree holds a copy of dependencies and build output)`);
 
-  // The subscriptions (lib/subscriptions.ts): each one's folder signed in, no two on one account, and every one a team
-  // is listed to run on known here.
+  // The subscriptions (lib/subscriptions.ts): each one's folder signed in to its own account, no two on one account,
+  // and every one a team is listed to run on known here.
   const logins = accounts();
   for (const account of logins) {
     const folder = configDirOf(account);
     if (!existsSync(folder)) fail(`subscription ${account.name}: ${folder} doesn't exist (CLAUDE_CONFIG_DIR=${folder} claude auth login)`);
     else {
       const login = loginOf(account);
-      login
-        ? ok(`subscription ${account.name}: signed in${login.plan ? ` (${login.plan})` : ""}`)
-        : warn(
-            `subscription ${account.name}: no Claude login in ${folder}${account.configDir ? ` (CLAUDE_CONFIG_DIR=${folder} claude auth login)` : " (claude auth login)"}`
-          );
+      if (!login)
+        warn(
+          `subscription ${account.name}: no Claude login in ${folder}${account.configDir ? ` (CLAUDE_CONFIG_DIR=${folder} claude auth login)` : " (claude auth login)"}`
+        );
+      else if (!onOwn(account, login))
+        fail(
+          `subscription ${account.name}: signed in to ${login.email ?? "another Claude account"}, not ${account.email ?? "its own"}, so its teams don't run on it (a6g subscriptions signin ${account.name})`
+        );
+      else ok(`subscription ${account.name}: signed in${login.plan ? ` (${login.plan})` : ""}${login.email ? ` as ${login.email}` : ""}`);
     }
   }
   for (const same of sameLogins(logins)) warn(`subscriptions ${same.join(" and ")} are the same Claude account: its usage counts once per name`);

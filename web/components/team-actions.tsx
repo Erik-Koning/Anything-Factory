@@ -2,9 +2,24 @@
 // behind ⋯ the less used: restart its planner or its environment, upgrade its factory, wake it, delete it. Each press
 // completes at once, says so in a toast, and the team's Mac applies it within a minute; the overview's Controls panel
 // shows how each went. Only deleting asks for more: the team's name, typed, and a code from the authenticator.
+//
+// A pause can end by itself when the usage limit the team waits on resets, for a team stopped because its subscription
+// was used up: a tick in the Pause dialog, and for a team stopped already, under ⋯ (where it's taken back too). Offered
+// where the team's Mac will read it (it reports that), and not while the budget paused the team, which waits for the
+// budget.
 import { controlAction, teamAction } from "../app/t/[team]/actions.ts";
 import { LIMITS } from "../server/access.ts";
-import { ACTION_WORDS, actionsOf, type Control, holdOf, journeysUnderWay, type Task, type TeamAction, type TeamDoc } from "../server/factory.ts";
+import {
+  ACTION_WORDS,
+  actionsOf,
+  budgetHolds,
+  type Control,
+  holdOf,
+  journeysUnderWay,
+  type Task,
+  type TeamAction,
+  type TeamDoc,
+} from "../server/factory.ts";
 import { controlsView } from "../server/views.ts";
 import { ActionForm } from "./action-form.tsx";
 import { CloseDialog, Dialog, MoreMenu, OpenDialog } from "./overlays.tsx";
@@ -63,6 +78,9 @@ export function TeamActions({ team, controls, tasks, mayDelete }: { team: TeamDo
   );
   const open = tasks.filter((t) => t.kind === "journey" && t.status !== "done" && t.status !== "rejected");
   const underWay = new Set(journeysUnderWay(tasks).map((j) => j.id));
+  // Whether its Mac ends a pause at the usage limit's reset; for one stopped already, whether that can be asked now.
+  const untilReset = team.status?.untilReset === true;
+  const stopped = held?.scope === "now" && untilReset && !budgetHolds(controls);
   return (
     <div className="team-actions">
       {pending ? (
@@ -95,6 +113,17 @@ export function TeamActions({ team, controls, tasks, mayDelete }: { team: TeamDo
           <OpenDialog target={dialog("resume")} className="menu-item">
             Resume with a note…
           </OpenDialog>
+        ) : null}
+        {stopped ? (
+          held?.until === "reset" ? (
+            <Press action={controlAction} team={name} fields={{ kind: "stop" }} className="menu-item">
+              Keep it paused until I resume it
+            </Press>
+          ) : (
+            <Press action={controlAction} team={name} fields={{ kind: "stop", until: "reset" }} className="menu-item">
+              Resume when its usage limit resets
+            </Press>
+          )
         ) : null}
         {AT_ONCE.map((action) => (
           <Press key={action} action={teamAction} team={name} fields={{ action }} className="menu-item" disabled={busy.has(action)}>
@@ -144,6 +173,15 @@ export function TeamActions({ team, controls, tasks, mayDelete }: { team: TeamDo
                 <span>Now: nothing starts or merges; members finish their current turn. (Stop does this.)</span>
               </label>
             </fieldset>
+            {untilReset ? (
+              <label className="check">
+                <input type="checkbox" name="until" value="reset" />
+                <span>
+                  Resume by itself when its usage limit resets. For a team that ran out of its subscription&apos;s usage: its Mac starts it again once the
+                  limit it waits on resets. Unticked, it stays paused until you resume it.
+                </span>
+              </label>
+            ) : null}
             <label htmlFor={dialog("pause-note")}>
               Note (optional, for the record and the report)
               <textarea id={dialog("pause-note")} name="note" rows={2} maxLength={LIMITS.note} />

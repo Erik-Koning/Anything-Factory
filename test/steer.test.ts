@@ -14,13 +14,14 @@ import {
   listFor,
   loginDirs,
   nearLimit,
+  nextReset,
   parseUsageReport,
   type Reading,
   type SubscriptionState,
   weekFor,
   withReading,
 } from "../lib/subscriptions.ts";
-import { readLimits } from "../lib/holds.ts";
+import { readHold, readLimits } from "../lib/holds.ts";
 import { PACKAGE } from "../lib/paths.ts";
 import { budgetControl } from "../lib/tasks/controls.ts";
 import { fileStore } from "../lib/tasks/files.ts";
@@ -194,6 +195,52 @@ describe("choosing a role's subscription", () => {
     // A name that isn't a subscription here is closed.
     const unknown = chooseFor(["planner"], {}, { ...ctx, use: { "*": ["three"] } });
     assert.match(unknown.waiting["planner"]?.why ?? "", /three isn't a subscription on this Mac/);
+  });
+
+  test("one signed in to another account than its own is closed, whatever its readings say: its roles move on or wait", () => {
+    const held = { ...state(reading("one", 10), reading("two", 20)), held: { one: NOW.toISOString() } };
+    assert.deepEqual(gate("one", held, {}, ["one", "two"], NOW), {
+      open: false,
+      exhausted: false,
+      room: false,
+      why: "one is signed in to another Claude account than its own (a6g subscriptions signin one)",
+      until: null,
+      kind: "account",
+    });
+    const choice = chooseFor(
+      ["planner", "builder"],
+      { planner: "one", builder: "one" },
+      { use: { "*": ["one", "two"], builder: ["one"] }, accounts: two, state: held, limits: {}, now: NOW }
+    );
+    assert.deepEqual(choice.roles, { planner: "two", builder: "one" });
+    assert.equal(choice.waiting["builder"]?.key, "one:account");
+  });
+});
+
+describe("when the usage limit a team waits on resets", () => {
+  test("the first of its waiting roles to open says when; with none waiting, the limit nearest its end, as a guess", () => {
+    const names = ["one", "two"];
+    const waiting = {
+      builder: { why: "one has used its week", until: later(48) },
+      planner: { why: "two has used its five hours", until: later(3) },
+      tester: { why: "the team has spent $12 of the $10 a week budget on one", until: null },
+    };
+    assert.deepEqual(nextReset(names, waiting, state(), {}, NOW), { at: later(3), why: "two has used its five hours", guess: false });
+    // A wait whose time has passed says nothing any more.
+    assert.equal(nextReset(names, { planner: { why: "two has used its five hours", until: later(-1) } }, state(), {}, NOW).at, null);
+
+    const readings = state(reading("one", 63, { session: { percent: 93, resetsAt: later(2) } }), reading("two", 80));
+    assert.deepEqual(nextReset(names, {}, readings, {}, NOW), { at: later(2), why: "one's five hours, at 93%", guess: true });
+    // Against the operator's limit for it: 80% of a week limited to 85% is nearer its end than 93% of five hours.
+    assert.deepEqual(nextReset(names, {}, readings, { two: { weekly: 85 } }, NOW), { at: later(48), why: "two's week, at 80%", guess: true });
+    // Only the subscriptions the team's roles run on.
+    assert.equal(nextReset(["two"], {}, readings, {}, NOW).why, "two's week, at 80%");
+    // A window that has reset, or no reading at all: nothing says when.
+    assert.deepEqual(nextReset(names, {}, state(reading("one", 99, { resetsAt: later(-1) })), {}, NOW), {
+      at: null,
+      why: "no reading of the team's subscriptions says when a limit resets",
+      guess: true,
+    });
   });
 });
 
@@ -549,6 +596,71 @@ describe("a6g subscriptions use and limit, the guard and the watchdog", () => {
         ).outcome,
         "allow"
       );
+    } finally {
+      await w.close();
+    }
+  });
+
+  test("a pause until the reset: the watchdog resumes the team once the limit it waits on has reset; a plain pause takes it back", async () => {
+    const { w, readings, steering } = await world();
+    try {
+      const store = fileStore(w.run, "fixture");
+      const asked = async () => (await store.controls.all()).map((c) => `${c.kind} ${c.by}${c.until ? ` until ${c.until}` : ""}`);
+      const log = () => readFileSync(join(w.run, "watchdog.log"), "utf8");
+      // The team's one subscription has used its week: every role waits for it.
+      readings({ default: 100 });
+      assert.equal((await w.a6g("subscriptions", "use", "fixture", "default")).code, 0);
+      const until: string = steering().waiting.planner.until;
+      assert.ok(until);
+      const paused = await w.a6g("pause", "fixture", "--until-reset", "--note", "out of usage");
+      assert.equal(paused.code, 0, paused.out);
+      assert.match(paused.out, /fixture paused: the watchdog sends no ticks/);
+      assert.match(
+        paused.out,
+        /it starts again at \d{4}-\d\d-\d\d \d\d:\d\d, when its usage limit resets \(default has used its week\); a6g resume fixture/
+      );
+      assert.deepEqual(readHold(w.run)?.reset, { at: until, why: "default has used its week", guess: false, found: readHold(w.run)?.reset?.found });
+      assert.match(
+        log(),
+        /the operator paused the team now, until its usage limit resets\n.*the pause ends at .* UTC, when the team's usage limit resets/
+      );
+      assert.match(
+        (await w.a6g("status", "fixture")).out,
+        /fixture \(Fixture team\) paused.*\n(.*\n)* {3}it starts again at .*, when its usage limit resets/
+      );
+      assert.match(
+        (await w.a6g("start", "fixture")).out,
+        /fixture is paused \(by the operator, now\): it starts again at .*, when its usage limit resets \(default has used its week\), or a6g resume fixture now/
+      );
+      // Before the reset, the watchdog leaves it paused.
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.deepEqual(await asked(), ["pause operator until reset"]);
+
+      // The week resets (the moment kept has passed, and a new reading says 3%): the next run resumes the team.
+      write(w.run, { "hold.json": { ...readHold(w.run), reset: { ...readHold(w.run)?.reset, at: new Date(Date.now() - 60_000).toISOString() } } });
+      readings({ default: 3 });
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(!existsSync(join(w.run, "paused")) && readHold(w.run) === null);
+      assert.deepEqual(await asked(), ["pause operator until reset", "resume reset"]);
+      assert.match(log(), /the team's usage limit reset, so the pause asked to end then has: the team is resumed/);
+      assert.match(
+        w.calls().join("\n"),
+        /thread send mcp:planner The team starts again: its usage limit reset, and the operator's pause was to end then\. Carry on\./
+      );
+
+      // Asked of a team stopped already, with no subscription closed to it: the limit nearest its end, which it says.
+      assert.equal((await w.a6g("pause", "fixture")).code, 0);
+      const later = await w.a6g("pause", "fixture", "--until-reset");
+      assert.match(later.out, /it starts again at .*, when the limit nearest its end resets \(default's week, at 3% when that was worked out\)/);
+      assert.match(log(), /the operator asked to pause now of a team paused already: the pause ends when its usage limit resets/);
+      // A plain pause takes it back: the reset passes, and the team stays paused until it's resumed.
+      const back = await w.a6g("pause", "fixture");
+      assert.doesNotMatch(back.out, /it starts again/);
+      assert.equal(readHold(w.run)?.until, undefined);
+      assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+      assert.ok(existsSync(join(w.run, "paused")));
+      assert.deepEqual((await asked()).slice(2), ["pause operator", "pause operator until reset", "pause operator"]);
     } finally {
       await w.close();
     }

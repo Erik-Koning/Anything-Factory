@@ -104,8 +104,7 @@ for several accounts); this Mac's own login (`~/.claude`) is `default`. A team's
 setting for it (each instance's `homePath`), so the factory never touches the login itself:
 
 ```bash
-CLAUDE_CONFIG_DIR=~/.claude-b claude auth login        # sign the second subscription in, once
-a6g subscriptions add b --config-dir ~/.claude-b
+a6g subscriptions add b                                 # a folder of a6g's for it (~/.a6g/logins/b), signed in here, once
 a6g subscriptions use app default,b                     # app runs on default, and on b when default closes
 a6g subscriptions use site b,default                    # site the other way round
 a6g subscriptions use app b --role builder              # or one role on a list of its own
@@ -131,6 +130,15 @@ each window is left (the five hours, the week, a model's own week, extra usage),
 window, and where the teams stop; and what each used over the last day, week, 30 or 90 days, in API-equivalent dollars
 and tokens, by subscription and by model, every session on the Mac counted. A team's spend is counted on the subscription each request ran on, and
 a budget in percent counts each against that subscription's own week.
+
+Each subscription keeps the Claude account it was added with (one added before this version, the account its first
+reading finds). `default` is the one a sign-in anywhere on this Mac moves (`/login` in any Claude Code session), and a
+folder of yours is moved by signing in there; a folder of a6g's (`a6g subscriptions add` without `--config-dir`) only by
+`a6g subscriptions signin`. Signed in to another account since, a subscription is held: its teams' roles move on down
+their list or wait, and its usage isn't read, since that report would be the other account's; `a6g subscriptions`,
+`a6g doctor` and the web app say so. `a6g subscriptions signin b` signs it in to its own account again (Claude Code's
+browser sign-in, its address filled in), and it runs again at the watchdog's next reading; `--switch` makes the account
+it's signed in to its own.
 
 The choice is each machine's: name the same login the same on every Mac, and a worker runs its builders on its own
 list. The limits read each subscription's own usage, so they hold wherever it's used; what a week comes to in dollars
@@ -159,6 +167,17 @@ It stays paused until `a6g resume my-app --note "…"`, whose note goes to the p
 team page does the same for admins (Stop, Pause… and Resume beside the team's name), at once; the watchdog applies it
 within a minute. Under ⋯ there: restart the planner or the environment, upgrade the factory, wake the team, or delete it
 (its name typed and an authenticator code): its lead's watchdog runs each as a job of its own (`a6g act`).
+
+A pause of yours stays until you resume the team, even one you made because its subscription had run out. To have it
+start again by itself then, pause it with `--until-reset` (a tick in the web app's Pause dialog; for a team stopped
+already, `a6g pause my-app --until-reset` again, or ⋯ → Resume when its usage limit resets): the watchdog resumes the
+team once the limit it waits on has reset, and tells you and the planner. That's the reset of the week or the five
+hours that closed its subscriptions, the first of them to open again. With none closed as the readings stand (a limit
+reached since the last one, or a pause ahead of it), it's the limit nearest its end, and a reading within half an hour
+that finds another one reached, resetting sooner, takes its place. `a6g status`, the pause itself and the web app's
+Controls say when that is and which limit. `a6g pause my-app` without the flag (⋯ → Keep it paused until I resume it)
+takes it back. It needs a reading: a team on this Mac's own login when that isn't a listed subscription has none, and
+stays paused. And a team its budget paused too waits for the budget, or for you.
 
 You can also watch a team in the T3 Code window: one planner thread, with a child thread per member.
 
@@ -562,7 +581,8 @@ old one used after its successor ends the link, as does a new one turning up aft
 the end of every full watchdog run it reports every team registered on it, those whose tasks are in files too: lead or
 worker, where the team stands, who's at work, and its checkout (as `~/…` under your home folder); and its Claude
 subscriptions, by name, with their limits as last read and what each used there by hour and day (never a login's
-folder or account: a hash of the login, so one login on two Macs shows once). **Machines** on the
+folder or account id: a hash of the login, so one login on two Macs shows once, and the address it signs in with,
+which names it on the page). **Machines** on the
 web app shows you your machines, and an admin every machine and whose it is; a team's card on **Teams** names the
 machines its members and admins run it on. A machine not heard from for 15 minutes shows as not reporting. Admins and
 the members of a team link machines, ten each. Unlink one from its card or with `a6g disconnect app`; one that reports
@@ -605,7 +625,7 @@ otherwise (`--store` chooses), and refuses a name another team has used there; a
 teams the linked Macs run that it doesn't show. A team no Mac has reported for 15 minutes is marked so, there and in
 **Waiting on you**, where an answer to it waits until a Mac runs it again. `a6g unregister` on its lead takes a team off
 the app: its tasks and history stay, its name stays taken, and `a6g register` puts it back. An admin can take one off
-from its overview too, with their authenticator's code, once no Mac runs it, and put it back from there; a report from
+from its Settings too, with their authenticator's code, once no Mac runs it, and put it back from there; a report from
 its lead afterwards puts it back by itself.
 
 A team whose work is complete gets a nightly tick; work from outside it added after that (a task the operator adds or

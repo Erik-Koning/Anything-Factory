@@ -65,15 +65,19 @@ request (Article 8).
   are in files is named, with no pages here); and Unlink. `/machines/link`: where `a6g connect app` sends you to look
   up its code, check it, and approve or refuse it.
 - `/subscriptions` Subscriptions: the Claude subscriptions on the machines you see (an admin, every linked one's), one
-  per login however many Macs report it, as T3 Code's Usage page shows them. **Limits** (the default): a card per
-  window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of the pool is
-  left, whether it's going faster than the window runs, and a bar with each subscription's part: what's left of it,
-  its used part hatched until it resets, where even use would be by now, and a dashed mark where the factory's teams
-  stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed to them.
+  per login however many Macs report it, named by the address it signs in with (its names in a6g beside it, and said
+  to share its limits when two folders sign in to it), as T3 Code's Usage page shows them. **Limits** (the default):
+  a card per window (the five-hour session, the week, a model's own week, extra usage by the month) with how much of
+  the pool is left, whether it's going faster than the window runs, and a bar with each subscription's part: what's
+  left of it, its used part hatched until it resets, where even use would be by now, and a dashed mark where the
+  factory's teams stop (`a6g subscriptions limit`); then each subscription's plan, Macs, teams and whether it's closed
+  to them.
   **Cost** and **Tokens** over the past 24 hours (by hour) or 7, 30 or 90 days: the total and each subscription's,
   a chart (read with the arrow keys too), processed, cached, uncached and output tokens and what the cache saved,
   dollars and tokens by type and by speed, and a breakdown by model (each opens its own figures) or by day. Narrowed
-  to one machine or one subscription; what's shown is in the address. Usage is every session on the Mac (the
+  to one machine, one subscription, or one of its names in a6g (what that name used, its teams and its limits);
+  most used first (of the week, or of the cost or tokens over the window) or A to Z; what's shown is in the address.
+  A Mac on a factory before the addresses names its subscriptions as a6g does. Usage is every session on the Mac (the
   operator's own too) at `lib/prices.ts`'s prices: a model with no price there counts its tokens and says so.
 - `/t/<team>/add`, as an admin, **Approve it now**: the task goes straight to the builders.
 - Beside a team's name on each of its pages, for admins: **Stop** (a pause now), **Pause…** (its choices in a dialog:
@@ -82,26 +86,36 @@ request (Article 8).
   typed and an authenticator code: paused now and off the site at once, then unregistered by its Mac, its files and
   history kept). Each completes at once and says so in a toast; the actions record a control of kind `action` that
   the lead's watchdog starts within a minute (`a6g act`), whose word on it (`acted`) the overview shows. Every in-place
-  button on the site works this way: the page refreshes where it is, and a toast says what happened.
+  button on the site works this way: the page refreshes where it is, and a toast says what happened. Then
+  **⚙ Settings** (the gear alone on a phone), which opens the team's Settings.
 - `/t/<team>` Overview: status, progress, journeys (and which are due their verification); for members and admins the
-  graph (the factory's own `layout`, as SVG) and recent merges. For admins, **Controls**: while it's pausing, what's
-  still going and what can't move without you; once paused, the report of where it stands; what came of each action;
-  and what was asked lately. Each control goes in the audit log; the lead's watchdog applies it within a minute (until
-  then the panel says it's waiting for the team's Mac). Then
-  **Spend**: what its tokens would cost on the Claude API today, this week and in all (against the budget, when there
-  is one), each of the last 14 days, and the journeys and tasks that cost the most; and the budget itself (a day, a
-  week, in all, and whether a new day or week resumes a team it paused), set with an authenticator code like a pause,
-  in dollars or in percent of a Claude subscription's week (over 100% for more than one subscription's worth). Once
-  the subscription is measured (`a6g subscriptions`), every figure also shows its share of a subscription's week, and
-  the panel what the subscription's own usage report says. Then **Subscriptions**: the Claude subscriptions on the
-  team's Mac with how much of each one's week is used, the order the team takes them in and whose order it is, what
-  each role runs on now, and a form that changes the order for every role or for one, with an authenticator code. It
-  records a control the lead's watchdog applies within a minute, as `a6g subscriptions use` does at the terminal; a
-  team whose Mac doesn't report its subscriptions (an older factory version) is told where they're chosen instead.
-  Then **On the site** (admins): a team no Mac runs can be taken off the site, with an optional note, and put back
-  the same way; for one a Mac runs, deleting it (⋯) or the command that unregisters it there, which takes it off too. A team that's off isn't on Teams, in Waiting on you, the header's count, the emails, the team
-  switcher or the invitations; its pages still open from a link, each saying it's off. It records a control of kind
-  `retire` or `restore` (and `a6g unregister` and `register` record them too); only the app reads them.
+  graph (the factory's own `layout`, as SVG) and recent merges. For admins, Status also says how far each subscription
+  the team spends on is through its week: how much is used, when it resets, and when, at the week's pace so far, it
+  would be used up (once six hours of the week have run), with a way to the budget. Then **Controls**: while it's
+  pausing, what's still going and what can't move without you; once paused, the report of where it stands; what came
+  of each action; and what was asked lately. Each control goes in the audit log; the lead's watchdog applies it within
+  a minute (until then the panel says it's waiting for the team's Mac). Then **Spend**: what its tokens would cost on
+  the Claude API today, this week and in all (against the budget, when there is one), each of the last 14 days, and
+  the journeys and tasks that cost the most, with a way to the budget on Settings. Once the subscription is measured
+  (`a6g subscriptions`), every figure also shows its share of a subscription's week, and the panel what the
+  subscription's own usage report says.
+- `/t/<team>/settings` Settings (admins), from the ⚙ key beside the team's name or its tab: how the team runs, in one
+  place. **Budget**: what it has spent today, this week and in all against the budget, how far its subscriptions are
+  through their week, and the budget itself (a day, a week, in all, and whether a new day or week resumes a team it
+  paused), set with an authenticator code like a pause, in dollars or in percent of a Claude subscription's week (over
+  100% for more than one subscription's worth). Then **Subscriptions**: the Claude subscriptions on the team's Mac with
+  how much of each one's week is used, the order the team takes them in and whose order it is, what each role runs on
+  now, and a form that changes the order for every role or for one, with an authenticator code. It records a control
+  the lead's watchdog applies within a minute, as `a6g subscriptions use` does at the terminal; a team whose Mac
+  doesn't report its subscriptions (an older factory version) is told where they're chosen instead. Then **Working
+  agreement**: its level in force and who set it, and the way to its page (below), where the Settings tab stays marked.
+  Then **On the site**: a team no Mac runs can be taken off the site, with an optional note, and put back the same
+  way; for one a Mac runs, deleting it (⋯) or the command that unregisters it there, which takes it off too. A team
+  that's off isn't on Teams, in Waiting on you, the header's count, the emails, the team switcher or the invitations;
+  its pages still open from a link, each saying it's off, with a way back on to its Settings. It records a control of
+  kind `retire` or `restore` (and `a6g unregister` and `register` record them too); only the app reads them. Stopping,
+  pausing and the rest stay beside the team's name. The machine-wide limit (`a6g subscriptions limit`) is set at the
+  Mac's terminal: the Subscriptions page shows where it stops the teams.
 - `/t/<team>/inbox` **Waiting on you** (admins), with its count on the tab, in the header on every page (all teams:
   `/inbox`), on the Teams page and at the top of the overview: each question the planner or the approver put to the
   operator, and each block raised to them (a block the team sorts out, or that waits on other tasks, isn't listed).
@@ -158,7 +172,8 @@ request (Article 8).
   instead; a review the team's Mac hasn't written onto the record yet says so, and an overturned one shows what the
   planner noted it did. The tab counts what an admin has left to review. The app only reads decisions: a review is a
   control, as a pause is, which the lead's watchdog writes onto the record and, for an overturn, passes to the planner.
-- `/t/<team>/agreement` (admins): the working agreement, how readily the team brings a question to the operator.
+- `/t/<team>/agreement` (admins), from Settings: the working agreement, how readily the team brings a question to the
+  operator.
   What's in force and who set it; how the last 30 days went (asked, decided, flagged, overturned); what the
   operator's reviews and answers under the agreement in force suggest (since it was last changed, and at most those
   30 days), when they suggest anything: a topic they keep overturning is one to be asked about, and one where they

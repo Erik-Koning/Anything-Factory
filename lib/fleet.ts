@@ -149,6 +149,9 @@ export interface MachineSubscription {
   name: string;
   // Its login, as a hash: the same login on two machines is one subscription on the page. Null when it's signed out.
   login: string | null;
+  // The address the login signs in with, which names it on the page: null when it's signed out or Claude Code's
+  // config doesn't say; absent from a version that doesn't report it.
+  email?: string | null;
   plan: string | null;
   // When its limits were last read (null: never), and those that haven't reset since.
   at: string | null;
@@ -262,6 +265,9 @@ function parseProjects(value: unknown): MachineProjects | undefined {
 // A model's id as a transcript names it (lib/prices.ts modelKey), a login's hash, a plan's name and a currency.
 const MODEL = /^[A-Za-z0-9][\w.:-]{0,79}$/;
 const LOGIN = /^[a-f0-9]{16}$/;
+// An address a login signs in with, as Claude Code's config has it: one @, nothing blank, nothing unshown.
+export const isEmail = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 254 && /^[^\s@]{1,64}@[^\s@]{1,189}$/.test(value) && !UNSHOWN.test(value);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 const isTime = (value: unknown): value is string => typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
@@ -295,9 +301,11 @@ function parseSubscriptions(value: unknown): MachineSubscription[] | undefined {
   let usage = 0;
   for (const sub of value) {
     if (!isObject(sub)) return undefined;
-    const { name, login, plan, at, weekly, session, models, extra, week, limits, closed, teams, today, days, hours, sessions, counted } = sub;
+    const { name, login, email, plan, at, weekly, session, models, extra, week, limits, closed, teams, today, days, hours, sessions, counted } = sub;
     if (typeof name !== "string" || !SUBSCRIPTION.test(name)) return undefined;
     const ownLogin = orNull(login, (v): v is string => typeof v === "string" && LOGIN.test(v));
+    const address = email === undefined ? null : orNull(email, isEmail);
+    if (address === undefined) return undefined;
     const ownPlan = orNull(plan, (v): v is string => isText(v, 40));
     const readAt = orNull(at, isTime);
     const week7 = parseWindow(weekly);
@@ -357,6 +365,7 @@ function parseSubscriptions(value: unknown): MachineSubscription[] | undefined {
     parsed.push({
       name,
       login: ownLogin,
+      email: address,
       plan: ownPlan,
       at: readAt,
       weekly: week7,

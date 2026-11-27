@@ -1,15 +1,20 @@
-// a6g subscriptions [check | add <name> --config-dir <dir> | remove <name> | use <team> … | limit <name|all> …]: the
+// a6g subscriptions [check | add <name> … | signin <name> … | remove <name> | use <team> … | limit <name|all> …]: the
 // Claude subscriptions the teams run on (lib/subscriptions.ts), what each one's usage report last said, what one
 // subscription's week comes to in API-equivalent dollars (which a budget in percent is a share of), which teams run on
 // each, and the operator's limits. The operator's: an agent never changes them.
 //
+//   add <name> [--config-dir <dir>]               a subscription, in a folder of a6g's (~/.a6g/logins/<name>) signed
+//                                                 in from here, or of the operator's; it keeps the account it's on
+//   signin <name> [--switch]                      signs its folder in to its own account again; --switch makes the
+//                                                 account it's signed in to its own
 //   use <team> <name>[,<name>…] [--role <role>]   the subscriptions the team (or one role) runs on, in order: it moves
 //                                                 to the next when one closes (lib/steer.ts); --clear forgets them
 //   limit <name|all> [--weekly <n>%] [--session <n>%]
 //                                                 how much of a subscription the teams may use; "all" limits the
 //                                                 subscriptions' weekly percentages added up; 0 removes a limit
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { FALLBACKS, MODEL_ALIASES, modelName } from "../models.ts";
 import { readRegistry, teamsDir } from "../paths.ts";
 import { operatorOnly } from "../session.ts";
@@ -22,7 +27,9 @@ import {
   gate,
   listFor,
   loginOf,
+  loginsDir,
   observeSubscriptions,
+  onOwn,
   sameLogins,
   setAccounts,
   setSubscriptionLimits,
@@ -39,7 +46,7 @@ import { die, parseArgs } from "../util.ts";
 import { describeSteering, teamNames } from "./team.ts";
 
 const USAGE =
-  "usage: a6g subscriptions [check | add <name> --config-dir <dir> | remove <name> | use <team> <name>[,<name>…] [--role <role>] [--clear] | limit <name|all> [--weekly <n>%] [--session <n>%]]";
+  "usage: a6g subscriptions [check | add <name> [--config-dir <dir>] | signin <name> [--switch] | remove <name> | use <team> <name>[,<name>…] [--role <role>] [--clear] | limit <name|all> [--weekly <n>%] [--session <n>%]]";
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const money = (n: number): string => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -72,6 +79,24 @@ function fallenOn(): Map<string, string[]> {
   return on;
 }
 
+// How a subscription's folder is signed in by hand, to `email` when it's given.
+const loginCommand = (account: Account, email?: string | null): string =>
+  `${account.configDir ? `CLAUDE_CONFIG_DIR=${account.configDir} ` : ""}claude auth login${email ? ` --email ${email}` : ""}`;
+
+// Signs a subscription's folder in with Claude Code (its browser sign-in, with `email` filled in), when someone's at
+// the terminal to.
+function signIn(account: Account, email: string | null): void {
+  if (!process.stdin.isTTY) return;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (account.configDir) env["CLAUDE_CONFIG_DIR"] = account.configDir;
+  else delete env["CLAUDE_CONFIG_DIR"];
+  spawnSync("claude", ["auth", "login", ...(email ? ["--email", email] : [])], { env, stdio: "inherit" });
+}
+
+// The subscription already on a Claude account: its own, or its folder's.
+const onAccount = (list: Account[], login: string, except?: string): Account | undefined =>
+  list.find((a) => a.name !== except && (a.login ?? loginOf(a)?.login) === login);
+
 function limitWords(limit: SubscriptionLimit | undefined): string {
   const parts = [limit?.weekly ? `${limit.weekly}% a week` : "", limit?.session ? `${limit.session}% of five hours` : ""].filter(Boolean);
   return parts.length ? `limit ${parts.join(", ")}` : "no limit of yours (closed only when used up)";
@@ -89,7 +114,10 @@ function show(): void {
     const r = state.readings[account.name];
     const login = loginOf(account);
     const where = account.configDir ? account.configDir : "this Mac's own login";
-    const signed = login ? `signed in${login.plan ? ` to ${login.plan}` : ""} (account ${login.login.slice(0, 8)})` : "not signed in";
+    const its = account.email ?? (account.login ? `account ${account.login.slice(0, 8)}` : null);
+    const signed = login
+      ? `signed in${login.plan ? ` to ${login.plan}` : ""}${login.email ? ` as ${login.email}` : ""} (account ${login.login.slice(0, 8)})${onOwn(account, login) ? "" : `, not ${its}, its own`}`
+      : `not signed in${its ? ` (its own account: ${its})` : ""}`;
     const g = gate(account.name, state, limits, names);
     const week = weekFor(state, account.name);
     console.info(
@@ -118,6 +146,11 @@ function show(): void {
     console.info(`Across all of them: ${total}% of a week used, the limit is ${allCap}%.`);
   }
   for (const same of sameLogins(list)) console.info(`Note: ${same.join(" and ")} are the same Claude account; remove one (a6g subscriptions remove).`);
+  const mac = list.find((a) => a.configDir === null);
+  if (mac && on.get(mac.name))
+    console.info(
+      `Note: teams run on ${mac.name}, this Mac's own login, which signing in to Claude Code here moves to that account (they wait until it's back); a subscription in a folder of a6g's isn't moved: a6g subscriptions add <name>.`
+    );
   const uses = teamUses();
   const teams = Object.keys(uses);
   if (teams.length) {
@@ -216,7 +249,7 @@ function limit(name: string | undefined, options: Record<string, unknown>): numb
 }
 
 export function subscriptions(argv: string[]): number {
-  const { positional, options } = parseArgs(argv, { booleans: ["clear"] });
+  const { positional, options } = parseArgs(argv, { booleans: ["clear", "switch"] });
   const [sub, name, more] = positional;
   if (!sub) {
     show();
@@ -234,19 +267,44 @@ export function subscriptions(argv: string[]): number {
   if (sub === "add") {
     if (!name || !SUBSCRIPTION_NAME.test(name)) die(`${USAGE}\n(a name: lowercase letters, digits and -)`);
     if (name === ALL) die(`${ALL} names every subscription at once (a6g subscriptions limit ${ALL}); pick another name`);
-    const dir =
-      typeof options["config-dir"] === "string"
-        ? resolve(options["config-dir"])
-        : die(`${USAGE}\n(--config-dir: the account's Claude Code config folder, its CLAUDE_CONFIG_DIR)`);
-    if (!existsSync(dir)) die(`${dir} doesn't exist: sign in to that account with CLAUDE_CONFIG_DIR=${dir} claude auth login first`);
+    // A folder of the operator's, or one of a6g's that nothing else signs in to.
+    const given = typeof options["config-dir"] === "string" ? resolve(options["config-dir"]) : null;
+    if (given && !existsSync(given))
+      die(
+        `${given} doesn't exist: sign in to that account with CLAUDE_CONFIG_DIR=${given} claude auth login first, or leave --config-dir out for a folder of a6g's`
+      );
+    const dir = given ?? join(loginsDir, name);
     if (list.some((a) => a.name === name)) die(`there's a subscription named ${name} already`);
     if (list.some((a) => a.configDir === dir)) die(`${dir} is a subscription already`);
-    const login = loginOf({ name, configDir: dir });
-    const same = login ? list.find((a) => loginOf(a)?.login === login.login) : undefined;
+    if (!given) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const account: Account = { name, configDir: dir };
+    if (!loginOf(account)) signIn(account, null);
+    const login = loginOf(account);
+    const same = login ? onAccount(list, login.login) : undefined;
     if (same) die(`${dir} is signed in to the same Claude account as ${same.name}: its usage would count twice. Sign it in to the other account first.`);
-    setAccounts([...list, { name, configDir: dir } satisfies Account]);
+    setAccounts([...list, login ? { ...account, login: login.login, email: login.email } : account]);
     console.info(
-      `a6g: added ${name}${login ? ` (${login.plan ?? "signed in"})` : ` (not signed in yet: CLAUDE_CONFIG_DIR=${dir} claude auth login)`}; a6g subscriptions check reads it now, and a6g subscriptions use <team> ${name} runs a team on it`
+      `a6g: added ${name}${login ? ` (${login.email ?? login.plan ?? "signed in"}, its own account from now on)` : ` (not signed in yet: ${loginCommand(account)})`}; a6g subscriptions check reads it now, and a6g subscriptions use <team> ${name} runs a team on it`
+    );
+    return 0;
+  }
+  if (sub === "signin") {
+    const account = list.find((a) => a.name === name) ?? die(`no subscription named ${name ?? ""} (${list.map((a) => a.name).join(", ")})`);
+    // --switch: whichever account it's signed in to becomes its own.
+    const switching = options["switch"] === true;
+    signIn(account, switching ? null : (account.email ?? null));
+    const login = loginOf(account) ?? die(`${account.name} isn't signed in: ${loginCommand(account, switching ? null : account.email)}`);
+    const that = `${login.email ?? "a Claude account"} (account ${login.login.slice(0, 8)})`;
+    if (!switching && !onOwn(account, login))
+      die(
+        `${account.name} is signed in to ${that}, not ${account.email ?? "its own"}: its teams still don't run on it. Sign it in to its own (${loginCommand(account, account.email)}), or make that one its own: a6g subscriptions signin ${account.name} --switch`
+      );
+    const same = account.login === login.login ? undefined : onAccount(list, login.login, account.name);
+    if (same) die(`${that} is ${same.name}'s already: its usage would count twice`);
+    const changed = !!account.login && account.login !== login.login;
+    setAccounts(list.map((a) => (a.name === account.name ? { ...a, login: login.login, email: login.email ?? (changed ? null : (a.email ?? null)) } : a)));
+    console.info(
+      `a6g: ${account.name} is signed in to ${that}, its own account${changed ? " from now on (what its week comes to is estimated again)" : ""}${subscriptionState().held?.[account.name] ? "; its teams run on it again at the watchdog's next reading, within five minutes (a6g subscriptions check reads it now)" : ""}`
     );
     return 0;
   }

@@ -275,7 +275,8 @@ export async function seed(): Promise<World> {
 }
 
 // The operator's two Claude subscriptions as the attic reports them (lib/subscriptions.ts subscriptionsReport): a month
-// of days and a day of hours on two models, one of them with no price, the week of one used up.
+// of days and a day of hours on two models, one of them with no price, the week of one used up; the first goes by two
+// names in a6g, default and work (two folders signed in to the one account).
 function subscriptionsSeen(now: Date): MachineSubscription[] {
   const bucket = (at: string, model: string, scale: number, priced = true): UsageBucket => {
     const f: Record<(typeof USAGE_FIELDS)[number], number> = {
@@ -309,11 +310,13 @@ function subscriptionsSeen(now: Date): MachineSubscription[] {
     hours: Array.from({ length: 25 }, (_, i) => [bucket(hour(i), "claude-opus-5-5", weight * wave(i, phase) * 0.12)]).flat(),
   });
   const read = new Date(now.getTime() - 20 * 60_000).toISOString();
+  const readBefore = new Date(now.getTime() - 35 * 60_000).toISOString();
   const later = (ms: number) => new Date(now.getTime() + ms).toISOString();
   return [
     {
       name: "default",
       login: "0f1e2d3c4b5a6978",
+      email: "operator@example.com",
       plan: "Max",
       at: read,
       weekly: { percent: 64, resetsAt: later(2.4 * 86_400_000) },
@@ -332,6 +335,7 @@ function subscriptionsSeen(now: Date): MachineSubscription[] {
     {
       name: "refdocs",
       login: "8796a5b4c3d2e1f0",
+      email: "refdocs@example.com",
       plan: "Max",
       at: read,
       weekly: { percent: 100, resetsAt: later(0.6 * 86_400_000) },
@@ -346,6 +350,25 @@ function subscriptionsSeen(now: Date): MachineSubscription[] {
       ...usage(1.7, 0.7),
       sessions: [5, 33, 130, 220],
       counted: read,
+    },
+    {
+      name: "work",
+      login: "0f1e2d3c4b5a6978",
+      email: "operator@example.com",
+      plan: "Max",
+      at: readBefore,
+      weekly: { percent: 63, resetsAt: later(2.4 * 86_400_000) },
+      session: { percent: 34, resetsAt: later(2.2 * 3_600_000) },
+      models: [{ model: "Fable", percent: 41, resetsAt: later(2.4 * 86_400_000) }],
+      extra: { enabled: true, limit: 50, used: 12.5, currency: "USD" },
+      week: 1480,
+      limits: { weekly: null, session: null },
+      closed: null,
+      teams: [{ team: "blog", roles: ["builder"] }],
+      today: day(0),
+      ...usage(3.1, 0.3),
+      sessions: [2, 9, 30, 50],
+      counted: readBefore,
     },
   ];
 }

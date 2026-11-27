@@ -207,6 +207,29 @@ test("the pause panel shows a pause or resume as waiting until the team's Mac ha
   assert.equal(askedBy("watchdog"), "the team's Mac, as the pause settled");
 });
 
+test("a pause asked to end at the usage limit's reset says so, and the resume its Mac makes then is the Mac's, as asked", () => {
+  let k = 0;
+  const control = (fields: Omit<Control, "id" | "version">): Control => ({ ...fields, id: `k${++k}`, version: 1 });
+  const tasks = [{ id: "4", status: "building" }] as never;
+  assert.deepEqual(
+    [
+      control(pauseControl([], "shop", { scope: "now", by: "web:s1", until: "reset" })),
+      control(pauseControl(tasks, "shop", { scope: "tasks", by: "web:s1", until: "reset" })),
+      control(pauseControl([], "shop", { scope: "now", by: "web:s1" })),
+      control(resumeControl("shop", "reset", "its usage limit reset, and the operator's pause was to end then")),
+      control(resumeControl("shop", "web:s1")),
+    ].map(controlSaid),
+    [
+      "Asked to pause now, until its usage limit resets",
+      "Asked to pause after the work under way (#4), until its usage limit resets",
+      "Asked to pause now",
+      "Resumed at the usage limit's reset",
+      "Asked to resume",
+    ]
+  );
+  assert.equal(askedBy("reset"), "the team's Mac, as the pause asked");
+});
+
 test("the spend chart: 14 days ending on the lead's day, every machine added, empty days at $0; clean axis steps", () => {
   const row = (cost: number) => ({
     role: "builder",

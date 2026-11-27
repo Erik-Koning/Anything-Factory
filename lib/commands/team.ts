@@ -23,7 +23,7 @@ import {
   versionDir,
 } from "../paths.ts";
 import { describeLimits, pausedUntil } from "../budget.ts";
-import { readHold, readLimits } from "../holds.ts";
+import { applied, readHold, readLimits, resetWords } from "../holds.ts";
 import {
   accounts,
   chooseFor,
@@ -386,7 +386,7 @@ export async function unregister(argv: string[]): Promise<number> {
         await store.close();
       }
     } catch (error) {
-      console.warn(`  couldn't take ${name} off the web app: ${(error as Error).message.split("\n")[0]}. An admin can, from its overview there.`);
+      console.warn(`  couldn't take ${name} off the web app: ${(error as Error).message.split("\n")[0]}. An admin can, from its Settings there.`);
     }
   return 0;
 }
@@ -421,8 +421,9 @@ export async function start(argv: string[]): Promise<number> {
       console.error(`a6g: couldn't read the team's controls (${(error as Error).message.split("\n")[0]}); a pause recorded there still holds`);
     }
     if (hold) {
+      const reset = resetWords(readHold(entry.run), (iso) => localTime(new Date(iso)));
       console.info(
-        `a6g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): ${when ? `auto-resume starts it again ${when} at the earliest, or a6g resume ${entry.name} now` : `a6g resume ${entry.name} starts it again`}`
+        `a6g: ${entry.name} is paused (${hold.by === "budget" ? "by its budget" : "by the operator"}, ${describeHold(hold)}): ${when ? `auto-resume starts it again ${when} at the earliest, or a6g resume ${entry.name} now` : reset ? `${reset}, or a6g resume ${entry.name} now` : `a6g resume ${entry.name} starts it again`}`
       );
       return status([entry.name]);
     }
@@ -438,7 +439,7 @@ export async function start(argv: string[]): Promise<number> {
   return status([entry.name]);
 }
 
-const PAUSE_USAGE = 'usage: a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--note "…"]';
+const PAUSE_USAGE = 'usage: a6g pause <team> [--after tasks | --after journeys [--journeys 3,7]] [--until-reset] [--note "…"]';
 
 // The operator's control, recorded in the team's store and applied in its run folder at once (the web app's wait for
 // the watchdog's next minute). On a worker machine it's recorded only: the lead applies it.
@@ -485,10 +486,13 @@ function pauseHere(entry: RegistryEntry, paused: boolean): void {
 // a6g pause <team>: nothing starts or merges from now; running members finish their turn. --after tasks: the work under
 // way finishes, reviewed and merged, then the team pauses; --after journeys: the journeys under way (or --journeys)
 // finish, verification and polish included, then it pauses. Either way the operator gets a report when it does, and
-// work stays stopped until a6g resume. A team whose tickets are on a GitHub board can only pause now.
+// work stays stopped until a6g resume. --until-reset: or until the usage limit the team waits on resets, when its
+// lead's watchdog resumes it (for a team stopped because its subscription was used up); on a team paused already, it
+// only says when the pause ends, and a6g pause without it takes that back. A team whose tickets are on a GitHub board
+// can only pause now.
 export async function pause(argv: string[]): Promise<number> {
   operatorOnly("pause");
-  const { positional, options } = parseArgs(argv);
+  const { positional, options } = parseArgs(argv, { booleans: ["until-reset"] });
   const entry = entryFor(positional[0] ?? die(PAUSE_USAGE));
   const after = typeof options["after"] === "string" ? options["after"].replace(/s$/, "") : undefined;
   if (after !== undefined && after !== "task" && after !== "journey") die(PAUSE_USAGE);
@@ -502,12 +506,14 @@ export async function pause(argv: string[]): Promise<number> {
       : undefined;
   if (journeys && scope !== "journeys") die("--journeys goes with --after journeys");
   const note = typeof options["note"] === "string" ? options["note"] : "";
+  const until = options["until-reset"] ? ("reset" as const) : null;
+  let recorded: Control | null = null;
   if (!entry.tasks || entry.worker) {
-    if (scope !== "now")
+    if (scope !== "now" || until)
       die(
         entry.worker
-          ? `pause the team after its work from its lead; here, a6g pause ${entry.name} stops this machine's members`
-          : `${entry.name} keeps its tickets on a GitHub board, so it can only pause now (a6g pause ${entry.name})`
+          ? `pause the team after its work, or until its usage limit resets, from its lead; here, a6g pause ${entry.name} stops this machine's members`
+          : `${entry.name} keeps its tickets on a GitHub board, so it can only pause now, until you resume it (a6g pause ${entry.name})`
       );
     pauseHere(entry, true);
     if (entry.worker) {
@@ -516,7 +522,9 @@ export async function pause(argv: string[]): Promise<number> {
     }
   } else
     try {
-      await recordControl(entry, async (store) => pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note }));
+      recorded = await recordControl(entry, async (store) =>
+        pauseControl(await store.tasks.all(), entry.name, { scope, journeys, by: OPERATOR, note, until })
+      );
     } catch (error) {
       // Stopping must work whatever else doesn't: now is a file on this machine, recorded once the graph is reachable.
       if (scope !== "now") throw error;
@@ -531,6 +539,16 @@ export async function pause(argv: string[]): Promise<number> {
       ? `a6g: ${entry.name} paused: the watchdog sends no ticks and starts nothing, and the planner can't start members or merge. Running members finish what they're doing.`
       : `a6g: ${entry.name} is pausing after ${hold ? describeHold(hold) : scope}: that work finishes and merges, nothing else is claimed, and once nothing in it can move the team pauses and you get a report. a6g status ${entry.name} shows what's left.`
   );
+  // As the run folder has it. Asked for and not there: the budget paused the team too, or the watchdog was busy with
+  // the team and applies the pause within a minute.
+  const reset = resetWords(hold, (iso) => localTime(new Date(iso)));
+  if (reset) console.info(`a6g: ${reset}; a6g resume ${entry.name} starts it sooner, and a6g pause ${entry.name} keeps it paused until you do.`);
+  else if (until && recorded)
+    console.info(
+      applied(entry.run)(recorded.id)
+        ? `a6g: it stays paused until a6g resume ${entry.name}: its budget paused it too, and a team the budget paused waits for the budget, or for you.`
+        : `a6g: a6g status ${entry.name} says when it starts again, once the watchdog has applied the pause.`
+    );
   return 0;
 }
 
@@ -749,6 +767,8 @@ export async function status(argv: string[]): Promise<number> {
       );
     else if (hold?.settledAt && hold.scope !== "now")
       console.info(`   paused after ${describeHold(hold)} at ${hold.settledAt.slice(0, 16)}: a6g resume ${name} carries on`);
+    const reset = resetWords(hold, (iso) => localTime(new Date(iso)));
+    if (reset) console.info(`   ${reset}`);
     const spend = readJson<Spend | null>(join(entry.run, "spend.json"), null);
     if (spend) console.info(`   ${describeSpend(spend, readLimits(entry.run))}`);
     const drain = join(entry.home, ".a6g", "run", "state", "drain");
@@ -852,8 +872,14 @@ export async function upgrade(argv: string[]): Promise<number> {
   // version.
   if (!entry.worker && existsSync(join(entry.run, "planner-thread"))) {
     try {
+      // Closed once it's asked: a Mongo store left open keeps this process alive, and the team's merge lock with it
+      // when the upgrade runs under one (a6g lock merge -- a6g upgrade …).
       const store = await openStore(team, entry.run);
-      await store.controls.create(actionControl(entry.name, OPERATOR, "rotate", `upgraded to ${version}`));
+      try {
+        await store.controls.create(actionControl(entry.name, OPERATOR, "rotate", `upgraded to ${version}`));
+      } finally {
+        await store.close();
+      }
       console.info(`a6g: asked for the planner to restart on ${version} once the members under way have finished; a6g status shows it`);
     } catch (error) {
       console.warn(

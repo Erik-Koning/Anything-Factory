@@ -8,7 +8,9 @@
 //   tasks      the work under way finishes (built, reviewed, sent back and fixed, merged); nothing new is claimed.
 //   journeys   the journeys under way (or those chosen) finish, verification and polish included; nothing else starts.
 // Either graceful scope ends in the same pause as "now" once nothing in it can move (it has settled), with a report of
-// where the team stands; work stays stopped until the operator resumes it.
+// where the team stands; work stays stopped until the operator resumes it. Or, when they asked for that with the pause
+// (`until` "reset"), until the usage limit the team waits on resets: its lead's watchdog resumes it then (lib/holds.ts
+// keepReset), for a team paused because its subscription was used up.
 import { type Agreement, DEFAULT_AGREEMENT, normalised } from "./agreement.ts";
 import { designOpen, FOUNDATION, journeyDue, nowIso, Refused, type Doc, type Task } from "./model.ts";
 import { START_EXPIRES_HOURS, type StartAsk, type StartProgress, type StartStep } from "./start.ts";
@@ -86,8 +88,9 @@ export interface Control extends Doc {
   // app and put it back (retiredOf); only the app reads them. `action` asks the team's lead to do something at once
   // (TEAM_ACTIONS), and `acted` is the lead's word on it.
   kind: "pause" | "resume" | "budget" | "agreement" | "review" | "subscriptions" | "start" | "starting" | "retire" | "restore" | "action" | "acted";
-  // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit), or
-  // "machine:<name>" (a machine's word on an ask to start a team).
+  // "operator" (the CLI), "web:<stakeholder id>" (an admin on the web app), "budget" (the watchdog, at a limit),
+  // "reset" (the watchdog, ending a pause asked to end at the usage limit's reset), or "machine:<name>" (a machine's
+  // word on an ask to start a team).
   by: string;
   at: string;
   // The operator's words: a resume's feedback goes to the planner.
@@ -96,6 +99,9 @@ export interface Control extends Doc {
   scope: HoldScope | null;
   tasks: string[];
   journeys: string[];
+  // A pause of the operator's that ends by itself: "reset", once the usage limit the team waits on resets. Absent or
+  // null: it stays until they resume the team.
+  until?: "reset" | null;
   // A budget: the limits from now on (null: none).
   limits: Limits | null;
   // A pause or resume the budget made: which limit, for which period ("daily:2026-11-04", "weekly:2026-11-02",
@@ -126,15 +132,29 @@ export interface Hold {
   since: string;
   by: string;
   note: string;
+  // "reset" when it ends by itself at the usage limit's reset (endsAtReset).
+  until?: "reset" | null;
+}
+
+// When a pause asked to end at the usage limit's reset does, as the lead's readings of the team's subscriptions said at
+// `found`: `at` is null while none says when, `why` is the limit in words ("default has used its week"), and `guess`
+// says no subscription was closed to the team then, so it's the limit nearest its end ("default's week, at 63%").
+export interface ResetAt {
+  at: string | null;
+  why: string;
+  guess: boolean;
+  found: string;
 }
 
 // A hold as the watchdog keeps it (the run folder's hold.json) and reports it to the web app: what's still moving,
-// what can't move without the operator, and once it settled, when and the report.
+// what can't move without the operator, and once it settled, when and the report. And for one that ends at the usage
+// limit's reset, when that is.
 export interface HoldState extends Hold {
   settledAt: string | null;
   left: string[];
   stuck: string[];
   report: string | null;
+  reset?: ResetAt | null;
 }
 
 // Work that's begun: being built, in review, or sent back for changes (approved again, its branch made).
@@ -149,10 +169,11 @@ export function journeysUnderWay(all: Task[]): Task[] {
 const blank = { note: "", scope: null, tasks: [], journeys: [], limits: null };
 
 // A pause, its scope fixed against the graph as it is now. `journeys` picks some of those under way; by default, all.
+// `until` "reset" ends it at the usage limit's reset.
 export function pauseControl(
   all: Task[],
   team: string,
-  ask: { scope: HoldScope; journeys?: string[] | undefined; by: string; note?: string },
+  ask: { scope: HoldScope; journeys?: string[] | undefined; by: string; note?: string; until?: "reset" | null | undefined },
   at = nowIso()
 ): Omit<Control, "id" | "version"> {
   const tasks = ask.scope === "now" ? [] : all.filter(started).map((t) => t.id);
@@ -169,7 +190,18 @@ export function pauseControl(
     } else journeys = underWay;
     if (!journeys.length) throw new Refused("no journey is under way: pause after the current tasks, or now");
   }
-  return { ...blank, team, kind: "pause", by: ask.by, at, note: ask.note?.trim() ?? "", scope: ask.scope, tasks, journeys };
+  return {
+    ...blank,
+    team,
+    kind: "pause",
+    by: ask.by,
+    at,
+    note: ask.note?.trim() ?? "",
+    scope: ask.scope,
+    tasks,
+    journeys,
+    ...(ask.until ? { until: ask.until } : {}),
+  };
 }
 
 export const resumeControl = (team: string, by: string, note = "", at = nowIso()): Omit<Control, "id" | "version"> => ({
@@ -197,8 +229,34 @@ export function holdOf(controls: Control[]): Hold | null {
   const pauses = controls.slice(controls.findLastIndex((c) => c.kind === "resume") + 1).filter((c) => c.kind === "pause" && c.scope);
   const chosen = pauses.findLast((c) => c.scope === "now") ?? pauses.at(-1);
   if (!chosen?.scope) return null;
-  return { control: chosen.id, scope: chosen.scope, tasks: chosen.tasks, journeys: chosen.journeys, since: chosen.at, by: chosen.by, note: chosen.note };
+  return {
+    control: chosen.id,
+    scope: chosen.scope,
+    tasks: chosen.tasks,
+    journeys: chosen.journeys,
+    since: chosen.at,
+    by: chosen.by,
+    note: chosen.note,
+    ...(endsAtReset(controls) ? { until: "reset" as const } : {}),
+  };
 }
+
+// Who resumes a team at the usage limit's reset: the lead's watchdog, under this name.
+export const RESET = "reset";
+
+// Whether the pause in force ends by itself at the usage limit's reset: the operator's latest pause since the last
+// resume asked for that (a later one that didn't takes it back), and the budget made none since, as a team it paused
+// waits for the budget or the operator. The watchdog's record of a hold that settled is neither's.
+export function endsAtReset(controls: Control[]): boolean {
+  const pauses = controls
+    .slice(controls.findLastIndex((c) => c.kind === "resume") + 1)
+    .filter((c) => c.kind === "pause" && c.scope && c.by !== "watchdog");
+  return !budgetHolds(controls) && pauses.at(-1)?.until === "reset";
+}
+
+// Whether the budget made one of the pauses in force.
+export const budgetHolds = (controls: Control[]): boolean =>
+  controls.slice(controls.findLastIndex((c) => c.kind === "resume") + 1).some((c) => c.kind === "pause" && c.scope && c.by === "budget");
 
 // The pause the watchdog records once a graceful hold has settled, so every machine's claims see the team stopped.
 export const settledControl = (team: string, hold: Hold, at = nowIso()): Omit<Control, "id" | "version"> => ({
@@ -489,6 +547,11 @@ export function holdReport(hold: Hold, all: Task[], stuck: string[], extra: stri
   if (stuck.length) lines.push("", "Stopped in the hold, and why:", ...stuck.map((s) => `  ${s}`));
   lines.push("", `Not started: ${open("approved")} approved, ${open("proposed") + open("triage") + open("researching")} still being decided.`);
   if (extra.length) lines.push("", ...extra);
-  lines.push("", "Work stays stopped until you resume the team (the web app's Resume, or a6g resume <team>), with any feedback for the planner.");
+  lines.push(
+    "",
+    hold.until === "reset"
+      ? "Work stays stopped until the team's usage limit resets, as you asked, or until you resume it (the web app's Resume, or a6g resume <team>), with any feedback for the planner."
+      : "Work stays stopped until you resume the team (the web app's Resume, or a6g resume <team>), with any feedback for the planner."
+  );
   return lines.join("\n");
 }

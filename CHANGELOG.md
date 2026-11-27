@@ -11,6 +11,69 @@
   than this version's (`a6g upgrade <team>` moves them; a role that names a model id keeps it). `a6g doctor` warns
   until it's put right. A test keeps each short name on the newest model of its family the price table knows.
 
+## 0.8.17: An upgrade that ends
+
+- **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on
+  the new version, and for a team whose tasks are in Mongo it left that connection open: the command printed its last
+  line and never ended. Run under the team's merge lock, as a release's upgrades are, it held the lock, so nothing of
+  the team's merged until it was stopped. It now closes the store once it has asked.
+
+## 0.8.16: A pause that ends when the usage limit resets, subscriptions that keep their account and go by its address, and a team's settings in one place
+
+### A pause that ends when the usage limit resets
+
+- **A team you paused because its subscription ran out can start again by itself.** A pause of yours stays until you
+  resume it, so a team stopped while it was out of usage stayed stopped after the limit reset.
+  `a6g pause <team> --until-reset`, or a tick in the web app's Pause dialog, ends the pause when the limit the team
+  waits on resets: its lead's watchdog resumes it then, and tells you and the planner. For a team stopped already, ⋯ →
+  Resume when its usage limit resets (or the command again); ⋯ → Keep it paused until I resume it (or `a6g pause`
+  without the flag) takes it back.
+- **It says when, and which limit.** The pause, `a6g status` and the web app's Controls give the moment and the limit:
+  the week or the five hours that closed the team's subscriptions, the first to open again. With none closed as the
+  readings stand, it's the limit nearest its end, and a reading within half an hour that finds another reached,
+  resetting sooner, takes its place. With no reading at all, it says so and stays paused.
+- **The budget still decides for a team it paused.** A pause asked to end at the reset doesn't, of a team its budget
+  paused too: that one waits for the budget's own auto-resume, or for you.
+- The web app offers it where the team's Mac will read it: a lead on this version reports that it does.
+
+### Subscriptions keep the Claude account they were added with
+
+- **A sign-in elsewhere no longer moves a team onto another Claude account.** `default` is this Mac's own Claude Code
+  login, so a `/login` in any Claude Code session here changed which account it was, and a6g followed: the teams on it
+  ran on the other account's week, beside any already there, while their own account's week went unused. Each
+  subscription now keeps the account it was added with (one added before this version, the account its first reading
+  finds). Signed in to another since, it's **held**: closed to the teams, whose roles move on down their list or wait,
+  and not read, since that report is the other account's. `a6g subscriptions`, `a6g doctor`, the watchdog's log and the
+  web app say so, and the web app names it by its own account's address.
+- **`a6g subscriptions signin <name>`** signs its folder in to its own account again (Claude Code's browser sign-in,
+  with its address filled in); once it's back, the watchdog's next reading lets its teams run on it. `--switch` makes
+  the account it's signed in to its own, on purpose.
+- **`a6g subscriptions add <name>` makes a folder of a6g's for it**, `~/.a6g/logins/<name>`, which no Claude Code session
+  of yours signs in to, and signs it in from the terminal; `--config-dir` still names one of yours. `a6g subscriptions`
+  notes when teams run on this Mac's own login.
+
+### A team's settings in one place, and when its week runs out
+
+- **⚙ Settings beside each team's name**, and a Settings tab in place of Agreement: the budget, the subscriptions it
+  runs on, the working agreement and its place on the site, on one page. The budget was the last thing on the
+  overview, folded away under the work and the graph; it's now the first thing on Settings, open, beside what the team
+  has spent against it. Stop, pause and the rest stay beside the name.
+- **When the week runs out, at its pace so far.** For admins, a team's Status says how much of each subscription's
+  week it spends on is used, when it resets, and when, at the week's pace so far, it would be used up, with a way to
+  the budget. Teams on one Claude account share its week, so a budget for each is what keeps one from using up the
+  others'.
+
+### Subscriptions by the address they sign in with, chosen one name at a time, in order of use
+
+- **The Subscriptions page names each Claude account by its email address**, not by its names in a6g joined together
+  ("default / refdocs"). Those names show beside it, and an account two folders sign in to says they share its
+  limits. A Mac sends the address with its report from this version on (`a6g self-install` there); until then its
+  subscriptions keep their a6g names. `a6g subscriptions` says the address too.
+- **Choose one of an account's names** beside it at the top of the page: what that name used, the teams on it and
+  where they stop. **Sort** by most used (of the week on Limits, of the cost or tokens over the window on the others)
+  or A to Z.
+- The cost and tokens chart's table for screen readers no longer widens the page on a phone.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits

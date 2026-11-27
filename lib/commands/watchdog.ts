@@ -31,6 +31,7 @@ import {
   clearNotes,
   holdNote,
   keepAgreement,
+  keepReset,
   markApplied,
   pendingNotes,
   progressHold,
@@ -49,10 +50,10 @@ import { operatorOnly } from "../session.ts";
 import { type MachineReport, type MachineSubscription, type MachineTeam, REPORT_LIMITS } from "../fleet.ts";
 import { plain } from "../untrusted.ts";
 import { machineName } from "../machine.ts";
-import { type Control, describeHold, holdOf, limitsOf, settledControl } from "../tasks/controls.ts";
+import { type Control, describeHold, endsAtReset, holdOf, limitsOf, RESET, resumeControl, settledControl } from "../tasks/controls.ts";
 import { claimRefusal, FOUNDATION, journeyDue, OPERATOR, type Task, waitsOnlyOnOperator } from "../tasks/model.ts";
 import { blendedWeek, dayOf, describeSpend, type Spend, spendOf, weekOf } from "../tasks/spend.ts";
-import { applySubscriptionControls, modelNow, readSteering, steer, steeringNote, subscriptionsView } from "../steer.ts";
+import { applySubscriptionControls, modelNow, readSteering, resetFor, steer, steeringNote, subscriptionsView } from "../steer.ts";
 import {
   accounts,
   describeWait,
@@ -675,6 +676,9 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   } catch (error) {
     if (oncePer("steer-failed", 60)) log(`couldn't keep the team on open subscriptions: ${(error as Error).message.split("\n")[0]}`);
   }
+  // A pause the operator asked to end at the usage limit's reset: resumed once that has passed, now the roles' waits
+  // are as the readings say.
+  await liftAtReset(entry, log, alert);
   // Where the team stands, for the web app (lib/tasks/teams.ts): the lead reports it every run, paused or not.
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, run, (text) => oncePer("state-unreported", 60) && log(text));
   if (existsSync(join(run, "paused"))) return;
@@ -1008,6 +1012,13 @@ export async function applyTeamControls(entry: RegistryEntry, log: (text: string
     problem(`couldn't set the team's subscriptions: ${(error as Error).message.split("\n")[0]}`);
   }
   for (const line of [...applied.log, ...moved, ...reviews.log, ...acted]) log(line);
+  // A pause asked to end at the usage limit's reset: when that is, kept at once, so a6g pause and the web app can say.
+  try {
+    const kept = readHold(entry.run)?.until === "reset" ? keepReset(entry.run, resetFor(entry)) : null;
+    if (kept?.said) log(kept.said);
+  } catch (error) {
+    problem(`couldn't work out when the team's usage limit resets: ${(error as Error).message.split("\n")[0]}`);
+  }
   const file = join(entry.run, "planner-thread");
   const planner = existsSync(file) ? readFileSync(file, "utf8").trim() : "";
   const busy = planner ? BUSY.includes(t3.threadShow(planner)?.status ?? "") : false;
@@ -1172,6 +1183,32 @@ async function enforceBudget(
   }
 }
 
+// A pause the operator asked to end at the usage limit's reset (lib/holds.ts keepReset): once the reset has passed, a
+// resume recorded as a control by "reset" and applied at once, the operator told. The store has the last word on
+// whether the pause still ends then: a pause or a resume asked for in this minute isn't overridden.
+async function liftAtReset(entry: RegistryEntry, log: (text: string) => void, alert: (kind: string, text: string) => Promise<void>): Promise<void> {
+  if (!entry.tasks || entry.worker || readHold(entry.run)?.until !== "reset") return;
+  let made: Control | null = null;
+  try {
+    const kept = keepReset(entry.run, resetFor(entry));
+    if (kept?.said) log(kept.said);
+    if (!kept?.due) return;
+    const store = await openStore({ name: entry.name, tasks: entry.tasks }, entry.run);
+    try {
+      if (endsAtReset(await store.controls.all()))
+        made = await store.controls.create(resumeControl(entry.name, RESET, "its usage limit reset, and the operator's pause was to end then"));
+    } finally {
+      await store.close();
+    }
+  } catch (error) {
+    log(`couldn't resume the team at its usage limit's reset: ${(error as Error).message.split("\n")[0]}`);
+    return;
+  }
+  if (!made) return;
+  await applyTeamControls(entry, log, log);
+  await alert(`reset-${made.id}`, "The team's usage limit reset, so it starts again: you asked for that when you paused it.");
+}
+
 // The web app's view of a Mongo team, now (a6g pause, resume and budget call it after applying a control).
 export async function reportTeamState(entry: RegistryEntry): Promise<void> {
   if (entry.tasks?.store === "mongo" && !entry.worker) await reportState(entry, entry.run, () => {});
@@ -1197,8 +1234,9 @@ function teamState(entry: RegistryEntry, run: string): TeamState {
     spend: readJson<Spend | null>(join(run, "spend.json"), null),
     planner: planner ? (t3.threadShow(planner)?.status ?? null) : null,
     members,
-    // The lead applies the operator's choice of subscriptions, so it's the one that says what there is to choose.
-    ...(entry.worker ? {} : { subscriptions: subscriptionsOf(entry) }),
+    // The lead applies the operator's choice of subscriptions, so it's the one that says what there is to choose; and
+    // it ends a pause asked to end at the usage limit's reset.
+    ...(entry.worker ? {} : { subscriptions: subscriptionsOf(entry), untilReset: true }),
     at: new Date().toISOString(),
   };
 }

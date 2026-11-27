@@ -120,6 +120,40 @@
   color: var(--ink);
   box-shadow: var(--rim), var(--raise-s);
 }
+/* A subscription and its names in a6g, joined: one account, called so on its machines. */
+.usage-filter a {
+  max-width: 100%;
+}
+.usage-filter-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage-filter-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.usage-filter-group a {
+  border-radius: 0;
+}
+.usage-filter-group a:first-child {
+  border-radius: var(--r-ctl) 0 0 var(--r-ctl);
+}
+.usage-filter-group a:last-child {
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+}
+.usage-filter-group a + a {
+  margin-left: -1px;
+  font-weight: 500;
+}
+.usage-filter-group a[aria-current="true"],
+.usage-filter-group a:focus-visible {
+  z-index: 1;
+}
+.usage-as {
+  margin: 8px 0 0;
+}
 .usage-select {
   display: none;
 }
