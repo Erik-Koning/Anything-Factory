@@ -1,5 +1,16 @@
 # Changelog
 
+## Every role on its family's newest model
+
+- **You hear when your teams aren't on the newest model.** `fable`, `opus`, `sonnet` and `haiku` are the newest of
+  each family this version knows, so a model released after it reached no role until a release knew it and each team
+  moved to that release: Fable 5.2 ran in your own sessions for days while the teams' planners and scaffolders stayed
+  on Fable 5.1. The watchdog now compares the models your subscriptions used in the last fortnight with what the
+  roles run on, and tells you once, on this Mac and through each connected channel: a newer model is in use than
+  this version knows (a release that knows it moves the teams), or a team's roles on a short name run an older one
+  than this version's (`a6g upgrade <team>` moves them; a role that names a model id keeps it). `a6g doctor` warns
+  until it's put right. A test keeps each short name on the newest model of its family the price table knows.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
