@@ -43,6 +43,9 @@ export interface TeamState {
   // The subscriptions on the lead and which the team runs on (lib/steer.ts): a lead whose factory version takes a
   // `subscriptions` control reports it, so the web app offers the choice only where it will be read.
   subscriptions?: TeamSubscriptions | null;
+  // Its lead ends a pause asked to end at the usage limit's reset (controls.ts Control.until): reported by a factory
+  // version that does, so the web app offers it only where it will be read.
+  untilReset?: boolean;
   at: string;
 }
 // The Claude subscriptions on a team's lead, as the web app shows them (the folders behind them stay on the machine).

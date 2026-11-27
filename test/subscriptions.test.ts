@@ -244,4 +244,81 @@ describe("a6g budget in percent, a6g subscriptions, and the watchdog", () => {
       await w.close();
     }
   });
+
+  test("a subscription keeps its account: signed in to another since, it's held and not read, until it's back or that one is made its own", async () => {
+    const { w } = await world();
+    try {
+      // Claude Code's usage report, whatever folder it's asked in.
+      const bin = tmp("a6g-claude-");
+      writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat <<'EOF'\n${report(40)}\nEOF\n`, { mode: 0o755 });
+      w.env["PATH"] = `${bin}:${w.env["PATH"]}`;
+      const signed = (dir: string, login: string, email: string) =>
+        writeFileSync(join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: login, emailAddress: email, planDisplayName: "Max" } }));
+      const listed = () =>
+        (JSON.parse(readFileSync(join(w.a6gHome, "subscriptions.json"), "utf8")) as { name: string; login?: string; email?: string }[]).filter(
+          (a) => a.name === "work"
+        );
+      const state = () => JSON.parse(readFileSync(join(w.a6gHome, "subscriptions", "state.json"), "utf8")) as SubscriptionState;
+
+      // No folder given: one of a6g's, signed in from the terminal (none here, so it says how).
+      const dir = join(w.a6gHome, "logins", "work");
+      const added = await w.a6g("subscriptions", "add", "work");
+      assert.equal(added.code, 0, added.out);
+      assert.ok(added.out.includes(`not signed in yet: CLAUDE_CONFIG_DIR=${dir} claude auth login`), added.out);
+      signed(dir, "u-work-1", "work@example.com");
+      const read = await w.a6g("subscriptions", "check");
+      assert.match(read.out, /work keeps work@example\.com as its own/);
+      assert.match(read.out, /work \(.*logins\/work\): 40% of this week used/);
+      const first = state().readings["work"]?.at;
+      assert.deepEqual(
+        listed().map((a) => [a.name, a.login, a.email]),
+        [["work", "u-work-1", "work@example.com"]]
+      );
+
+      // A sign-in to another account there: held, and that account's report isn't read as its.
+      signed(dir, "u-home-1", "home@example.com");
+      const held = await w.a6g("subscriptions", "check");
+      assert.match(held.out, /work is signed in to home@example\.com, not work@example\.com: its teams don't run on it until/);
+      assert.match(
+        held.out,
+        /signed in to Max as home@example\.com \(account u-home-1\), not work@example\.com, its own; .*closed: work is signed in to another Claude account than its own \(a6g subscriptions signin work\)/
+      );
+      assert.ok(state().held?.["work"]);
+      assert.equal(state().readings["work"]?.at, first, "the reading before it stays the last");
+      const refused = await w.a6g("subscriptions", "signin", "work");
+      assert.notEqual(refused.code, 0);
+      assert.ok(
+        refused.out.includes(
+          `its teams still don't run on it. Sign it in to its own (CLAUDE_CONFIG_DIR=${dir} claude auth login --email work@example.com)`
+        ),
+        refused.out
+      );
+      assert.match((await w.a6g("doctor")).out, /subscription work: signed in to home@example\.com, not work@example\.com, so its teams don't run on it/);
+
+      // Back on its own: read, and open again.
+      signed(dir, "u-work-1", "work@example.com");
+      const back = await w.a6g("subscriptions", "check");
+      assert.match(back.out, /work is signed in to its own account again: its teams run on it/);
+      assert.match(back.out, /work \(.*\): 40% of this week used.*\n.*as work@example\.com \(account u-work-1\); .*; open/);
+      assert.equal(state().held, undefined);
+
+      // Or the other account made its own, on purpose.
+      signed(dir, "u-home-1", "home@example.com");
+      await w.a6g("subscriptions", "check");
+      const switched = await w.a6g("subscriptions", "signin", "work", "--switch");
+      assert.equal(switched.code, 0, switched.out);
+      assert.match(
+        switched.out,
+        /work is signed in to home@example\.com \(account u-home-1\), its own account from now on .*; its teams run on it again at the watchdog's next reading/
+      );
+      assert.deepEqual(
+        listed().map((a) => [a.login, a.email]),
+        [["u-home-1", "home@example.com"]]
+      );
+      assert.match((await w.a6g("subscriptions", "check")).out, /work \(.*\): 40% of this week used/);
+      assert.equal(state().held, undefined);
+    } finally {
+      await w.close();
+    }
+  });
 });

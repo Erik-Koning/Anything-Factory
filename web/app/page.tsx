@@ -316,7 +316,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                               <p className="muted small">Nothing counted yet.</p>
                             )}
                             <p className="small">
-                              <Link href={`/t/${team.name}?open=budget#spend`}>{limits ? "Change the budget" : "Set a budget"}</Link>
+                              <Link href={`/t/${team.name}/settings#budget`}>{limits ? "Change the budget" : "Set a budget"}</Link>
                             </p>
                           </section>
                         ) : null}
@@ -338,7 +338,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         {board ? <Link href={`/t/${team.name}/board`}>Board</Link> : null}
                         <Link href={`/t/${team.name}/requests`}>Requests</Link>
                         {decides ? <Link href={`/t/${team.name}/proposals`}>To decide{waiting ? ` (${waiting})` : ""}</Link> : null}
-                        {control && status?.subscriptions ? <Link href={`/t/${team.name}#subscriptions`}>Subscriptions</Link> : null}
+                        {control && status?.subscriptions ? <Link href={`/t/${team.name}/settings#subscriptions`}>Subscriptions</Link> : null}
                       </p>
                     </div>
                   </details>
@@ -383,7 +383,7 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                   <Link href={`/t/${team.name}`}>{team.title || team.name}</Link>
                 </Fragment>
               ))}
-              . Each one&apos;s overview puts it back.
+              . Each one&apos;s Settings put it back.
             </p>
           ) : null}
         </div>

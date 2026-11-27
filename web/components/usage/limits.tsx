@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import { type Pace, paceOf, type Pool, type PoolPart } from "../../server/usage-view.ts";
 import { Ago } from "../ui.tsx";
-import { formatPercent, resetsIn, span } from "./format.ts";
+import { formatNames, formatPercent, resetsIn, span } from "./format.ts";
 
 const PACE: Record<Pace, { label: string; icon: ReactNode }> = {
   ahead: {
@@ -84,6 +84,12 @@ function Part({ part, pool, now, many }: { part: PoolPart; pool: Pool; now: numb
       <span className="pool-pop" aria-hidden="true">
         <b>{sub.name}</b>
         <dl>
+          {sub.email ? (
+            <>
+              <dt>In a6g</dt>
+              <dd>{sub.names.join(", ")}</dd>
+            </>
+          ) : null}
           {sub.plan ? (
             <>
               <dt>Plan</dt>
@@ -199,8 +205,8 @@ export function LimitCard({ pool, now }: { pool: Pool; now: number }) {
   );
 }
 
-// The subscriptions themselves, below the cards: each one's plan, machines, the teams on it now, whether it's closed to
-// them, and how fresh its reading is.
+// The subscriptions themselves, below the cards: each one's plan, machines and names in a6g, the teams on it now,
+// whether it's closed to them, and how fresh its reading is.
 export function SubscriptionFacts({ subs }: { subs: import("../../server/usage-view.ts").Subscription[] }) {
   return (
     <ul className="sub-facts">
@@ -212,7 +218,11 @@ export function SubscriptionFacts({ subs }: { subs: import("../../server/usage-v
               <b>{s.name}</b>
               {s.plan ? <span className="muted"> · {s.plan}</span> : null}
               <span className="muted"> · on {s.machines.join(", ")}</span>
+              {s.email ? <span className="muted"> · {formatNames(s.names)} in a6g</span> : null}
             </p>
+            {s.names.length > 1 ? (
+              <p className="small muted">{formatNames(s.names)} are one Claude account: they share its limits, and each counts what it used.</p>
+            ) : null}
             {s.latest.closed ? <p className="small warn-text">Closed to the teams: {s.latest.closed.why}.</p> : null}
             <p className="small muted">
               {s.teams.length

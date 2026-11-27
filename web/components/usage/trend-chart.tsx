@@ -153,29 +153,32 @@ export function TrendChart({
           </>
         ) : null}
       </div>
-      <table className="sr">
-        <caption>{label}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{hourly ? "Hour" : "Day"}</th>
-            {shown.map((s) => (
-              <th scope="col" key={s.name}>
-                {s.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {periods.map((p, i) => (
-            <tr key={p}>
-              <th scope="row">{periodName(i)}</th>
+      {/* Hidden by its box: a table is as wide as its figures whatever its own width says, and would widen a phone's page. */}
+      <div className="sr">
+        <table>
+          <caption>{label}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{hourly ? "Hour" : "Day"}</th>
               {shown.map((s) => (
-                <td key={s.name}>{format(s.values[i] ?? 0)}</td>
+                <th scope="col" key={s.name}>
+                  {s.name}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {periods.map((p, i) => (
+              <tr key={p}>
+                <th scope="row">{periodName(i)}</th>
+                {shown.map((s) => (
+                  <td key={s.name}>{format(s.values[i] ?? 0)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

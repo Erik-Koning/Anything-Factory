@@ -1017,11 +1017,14 @@ test("a contributor neither sees the work nor adds to it, by page or by calling 
   expect(await graph.collection("tasks").findOne({ team: "shop", title: "Sneaky task" })).toBeNull();
 });
 
+// Controls oldest first, by the number in their ids: as text, k10 sorts before k9.
+const inOrder = (controls: Control[]): Control[] => controls.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+
 test("the admin pauses the team after the work under way, reads where it stands, and resumes it with feedback", async () => {
   const { page } = admin;
   const { graph, accounts } = await databases();
   const controls = async (): Promise<Control[]> =>
-    (await graph.collection("controls").find({ team: "shop" }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+    inOrder((await graph.collection("controls").find({ team: "shop" }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
   const tasks = async (): Promise<Task[]> =>
     (await graph.collection("tasks").find({ team: "shop" }).toArray()).map(({ _id, ...t }) => t as unknown as Task);
   // The lead's watchdog isn't running here: the test reports what it would, from the same functions.
@@ -1114,6 +1117,76 @@ test("the admin pauses the team after the work under way, reads where it stands,
   await report({ state: "active", hold: null });
 });
 
+test("the admin stops a team until its usage limit resets, reads when that is, and takes it back under ⋯", async () => {
+  const { page } = admin;
+  const { graph } = await databases();
+  const controls = async (): Promise<Control[]> =>
+    inOrder((await graph.collection("controls").find({ team: "shop" }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
+  // The lead's watchdog isn't running here: the test reports what it would.
+  const report = (status: Record<string, unknown>) =>
+    graph
+      .collection("teams")
+      .updateOne({ _id: "shop" as never }, { $set: { status: { members: {}, planner: "running", at: new Date().toISOString(), ...status } } });
+  const panel = page.getByRole("region", { name: "Controls" });
+  const head = page.locator(".team-head");
+  const more = head.locator("summary[aria-label='More for Shop']");
+  const pausing = page.getByRole("dialog", { name: "Pause Shop" });
+  const tick = pausing.getByLabel(/Resume by itself when its usage limit resets/);
+
+  // A Mac whose factory version can't end a pause at the reset isn't offered it.
+  await report({ state: "active", hold: null });
+  await page.goto("/t/shop");
+  await head.getByRole("button", { name: "Pause…" }).click();
+  await expect(pausing.getByText("After the work under way")).toBeVisible();
+  await expect(tick).toHaveCount(0);
+  await pausing.getByRole("button", { name: "Cancel" }).click();
+
+  // One that can: ticked in the dialog, here with a stop now.
+  await report({ state: "active", hold: null, untilReset: true });
+  await page.reload();
+  await head.getByRole("button", { name: "Pause…" }).click();
+  await pausing.getByLabel(/^Now:/).check();
+  await tick.check();
+  await pausing.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop, until its usage limit resets.");
+  expect((await controls()).at(-1)).toMatchObject({ kind: "pause", scope: "now", until: "reset" });
+  const hold = holdOf(await controls());
+  if (!hold) throw new Error("no hold");
+  expect(hold.until).toBe("reset");
+
+  // Its Mac says when, and which limit: the panel reads it in the reader's own time.
+  const at = new Date(Date.now() + 3 * 3_600_000).toISOString();
+  const reset = { at, why: "default has used its week", guess: false, found: new Date().toISOString() };
+  const paused = (fields: Record<string, unknown>) =>
+    report({ state: "paused", untilReset: true, hold: { ...hold, settledAt: hold.since, left: [], stuck: [], report: null, ...fields } });
+  await paused({ reset });
+  await page.reload();
+  await expect(
+    panel.getByText(/It resumes by itself .* when its usage limit resets \(default has used its week\)\. Resume it to start sooner\./)
+  ).toBeVisible();
+  await expect(panel.locator(`time[datetime="${at}"]`)).toBeVisible();
+  await expect(panel.getByText("Work stays stopped until you resume it.")).toHaveCount(0);
+
+  // Taken back under ⋯: it stays paused until it's resumed.
+  await more.click();
+  await head.getByRole("button", { name: "Keep it paused until I resume it" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop.");
+  expect(holdOf(await controls())?.until).toBeUndefined();
+  await paused({ until: null });
+  await page.reload();
+  await expect(panel.getByText("Work stays stopped until you resume it.")).toBeVisible();
+  // And asked of a team stopped already, the same way.
+  await more.click();
+  await head.getByRole("button", { name: "Resume when its usage limit resets" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to stop, until its usage limit resets.");
+  expect(holdOf(await controls())?.until).toBe("reset");
+  await expect(panel.getByText("Asked to pause now, until its usage limit resets").first()).toBeAttached();
+
+  await head.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByRole("status")).toContainText("Asked to resume");
+  await report({ state: "active", hold: null });
+});
+
 test("the admin restarts a team's planner from ⋯ and deletes the team, each at once, said in a toast", async () => {
   const { page } = admin;
   const { graph, accounts } = await databases();
@@ -1169,8 +1242,8 @@ test("the admin restarts a team's planner from ⋯ and deletes the team, each at
     await page.goto("/");
     await expect(page.locator("details#blog")).toHaveCount(0);
 
-    // Put back from its overview, as a6g register on its Mac would.
-    await page.goto("/t/blog");
+    // Put back from its Settings, as a6g register on its Mac would.
+    await page.goto("/t/blog/settings");
     await page.getByRole("region", { name: "On the site" }).getByRole("button", { name: "Put it back on the site" }).click();
     await expect(page.getByRole("status")).toContainText("Back on the site");
     await page.goto("/");
@@ -1245,7 +1318,13 @@ test("the admin sees what the team spent: today, this week and in all against th
   );
 
   await page.goto("/t/shop");
+  // Status says how far the subscription is through its week: 52% used, three days before it resets, lasts the week.
+  const status = page.getByRole("region", { name: "Status" });
+  await expect(status.getByText(/Your subscription: 52% of its week used, resets in 2d 23h/)).toBeVisible();
+  await expect(status.getByText("at this pace it lasts the week")).toBeVisible();
+  await expect(status.getByRole("link", { name: "The budget →" })).toHaveAttribute("href", "/t/shop/settings#budget");
   const panel = page.getByRole("region", { name: "Spend" });
+  await expect(panel.getByRole("link", { name: "Change the budget →" })).toHaveAttribute("href", "/t/shop/settings#budget");
   const tiles = panel.locator(".tiles li");
   await expect(tiles.nth(0)).toContainText("Today$8.00");
   await expect(tiles.nth(0)).toContainText("of $10 a day · near the budget");
@@ -1272,19 +1351,20 @@ test("the admin sees what the team spent: today, this week and in all against th
   await graph.collection("controls").deleteOne({ _id: "shop:k900" as never });
 });
 
-test("the admin sets the budget with a code; a limit left blank is none", async () => {
+test("the admin sets the budget with a code on Settings; a limit left blank is none", async () => {
   const { page } = admin;
   const { graph, accounts } = await databases();
   await page.goto("/t/shop");
-  const panel = page.getByRole("region", { name: "Spend" });
-  await panel.getByText("Set a budget").click();
+  await page.getByRole("region", { name: "Spend" }).getByRole("link", { name: "Set a budget →" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/settings#budget$/);
+  const panel = page.getByRole("region", { name: "Budget" });
   await panel.getByLabel("A day", { exact: true }).fill("12");
   await panel.getByLabel("In all", { exact: true }).fill("$300");
   await panel.getByLabel(/start it again when the next one starts/).check();
   await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Set the budget" }).click();
   await expect(page.getByRole("status")).toContainText("The budget is $12 a day, none a week, $300 in all.");
-  const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  const budget = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { at: -1 } });
   expect(budget).toMatchObject({ by: expect.stringMatching(/^web:s\d+$/), limits: { daily: 12, weekly: null, total: 300, autoResume: true } });
   await expect
     .poll(() => accounts.collection("audit").findOne({ team: "shop", action: "team.budget", outcome: "ok" }))
@@ -1295,7 +1375,6 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
   await expect(panel.locator(".tiles li").first()).toContainText("of $12 a day");
 
   // As a share of a subscription's week, over 100% too: one and a half subscriptions' worth in all.
-  await panel.getByText("Change the budget").first().click();
   await panel.getByLabel(/Percent of a subscription's week/).check();
   await panel.getByLabel("A day", { exact: true }).fill("");
   await panel.getByLabel("A week", { exact: true }).fill("60");
@@ -1303,7 +1382,7 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
   await panel.getByLabel("Code from your authenticator").fill(await freshCode(page, state().admin.totpURI));
   await panel.getByRole("button", { name: "Change the budget" }).click();
   await expect(page.getByRole("status")).toContainText("The budget is none a day, 60% a week, 150% in all of a subscription's week.");
-  const shares = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { _id: -1 } });
+  const shares = await graph.collection("controls").findOne({ team: "shop", kind: "budget" }, { sort: { at: -1 } });
   expect(shares).toMatchObject({ limits: { daily: null, weekly: 60, total: 150, unit: "subscription" } });
   // 21.25 of a $1,000 week is 2.1% of 60%; 27.75 is 2.8% of 150%.
   await expect(panel.locator(".tiles li").nth(1)).toContainText("2.1%");
@@ -1315,7 +1394,7 @@ test("the admin sets the budget with a code; a limit left blank is none", async 
 // The operator's controls of one kind on Shop, oldest first, as the store keeps them.
 async function shopControls(kind: Control["kind"]): Promise<Control[]> {
   const { graph } = await databases();
-  return (await graph.collection("controls").find({ team: "shop", kind }).sort({ _id: 1 }).toArray()).map(({ _id, ...c }) => c as unknown as Control);
+  return inOrder((await graph.collection("controls").find({ team: "shop", kind }).toArray()).map(({ _id, ...c }) => c as unknown as Control));
 }
 
 test("a member reads what the team decided for the operator, and reviews none of it", async ({ browser }) => {
@@ -1326,6 +1405,8 @@ test("a member reads what the team decided for the operator, and reviews none of
   // The same log under a name that fits who reads it, with no count of what's to review, and no agreement.
   await expect(tabs.getByRole("link", { name: /Decided for you/ })).toHaveCount(0);
   await expect(tabs.getByRole("link", { name: "Agreement" })).toHaveCount(0);
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Settings for / })).toHaveCount(0);
   await expect(tabs.getByRole("link", { name: "Decision log" })).toHaveText("Decision log");
   await tabs.getByRole("link", { name: "Decision log" }).click();
   await expect(page).toHaveURL(/\/t\/shop\/decided$/);
@@ -1357,6 +1438,7 @@ test("a member reads what the team decided for the operator, and reviews none of
   await expect.poll(() => refusalOf("decision.reviewed")).toContain("You can't do that here.");
   expect(await shopControls("review")).toEqual([]);
   expect((await page.goto("/t/shop/agreement"))?.status()).toBe(404);
+  expect((await page.goto("/t/shop/settings"))?.status()).toBe(404);
   await context.close();
 });
 
@@ -1441,8 +1523,17 @@ test("the admin changes the working agreement at once: the level, a topic and st
   const { page } = admin;
   const { accounts } = await databases();
   await page.goto("/t/shop/decided");
-  await page.getByRole("navigation", { name: "Team" }).getByRole("link", { name: "Agreement" }).click();
+  const tabs = page.getByRole("navigation", { name: "Team" });
+  await expect(tabs.getByRole("link", { name: "Agreement" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Settings for Shop" }).click();
+  await expect(page).toHaveURL(/\/t\/shop\/settings$/);
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  const row = page.getByRole("region", { name: "Working agreement" });
+  await expect(row.getByText("The default: nobody has changed it.")).toBeVisible();
+  await row.getByRole("link", { name: /the form that changes it/ }).click();
   await expect(page).toHaveURL(/\/t\/shop\/agreement$/);
+  // Still under Settings.
+  await expect(tabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
   const inForce = page.getByRole("region", { name: "In force" });
   await expect(inForce.getByText("balanced", { exact: true })).toBeVisible();
   await expect(inForce.getByText("Nobody has changed it: this is the default, which asks about a change of scope.")).toBeVisible();
@@ -1867,15 +1958,15 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
     await expect(page.locator(".team-head")).toContainText("no Mac runs it");
     await expect(page.getByText(/^No Mac runs this team now \(last heard from .*\): an answer waits until one does\.$/)).toBeVisible();
 
-    // Shop's Mac runs it: its overview says to unregister it there, and has no form.
-    await page.goto("/t/shop");
+    // Shop's Mac runs it: its Settings say to unregister it there, and have no form.
+    await page.goto("/t/shop/settings");
     const panel = page.getByRole("region", { name: "On the site" });
     await expect(panel).toContainText("A Mac runs it: it last reported just now.");
     await expect(panel.getByText("a6g unregister shop")).toBeVisible();
     await expect(panel.getByRole("button", { name: "Take it off the site" })).toHaveCount(0);
 
     // Blog comes off with a note, at once.
-    await page.goto("/t/blog");
+    await page.goto("/t/blog/settings");
     await expect(panel).toContainText("No Mac runs it now: it was last heard from 2 h ago.");
     await panel.locator("summary", { hasText: "Take it off the site" }).click();
     await panel.getByLabel("Why (optional, for the record)").fill("A trial that's over");
@@ -1886,7 +1977,7 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
     // Off every list: Teams (named at the foot instead), Waiting on you, the switcher.
     await page.goto("/");
     await expect(page.locator("details#blog")).toHaveCount(0);
-    await expect(page.locator(".teams-foot")).toContainText("Taken off the site: Blog. Each one's overview puts it back.");
+    await expect(page.locator(".teams-foot")).toContainText("Taken off the site: Blog. Each one's Settings put it back.");
     await page.goto("/inbox");
     await expect(page.getByRole("heading", { name: "Waiting on you", level: 1 })).toBeVisible();
     await expect(page.locator("main")).not.toContainText("Blog");
@@ -1901,8 +1992,10 @@ test("a team no Mac runs is marked and its answers wait; the admin takes it off 
         detail: "A trial that's over",
       });
 
-    // And back on, from its overview.
+    // And back on, from its Settings: the notice on every page of it links there.
     await page.goto("/t/blog");
+    await page.locator(".notice.off-site").getByRole("link", { name: "Put it back" }).click();
+    await expect(page).toHaveURL(/\/t\/blog\/settings#site$/);
     await panel.getByRole("button", { name: "Put it back on the site" }).click();
     await expect(page.getByRole("status")).toContainText("Back on the site");
     await expect(page.locator(".notice.off-site")).toHaveCount(0);
@@ -1919,7 +2012,7 @@ test("the admin chooses a team's subscriptions with a code, from what its Mac re
   const { page } = admin;
   const { graph, accounts } = await databases();
   // A team whose Mac doesn't report its subscriptions has no form.
-  await page.goto("/t/shop");
+  await page.goto("/t/shop/settings");
   const panel = page.getByRole("region", { name: "Subscriptions" });
   await expect(panel).toContainText("chosen on its Mac for now");
   await expect(panel.getByText("Change the order")).toHaveCount(0);
@@ -1995,7 +2088,7 @@ test("the admin chooses a team's subscriptions with a code, from what its Mac re
   expect(await newest()).toMatchObject({ subscriptions: { role: "reviewer", use: [] } });
 
   // Blog is published as an older factory version publishes: its subscriptions are chosen on its Mac.
-  await page.goto("/t/blog");
+  await page.goto("/t/blog/settings");
   await expect(page.getByRole("region", { name: "Subscriptions" })).toContainText("a6g subscriptions use blog");
   await graph.collection("controls").deleteMany({ team: "shop", kind: "subscriptions" });
   await graph.collection<{ _id: string }>("teams").updateOne({ _id: "shop" }, { $unset: { "status.subscriptions": "" } });

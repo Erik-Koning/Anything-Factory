@@ -14,7 +14,8 @@ import { toReview } from "../../../../lib/tasks/decisions.ts";
 import { controlsFor, decisionsFor, tasksOf, teamFor } from "./team.ts";
 
 // A team's pages, by what the person may do there: the first part of the path after /t/<team>, and what opens it.
-// Adding a task has no tab: the board's button opens it.
+// Adding a task has no tab: the board's button opens it. Nor has the working agreement: it's one of the settings, and
+// the Settings tab stays marked on its page.
 const SECTIONS: [string, (viewer: Viewer, team: string) => boolean][] = [
   ["", () => true],
   ["inbox", (v, t) => can(v, "proposals:decide", t)],
@@ -25,6 +26,7 @@ const SECTIONS: [string, (viewer: Viewer, team: string) => boolean][] = [
   ["proposals", (v, t) => can(v, "proposals:decide", t)],
   ["decided", (v, t) => can(v, "decisions:read", t)],
   ["agreement", (v, t) => can(v, "team:control", t)],
+  ["settings", (v, t) => can(v, "team:control", t) || can(v, "team:retire", t)],
 ];
 const sectionsFor = (viewer: Viewer, team: string): string[] => SECTIONS.filter(([, open]) => open(viewer, team)).map(([s]) => s);
 
@@ -60,6 +62,7 @@ export default async function TeamLayout({ children, params }: { children: React
     // Decided for the operator: whoever reviews it reads "for you"; a member reads the same log.
     decided: reviews ? "Decided for you" : "Decision log",
     agreement: "Agreement",
+    settings: "Settings",
   };
   return (
     <>
@@ -71,9 +74,19 @@ export default async function TeamLayout({ children, params }: { children: React
         <TeamRepo repo={team.repo} branch={team.branch} />
         {/* The controls and the switcher: at the right of the name, or on a line of their own under it on a phone. */}
         <div className="team-tools">
-          {/* A deleted team's own controls are gone with it: it's put back from its overview, or by a6g register. */}
+          {/* A deleted team's own controls are gone with it: it's put back from its Settings, or by a6g register. */}
           {can(viewer, "team:control", team.name) && retired?.kind !== "action" ? (
             <TeamActions team={team} controls={controls} tasks={tasks} mayDelete={can(viewer, "team:retire", team.name)} />
+          ) : null}
+          {/* How it runs (its budget, subscriptions, agreement and place on the site), beside what's done to it. */}
+          {open.includes("settings") ? (
+            <Link className="button s settings-key" href={`${base}/settings`} aria-label={`Settings for ${team.title || team.name}`} title="Settings">
+              <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+                <circle cx="8" cy="8" r="2.25" />
+                <path d="M8 1.5v1.75M8 12.75v1.75M1.5 8h1.75M12.75 8h1.75M3.4 3.4l1.25 1.25M11.35 11.35l1.25 1.25M3.4 12.6l1.25-1.25M11.35 4.65l1.25-1.25" />
+              </svg>
+              <span className="settings-word">Settings</span>
+            </Link>
           ) : null}
           <TeamSwitcher current={team.name} teams={switchTo} />
         </div>
@@ -84,7 +97,7 @@ export default async function TeamLayout({ children, params }: { children: React
             <b>Taken off the site</b> <Ago at={retired.at} />. It isn&apos;t on Teams or in Waiting on you, and nobody is emailed about it.
           </span>
           {can(viewer, "team:retire", team.name) ? (
-            <Link className="button" href={`${base}#site`}>
+            <Link className="button" href={`${base}/settings#site`}>
               Put it back
             </Link>
           ) : null}
@@ -92,14 +105,14 @@ export default async function TeamLayout({ children, params }: { children: React
       ) : null}
       <Tabs
         links={open
-          .filter((s) => s !== "add")
+          .filter((s) => s !== "add" && s !== "agreement")
           .map((s) => ({
             href: s ? `${base}/${s}` : base,
             label: LABELS[s] ?? s,
             exact: s === "",
             count: s === "inbox" ? waiting : s === "decided" ? unreviewed : 0,
-            // A task's page and adding one are the board's.
-            also: s === "board" ? [`${base}/tasks`, `${base}/add`] : [],
+            // A task's page and adding one are the board's; the agreement is one of the settings.
+            also: s === "board" ? [`${base}/tasks`, `${base}/add`] : s === "settings" ? [`${base}/agreement`] : [],
           }))}
       />
       {children}
