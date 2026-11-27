@@ -1,51 +1,8 @@
 # Changelog
 
-## Page checks: a sign-in the app ends on its own is made again mid-run
+## 0.8.18: Proposals that lead with their ask, each team's repository on Teams, and a word when your teams aren't on the newest model
 
-- **A sign-in can say how long it lives.** The harness manifest's `auth.maxAgeMin` gives a state a life in minutes
-  (`{ "person": 15 }`), for an app that signs it out sooner than the factory's 12 hours. `a6g pages` makes it again
-  once it's that old, before each page seen as it and each refusal asked of it, so a run longer than the app's idle
-  sign-out no longer fails that state's later pages, and a refusal is never read from a session the app had already
-  ended: what the old sign-in showed (where its pages landed, whether it was live) is asked again with the new one.
-  Found on a team whose app signs its users out after 20 idle minutes and whose page runs take longer.
-
-## A check that stands through the team's notes, a reviewer's copy of its own, and a team that rests while it waits on you
-
-- **A commit of the team's notes no longer throws a check away.** The check after merges drops its run when the
-  checkout's commit moves under it, and the planner commits its decisions, lessons and direction (`.a6g/*.md`) on the
-  integration branch whenever it likes: a team's suite of almost two hours was thrown away for a `lessons.md`. A move
-  that is only such commits now leaves the run standing for the commit it ran on; any other change still runs it again.
-- **A reviewer's copy is its team's own.** The reviewer and the security reviewer work in `/tmp/review-<team>-<n>`,
-  where two teams' reviewers shared `/tmp/review-<n>`, and give the copy its own dependencies (the team's
-  `worktreeSetup`, run in the copy), never the checkout's linked in: a copy that borrowed the checkout's `node_modules`
-  let an install in it point the team's workspace links into the copy, and the team's app stopped once it was removed.
-- **A team that waits only on you rests.** Blocked tasks, and approved ones set to start after a task still open, are
-  nothing a member could take on, so a team with only those beside your question or your decision now counts as
-  waiting on you: one whose single approved task waited on a question ticked every ten minutes for a night, with
-  nobody working. The planner still looks at a blocked task on the hourly tick.
-
-## Every role on its family's newest model
-
-- **You hear when your teams aren't on the newest model.** `fable`, `opus`, `sonnet` and `haiku` are the newest of
-  each family this version knows, so a model released after it reached no role until a release knew it and each team
-  moved to that release: Fable 5.2 ran in your own sessions for days while the teams' planners and scaffolders stayed
-  on Fable 5.1. The watchdog now compares the models your subscriptions used in the last fortnight with what the
-  roles run on, and tells you once, on this Mac and through each connected channel: a newer model is in use than
-  this version knows (a release that knows it moves the teams), or a team's roles on a short name run an older one
-  than this version's (`a6g upgrade <team>` moves them; a role that names a model id keeps it). `a6g doctor` warns
-  until it's put right. A test keeps each short name on the newest model of its family the price table knows.
-
-## Which repository each team works on
-
-- **Teams says each team's repository.** Under its name on Teams, in its fold's Team facts (linked, with its branch)
-  and beside its name on its own pages: `owner/name` for one on GitHub, linked to its page, or the remote's host and
-  path for one elsewhere. A team's lead publishes it when it registers, from the remote its checkout pushes to, with
-  any user or token in that address left out; never a folder on the Mac. A team registered by an older version, or
-  with no remote, shows nothing for it until `a6g register` runs again.
-- **`a6g teams` and `a6g status` say it too,** and `a6g teams` names the checkout under `~/`. With no remote, it's the
-  repository on this Mac the checkout belongs to.
-
-## Decisions lead with the ask, and a score reads as bars
+### Decisions lead with the ask, and a score reads as bars
 
 - **A proposal says what it asks of you, in a line.** Decisions showed a proposal as the team's notes on it: its title,
   the gate, the score's reason, the task's words and eight figures. Now it leads with its headline, one short question
@@ -60,7 +17,52 @@
 - **A score is bars.** Each dimension is three steps filled to its figure, with what that figure means beside it ("2:
   a job done badly today"), on Decisions and on the task's page, in both themes and on a phone.
 
-## Web app: a team's pages and Subscriptions, tidied
+### Which repository each team works on
+
+- **Teams says each team's repository.** Under its name on Teams, in its fold's Team facts (linked, with its branch)
+  and beside its name on its own pages: `owner/name` for one on GitHub, linked to its page, or the remote's host and
+  path for one elsewhere. A team's lead publishes it when it registers, from the remote its checkout pushes to, with
+  any user or token in that address left out; never a folder on the Mac. A team registered by an older version, or
+  with no remote, shows nothing for it until `a6g register` runs again.
+- **`a6g teams` and `a6g status` say it too,** and `a6g teams` names the checkout under `~/`. With no remote, it's the
+  repository on this Mac the checkout belongs to.
+
+### Every role on its family's newest model
+
+- **You hear when your teams aren't on the newest model.** `fable`, `opus`, `sonnet` and `haiku` are the newest of
+  each family this version knows, so a model released after it reached no role until a release knew it and each team
+  moved to that release: Fable 5.2 ran in your own sessions for days while the teams' planners and scaffolders stayed
+  on Fable 5.1. The watchdog now compares the models your subscriptions used in the last fortnight with what the
+  roles run on, and tells you once, on this Mac and through each connected channel: a newer model is in use than
+  this version knows (a release that knows it moves the teams), or a team's roles on a short name run an older one
+  than this version's (`a6g upgrade <team>` moves them; a role that names a model id keeps it). `a6g doctor` warns
+  until it's put right. A test keeps each short name on the newest model of its family the price table knows.
+
+### A check that stands through the team's notes, a reviewer's copy of its own, and a team that rests while it waits on you
+
+- **A commit of the team's notes no longer throws a check away.** The check after merges drops its run when the
+  checkout's commit moves under it, and the planner commits its decisions, lessons and direction (`.a6g/*.md`) on the
+  integration branch whenever it likes: a team's suite of almost two hours was thrown away for a `lessons.md`. A move
+  that is only such commits now leaves the run standing for the commit it ran on; any other change still runs it again.
+- **A reviewer's copy is its team's own.** The reviewer and the security reviewer work in `/tmp/review-<team>-<n>`,
+  where two teams' reviewers shared `/tmp/review-<n>`, and give the copy its own dependencies (the team's
+  `worktreeSetup`, run in the copy), never the checkout's linked in: a copy that borrowed the checkout's `node_modules`
+  let an install in it point the team's workspace links into the copy, and the team's app stopped once it was removed.
+- **A team that waits only on you rests.** Blocked tasks, and approved ones set to start after a task still open, are
+  nothing a member could take on, so a team with only those beside your question or your decision now counts as
+  waiting on you: one whose single approved task waited on a question ticked every ten minutes for a night, with
+  nobody working. The planner still looks at a blocked task on the hourly tick.
+
+### Page checks: a sign-in the app ends on its own is made again mid-run
+
+- **A sign-in can say how long it lives.** The harness manifest's `auth.maxAgeMin` gives a state a life in minutes
+  (`{ "person": 15 }`), for an app that signs it out sooner than the factory's 12 hours. `a6g pages` makes it again
+  once it's that old, before each page seen as it and each refusal asked of it, so a run longer than the app's idle
+  sign-out no longer fails that state's later pages, and a refusal is never read from a session the app had already
+  ended: what the old sign-in showed (where its pages landed, whether it was live) is asked again with the new one.
+  Found on a team whose app signs its users out after 20 idle minutes and whose page runs take longer.
+
+### Web app: a team's pages and Subscriptions, tidied
 
 - **No empty panel on a team's overview.** With its subscriptions and its place on the site moved to Settings, "How it
   runs" held one sentence saying where the buttons are. It shows only when there's something to say of the controls:
