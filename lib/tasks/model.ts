@@ -39,7 +39,7 @@ export type Score = Record<Dimension, number> & { confidence: Confidence; size: 
 // The Musk gate, before scoring: who asked and why, what could be deleted or simplified instead, the simplest version.
 // `headline` is the ask as the operator reads it first on Decisions, often on a phone: one short question about what
 // approving it gets people, as a question's headline is (Ask). The rest of the gate is the case behind it. Gates
-// recorded before 0.8.16 have none, and show the task's title instead.
+// recorded before 0.8.18 have none, and show the task's title instead.
 export interface Gate {
   asked: string;
   simplify: string;
