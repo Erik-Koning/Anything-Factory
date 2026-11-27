@@ -16,6 +16,7 @@ import {
   claimRefusal,
   DEFAULT_WEIGHTS,
   designOpen,
+  headlineRefusal,
   ideasQueued,
   journeyDue,
   MERGE,
@@ -66,7 +67,16 @@ function setup(raw: RawTeam = team()) {
 }
 
 const SCORE = ["--pain", "3", "--reach", "2", "--revenue", "1", "--wow", "2", "--distribution", "1", "--leverage", "2", "--urgency", "1", "--risk", "0"];
-const GATE = ["--asked", "the operator, for repeat users", "--simplify", "nothing to delete", "--simplest", "one button"];
+const GATE = [
+  "--asked",
+  "the operator, for repeat users",
+  "--simplify",
+  "nothing to delete",
+  "--simplest",
+  "one button",
+  "--headline",
+  "Let people pick up where they left off?",
+];
 
 const task = (fields: Partial<Task> & { id: string }): Task => ({
   ...newTask({ team: "fixture", title: `task ${fields.id}`, kind: "feature", status: "approved", by: "planner", ...fields }),
@@ -107,6 +117,16 @@ describe("the task model", () => {
     };
     assert.equal(priorityOf(painOnly), Math.round((100 * 9) / (3 * 14)), "pain weighs 3 of the 14");
     assert.equal(priorityOf(painOnly, { ...DEFAULT_WEIGHTS, pain: 0 }), 0);
+  });
+
+  test("a headline is the decision in a line, in the operator's words", () => {
+    assert.equal(headlineRefusal("Let donors print their gift as a card?", "--reason"), null);
+    assert.match(headlineRefusal("x".repeat(121), "--reason") ?? "", /121 characters: keep it to 120/);
+    assert.match(headlineRefusal("Ship it after #12?", "--reason") ?? "", /a task number/);
+    assert.match(headlineRefusal("Cache `getTasks` results?", "--reason") ?? "", /code in backticks/);
+    assert.match(headlineRefusal("Split receipt.tsx in two?", "the gate") ?? "", /a file's or a library's name .*goes in the gate/);
+    assert.match(headlineRefusal("Move the site to Next.js 17?", "--reason") ?? "", /a library's name/);
+    assert.equal(headlineRefusal("Keep sign-in at one tap, e.g. by email?", "--reason"), null, "an abbreviation isn't a file");
   });
 
   test("the planner moves tasks, but never approves its own or marks code done", () => {
@@ -1253,6 +1273,41 @@ describe("the audit's findings stay fixed", () => {
       await store.tasks.replace({ ...((await store.tasks.get("2")) as Task), status: "review" });
     }
     assert.equal((await changesRequested(store, "2", { branch: "a6g/b2-b", note: "r4", maxRounds: 3, by: "reviewer" })).task?.status, "blocked");
+  });
+
+  test("a proposal leads with its ask: a new gate needs a headline, and an edit gives one to a proposal without", async () => {
+    const { as, store } = setup();
+    await a6g(["task", "add", "Resume a paused recording"], as("planner"));
+    const score = (...extra: string[]) =>
+      a6g(["task", "score", "1", ...SCORE, ...extra, "--confidence", "asks", "--size", "M", "--why", "users lose work"], as("planner"));
+    const gate = GATE.slice(0, 6);
+    assert.match((await score(...gate)).out, /lead with the ask/, "a new gate without its headline");
+    assert.match((await score(...gate, "--headline", "Resume after #3 lands?")).out, /a task number/);
+    assert.match((await score(...gate, "--headline", "Keep recorder.ts paused?")).out, /a file's or a library's name/);
+    assert.equal((await store().tasks.get("1"))?.gate, null, "nothing kept from a refused score");
+    const scored = await score(...GATE);
+    assert.equal(scored.code, 0, scored.out);
+    assert.equal((await store().tasks.get("1"))?.gate?.headline, "Let people pick up where they left off?");
+    // A score again keeps the ask, with the gate as it was or a new one.
+    assert.equal((await score()).code, 0);
+    assert.equal((await score(...gate)).code, 0);
+    assert.equal((await store().tasks.get("1"))?.gate?.headline, "Let people pick up where they left off?");
+    assert.match((await a6g(["task", "show", "1"], as("planner"))).out, /asks the operator: Let people pick up where they left off\?/);
+
+    // An approved task's ask, said better, isn't a new task: it stays approved.
+    await a6g(["task", "approve", "1"], as("approver"));
+    const edited = await a6g(["task", "edit", "1", "--headline", "Let people resume a recording they paused?"], as("planner"));
+    assert.equal(edited.code, 0, edited.out);
+    assert.deepEqual(
+      [(await store().tasks.get("1"))?.status, (await store().tasks.get("1"))?.gate?.headline],
+      ["approved", "Let people resume a recording they paused?"]
+    );
+    // A proposal scored before headlines gets one by an edit; a task with no gate has nothing to head.
+    await update(store().tasks, "1", (t) => ({ ...t, gate: t.gate && { asked: t.gate.asked, simplify: t.gate.simplify, simplest: t.gate.simplest } }));
+    assert.equal((await a6g(["task", "edit", "1", "--headline", "Let people resume a recording?"], as("planner"))).code, 0);
+    assert.equal((await store().tasks.get("1"))?.gate?.headline, "Let people resume a recording?");
+    await a6g(["task", "add", "Flaky test", "--kind", "bug", "--sev", "minor"], as("planner"));
+    assert.match((await a6g(["task", "edit", "2", "--headline", "Fix it?"], as("planner"))).out, /no gate yet/);
   });
 
   test("approval goes with a task back to the proposals, and a new score; journeys are done only once verified", async () => {

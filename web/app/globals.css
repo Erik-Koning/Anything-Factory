@@ -1951,35 +1951,83 @@ code.path {
     grid-column: 1 / -1;
   }
 }
-/* A score by dimension: a small sheet, each name with its figure, read across. */
-.score {
+/* A score as bars (components/score-bars.tsx): each dimension's name, three steps filled to its figure, the figure and
+   what it means, the rows sharing their columns so the bars line up and their lengths compare down the list. One hue,
+   the empty steps a light tint of it; the figure and its meaning say it in words too. */
+.score-bars {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 0 18px;
+  grid-template-columns: max-content 4.5rem 1.2ch minmax(0, 1fr);
+  gap: 4px 10px;
   max-width: 46rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.score li {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--line);
+.score-bars li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 22px;
 }
-.score span {
+.score-bars .name {
   color: var(--ink-2);
   font: 500 11px/1.45 var(--font-code);
   font-stretch: 100%;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
-.score b {
-  font: 600 13.5px/1.4 var(--font-code);
+.score-bars .steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  height: 10px;
+}
+.score-bars .steps i {
+  background: color-mix(in srgb, var(--chart) 16%, transparent);
+}
+.score-bars .steps i:first-child {
+  border-radius: 4px 0 0 4px;
+}
+.score-bars .steps i:last-child {
+  border-radius: 0 4px 4px 0;
+}
+.score-bars .steps i.on {
+  background: var(--chart);
+}
+.score-bars b {
+  font: 600 13px/1.4 var(--font-code);
   font-stretch: 87.5%;
   font-variant-numeric: tabular-nums slashed-zero;
+  text-align: right;
+}
+.score-bars .means {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+/* On a phone, what a figure means goes under its bar, so the bars keep their length and the words their line. */
+@media (max-width: 560px) {
+  .score-bars {
+    row-gap: 8px;
+  }
+  .score-bars li {
+    row-gap: 1px;
+  }
+  .score-bars .means {
+    grid-column: 2 / -1;
+  }
+}
+@media (forced-colors: active) {
+  .score-bars .steps i {
+    forced-color-adjust: none;
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+  .score-bars .steps i.on {
+    background: CanvasText;
+  }
 }
 
 /* --- The board and the graph ------------------------------------------------------------------------------------ */
@@ -2721,16 +2769,20 @@ li.waiting > dl {
 .rows > li.waiting > * + * {
   margin-top: 0;
 }
-/* With a headline, the task's own title is the context above it, not a second heading. */
-li.waiting:has(> .decide > .headline) > .head .title {
+/* With a headline, the task's own title is the context above it, not a second heading (a question's, or a proposal's
+   ask on Decisions). */
+li.waiting:has(> .decide > .headline) > .head .title,
+li.to-decide:has(> .about > .headline) > .head .title {
   color: var(--ink-2);
   font-size: 14px;
   font-weight: 550;
 }
-li.waiting:has(> .decide > .headline) > .head .title a {
+li.waiting:has(> .decide > .headline) > .head .title a,
+li.to-decide:has(> .about > .headline) > .head .title a {
   color: inherit;
 }
-.decide > .headline {
+.decide > .headline,
+.to-decide > .about > .headline {
   color: var(--ink);
   font-size: 19px;
   font-weight: 650;

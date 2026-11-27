@@ -646,6 +646,21 @@ test("the admin approves one proposal with a note and rejects another with a rea
   await page.goto("/t/shop/proposals");
   await expect(page.getByRole("heading", { name: "Proposed" })).toBeVisible();
 
+  // Each proposal leads with its ask; its score is bars that say what each figure means, and the case is a tap away.
+  const card = page.locator(`#task-${approve}`);
+  await expect(card.locator(".about > .headline")).toHaveText("Let support send a customer their orders as a spreadsheet?");
+  const bars = card.getByRole("list", { name: "Score by dimension, 0 to 3" });
+  await expect(bars.getByRole("listitem")).toHaveCount(8);
+  await expect(bars.getByRole("listitem").first()).toHaveText(/^pain\s*2 of 3:\s*a job done badly today$/);
+  await expect(bars.locator(".steps i.on")).toHaveCount(11);
+  await expect(card.getByText("Size S · people asked for it")).toBeVisible();
+  await expect(card.getByText("support, for refunds")).toBeHidden();
+  await card.getByText("Show the case", { exact: true }).click();
+  await expect(card.getByText("support, for refunds")).toBeVisible();
+  // One scored before headlines has its title alone, as it had.
+  await expect(page.locator(`#task-${reject} .about > .headline`)).toHaveCount(0);
+  await expect(page.locator(`#task-${reject}`).getByRole("link", { name: "Dark mode for receipts" })).toBeVisible();
+
   await page
     .getByLabel("Note (optional)")
     .and(page.locator(`#approve-${approve}`))
