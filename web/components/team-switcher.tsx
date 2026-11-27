@@ -40,13 +40,15 @@ export function TeamSwitcher({ current, teams }: { current: string; teams: Switc
   if (!others.length) return null;
   return (
     <details className="switcher" ref={menu}>
-      {/* On a phone the key says only "Switch": "team" stays for a screen reader. */}
+      {/* On a phone the key says only "Switch", and on the narrowest only its arrows, so it stays on the line of the
+          team's controls: the words stay for a screen reader. */}
       <summary>
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
           <path d="M2.5 5.5h10m-3-3 3 3-3 3M13.5 10.5h-10m3-3-3 3 3 3" />
         </svg>
         <span>
-          Switch<span className="switch-team"> team</span>
+          <span className="switch-word">Switch</span>
+          <span className="switch-team"> team</span>
         </span>
       </summary>
       <ul className="plain">

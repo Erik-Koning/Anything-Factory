@@ -50,6 +50,11 @@ test("an admin signs in with the password and the authenticator's code", async (
   const user = await accounts.collection("user").findOne({ email: state().admin.email });
   const sessions = await accounts.collection("session").find({ userId: user?._id }).toArray();
   expect(sessions.map((s) => s.secondFactor)).toEqual([true]);
+  // A team nothing has been asked of has no panel of controls under its work: its keys are beside its name.
+  await page.goto("/t/blog");
+  await expect(page.getByRole("heading", { level: 1, name: "Blog" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How it runs" })).toHaveCount(0);
+  await page.goto("/");
 });
 
 test("Better Auth's admin endpoints and enrolment aren't served over HTTP, even to an admin", async () => {
@@ -1306,6 +1311,21 @@ test("the admin sees what the team spent: today, this week and in all against th
   const status = page.getByRole("region", { name: "Status" });
   await expect(status.getByText(/Your subscription: 52% of its week used, resets in 2d 23h/)).toBeVisible();
   await expect(status.getByText("at this pace it lasts the week")).toBeVisible();
+  // A week that would run out before it resets says so in the same line, in words: a chip that long wrapped in two.
+  const paced = (percent: number, days: number) =>
+    graph
+      .collection("teams")
+      .updateOne(
+        { _id: "shop" as never },
+        { $set: { "status.spend.subscriptions": [{ account: "default", percent, resetsAt: new Date(Date.now() + days * 86_400_000).toISOString() }] } }
+      );
+  await paced(82, 5);
+  await page.reload();
+  await expect(status.locator(".week-pace .runs-out")).toHaveText(/at this pace, used up in \d+h \d+m/);
+  await expect(status.locator(".week-pace .chip")).toHaveCount(0);
+  await paced(52, 3);
+  await page.reload();
+  await expect(status.getByText("at this pace it lasts the week")).toBeVisible();
   await expect(status.getByRole("link", { name: "The budget →" })).toHaveAttribute("href", "/t/shop/settings#budget");
   const panel = page.getByRole("region", { name: "Spend" });
   await expect(panel.getByRole("link", { name: "Change the budget →" })).toHaveAttribute("href", "/t/shop/settings#budget");
@@ -2506,6 +2526,14 @@ test("pages fit a phone's width without scrolling sideways", async ({ browser })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, path).toBeLessThanOrEqual(0);
   }
+  // A team's controls, the gear and the switcher share the line under its name: the switcher's key is its arrows alone
+  // here, and still says what it's for.
+  await page.goto("/t/blog");
+  const keys = page.locator(".team-tools > *");
+  await expect(keys).toHaveCount(3);
+  const tops = await keys.evaluateAll((all) => all.map((key) => Math.round(key.getBoundingClientRect().top)));
+  expect(new Set(tops).size, tops.join(" ")).toBe(1);
+  await expect(page.getByText("Switch team")).toHaveCount(1);
   await context.close();
 });
 
