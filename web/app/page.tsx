@@ -7,6 +7,7 @@ import { StartCard } from "../components/start-card.tsx";
 import { SubmitButton } from "../components/submit-button.tsx";
 import { TeamActions } from "../components/team-actions.tsx";
 import { TeamFolds } from "../components/team-folds.tsx";
+import { TeamRepo } from "../components/team-repo.tsx";
 import { Ago, Chip, Notice, QuietMark, type SearchParams } from "../components/ui.tsx";
 import { machinesRunning, type MachineTeam, online } from "../../lib/fleet.ts";
 import { can, LIMITS, roleIn, runsTeam } from "../server/access.ts";
@@ -152,6 +153,8 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <span className="title">{title}</span>
                         <Chip>{status?.state ?? "no status yet"}</Chip>
                         {quiet ? <QuietMark last={quiet.last} /> : null}
+                        {/* Which repository, under the name: named here, linked in the fold's Team facts. */}
+                        <TeamRepo repo={team.repo} link={false} />
                       </span>
                       {/* The same four figures in the same places on every row, each saying what it counts, so a row
                           needs no column headings. */}
@@ -234,6 +237,14 @@ export default async function TeamsPage({ searchParams }: { searchParams: Search
                         <section aria-label={`${title}: the team`}>
                           <h3 className="small">Team</h3>
                           <dl className="facts small">
+                            {team.repo ? (
+                              <>
+                                <dt>Repository</dt>
+                                <dd>
+                                  <TeamRepo repo={team.repo} branch={team.branch} />
+                                </dd>
+                              </>
+                            ) : null}
                             <dt>Your role</dt>
                             <dd>{role}</dd>
                             <dt>Planner</dt>

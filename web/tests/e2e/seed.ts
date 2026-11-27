@@ -47,7 +47,13 @@ const score = (size: Score["size"], why: string): Score => ({
 const gate = (asked: string) => ({ asked, simplify: "nothing to delete: it's new", simplest: "one button" });
 
 // `operator`: who the team works for, which a factory version that reads the working agreement publishes.
-function settings(name: string, title: string, mode: TeamSettings["mode"], operator?: TeamSettings["operator"]): TeamSettings {
+function settings(
+  name: string,
+  title: string,
+  mode: TeamSettings["mode"],
+  operator?: TeamSettings["operator"],
+  repo?: TeamSettings["repo"]
+): TeamSettings {
   return {
     name,
     title,
@@ -57,13 +63,16 @@ function settings(name: string, title: string, mode: TeamSettings["mode"], opera
     branch: "main",
     factory: "0.4.0",
     ...(operator ? { operator } : {}),
+    ...(repo ? { repo } : {}),
     publishedAt: nowIso(),
   };
 }
 
 export async function seed(): Promise<World> {
   const shop = storeFor("shop");
-  await shop.publish(settings("shop", "Shop", "finish", { technical: true, designCheckIn: false }));
+  await shop.publish(
+    settings("shop", "Shop", "finish", { technical: true, designCheckIn: false }, { name: "acme/storefront", url: "https://github.com/acme/storefront" })
+  );
   await shop.report({ state: "active", planner: "running", members: { builder: 1 }, at: nowIso() });
   const blog = storeFor("blog");
   await blog.publish(settings("blog", "Blog", "cycles"));

@@ -20,7 +20,7 @@ import {
 import { newTask, type Task, withEvent } from "../lib/tasks/model.ts";
 import { decide } from "../lib/tasks/decide.ts";
 import { keyHash } from "../lib/tasks/requests.ts";
-import { settingsOf } from "../lib/tasks/teams.ts";
+import { repoOfRemote, settingsOf } from "../lib/tasks/teams.ts";
 import { machinesRunning, online } from "../lib/fleet.ts";
 import { machineReport } from "../lib/commands/watchdog.ts";
 import { markMoved, migrate } from "../lib/tasks/migrate.ts";
@@ -237,6 +237,48 @@ describe("what the web app shares", () => {
     const doc = await mongo.team();
     assert.deepEqual([doc?.name, doc?.approval.mode, doc?.factory, doc?.status?.members], ["fixture", "thresholds", "0.4.0", { builder: 2 }]);
     assert.equal(await fileStore(tmp("a6g-run-"), "fixture").team(), null);
+  });
+
+  test("which repository a team works on: owner/name from its remote, never a folder, a user or a token", async () => {
+    const github = { name: "acme/shop", url: "https://github.com/acme/shop" };
+    for (const remote of [
+      "https://github.com/acme/shop.git",
+      "git@github.com:acme/shop.git",
+      "ssh://git@github.com/acme/shop",
+      "https://x-access-token:SECRET@github.com/acme/shop.git",
+    ])
+      assert.deepEqual(repoOfRemote(remote), github, remote);
+    assert.deepEqual(repoOfRemote("https://me:pw@git.example.com/group/shop.git?ref=x"), {
+      name: "git.example.com/group/shop",
+      url: "https://git.example.com/group/shop",
+    });
+    assert.deepEqual(repoOfRemote("git@gitlab.com:group/shop.git"), { name: "gitlab.com/group/shop", url: null }, "no page to link to");
+    for (const none of ["/Users/someone/code/shop", "file:///Users/someone/shop", "../shop", "", null, "https://github.com/"])
+      assert.equal(repoOfRemote(none), null, String(none));
+
+    const mongo = storeOver(fakeMongo(), { name: "fixture", tasks: { store: "mongo", database: "a6g", lead: "studio" } });
+    const loaded = normalize({ ...team(), tasks: { store: "mongo", lead: "studio" } }, "/x").team;
+    await mongo.publish(settingsOf(loaded, "0.4.0", "https://x-access-token:SECRET@github.com/acme/shop.git"));
+    const doc = await mongo.team();
+    assert.deepEqual(doc?.repo, github);
+    assert.doesNotMatch(JSON.stringify(doc), /SECRET|x-access-token/);
+    await mongo.publish(settingsOf(loaded, "0.4.0"));
+    assert.equal((await mongo.team())?.repo, null, "no remote, nothing to show");
+  });
+
+  test("a6g teams says each team's repository and its checkout", async () => {
+    const shop = makeRepo(baseTeam({ name: "shop" }));
+    git(shop, "remote", "add", "origin", "https://x-access-token:SECRET@github.com/acme/shop.git");
+    const notes = makeRepo(baseTeam({ name: "notes" }));
+    const a6gHome = tmp("a6g-home-");
+    const entry = (name: string, home: string) => ({ name, title: name, home, run: tmp("a6g-run-"), version: "0.8.16" });
+    write(a6gHome, { "teams/shop.json": entry("shop", shop), "teams/notes.json": entry("notes", notes) });
+    const listed = await a6g(["teams"], { env: { A6G_HOME: a6gHome } });
+    assert.equal(listed.code, 0, listed.out);
+    assert.match(listed.out, new RegExp(`^shop\\s+0\\.8\\.16\\s+active\\s+acme/shop\\s+${shop}$`, "m"));
+    assert.doesNotMatch(listed.out, /SECRET/);
+    // With no remote, the repository on this machine the checkout belongs to.
+    assert.match(listed.out, new RegExp(`^notes\\s+0\\.8\\.16\\s+active\\s+${notes}\\s+${notes}$`, "m"));
   });
 
   test("decisions go through the move table, whoever asks", async () => {

@@ -4,6 +4,7 @@ import type { Team } from "../config.ts";
 import type { HoldState } from "./controls.ts";
 import type { Spend } from "./spend.ts";
 import type { ApprovalRules } from "./model.ts";
+import { githubRepoOf } from "./start.ts";
 
 export interface TeamSettings {
   name: string;
@@ -16,7 +17,16 @@ export interface TeamSettings {
   // Who the team works for (team.json operator), which the working agreement reads: a team published by a factory
   // version from before the agreement has none, and the app says its agreement isn't read yet.
   operator?: Team["operator"];
+  // The repository it works on, from the remote its checkout pushes to (repoOfRemote): a team published by a factory
+  // version from before this has none, nor has one whose checkout has no remote, and the app shows nothing for it.
+  repo?: TeamRepo | null;
   publishedAt: string;
+}
+// A repository as the web app shows it: owner/name on GitHub, or a remote's host and path elsewhere; and its page, when
+// it has one to link to.
+export interface TeamRepo {
+  name: string;
+  url: string | null;
 }
 export interface TeamState {
   // paused (by the operator, or a hold that settled), pausing (a graceful hold under way), complete (the finish line
@@ -55,7 +65,8 @@ export interface TeamDoc extends TeamSettings {
   status: TeamState | null;
 }
 
-export const settingsOf = (team: Team, factory: string): TeamSettings => ({
+// `remote`: the address of the remote the team's checkout pushes to, as git has it (null: none).
+export const settingsOf = (team: Team, factory: string, remote: string | null = null): TeamSettings => ({
   name: team.name,
   title: team.title,
   mode: team.mode,
@@ -64,5 +75,38 @@ export const settingsOf = (team: Team, factory: string): TeamSettings => ({
   branch: team.branch,
   factory,
   operator: team.operator,
+  repo: repoOfRemote(remote),
   publishedAt: new Date().toISOString(),
 });
+
+// The repository behind a git remote's address, fit to show anyone who can see the team: a GitHub remote, over https
+// or ssh, as owner/name with its page; any other as its host and path, linked when it's on the web. Whatever the
+// address carries besides (a user, a token, a query) is left out. A folder on the machine is no repository to show:
+// its path names the operator's account there, so it's null, as no remote is.
+export function repoOfRemote(remote: string | null | undefined): TeamRepo | null {
+  const text = remote?.trim() ?? "";
+  let host = "";
+  let path = "";
+  // The page's scheme, for an address on the web; null for ssh or git's own protocol.
+  let web: string | null = null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      return null;
+    }
+    if (url.protocol === "file:") return null;
+    [host, path, web] = [url.host, url.pathname, url.protocol === "https:" || url.protocol === "http:" ? url.protocol : null];
+  } else {
+    // git's own short form, [user@]host:path.
+    const short = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/\/)(\S+)$/.exec(text);
+    if (!short) return null;
+    [host, path] = [short[1] ?? "", short[2] ?? ""];
+  }
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+  if (!host || !path) return null;
+  const github = /^(?:www\.)?github\.com$/i.test(host) ? githubRepoOf(path) : null;
+  if (github) return { name: github.full, url: `https://github.com/${github.full}` };
+  return { name: `${host}/${path}`, url: web ? `${web}//${host}/${path}` : null };
+}
