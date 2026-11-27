@@ -1,5 +1,15 @@
 # Changelog
 
+## Which repository each team works on
+
+- **Teams says each team's repository.** Under its name on Teams, in its fold's Team facts (linked, with its branch)
+  and beside its name on its own pages: `owner/name` for one on GitHub, linked to its page, or the remote's host and
+  path for one elsewhere. A team's lead publishes it when it registers, from the remote its checkout pushes to, with
+  any user or token in that address left out; never a folder on the Mac. A team registered by an older version, or
+  with no remote, shows nothing for it until `a6g register` runs again.
+- **`a6g teams` and `a6g status` say it too,** and `a6g teams` names the checkout under `~/`. With no remote, it's the
+  repository on this Mac the checkout belongs to.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
