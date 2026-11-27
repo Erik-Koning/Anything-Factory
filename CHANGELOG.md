@@ -35,6 +35,16 @@
   than this version's (`a6g upgrade <team>` moves them; a role that names a model id keeps it). `a6g doctor` warns
   until it's put right. A test keeps each short name on the newest model of its family the price table knows.
 
+## Which repository each team works on
+
+- **Teams says each team's repository.** Under its name on Teams, in its fold's Team facts (linked, with its branch)
+  and beside its name on its own pages: `owner/name` for one on GitHub, linked to its page, or the remote's host and
+  path for one elsewhere. A team's lead publishes it when it registers, from the remote its checkout pushes to, with
+  any user or token in that address left out; never a folder on the Mac. A team registered by an older version, or
+  with no remote, shows nothing for it until `a6g register` runs again.
+- **`a6g teams` and `a6g status` say it too,** and `a6g teams` names the checkout under `~/`. With no remote, it's the
+  repository on this Mac the checkout belongs to.
+
 ## 0.8.17: An upgrade that ends
 
 - **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on

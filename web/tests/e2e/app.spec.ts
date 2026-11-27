@@ -635,6 +635,22 @@ test("a member follows the work on the board, and suggests a task, which goes to
   await member.context.close();
 });
 
+test("a team says which repository it works on: under its name on Teams, linked in its fold and its heading", async () => {
+  const { page } = admin;
+  await page.goto("/");
+  const shop = page.locator("details#shop");
+  await expect(shop.locator("summary .team-repo")).toHaveText("acme/storefront");
+  await shop.evaluate((row) => ((row as HTMLDetailsElement).open = true));
+  await expect(shop.getByRole("link", { name: "acme/storefront" })).toHaveAttribute("href", "https://github.com/acme/storefront");
+  await expect(shop.locator("dd .team-repo")).toHaveText("acme/storefront on main");
+  // A team that published none (an older factory, or no remote) shows nothing for it.
+  await expect(page.locator("details#blog .team-repo")).toHaveCount(0);
+  await page.goto("/t/shop");
+  const heading = page.locator(".team-head");
+  await expect(heading.getByRole("link", { name: "acme/storefront" })).toHaveAttribute("href", "https://github.com/acme/storefront");
+  await expect(heading.locator(".team-repo")).toHaveText("acme/storefront on main");
+});
+
 test("the admin approves one proposal with a note and rejects another with a reason", async ({ browser }) => {
   // A second sign-in, with a backup code this time.
   const fresh = await newPage(browser);

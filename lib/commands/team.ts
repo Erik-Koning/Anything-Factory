@@ -2,7 +2,7 @@
 // status, teams, prompt and upgrade.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { instanceId, loadTeam, MEMBER_COMMAND_MIN, modelsOf, type RawTeam, type Team } from "../config.ts";
 import * as docker from "../docker.ts";
@@ -41,11 +41,12 @@ import { compile, promptFile, writePrompt } from "../prompts.ts";
 import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
-import { die, localTime, type Options, parseArgs, readJson, writeJson } from "../util.ts";
+import { die, git, localTime, type Options, parseArgs, readJson, writeJson } from "../util.ts";
 import { acquireSlot } from "../lock.ts";
 import { answers, applyTeamControls, ensureWatchdog, keptWorktrees, reportTeamState, watchOnce } from "./watchdog.ts";
 import { machineName } from "../machine.ts";
-import { isLead, multiMachine } from "../tasks/machines.ts";
+import { isLead, multiMachine, remoteOf } from "../tasks/machines.ts";
+import { underHome } from "../orders.ts";
 import {
   actionControl,
   budgetControl,
@@ -64,7 +65,7 @@ import {
 import { fileDesignCheckIn } from "../tasks/design.ts";
 import { designOpen, nowIso, OPERATOR, Refused } from "../tasks/model.ts";
 import { openStore, type Store } from "../tasks/store.ts";
-import { settingsOf } from "../tasks/teams.ts";
+import { repoOfRemote, settingsOf } from "../tasks/teams.ts";
 import { openTeamStore } from "../tasks/ops.ts";
 import { checkDue, fileGaps, readVerifyLog } from "../verify.ts";
 
@@ -146,7 +147,7 @@ async function publishTeam(home: string): Promise<void> {
   try {
     const store = await openStore(team, readRegistry(team.name)?.run ?? defaultRunDir(team.name));
     try {
-      await store.publish(settingsOf(team, PACKAGE.version));
+      await store.publish(settingsOf(team, PACKAGE.version, remoteAddress(team.home, remoteOf(team))));
       console.info(`  published ${team.name}'s settings for the web app`);
       if (await putBackOnApp(store, team.name)) console.info(`  ${team.name} was off the web app; it's back on it`);
     } finally {
@@ -154,6 +155,29 @@ async function publishTeam(home: string): Promise<void> {
     }
   } catch (error) {
     console.warn(`  couldn't publish ${team.name}'s settings for the web app: ${(error as Error).message.split("\n")[0]}`);
+  }
+}
+
+// The address of a remote of the team's checkout, as git has it, or null when there's no such remote.
+function remoteAddress(home: string, remote: string): string | null {
+  try {
+    return git(home, "remote", "get-url", remote) || null;
+  } catch {
+    return null;
+  }
+}
+
+// The repository a registered team works on, as the operator's terminal says it: owner/name on GitHub, or the
+// remote's host and path, from the remote it pushes to (team.json push.remote, else origin); with no remote, the
+// operator's own repository on this machine (the team's checkout is a worktree of it), under ~/.
+function repoLine(home: string): string {
+  const remote = readJson<RawTeam | null>(join(home, ".a6g", "team.json"), null)?.push;
+  const named = repoOfRemote(remoteAddress(home, (remote && remote.remote) || "origin"));
+  if (named) return named.name;
+  try {
+    return underHome(dirname(git(home, "rev-parse", "--path-format=absolute", "--git-common-dir")));
+  } catch {
+    return "no repository";
   }
 }
 
@@ -741,7 +765,9 @@ export async function status(argv: string[]): Promise<number> {
       existsSync(join(entry.run, "paused")) ? "paused" : pausing ? "pausing" : null,
       existsSync(join(entry.run, "complete")) ? "complete" : null,
     ].filter((flag) => flag !== null);
-    console.info(`== ${name} (${entry.title}) ${flags.length ? flags.join(", ") : "active"} · factory ${entry.version} · ${entry.home}`);
+    console.info(
+      `== ${name} (${entry.title}) ${flags.length ? flags.join(", ") : "active"} · factory ${entry.version} · ${repoLine(entry.home)} · ${entry.home}`
+    );
     console.info(
       `   planner ${planner ?? "none"}${thread ? ` (${[thread.status, thread.model ? `on ${thread.model}` : null].filter(Boolean).join(", ")})` : ""}`
     );
@@ -792,7 +818,8 @@ export async function status(argv: string[]): Promise<number> {
   return 0;
 }
 
-// Every registered team on a line: its version, whether it runs, and its checkout (a6g status says more).
+// Every registered team on a line: its version, whether it runs, the repository it works on and its checkout (a6g
+// status says more).
 export function teams(): number {
   for (const name of teamNames()) {
     const entry = readRegistry(name);
@@ -805,7 +832,7 @@ export function teams(): number {
         : existsSync(join(entry.run, "complete"))
           ? "complete"
           : "active";
-    console.info(`${name.padEnd(20)} ${String(entry.version).padEnd(8)} ${state.padEnd(9)} ${entry.home}`);
+    console.info(`${name.padEnd(20)} ${String(entry.version).padEnd(8)} ${state.padEnd(9)} ${repoLine(entry.home).padEnd(32)} ${underHome(entry.home)}`);
   }
   return 0;
 }
