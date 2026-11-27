@@ -1,4 +1,4 @@
-// Whether the team is on the site, a row of the overview's How it runs (admins only): a team no Mac runs can be taken
+// Whether the team is on the site, a row of How it runs on its Settings (admins only): a team no Mac runs can be taken
 // off, and one that's off put back, at once. One a Mac still runs comes off when it's deleted (the team's menu, beside
 // its name), which takes it off its Mac too: taking it off here would leave it running unseen.
 import { siteAction } from "../app/t/[team]/actions.ts";

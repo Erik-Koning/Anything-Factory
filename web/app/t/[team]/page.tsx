@@ -2,14 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { SpendPanel } from "../../../components/spend-panel.tsx";
-import { SitePanel } from "../../../components/site-panel.tsx";
-import { SubscriptionsPanel } from "../../../components/subscriptions-panel.tsx";
 import { TeamControls } from "../../../components/team-controls.tsx";
-import { Ago, Chip, Notice, param, type SearchParams } from "../../../components/ui.tsx";
+import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
+import { WeekPace } from "../../../components/week-pace.tsx";
 import { can } from "../../../server/access.ts";
-import { limitsOf, retiredOf, storeFor, usageOf } from "../../../server/factory.ts";
+import { limitsOf, storeFor, usageOf } from "../../../server/factory.ts";
 import { waitingCount } from "../../../server/inbox.ts";
-import { journeys, merges, offSite, progress } from "../../../server/views.ts";
+import { journeys, merges, progress } from "../../../server/views.ts";
 import { controlsFor, readAhead, tasksOf, teamFor } from "./team.ts";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -17,8 +16,6 @@ export const metadata: Metadata = { title: "Overview" };
 export default async function OverviewPage({ params, searchParams }: { params: Promise<{ team: string }>; searchParams: SearchParams }) {
   const { team: name } = await params;
   readAhead(name, "controls");
-  // Which form a refused control reopens (actions.ts).
-  const open = param((await searchParams)["open"]);
   const { viewer, team } = await teamFor(name);
   const control = can(viewer, "team:control", team.name);
   const [tasks, cycles, controls] = await Promise.all([
@@ -35,7 +32,6 @@ export default async function OverviewPage({ params, searchParams }: { params: P
   const details = can(viewer, "team:board", team.name);
   const shownJourneys = journeys(tasks);
   const waiting = can(viewer, "proposals:decide", team.name) ? waitingCount(tasks) : 0;
-  const retire = can(viewer, "team:retire", team.name);
   // What wakes an idle or finished team: new work, from whoever may give it some.
   const adds = can(viewer, "tasks:add", team.name) ? "add a task" : can(viewer, "tasks:suggest", team.name) ? "suggest a task" : null;
   const asks = can(viewer, "requests:send", team.name);
@@ -124,6 +120,18 @@ export default async function OverviewPage({ params, searchParams }: { params: P
             <dd>
               <Ago at={status?.at} />
             </dd>
+            {/* For its admins: how far its subscriptions are through their week, and when at this pace they run out. */}
+            {control && status?.spend?.subscriptions?.length ? (
+              <>
+                <dt>This week</dt>
+                <dd>
+                  <WeekPace subscriptions={status.spend.subscriptions} />
+                  <Link className="way small" href={`/t/${team.name}/settings#budget`}>
+                    {limits ? "The budget →" : "Set a budget →"}
+                  </Link>
+                </dd>
+              </>
+            ) : null}
           </dl>
         </section>
         <section className="panel" aria-labelledby="progress">
@@ -186,19 +194,15 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         journeysPanel
       )}
 
-      {/* Under the work, for its admins: how the team runs (a row each for its controls, its subscriptions and its place
-          on the site), then what it spent. */}
-      {control || retire ? (
+      {/* Under the work, for its admins: where its controls stand, then what it spent. What it may spend, the
+          subscriptions it runs on, the agreement and its place on the site are on Settings. */}
+      {control ? (
         <section className="panel runs" aria-labelledby="runs">
           <h2 id="runs">How it runs</h2>
-          {control ? <TeamControls team={team} controls={controls} /> : null}
-          {control ? <SubscriptionsPanel team={team} controls={controls} open={open === "subscriptions"} /> : null}
-          {retire ? <SitePanel team={team} retired={offSite(team, retiredOf(controls))} expanded={open === "site"} /> : null}
+          <TeamControls team={team} controls={controls} />
         </section>
       ) : null}
-      {control ? (
-        <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} open={open === "budget"} />
-      ) : null}
+      {control ? <SpendPanel team={team.name} spend={team.status?.spend ?? null} usage={usage} limits={limits} tasks={tasks} /> : null}
     </>
   );
 }

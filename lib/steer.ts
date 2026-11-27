@@ -36,6 +36,7 @@ import {
   fallbackFor,
   gate,
   listFor,
+  nextReset,
   owns,
   setTeamUses,
   subscriptionLimits,
@@ -327,6 +328,17 @@ export function steer(entry: SteerEntry, now = new Date()): SteerResult | null {
   writeJson(steeringFile(entry.run), steering);
   const tell = changes.length ? { key: `subscriptions-${hash(...signature)}`, text: `Subscriptions: the team's ${changes.join("; the ")}.` } : null;
   return { said, plannerMoved: Object.hasOwn(homes, "planner"), tell, steering };
+}
+
+// When the usage limit the team waits on resets (lib/subscriptions.ts nextReset), for a pause asked to end then: from
+// its roles' waits as last steered, and the readings of every subscription its roles may run on.
+export function resetFor(entry: Pick<RegistryEntry, "name" | "run">, now = new Date()): ReturnType<typeof nextReset> {
+  const steering = readSteering(entry.run);
+  const list = accounts();
+  const use = teamUses()[entry.name];
+  const roles = Object.keys(steering?.roles ?? {});
+  const names = [...new Set((roles.length ? roles : ["planner"]).flatMap((role) => listFor(use, role, list)))];
+  return nextReset(names, steering?.waiting ?? {}, subscriptionState(), subscriptionLimits(), now);
 }
 
 // The operator's `subscriptions` controls the run folder hasn't applied yet (the web app's; a6g subscriptions use

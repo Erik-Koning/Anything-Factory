@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Fragment } from "react";
 import { LinkPending } from "../../components/link-pending.tsx";
-import { formatCount, formatDay, formatPercent, formatTokens, formatUsd } from "../../components/usage/format.ts";
+import { formatCount, formatDay, formatNames, formatPercent, formatTokens, formatUsd } from "../../components/usage/format.ts";
 import { LimitCard, LimitKey, SubscriptionFacts } from "../../components/usage/limits.tsx";
 import { LocalHour } from "../../components/usage/local-hour.tsx";
 import { ModelTable, type ModelRow } from "../../components/usage/model-table.tsx";
@@ -20,7 +21,11 @@ import {
   poolsOf,
   processed,
   ranked,
+  type Sort,
+  SORTS,
+  sortedBy,
   speedSegments,
+  subscriptionAs,
   subscriptionsOf,
   tokenSegments,
   type Totals,
@@ -32,9 +37,11 @@ import "./subscriptions.css";
 
 export const metadata: Metadata = { title: "Subscriptions" };
 
-// The Claude subscriptions on the machines the person sees (an admin, every linked machine's): how much of each one's
-// limits is left, and what they used over a window, in dollars at the API's prices and in tokens, by subscription and
-// by model. What's shown is in the address, so a view can be linked to and the back button goes back to the last one.
+// The Claude subscriptions on the machines the person sees (an admin, every linked machine's), each by the address it
+// signs in with: how much of each one's limits is left, and what they used over a window, in dollars at the API's
+// prices and in tokens, by subscription and by model. One subscription, or one of its names in a6g, can be chosen, and
+// they're in order of use or of name. What's shown is in the address, so a view can be linked to and the back button
+// goes back to the last one.
 export default async function SubscriptionsPage({ searchParams }: { searchParams: SearchParams }) {
   const [viewer, linked, params] = await Promise.all([requireViewer(), linkedMachines(), searchParams]);
   const machines = visibleMachines(viewer, linked).sort((a, b) => a.name.localeCompare(b.name));
@@ -42,24 +49,28 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
   const metric: Metric = METRICS.find((m) => m.value === param(params["view"]))?.value ?? "limits";
   const days: Period = PERIODS.find((p) => String(p.days) === param(params["period"]))?.days ?? 30;
   const by = param(params["by"]) === "period" ? "period" : "model";
+  const sort: Sort = SORTS.find((s) => s.value === param(params["sort"]))?.value ?? "used";
   const onMachine = machines.find((m) => m.name === param(params["machine"]) && reported.has(m.id))?.name ?? null;
   const reporting = machines.filter((m) => reported.has(m.id));
-  const all = subscriptionsOf(
-    reporting
-      .filter((m) => !onMachine || m.name === onMachine)
-      .map((m) => ({ machine: { id: m.id, name: m.name }, subscriptions: reported.get(m.id) ?? [] }))
-  );
-  const chosen = all.find((s) => s.key === param(params["sub"])) ?? null;
-  const subs = chosen ? [chosen] : all;
   const now = new Date();
+  const reports = reporting
+    .filter((m) => !onMachine || m.name === onMachine)
+    .map((m) => ({ machine: { id: m.id, name: m.name }, subscriptions: reported.get(m.id) ?? [] }));
+  const all = sortedBy(subscriptionsOf(reports), sort, metric, days, now);
+  const chosen = all.find((s) => s.key === param(params["sub"])) ?? null;
+  // One of its names in a6g, when it goes by more than one.
+  const as = chosen && chosen.names.length > 1 ? (chosen.names.find((n) => n === param(params["as"])) ?? null) : null;
+  const subs = chosen ? [as ? subscriptionAs(reports, chosen, as) : chosen] : all;
   const href = (change: Record<string, string | null>) => {
     const next = new URLSearchParams();
     const current: Record<string, string | null> = {
       view: metric === "limits" ? null : metric,
       period: days === 30 ? null : String(days),
       by: by === "model" ? null : by,
+      sort: sort === "used" ? null : sort,
       machine: onMachine,
       sub: chosen?.key ?? null,
+      as,
     };
     for (const [key, value] of Object.entries({ ...current, ...change })) if (value) next.set(key, value);
     const query = next.toString();
@@ -68,12 +79,24 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
 
   const periods = PERIODS.map((p) => ({ label: p.label, href: href({ period: p.days === 30 ? null : String(p.days) }), on: p.days === days }));
   const views = METRICS.map((m) => ({ label: m.label, href: href({ view: m.value === "limits" ? null : m.value }), on: m.value === metric }));
+  const sorts = SORTS.map((s) => ({ label: s.label, href: href({ sort: s.value === "used" ? null : s.value }), on: s.value === sort }));
+  const accounts = all.map((s) => ({
+    key: s.key,
+    label: s.name,
+    colour: s.colour,
+    href: href({ sub: s.key, as: null }),
+    on: chosen?.key === s.key && !as,
+    names:
+      s.names.length > 1
+        ? s.names.map((n) => ({ key: n, label: n, of: s.name, href: href({ sub: s.key, as: n }), on: chosen?.key === s.key && as === n }))
+        : [],
+  }));
   return (
     <>
       <h1>Subscriptions</h1>
       <p className="lede">
-        The Claude subscriptions on {viewer.admin ? "every linked machine" : "your machines"}: what&apos;s left of their limits, and what they&apos;ve
-        used.
+        The Claude subscriptions on {viewer.admin ? "every linked machine" : "your machines"}, each by the address it signs in with: what&apos;s left of
+        their limits, and what they&apos;ve used.
       </p>
       {!machines.length ? (
         <p className="panel empty">
@@ -90,24 +113,34 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
           <div className="usage-bar">
             <Filters
               label="Machine"
-              all="All machines"
-              current={onMachine}
-              options={reporting.length > 1 ? reporting.map((m) => ({ value: m.name, label: m.name })) : []}
-              href={(value) => href({ machine: value, sub: null })}
+              all={{ label: "All machines", href: href({ machine: null, sub: null, as: null }), on: onMachine === null }}
+              options={reporting.map((m) => ({
+                key: m.id,
+                label: m.name,
+                href: href({ machine: m.name, sub: null, as: null }),
+                on: onMachine === m.name,
+                names: [],
+              }))}
             />
             <Filters
               label="Subscription"
-              all="All subscriptions"
-              current={chosen?.key ?? null}
-              options={all.length > 1 ? all.map((s) => ({ value: s.key, label: s.name, colour: s.colour })) : []}
-              href={(value) => href({ sub: value })}
+              all={{ label: "All subscriptions", href: href({ sub: null, as: null }), on: chosen === null }}
+              options={accounts}
             />
             <span className="spacer" />
+            {all.length > 1 ? <Toggle label="Sort" items={sorts} wide /> : null}
             {metric !== "limits" ? <Toggle label="Period" items={periods} wide /> : null}
             <Toggle label="Show" items={views} wide />
+            {all.length > 1 ? <ViewSelect label="Sort" items={sorts} /> : null}
             {metric !== "limits" ? <ViewSelect label="Period" items={periods} /> : null}
             <ViewSelect label="Show" items={views} />
           </div>
+          {as && chosen ? (
+            <p className="small muted usage-as">
+              Only what {as} used. It&apos;s the same Claude account as {formatNames(chosen.names.filter((n) => n !== as))}
+              {chosen.email ? `, ${chosen.email}` : ""}: they share its limits.
+            </p>
+          ) : null}
           {metric === "limits" ? (
             <LimitsView subs={subs} now={now} />
           ) : (
@@ -119,34 +152,48 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
   );
 }
 
-// A row of links that narrows the page to one machine or one subscription; nothing when there's only one to choose.
+interface Choice {
+  key: string;
+  label: string;
+  href: string;
+  on: boolean;
+}
+
+// A row of links that narrows the page to one machine or one subscription, a subscription's names in a6g joined to it
+// when it goes by more than one; nothing when there's only one to choose.
 function Filters({
   label,
   all,
-  current,
   options,
-  href,
 }: {
   label: string;
-  all: string;
-  current: string | null;
-  options: { value: string; label: string; colour?: number }[];
-  href: (value: string | null) => string;
+  all: Omit<Choice, "key">;
+  options: (Choice & { colour?: number; names: (Choice & { of: string })[] })[];
 }) {
-  if (!options.length) return null;
+  if (options.reduce((n, o) => n + 1 + o.names.length, 0) < 2) return null;
+  const link = (c: Omit<Choice, "key">, colour?: number, of?: string) => (
+    <Link href={c.href} aria-current={c.on ? "true" : undefined}>
+      <LinkPending />
+      {colour !== undefined ? <span className={`swatch c${colour}`} aria-hidden="true" /> : null}
+      <span className="usage-filter-label">{c.label}</span>
+      {of ? <span className="sr"> ({of})</span> : null}
+    </Link>
+  );
   return (
     <nav className="usage-filter" aria-label={label}>
-      <Link href={href(null)} aria-current={current === null ? "true" : undefined}>
-        <LinkPending />
-        {all}
-      </Link>
-      {options.map((o) => (
-        <Link key={o.value} href={href(o.value)} aria-current={current === o.value ? "true" : undefined}>
-          <LinkPending />
-          {o.colour !== undefined ? <span className={`swatch c${o.colour}`} aria-hidden="true" /> : null}
-          {o.label}
-        </Link>
-      ))}
+      {link(all)}
+      {options.map((o) =>
+        o.names.length ? (
+          <span key={o.key} className="usage-filter-group">
+            {link(o, o.colour)}
+            {o.names.map((n) => (
+              <Fragment key={n.key}>{link(n, undefined, n.of)}</Fragment>
+            ))}
+          </span>
+        ) : (
+          <Fragment key={o.key}>{link(o, o.colour)}</Fragment>
+        )
+      )}
     </nav>
   );
 }
@@ -209,7 +256,8 @@ function UsageView({
   const usage = usageOf(subs, days, now);
   const format = metric === "cost" ? formatUsd : formatTokens;
   const total = valueOf(usage.totals, metric);
-  const series = ranked(usage.series, metric);
+  // In the page's order, as the chart and the table are.
+  const series = usage.series;
   const unpricedShare = usage.totals.requests ? usage.totals.unpriced / usage.totals.requests : 0;
   const unit = usage.hourly ? "hour" : "day";
   const heading = `${usage.hourly ? "Hourly" : "Daily"} ${metric === "cost" ? "cost" : "processed tokens"}`;
@@ -249,6 +297,7 @@ function UsageView({
                     <b>{s.sub.name}</b>
                     <span className="small muted">
                       {formatCount(s.sessions)} {s.sessions === 1 ? "session" : "sessions"}
+                      {s.sub.email ? ` · ${s.sub.names.join(", ")} in a6g` : ""}
                     </span>
                   </span>
                   <span className="fig">{format(v)}</span>

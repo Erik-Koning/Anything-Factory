@@ -1,4 +1,4 @@
-// Which Claude subscriptions a team runs on, a row of the overview's How it runs (admins only): the subscriptions on
+// Which Claude subscriptions a team runs on, a row of How it runs on its Settings (admins only): the subscriptions on
 // the team's Mac with how much of each one's week is used, the order the team takes them in and whose order that is,
 // what each role runs on now (and the roles on Opus while a subscription has used up Fable's own limit), and the form
 // that changes the order (a control the Mac applies within a minute, lib/steer.ts). A team whose Mac doesn't report

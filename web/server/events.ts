@@ -163,7 +163,14 @@ export function stateEvent(team: string, title: string, state: TeamState | null,
     team,
     at: state.at,
     title: `${title} ${said}`,
-    detail: state.state === "paused" ? (state.hold?.report ? clip(state.hold.report, 600) : "Nothing starts or merges until it's resumed.") : "",
+    detail:
+      state.state === "paused"
+        ? state.hold?.report
+          ? clip(state.hold.report, 600)
+          : state.hold?.until === "reset"
+            ? "Nothing starts or merges until its usage limit resets, or it's resumed."
+            : "Nothing starts or merges until it's resumed."
+        : "",
     path: `/t/${team}`,
   };
 }

@@ -1,8 +1,9 @@
 // Where the operator's controls stand, a row of the overview's How it runs (admins only): what was asked that its Mac
 // hasn't applied yet, a pause under way or in force (with its report), and what came of each action (a planner or
 // environment restart, an upgrade, a wake). The buttons themselves are beside the team's name (components/team-actions.tsx).
-import { type ActionState, actionsOf, type Control, describeHold, type TeamDoc } from "../server/factory.ts";
+import { type ActionState, actionsOf, type Control, describeHold, type HoldState, type TeamDoc } from "../server/factory.ts";
 import { actionSaid, askedBy, controlSaid, controlsView } from "../server/views.ts";
+import { LocalMoment } from "./local-moment.tsx";
 import { Ago, Chip } from "./ui.tsx";
 
 export function CodeField({ id }: { id: string }) {
@@ -15,6 +16,21 @@ export function CodeField({ id }: { id: string }) {
 }
 
 const OUTCOME_TONE: Record<ActionState["outcome"], string> = { asked: "caution", started: "caution", waiting: "caution", done: "ok", failed: "warn" };
+
+// When a pause asked to end at the usage limit's reset does, as the team's Mac last said: the moment, and the limit it
+// waits on (or, when no subscription was closed to the team, the one nearest its end).
+function EndsAtReset({ hold }: { hold: HoldState }) {
+  const reset = hold.reset;
+  if (!reset) return <>It resumes by itself when its usage limit resets; its Mac says when within a minute.</>;
+  if (!reset.at) return <>It was asked to resume when its usage limit resets, but {reset.why}. Resume it yourself, or it waits for a reading that says.</>;
+  return (
+    <>
+      It resumes by itself <LocalMoment at={reset.at} />,{" "}
+      {reset.guess ? `when the limit nearest its end resets (${reset.why} when its Mac worked that out)` : `when its usage limit resets (${reset.why})`}.
+      Resume it to start sooner.
+    </>
+  );
+}
 
 export function TeamControls({ team, controls }: { team: TeamDoc; controls: Control[] }) {
   const status = team.status;
@@ -39,6 +55,12 @@ export function TeamControls({ team, controls }: { team: TeamDoc; controls: Cont
             <p>
               Pausing after {describeHold(hold)}, asked <Ago at={hold.since} />. Nothing else is claimed; once this is merged the team pauses and you get a
               report.
+              {hold.until === "reset" ? (
+                <>
+                  {" "}
+                  <EndsAtReset hold={hold} />
+                </>
+              ) : null}
             </p>
             {hold.left.length ? (
               <>
@@ -73,7 +95,7 @@ export function TeamControls({ team, controls }: { team: TeamDoc; controls: Cont
                   <Ago at={hold.settledAt} />
                 </>
               ) : null}
-              . Work stays stopped until you resume it.
+              . {hold?.until === "reset" ? <EndsAtReset hold={hold} /> : "Work stays stopped until you resume it."}
             </p>
             {hold?.report ? (
               <details open>

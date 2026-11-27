@@ -4974,6 +4974,33 @@ ol.setup > li > * {
 .team-tools:empty {
   display: none;
 }
+/* The key to a team's Settings, between its controls and the switcher: a gear and the word, as the switcher's key has
+   its arrows and its word. On a phone, the gear alone (its name stays for a screen reader). */
+.settings-key svg {
+  flex: none;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* How far a team's subscriptions are through their week (components/week-pace.tsx), a line each. */
+.week-pace {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.week-pace .chip {
+  white-space: normal;
+}
+.facts .week-pace + .way {
+  display: inline-block;
+  margin-top: 6px;
+}
+.panel > .week-pace {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+}
 @media (max-width: 720px) {
   .team-head {
     gap: 6px 10px;
@@ -4982,6 +5009,7 @@ ol.setup > li > * {
     flex-basis: 100%;
     margin-left: 0;
   }
+  .settings-word,
   .switch-team {
     position: absolute;
     width: 1px;

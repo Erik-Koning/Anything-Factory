@@ -98,21 +98,39 @@ function DailyChart({ days, daily }: { days: { day: string; cost: number }[]; da
   );
 }
 
+// Today, this week and in all, each against its budget when there is one: on the overview's Spend and on Settings.
+export function SpendTiles({ spend, limits }: { spend: Spend; limits: Limits | null }) {
+  const unit = limits?.unit ?? "usd";
+  const week = spend.subscriptionWeek ?? null;
+  return (
+    <ul className="counts tiles">
+      <Tile label="Today" spent={spend.today} limit={limits?.daily} per="a day" unit={unit} week={week} />
+      <Tile label="This week" spent={spend.week} limit={limits?.weekly} per="a week" unit={unit} week={week} />
+      <Tile
+        label={spend.since ? `Since ${dayMonth.format(at(spend.since))}` : "In all"}
+        spent={spend.total}
+        limit={limits?.total}
+        per="in all"
+        unit={unit}
+        week={week}
+      />
+    </ul>
+  );
+}
+
+// What the team has spent, on its overview; the budget itself is set on Settings, which the panel links to.
 export function SpendPanel({
   team,
   spend,
   usage,
   limits,
   tasks,
-  open = false,
 }: {
   team: string;
   spend: Spend | null;
   usage: UsageDay[];
   limits: Limits | null;
   tasks: Task[];
-  // The budget form, reopened after a refusal.
-  open?: boolean;
 }) {
   const titles = new Map(tasks.map((t) => [t.id, t.title]));
   const unit = limits?.unit ?? "usd";
@@ -134,24 +152,16 @@ export function SpendPanel({
           </>
         ) : null}
       </p>
+      <p className="small">
+        <Link className="way" href={`/t/${team}/settings#budget`}>
+          {limits ? "Change the budget →" : "Set a budget →"}
+        </Link>
+      </p>
       {!spend && !usage.length ? (
         <p className="empty">Nothing counted yet: the team's Mac counts what it uses every five minutes.</p>
       ) : (
         <>
-          {spend ? (
-            <ul className="counts tiles">
-              <Tile label="Today" spent={spend.today} limit={limits?.daily} per="a day" unit={unit} week={week} />
-              <Tile label="This week" spent={spend.week} limit={limits?.weekly} per="a week" unit={unit} week={week} />
-              <Tile
-                label={spend.since ? `Since ${dayMonth.format(at(spend.since))}` : "In all"}
-                spent={spend.total}
-                limit={limits?.total}
-                per="in all"
-                unit={unit}
-                week={week}
-              />
-            </ul>
-          ) : null}
+          {spend ? <SpendTiles spend={spend} limits={limits} /> : null}
           {spend?.unpriced ? (
             <p className="small muted">{spend.unpriced} requests used a model with no price yet, so they aren't in these figures.</p>
           ) : null}
@@ -239,61 +249,66 @@ export function SpendPanel({
           </div>
         </>
       )}
-      <details open={open}>
-        <summary>{limits ? "Change the budget" : "Set a budget"}</summary>
-        {/* Drawn again with the budget as it now stands once one is set. */}
-        <ActionForm key={JSON.stringify(limits)} action={budgetAction} className="stack">
-          <input type="hidden" name="team" value={team} />
-          <fieldset className="choices">
-            <legend>In</legend>
-            <label className="check">
-              <input type="radio" name="unit" value="subscription" defaultChecked={unit === "subscription"} />
-              <span>
-                Percent of a subscription's week: 60 is three fifths of one subscription's weekly limit, 150 one and a half subscriptions'
-                {week ? ` (one is about ${dollars(week)} API-equivalent now)` : " (checked once the subscription has been measured)"}
-              </span>
-            </label>
-            <label className="check">
-              <input type="radio" name="unit" value="usd" defaultChecked={unit === "usd"} />
-              <span>Dollars, API-equivalent</span>
-            </label>
-          </fieldset>
-          <p className="hint">
-            Blank for no limit. At four fifths of a limit you get an email; at the limit the team pauses after the work under way; a tenth past it, now.
-          </p>
-          <div className="inline">
-            <label htmlFor="budget-daily">
-              A day
-              <input id="budget-daily" name="daily" inputMode="decimal" defaultValue={limits?.daily ?? ""} autoComplete="off" />
-            </label>
-            <label htmlFor="budget-weekly">
-              A week
-              <input id="budget-weekly" name="weekly" inputMode="decimal" defaultValue={limits?.weekly ?? ""} autoComplete="off" />
-            </label>
-            <label htmlFor="budget-total">
-              In all
-              <input id="budget-total" name="total" inputMode="decimal" defaultValue={limits?.total ?? ""} autoComplete="off" />
-            </label>
-          </div>
-          <label className="check">
-            <input type="checkbox" name="autoResume" value="yes" defaultChecked={limits?.autoResume ?? false} />
-            <span>When the budget paused the team for a day or a week, start it again when the next one starts</span>
-          </label>
-          {limits ? (
-            <label className="check">
-              <input type="checkbox" name="restart" value="yes" />
-              <span>Count "in all" from now (it's counted since {dayMonth.format(new Date(limits.since))})</span>
-            </label>
-          ) : null}
-          <label htmlFor="budget-code">
-            Code from your authenticator
-            <input id="budget-code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required />
-          </label>
-          <div>
-            <SubmitButton>{limits ? "Change the budget" : "Set the budget"}</SubmitButton>
-          </div>
-        </ActionForm>
-      </details>
     </section>
+  );
+}
+
+// The budget (a day, a week, in all, and whether a new day or week resumes a team it paused), on Settings, set with
+// a code from the authenticator. `week` is a subscription's week in dollars, once measured.
+export function BudgetForm({ team, limits, week }: { team: string; limits: Limits | null; week: number | null }) {
+  const unit = limits?.unit ?? "usd";
+  return (
+    // Drawn again with the budget as it now stands once one is set.
+    <ActionForm key={JSON.stringify(limits)} action={budgetAction} className="stack">
+      <input type="hidden" name="team" value={team} />
+      <fieldset className="choices">
+        <legend>In</legend>
+        <label className="check">
+          <input type="radio" name="unit" value="subscription" defaultChecked={unit === "subscription"} />
+          <span>
+            Percent of a subscription's week: 60 is three fifths of one subscription's weekly limit, 150 one and a half subscriptions'
+            {week ? ` (one is about ${dollars(week)} API-equivalent now)` : " (checked once the subscription has been measured)"}
+          </span>
+        </label>
+        <label className="check">
+          <input type="radio" name="unit" value="usd" defaultChecked={unit === "usd"} />
+          <span>Dollars, API-equivalent</span>
+        </label>
+      </fieldset>
+      <p className="hint">
+        Blank for no limit. At four fifths of a limit you get an email; at the limit the team pauses after the work under way; a tenth past it, now.
+      </p>
+      <div className="inline">
+        <label htmlFor="budget-daily">
+          A day
+          <input id="budget-daily" name="daily" inputMode="decimal" defaultValue={limits?.daily ?? ""} autoComplete="off" />
+        </label>
+        <label htmlFor="budget-weekly">
+          A week
+          <input id="budget-weekly" name="weekly" inputMode="decimal" defaultValue={limits?.weekly ?? ""} autoComplete="off" />
+        </label>
+        <label htmlFor="budget-total">
+          In all
+          <input id="budget-total" name="total" inputMode="decimal" defaultValue={limits?.total ?? ""} autoComplete="off" />
+        </label>
+      </div>
+      <label className="check">
+        <input type="checkbox" name="autoResume" value="yes" defaultChecked={limits?.autoResume ?? false} />
+        <span>When the budget paused the team for a day or a week, start it again when the next one starts</span>
+      </label>
+      {limits ? (
+        <label className="check">
+          <input type="checkbox" name="restart" value="yes" />
+          <span>Count "in all" from now (it's counted since {dayMonth.format(new Date(limits.since))})</span>
+        </label>
+      ) : null}
+      <label htmlFor="budget-code">
+        Code from your authenticator
+        <input id="budget-code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} required />
+      </label>
+      <div>
+        <SubmitButton>{limits ? "Change the budget" : "Set the budget"}</SubmitButton>
+      </div>
+    </ActionForm>
   );
 }

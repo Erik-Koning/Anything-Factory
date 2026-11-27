@@ -167,7 +167,7 @@ export function controlsView(status: TeamState | null, controls: Control[], limi
 
 // What a control asked for or did, as a line of a list begins: every kind in its own words, never one as another.
 export function controlSaid(c: Control): string {
-  if (c.kind === "resume") return "Asked to resume";
+  if (c.kind === "resume") return c.by === "reset" ? "Resumed at the usage limit's reset" : "Asked to resume";
   if (c.kind === "action") return actionSaid(c);
   if (c.kind === "acted") return "Said how an action went";
   if (c.kind === "budget") return "Asked to set the budget";
@@ -178,9 +178,10 @@ export function controlSaid(c: Control): string {
   if (c.kind === "starting") return "Said how far the team's start had got";
   if (c.kind === "retire") return "Took the team off the site";
   if (c.kind === "restore") return "Put the team back on the site";
+  const until = c.until === "reset" ? ", until its usage limit resets" : "";
   return c.scope === "now" || !c.scope
-    ? "Asked to pause now"
-    : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}`;
+    ? `Asked to pause now${until}`
+    : `Asked to pause after ${describeHold({ scope: c.scope, tasks: c.tasks, journeys: c.journeys })}${until}`;
 }
 
 // What an action asked for, as a line of a list begins (lib/tasks/controls.ts ACTION_WORDS).
@@ -209,11 +210,13 @@ export const askedBy = (by: string): string =>
     ? "the budget"
     : by === "watchdog"
       ? "the team's Mac, as the pause settled"
-      : by.startsWith("web:")
-        ? "an admin, here"
-        : by.startsWith("machine:")
-          ? `the Mac ${by.slice("machine:".length)}`
-          : "the operator, in the terminal";
+      : by === "reset"
+        ? "the team's Mac, as the pause asked"
+        : by.startsWith("web:")
+          ? "an admin, here"
+          : by.startsWith("machine:")
+            ? `the Mac ${by.slice("machine:".length)}`
+            : "the operator, in the terminal";
 
 // Spend each day for the `n` days ending `last` (the lead's day, YYYY-MM-DD), every machine's added up; a day with
 // nothing counted is $0.

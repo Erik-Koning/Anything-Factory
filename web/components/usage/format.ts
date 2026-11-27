@@ -6,6 +6,9 @@ const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 export const formatUsd = (dollars: number): string => usd.format(dollars);
 export const formatCount = (n: number): string => count.format(n);
+// A subscription's names in a6g, as a sentence says them: "default", "default and refdocs".
+const names = new Intl.ListFormat("en-US", { type: "conjunction" });
+export const formatNames = (list: readonly string[]): string => names.format(list);
 
 // 999 as it is; above that in K, M, B or T with the unit chosen after rounding (999,999 is "1M"), three figures at most,
 // and no trailing zeros: "250K", "12.5K", "1.25M".
