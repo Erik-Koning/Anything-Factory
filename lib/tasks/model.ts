@@ -37,10 +37,14 @@ export type Size = keyof typeof SIZES;
 
 export type Score = Record<Dimension, number> & { confidence: Confidence; size: Size; why: string };
 // The Musk gate, before scoring: who asked and why, what could be deleted or simplified instead, the simplest version.
+// `headline` is the ask as the operator reads it first on Decisions, often on a phone: one short question about what
+// approving it gets people, as a question's headline is (Ask). The rest of the gate is the case behind it. Gates
+// recorded before 0.8.18 have none, and show the task's title instead.
 export interface Gate {
   asked: string;
   simplify: string;
   simplest: string;
+  headline?: string;
 }
 // Whether `claim` is held from this worktree on this machine (two machines can have a worktree at the same path).
 export const heldHere = (claim: Claim | null, worktree: string | null, machine: string): boolean =>
@@ -715,6 +719,25 @@ export const askOptions = (text: string | undefined): string[] =>
 // The option a recommendation picks: "(b) keeps checkout at one tap" → b.
 export const recommendedOption = (recommendation: string): string | null => /^\s*\(?([a-e])\)/i.exec(recommendation)?.[1]?.toLowerCase() ?? null;
 
+// What plainly isn't the operator's words in a headline: the team's own handles for things, which the operator would
+// have to look up before deciding. The rest of "no jargon" is the prompt's to teach; these a command can see.
+const JARGON: [RegExp, string][] = [
+  [/#\d/, "a task number"],
+  [/`/, "code in backticks"],
+  [/\b[\w-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml|py|sh|css|html|sql|prisma|toml)\b/i, "a file's or a library's name"],
+];
+
+// The headline of a question or a proposal: the decision in a line, in the operator's words. `rest` says where the
+// detail goes instead.
+export function headlineRefusal(headline: string, rest: string): string | null {
+  if (headline.length > ASK_LIMITS.headline)
+    return `the headline is ${headline.length} characters: keep it to ${ASK_LIMITS.headline}, the outcome to choose and no more (the rest goes in ${rest})`;
+  const jargon = JARGON.find(([pattern]) => pattern.test(headline));
+  if (jargon)
+    return `the headline has ${jargon[1]} in it: say the outcome in the operator's words, what people would see, get, pay or risk (how it's built goes in ${rest})`;
+  return null;
+}
+
 // What a question must carry: why it's the operator's and the team's recommendation. The operator raising one to
 // themselves gives the reason only. One the team raises leads with the decision in a line, its options as outcomes and
 // a recommendation as short, so the operator decides from those and opens the reasoning only when they want it.
@@ -726,8 +749,8 @@ export function askRefusal(ask: Pick<Ask, "reason" | "recommendation" | "headlin
   const headline = ask.headline?.trim() ?? "";
   if (!headline)
     return `lead with the decision, in one line the operator answers at a glance: --headline "<the outcome to choose, in their words: what people would see, get, pay or risk>" (at most ${ASK_LIMITS.headline} characters; the detail stays in --reason)`;
-  if (headline.length > ASK_LIMITS.headline)
-    return `the headline is ${headline.length} characters: keep it to ${ASK_LIMITS.headline}, the outcome to choose and no more (the rest goes in --reason)`;
+  const unclear = headlineRefusal(headline, "--reason");
+  if (unclear) return unclear;
   const options = ask.options ?? [];
   if (options.length === 1) return 'give two options or more, or none for an open question: --options "<one outcome> | <another>"';
   if (options.length > ASK_LIMITS.options) return `give at most ${ASK_LIMITS.options} options: the ones worth choosing between`;

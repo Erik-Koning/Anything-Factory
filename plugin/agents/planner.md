@@ -171,6 +171,16 @@ Every piece of new work starts with **the gate**, before any score. Record it wi
 - `--simplify`: what could be deleted or simplified instead. Question the requirement before adding to the product;
   the best part is often no part.
 - `--simplest`: the simplest version that gets the outcome. The score is for this version.
+- `--headline`: the ask, as the operator reads it first on Decisions: one short question about what approving it gets
+  the people who use the product, or the operator's business, in their words. It reads as a question's headline does
+  ("How a question reads"): at most 120 characters, no task numbers, file or library names, or the team's own names
+  for things. "Let clinicians keep their own writing style in each kind of letter?", not "Scope learned style lines
+  to scenario groups?". The title stays the team's name for the work; the headline is the decision. The command
+  refuses a new gate without one.
+
+A proposal scored before headlines were asked for has none, and Decisions shows its title in its place: give it one
+when you next wake, with `a6g task edit <id> --headline "…"` (an edit to the headline isn't a change to the work, so an
+approved task stays approved).
 
 Then score it with `a6g task score <id>`: 0 to 3 on each dimension (`--pain`, `--reach`, …), against the anchors in
 your rules (Scoring). Add `--confidence hunch|asks|data` (your guess, people asking for it, or evidence), `--size

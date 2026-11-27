@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ScoreBars } from "../../../../components/score-bars.tsx";
 import { Chip, clip, Notice, type SearchParams } from "../../../../components/ui.tsx";
 import { Verdict } from "../../../../components/verdict.tsx";
-import { DIMENSIONS } from "../../../../../lib/tasks/model.ts";
+import type { Score } from "../../../../../lib/tasks/model.ts";
 import { can } from "../../../../server/access.ts";
 import type { Task } from "../../../../server/factory.ts";
 import { originsFor } from "../../../../server/origin.ts";
@@ -77,6 +78,13 @@ export default async function ProposalsPage({ params, searchParams }: { params: 
 // with a severity needn't be. Said beside the key, which is shown but can't be pressed, rather than refused after.
 const needsScore = (t: Task): boolean => t.kind !== "journey" && !t.score && (t.kind === "feature" || !t.severity);
 
+// How sure the planner is of a score (lib/tasks/model.ts CONFIDENCE), in the operator's words.
+const CONFIDENCE_WORDS: Record<Score["confidence"], string> = {
+  hunch: "the planner's hunch",
+  asks: "people asked for it",
+  data: "backed by evidence",
+};
+
 // One proposal: what it is and why on the left, the decision on the right (one above the other on a narrow screen). Each
 // field stands over the key it goes with, and no key here is the solid: a page of proposals has no one commit.
 function Proposal({ team, task: t, origin }: { team: string; task: Task; origin: string }) {
@@ -94,48 +102,50 @@ function Proposal({ team, task: t, origin }: { team: string; task: Task; origin:
         {t.priority !== null ? <Chip tone="">{`p${t.priority}`}</Chip> : null}
       </div>
       <div className="about">
+        {/* The ask first, as a question's headline is: what approving it gets people. The case behind it (who asked,
+            what could go instead, the simplest version, the task's own words) is a tap away. */}
+        {t.gate?.headline ? <p className="headline">{t.gate.headline}</p> : null}
         <p className="small muted">{origin}</p>
-        {t.gate ? (
-          <dl className="facts small">
-            <dt>Who asked, why</dt>
-            <dd>{t.gate.asked}</dd>
-            <dt>Delete or simplify</dt>
-            <dd>{t.gate.simplify}</dd>
-            <dt>Simplest version</dt>
-            <dd>{t.gate.simplest}</dd>
-          </dl>
-        ) : null}
         {/* Neither yet: one line for both, as the task's page says it. */}
         {!t.gate && !t.score ? <p className="small muted">Not gated or scored yet: the planner does both.</p> : null}
         {t.score ? (
           <>
-            <p className="small">
-              <b>Score:</b> {t.score.why}{" "}
-              <span className="muted">
-                (confidence {t.score.confidence}, size {t.score.size})
-              </span>
+            {t.score.why ? <p className="small">{clip(t.score.why, 240)}</p> : null}
+            <ScoreBars score={t.score} />
+            <p className="small muted">
+              Size {t.score.size} · {CONFIDENCE_WORDS[t.score.confidence]}
             </p>
-            <ul className="score" aria-label="Score by dimension, 0 to 3">
-              {DIMENSIONS.map((d) => (
-                <li key={d}>
-                  <span>{d}</span> <b>{t.score?.[d] ?? 0}</b>
-                </li>
-              ))}
-            </ul>
           </>
         ) : t.gate ? (
           <p className="small muted">Not scored yet.</p>
         ) : null}
-        {t.body ? <p className="text small">{clip(t.body, 900)}</p> : null}
-        {t.request ? (
-          <p className="small">
-            From request <Link href={`/t/${team}/requests/${t.request}`}>{t.request}</Link>
-          </p>
-        ) : null}
-        {last ? (
-          <p className="small muted">
-            {last.by}: {clip(last.text, 400)}
-          </p>
+        {t.gate || t.body || t.request || last ? (
+          <details className="more reasoning">
+            <summary>Show the case</summary>
+            <div className="reasoning-body">
+              {t.gate ? (
+                <dl className="facts small">
+                  <dt>Who asked, why</dt>
+                  <dd>{t.gate.asked}</dd>
+                  <dt>Delete or simplify</dt>
+                  <dd>{t.gate.simplify}</dd>
+                  <dt>Simplest version</dt>
+                  <dd>{t.gate.simplest}</dd>
+                </dl>
+              ) : null}
+              {t.body ? <p className="text small">{clip(t.body, 900)}</p> : null}
+              {t.request ? (
+                <p className="small">
+                  From request <Link href={`/t/${team}/requests/${t.request}`}>{t.request}</Link>
+                </p>
+              ) : null}
+              {last ? (
+                <p className="small muted">
+                  {last.by}: {clip(last.text, 400)}
+                </p>
+              ) : null}
+            </div>
+          </details>
         ) : null}
       </div>
       <div className="decide">

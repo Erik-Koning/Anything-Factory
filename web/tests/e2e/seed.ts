@@ -98,7 +98,7 @@ export async function seed(): Promise<World> {
     title: "Export orders as CSV",
     kind: "feature",
     status: "proposed",
-    gate: gate("support, for refunds"),
+    gate: { ...gate("support, for refunds"), headline: "Let support send a customer their orders as a spreadsheet?" },
     score: score("S", "weekly refunds"),
   });
   const toReject = await add({

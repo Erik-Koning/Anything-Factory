@@ -15,6 +15,7 @@ import { agreementOf, describeHold, holdOf } from "../tasks/controls.ts";
 import { judgedFrom } from "../tasks/decisions.ts";
 import { betterDiagram } from "../tasks/graph.ts";
 import {
+  ASK_LIMITS,
   type Ask,
   askOptions,
   askRefusal,
@@ -32,6 +33,8 @@ import {
   finishedUnder,
   FOUNDATION,
   fromStakeholder,
+  type Gate,
+  headlineRefusal,
   heldHere,
   journeyDue,
   type Kind,
@@ -88,8 +91,11 @@ export const USAGE = `usage: a6g task <command>
       innovator hands in a concept, and the planner settles which is built, the concept or its retreat. Until then
       nobody claims the task, and it's labelled wherever it shows   ·   stream <id> off --reason "…" takes the mark off
   edit <id> [--title …] [--body … | --body-file f] [--kind k] [--sev s] [--area a] [--files p,q] [--parent id|none] [--after id,id|none]
+           [--headline "…"]
   score <id> --pain N --reach N --revenue N --wow N --distribution N --leverage N --urgency N --risk N
-             --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…"]
+             --confidence hunch|asks|data --size S|M|L|XL --why "…" [--asked "…" --simplify "…" --simplest "…" --headline "…"]
+      --headline: the ask the operator reads first on Decisions, what approving it gets people, in a line (needed with
+      a new gate; a6g task edit <id> --headline gives one to a proposal scored without)
   status <id> <status> [--reason "…"]   ·   import   ·   pace (the planner: what the budget can finish, so how many to start)
       question: --headline "the decision, in a line" [--options "an outcome | another"] --recommend "(a) the one
                 reason, in a line" --reason "why it's the operator's, and the detail" (all but --options required),
@@ -208,6 +214,7 @@ export function detail(t: Task): string {
   if (security) out.push(security);
   const stream = streamLine(t);
   if (stream) out.push(stream);
+  if (t.gate?.headline) out.push(`asks the operator: ${t.gate.headline}`);
   if (t.gate) out.push(`gate: asked ${t.gate.asked} · instead ${t.gate.simplify} · simplest ${t.gate.simplest}`);
   if (t.score)
     out.push(`score: ${DIMENSIONS.map((d) => `${d} ${t.score?.[d]}`).join(", ")}; confidence ${t.score.confidence}, size ${t.score.size}. ${t.score.why}`);
@@ -462,6 +469,12 @@ const edit: Handler = async ({ store, who }, [id], options) => {
     if (loop) throw new Refused(`--after ${loop} would make a loop: ${loop} already waits for ${task.id}`);
     changes.after = after;
   }
+  // The ask on Decisions is how the operator reads the proposal, not what it is: a new one isn't approved again.
+  const headline = gateHeadline(options);
+  if (headline !== undefined) {
+    if (!task.gate) throw new Refused(`task ${task.id} has no gate yet: its headline goes with it (a6g task score ${task.id} … --headline "…")`);
+    changes.gate = { ...task.gate, headline };
+  }
   if (!Object.keys(changes).length) throw new Refused("nothing to change; see a6g task help");
   // A journey is done by its tests passing: a task that's done already doesn't become one, with nothing asked of it.
   if (changes.kind === "journey" && task.kind !== "journey" && task.status === "done" && who !== OPERATOR)
@@ -489,6 +502,17 @@ const edit: Handler = async ({ store, who }, [id], options) => {
   return 0;
 };
 
+// A proposal's headline, from --headline: the ask the operator reads first on Decisions (Gate.headline).
+const HEADLINE_NEEDED = `lead with the ask, in one line the operator decides at a glance: --headline "<what approving it gets people, in their words: what they'd see, get, pay or risk>" (at most ${ASK_LIMITS.headline} characters; the case stays in the gate)`;
+function gateHeadline(options: Options): string | undefined {
+  const headline = optionText(options["headline"])?.trim();
+  if (headline === undefined) return undefined;
+  if (!headline) throw new Refused(HEADLINE_NEEDED);
+  const unclear = headlineRefusal(headline, "the gate or the task's body");
+  if (unclear) throw new Refused(unclear);
+  return headline;
+}
+
 const score: Handler = async ({ team, store, who }, [id], options) => {
   need(who, ["planner"], "scoring a task");
   const task = await getTask(store, id);
@@ -507,12 +531,18 @@ const score: Handler = async ({ team, store, who }, [id], options) => {
   const simplest = optionText(options["simplest"]);
   const given = [asked, simplify, simplest].filter((v) => v !== undefined).length;
   if (given && given < 3) throw new Refused("the gate is all three: --asked, --simplify and --simplest");
-  const gate = asked && simplify && simplest ? { asked, simplify, simplest } : task.gate;
+  const headline = gateHeadline(options) ?? task.gate?.headline;
+  const fresh: Gate | null = asked && simplify && simplest ? { asked, simplify, simplest } : null;
+  const base = fresh ?? task.gate;
+  const gate: Gate | null = base ? { ...base, ...(headline ? { headline } : {}) } : null;
   // Before new work is scored: who asked and why, what could go instead, and the simplest version (the score is for that).
   if (!gate && task.kind === "feature")
     throw new Refused(
       'new work passes the gate first: --asked "who asked, and why" --simplify "what could be deleted or simplified instead" --simplest "the simplest version that gets the outcome"'
     );
+  if (!gate && headline) throw new Refused("a headline goes with the gate: --asked, --simplify and --simplest too");
+  // A new gate is a new proposal, and the operator reads its ask first on Decisions: it has one from the start.
+  if (fresh && !headline) throw new Refused(HEADLINE_NEEDED);
   const scored: Score = { ...values, confidence, size, why };
   const priority = priorityOf(scored, team.priorities.weights);
   // An approval is for the task as it was scored: a new score sends an approved task back for approving.
@@ -1062,8 +1092,8 @@ const OPTIONS: Record<string, string[]> = {
   note: ["text"],
   screen: ["note"],
   stream: ["why", "move", "record", "note", "reason"],
-  edit: ["title", "body", "body-file", "kind", "sev", "area", "files", "parent", "after"],
-  score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest"],
+  edit: ["title", "body", "body-file", "kind", "sev", "area", "files", "parent", "after", "headline"],
+  score: [...DIMENSIONS, "confidence", "size", "why", "asked", "simplify", "simplest", "headline"],
   status: ["reason", "recommend", "headline", "options", "waits-on", "then", "topic", "stakes", "confidence"],
   ask: ["reason", "recommend", "headline", "options", "topic", "stakes", "confidence"],
   answer: ["text", "recommended"],

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ScoreBars } from "../../../../../components/score-bars.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/ui.tsx";
-import { awaitsStream, DIMENSIONS, journeyDue, streamLabel } from "../../../../../../lib/tasks/model.ts";
+import { awaitsStream, journeyDue, streamLabel } from "../../../../../../lib/tasks/model.ts";
 import { can, TASK_ID } from "../../../../../server/access.ts";
 import { storeFor, tasksFor } from "../../../../../server/factory.ts";
 import { waitsOnOperator } from "../../../../../../lib/tasks/answer.ts";
@@ -204,6 +205,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
         <section className="panel" aria-labelledby="case">
           <h2 id="case">The case for it</h2>
+          {task.gate?.headline ? (
+            <p>
+              <b>Asks you:</b> {task.gate.headline}
+            </p>
+          ) : null}
           {task.gate ? (
             <dl className="facts small">
               <dt>Who asked, why</dt>
@@ -229,13 +235,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                   (confidence {task.score.confidence}, size {task.score.size})
                 </span>
               </p>
-              <ul className="score small" aria-label="Score by dimension, 0 to 3">
-                {DIMENSIONS.map((d) => (
-                  <li key={d}>
-                    <Chip tone="">{`${d} ${task.score?.[d] ?? 0}`}</Chip>
-                  </li>
-                ))}
-              </ul>
+              <ScoreBars score={task.score} />
             </>
           ) : task.gate ? (
             <p className="small muted">Not scored yet.</p>

@@ -22,7 +22,8 @@ it isn't yours to decide, only the tasks in it. A task you sent for research
    well it scores.
 2. **Did it pass the gate honestly?** The requirement is questioned, the simpler alternative was really considered,
    and the score is for the simplest version. If the simplest version is still large, ask whether a smaller first
-   step would teach the team the same thing.
+   step would teach the team the same thing. Its headline (the ask the operator reads first) promises what the
+   simplest version delivers, no more: one that oversells it goes back to the planner to say plainly.
 3. **Is the score believable?** Each dimension has an anchor in your rules (Scoring). Check the claims you can:
    search the codebase and the documents, and use the web for market or user evidence when the score leans on it.
    A score built on a hunch says `confidence hunch`; if it claims more, the evidence should be in the task. An idea
