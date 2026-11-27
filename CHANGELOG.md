@@ -1,5 +1,20 @@
 # Changelog
 
+## Decisions lead with the ask, and a score reads as bars
+
+- **A proposal says what it asks of you, in a line.** Decisions showed a proposal as the team's notes on it: its title,
+  the gate, the score's reason, the task's words and eight figures. Now it leads with its headline, one short question
+  about what approving it gets people ("Let clinicians keep their own writing style in each kind of letter?"), as a
+  question's headline already did. The reason for the score, the bars and the size follow; who asked, what could go
+  instead, the simplest version and the task's words wait behind "Show the case". The planner gives a new gate its
+  headline (`a6g task score … --headline "…"`, refused without one) and one to a proposal scored before
+  (`a6g task edit <id> --headline "…"`, which leaves an approved task approved). The approver sends back one that
+  promises more than the simplest version delivers.
+- **A headline is in your words.** A question's or a proposal's headline with a task number, code in backticks or a
+  file's or a library's name in it is refused, with what to say instead.
+- **A score is bars.** Each dimension is three steps filled to its figure, with what that figure means beside it ("2:
+  a job done badly today"), on Decisions and on the task's page, in both themes and on a phone.
+
 ## Web app: pages read only what changed
 
 - **Signing in, and every page after it, no longer waits on every team's every task.** The header counts what waits
