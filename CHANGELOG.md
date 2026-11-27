@@ -1,5 +1,20 @@
 # Changelog
 
+## Web app: a team's pages and Subscriptions, tidied
+
+- **No empty panel on a team's overview.** With its subscriptions and its place on the site moved to Settings, "How it
+  runs" held one sentence saying where the buttons are. It shows only when there's something to say of the controls:
+  one asked, a pause under way or in force, or what came of an action.
+- **A team's keys stay on one line on a phone.** On a screen 380 wide or less the gear pushed the switcher onto a line
+  of its own. Its key is its arrows alone there; "Switch team" stays for a screen reader.
+- **The pace warning is words.** "At this pace, used up in 2d 19h" was a chip that wrapped into two tight lines in the
+  Status column. It's part of the line now, in the caution's colour.
+- **The subscriptions to choose from stay A–Z.** "Most used" is of the week on Limits and of the cost or tokens on the
+  other views, so the keys changed places from one view to the next. Only the bars, the lists and the chart follow the
+  sort.
+- **An address the web app doesn't take no longer hides a Mac's subscriptions.** A report with one address it refused
+  lost every subscription on that machine. Only the address is left out now, and the subscription shows by its name.
+
 ## 0.8.17: An upgrade that ends
 
 - **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on
