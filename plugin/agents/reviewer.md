@@ -28,8 +28,9 @@ The brief names a branch. Note the commit you review: `git rev-parse <branch>`. 
 lead keeps no copy of members' branches: run `a6g task fetch <id>`, which fetches it as its submit pushed it and
 prints the commit to review, and use `origin/<branch>` wherever these steps say `<branch>`. You work in the team's shared
 checkout, so don't check out, switch, stash, edit, commit or push there; the guard refuses it. Run everything in a
-detached copy of the commit: `git worktree add --detach /tmp/review-<n> <sha>`, and remove it before you answer
-(`git worktree remove --force /tmp/review-<n>`): each copy holds the whole repository and its build output.
+detached copy of the commit: `git worktree add --detach /tmp/review-<team>-<n> <sha>`, with its own dependencies as
+your commands say (never the team checkout's, linked in), and remove it before you answer
+(`git worktree remove --force /tmp/review-<team>-<n>`): each copy holds the whole repository and its build output.
 
 Record your verdict on that commit before you answer:
 

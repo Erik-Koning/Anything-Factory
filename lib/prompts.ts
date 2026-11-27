@@ -159,6 +159,12 @@ function commandsFor(team: Team, role: string): string {
           ? " Add `--security` to an approval to send the branch on to the security reviewer: when it changes who can do what, what someone can see, or what moves money, and `a6g blast` lists no security path for it (one that does is theirs already). It then merges once they've passed it too."
           : "")
     );
+  // A copy that borrowed the checkout's node_modules let an install in it point the team's workspace links into the
+  // copy, and the team's app stopped once the copy was removed; and two teams' reviewers shared /tmp/review-<n>.
+  if (role === "reviewer" || role === "security-reviewer")
+    lines.push(
+      `Your detached copy of a commit is \`/tmp/review-${team.name}-<n>\` (other teams' reviewers work in /tmp too). Give it its own dependencies${team.worktreeSetup ? ` (\`${team.worktreeSetup}\`, run in the copy)` : ""}, never the team checkout's: linked \`node_modules\` or build output let an install or a build in the copy rewrite the team's own, and the team's app stops once the copy is removed.`
+    );
   if (role === "security-reviewer")
     lines.push(
       "`a6g verdict security <branch> pass|issues --sha <the commit you reviewed> --note \"<one line>\"`: record your verdict on exactly that commit. It's refused if the branch has moved past it; read what was added and record again. `issues` sends the task back to its builder with your note; the merge queue merges the branch only once you've passed its tip."

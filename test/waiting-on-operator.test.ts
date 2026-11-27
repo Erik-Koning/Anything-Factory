@@ -29,9 +29,23 @@ describe("what waits only on the operator", () => {
     assert.equal(waitsOnlyOnOperator([proposed, question, done], true), true);
     assert.equal(waitsOnlyOnOperator([proposed, question], false), false, "the approver's proposals");
     assert.equal(waitsOnlyOnOperator([question], false), true);
-    for (const status of ["triage", "researching", "approved", "building", "review", "blocked"] as const)
+    for (const status of ["triage", "researching", "approved", "building", "review"] as const)
       assert.equal(waitsOnlyOnOperator([proposed, task({ id: "4", status })], true), false, status);
     assert.equal(waitsOnlyOnOperator([done], true), false, "nothing open is nothing to wait for");
+  });
+
+  test("what's held behind them waits too: blocked, or approved to start after a task still open", () => {
+    const question = task({ id: "1", status: "question" });
+    const blocked = task({ id: "2", status: "blocked" });
+    const behindQuestion = task({ id: "3", status: "approved", after: ["1"] });
+    const behindBlocked = task({ id: "4", status: "approved", after: ["2"] });
+    const behindDone = task({ id: "5", status: "approved", after: ["6"] });
+    const done = task({ id: "6", status: "done" });
+    assert.equal(waitsOnlyOnOperator([question, blocked, behindQuestion, behindBlocked, done], true), true);
+    assert.equal(waitsOnlyOnOperator([question, behindDone, done], true), false, "its turn has come: a member can take it");
+    assert.equal(waitsOnlyOnOperator([question, task({ id: "7", status: "approved", after: ["8"] })], true), false, "after a task that isn't there");
+    assert.equal(waitsOnlyOnOperator([blocked, behindBlocked], true), false, "nothing waits on the operator");
+    assert.equal(waitsOnlyOnOperator([question, behindQuestion, task({ id: "9", status: "building" })], true), false, "a member is at work");
   });
 
   test("the operator's decisions on proposals go to the planner once, in one message", async () => {

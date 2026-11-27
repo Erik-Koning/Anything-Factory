@@ -471,10 +471,16 @@ export const answersOn = (t: Task): Note[] => {
   return t.notes.filter((n) => n.kind === "answer" && n.at >= since);
 };
 // Whether everything still open waits on the operator: their answer to a question, or, where they decide every
-// proposal (approval.mode "operator"), their decision on one. Nothing the planner or a member could take on meanwhile.
+// proposal (approval.mode "operator"), their decision on one; the rest only behind those, blocked or approved to start
+// after a task still open. Nothing the planner or a member could take on meanwhile: a blocked task is the planner's to
+// look at again, which the hourly tick still lets it do. (A team whose one approved task waited on a question ticked
+// every ten minutes for a night, with nobody working.)
 export function waitsOnlyOnOperator(all: Task[], operatorDecides: boolean): boolean {
   const open = all.filter((t) => t.status !== "done" && t.status !== "rejected");
-  return open.length > 0 && open.every((t) => t.status === "question" || (operatorDecides && t.status === "proposed"));
+  const ids = new Set(open.map((t) => t.id));
+  const theirs = (t: Task): boolean => t.status === "question" || (operatorDecides && t.status === "proposed");
+  const behind = (t: Task): boolean => t.status === "blocked" || (t.status === "approved" && t.after.some((id) => ids.has(id)));
+  return open.some(theirs) && open.every((t) => theirs(t) || behind(t));
 }
 // The design check-in still open, if any: while there is one, the foundation is all that's built (claimRefusal).
 export const designOpen = (all: Task[]): Task | null => all.find((t) => t.kind === "design" && t.status !== "done" && t.status !== "rejected") ?? null;

@@ -9,7 +9,8 @@ You approve a branch only when every section below holds. Persistence is the job
 approve. Don't stop at the first problem: finish every section, then send the whole list back at once, so the next
 round is the last. Work from the exact commit you review (`git rev-parse <branch>`, or the commit `a6g task fetch <id>` prints on a team on several machines, noted before
 you start) in a
-detached copy (`git worktree add --detach /tmp/review-<n> <sha>`), and remove the copy before you answer.
+detached copy (`git worktree add --detach /tmp/review-<team>-<n> <sha>`) with its own dependencies, never the team
+checkout's linked in, and remove the copy before you answer.
 
 ## 1. Know what it touches
 
@@ -47,11 +48,11 @@ connection, or changes a contract without updating every caller, is "changes", e
 - New behaviour has tests at the right level: unit tests for logic, integration tests for wiring, and end-to-end or
   Playwright specs for a flow a person goes through. Bug fixes have a test that reproduces the bug.
 - **The tests fail without the change.** In the detached copy, put the code back as the branch found it and keep the
-  new tests. The branch's starting point is `base=$(git -C /tmp/review-<n> merge-base <integration> <sha>)` (not the
+  new tests. The branch's starting point is `base=$(git -C /tmp/review-<team>-<n> merge-base <integration> <sha>)` (not the
   integration branch's tip, which may have moved on). List what the branch changed, renames as a delete and an add:
-  `git -C /tmp/review-<n> diff --name-status --no-renames $base <sha>`. For each file that isn't a test: `M` or `D`,
-  `git -C /tmp/review-<n> checkout $base -- <file>`; `A`, delete it. Run the new tests: they must fail, for the right
-  reason. Then put the branch back (`git -C /tmp/review-<n> reset -q --hard <sha> && git -C /tmp/review-<n> clean -fdq`).
+  `git -C /tmp/review-<team>-<n> diff --name-status --no-renames $base <sha>`. For each file that isn't a test: `M` or `D`,
+  `git -C /tmp/review-<team>-<n> checkout $base -- <file>`; `A`, delete it. Run the new tests: they must fail, for the right
+  reason. Then put the branch back (`git -C /tmp/review-<team>-<n> reset -q --hard <sha> && git -C /tmp/review-<team>-<n> clean -fdq`).
   A test that passes on the old code proves nothing.
 - Nothing is weakened: no skipped, loosened or deleted assertions, no longer timeouts to hide flakiness.
 - **A scaffolder's branch changes what every check can see,** so hold it to more. The manifest
