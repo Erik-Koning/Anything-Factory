@@ -20,12 +20,14 @@
 // the watchdog keeps each role on an open one (lib/steer.ts). Readings and estimates: subscriptions/state.json.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { loadTeam } from "./config.ts";
 import { type MachineSubscription, REPORT_LIMITS, USAGE_DAYS, USAGE_FIELDS, USAGE_HOURS, type UsageBucket } from "./fleet.ts";
-import { fallbackModel, familyOf, modelName } from "./models.ts";
-import { A6G_HOME } from "./paths.ts";
+import { fallbackModel, familyOf, MODEL_ALIASES, modelName, modelTitle, newerThan, newerThanShortNames, onShortName, versionOf } from "./models.ts";
+import { A6G_HOME, PACKAGE, readRegistry, teamsDir } from "./paths.ts";
+import { modelKey } from "./prices.ts";
 import { dayOf, OWN_LOGIN, round } from "./tasks/spend.ts";
 import { type AccountUsage, allTranscriptDirs, collectHours, emptyTally, type Tally, TALLY_FIELDS } from "./usage.ts";
 import { readJson, writeJson } from "./util.ts";
@@ -602,4 +604,81 @@ export function subscriptionsReport(on: Record<string, MachineSubscription["team
       counted,
     };
   });
+}
+
+// --- Newer models ------------------------------------------------------------------------------------------------
+
+// The models the subscriptions here used in the last `days`, by id (lib/prices.ts modelKey): on which subscriptions,
+// and the first hour each was used in, as far back as the tallies go. From the tallies observeSubscriptions keeps
+// (lib/usage.ts collectAccountUsage).
+export function modelsInUse(now = new Date(), days = 14): Record<string, { since: string; on: string[] }> {
+  const from = new Date(now.getTime() - days * DAY_MS).toISOString().slice(0, 13);
+  const first: Record<string, string> = {};
+  const used: Record<string, { since: string; on: string[] }> = {};
+  for (const { name } of accounts()) {
+    let tallies: Record<string, Record<string, Tally>> = {};
+    try {
+      tallies = readJson<Partial<AccountUsage>>(join(SUBS, `${name}.hours.json`), {}).tallies ?? {};
+    } catch {}
+    for (const [hour, models] of Object.entries(tallies)) {
+      for (const [model, tally] of Object.entries(models)) {
+        if (!tally.requests) continue;
+        const id = modelKey(model);
+        if (!first[id] || hour < first[id]) first[id] = hour;
+        if (hour < from) continue;
+        const seen = (used[id] ??= { since: hour, on: [] });
+        if (!seen.on.includes(name)) seen.on.push(name);
+      }
+    }
+  }
+  for (const [id, seen] of Object.entries(used)) seen.since = first[id] ?? seen.since;
+  return used;
+}
+
+// Something that keeps a role off its family's newest model, in words. `key` says what it's about, so the watchdog
+// says each once: "factory claude-fable-5-2" (this version's short name is behind a model in use here), or "team
+// <name> claude-fable-5-2" (a team's roles are behind this version's short name).
+export interface ModelNotice {
+  key: string;
+  text: string;
+}
+
+// What keeps roles off their family's newest model: a newer one in use on a subscription here than this version's
+// short name for it (a release that knows it, then a6g upgrade, moves the teams); and each registered team whose roles
+// on a short name run an older one than this version's (a6g upgrade moves them). A team whose team.json can't be read
+// says nothing here: a6g doctor says why.
+export function modelNotices(now = new Date()): ModelNotice[] {
+  const inUse = modelsInUse(now);
+  const notices: ModelNotice[] = [];
+  for (const [family, id] of Object.entries(newerThanShortNames(Object.keys(inUse)))) {
+    const own = MODEL_ALIASES[family] as string;
+    const seen = inUse[id];
+    notices.push({
+      key: `factory ${id}`,
+      text: `${modelTitle(id)} (${id}) is in use on ${seen?.on.join(", ") ?? "a subscription here"}${seen ? ` since ${seen.since.slice(0, 10)}` : ""}, but Anything Factory ${PACKAGE.version} runs ${modelName(own)} roles on ${modelTitle(own)} (${own}): a release that knows ${modelTitle(id)} moves them (a6g self-install it, then a6g upgrade <team>)`,
+    });
+  }
+  const names = existsSync(teamsDir) ? readdirSync(teamsDir).flatMap((file) => (file.endsWith(".json") ? [file.slice(0, -5)] : [])) : [];
+  for (const name of names) {
+    try {
+      const entry = readRegistry(name);
+      if (!entry) continue;
+      const team = loadTeam(entry.home, { strict: false });
+      const models = entry.models ?? Object.fromEntries(Object.keys(team.roles).map((role) => [role, entry.model]));
+      const behind = new Map<string, string[]>();
+      for (const [role, model] of Object.entries(models)) {
+        const family = versionOf(model)?.family;
+        if (family && newerThan(MODEL_ALIASES[family] as string, model) && onShortName(team.raw, role))
+          behind.set(modelKey(model), [...(behind.get(modelKey(model)) ?? []), role]);
+      }
+      for (const [old, roles] of behind) {
+        const newest = MODEL_ALIASES[versionOf(old)?.family ?? ""] as string;
+        notices.push({
+          key: `team ${name} ${newest}`,
+          text: `${name} runs its ${roles.join(", ")} on ${modelTitle(old)} (${old}), but Anything Factory ${PACKAGE.version} runs ${modelName(newest)} roles on ${modelTitle(newest)} (${newest}): a6g upgrade ${name} moves ${roles.length === 1 ? "it" : "them"}`,
+        });
+      }
+    } catch {}
+  }
+  return notices;
 }

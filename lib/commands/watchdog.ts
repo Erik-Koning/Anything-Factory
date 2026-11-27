@@ -57,6 +57,7 @@ import {
   accounts,
   describeWait,
   loginDirs,
+  modelNotices,
   nearLimit,
   observeSubscriptions,
   subscriptionLimits,
@@ -69,7 +70,7 @@ import { expireClaims } from "../tasks/ops.ts";
 import { openStore } from "../tasks/store.ts";
 import type { TeamState } from "../tasks/teams.ts";
 import * as t3 from "../t3.ts";
-import { answers, die, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
+import { answers, die, hash, readJson, which, writeFileAtomic, writeJson } from "../util.ts";
 import { settleTeamWaits } from "../waits.ts";
 
 const LABEL = "ca.a6g.watchdog";
@@ -325,6 +326,21 @@ export function passReplies(
 
 export { answers };
 
+// What keeps roles off their family's newest model (lib/subscriptions.ts modelNotices), each said once: those new at a
+// reading go in one message, on this Mac and through each connected channel, and a6g doctor keeps listing them until
+// they're put right. Resolves to what to log.
+async function tellModelNotices(reach: Channel[]): Promise<string[]> {
+  const mark = (key: string) => join(A6G_HOME, `.stamp-model-${hash(key)}`);
+  const fresh = modelNotices().filter((notice) => !existsSync(mark(notice.key)));
+  if (!fresh.length) return [];
+  const text = fresh.map((notice) => `${notice.text}.`).join("\n\n");
+  notify("Anything Factory", fresh.length === 1 ? text : `${fresh.length} things keep roles off the newest models: a6g doctor lists them`);
+  const kind = `models-${hash(...fresh.map((notice) => notice.key))}`;
+  const said = await alertChannels(reach, A6G_HOME, kind, "[Anything Factory] Your teams aren't on the newest models", text);
+  for (const notice of fresh) writeFileSync(mark(notice.key), "");
+  return [...fresh.map((notice) => notice.text), ...said];
+}
+
 // The team's lock in its run folder (which launchd can read): one watcher at a time, up to a minute's wait. The same
 // slot as lib/lock.ts's, so a dead holder's lock is taken over safely, and a holder releases only its own.
 const acquireRun = (run: string): Promise<(() => void) | null> => acquireSlot([join(run, ".watch.lock")], { waitMin: 1, holder: "watchdog" });
@@ -396,6 +412,11 @@ export async function watchOnce(only?: string, before?: (entry: RegistryEntry) =
       for (const line of observeSubscriptions()) glog(line);
     } catch (error) {
       glog(`couldn't read the subscriptions' usage: ${(error as Error).message.split("\n")[0]}`);
+    }
+    try {
+      for (const line of await tellModelNotices(reach)) glog(line);
+    } catch (error) {
+      glog(`couldn't compare the roles' models with those in use: ${(error as Error).message.split("\n")[0]}`);
     }
   }
   // Ids of replies already passed on or passed over; only those Resend still lists matter, so the newest few hundred.

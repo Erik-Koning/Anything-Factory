@@ -12,7 +12,7 @@ import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
 import { promptFile, promptStale } from "../prompts.ts";
 import { readSteering } from "../steer.ts";
-import { accounts, configDirOf, describeWait, loginOf, sameLogins, teamUses } from "../subscriptions.ts";
+import { accounts, configDirOf, describeWait, loginOf, modelNotices, sameLogins, teamUses } from "../subscriptions.ts";
 import * as t3 from "../t3.ts";
 import { localTime, readJson, which } from "../util.ts";
 import { readToken, whatsappSettings } from "../whatsapp.ts";
@@ -160,6 +160,8 @@ export async function doctor(): Promise<number> {
     const missing = [...new Set(Object.values(roles).flat())].filter((name) => !known.has(name));
     if (missing.length) fail(`${team} is listed to run on ${missing.join(", ")}, which isn't a subscription here (a6g subscriptions add, or use)`);
   }
+  // Each role on its family's newest model: none newer in use here than this version knows, and no team behind it.
+  for (const notice of modelNotices()) warn(notice.text);
 
   // The Docker engines that answer, and what's on each (lib/docker.ts). Each has its own containers and they share
   // this Mac's ports: the same container on two is a copy nothing reaches, and a port two publish only one gets.

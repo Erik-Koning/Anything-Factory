@@ -240,6 +240,9 @@ furthest; most of a team's tokens go to building and checking, which stay on Opu
   every role on it.
 - `fable`, `opus`, `sonnet` and `haiku` mean the newest model of the family this version of the factory knows
   (`lib/models.ts`), so they move when you upgrade; a model id is used as written.
+- When a newer model of a family is in use on your subscriptions than this version knows (your own sessions count),
+  or a team's roles on a short name run an older one than this version's, the watchdog tells you once and
+  `a6g doctor` warns until it's put right: a release that knows it, or `a6g upgrade <team>`.
 
 `a6g register` records each role's model and prints them, and `a6g check` shows them in its summary. The planner's
 rules carry a table with each member's model, which it passes to T3 Code as `target.model`; the guard refuses a

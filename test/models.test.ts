@@ -3,12 +3,25 @@
 import { baseTeam, guard, holds, makeRepo, tmp, tool, write } from "./helpers.ts";
 import { fakeWorld } from "./fake-t3.ts";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { loadTeam, modelsOf, normalize, type RawTeam } from "../lib/config.ts";
-import { defaultModel, fallbackModel, familyOf, MODEL_ALIASES, modelId, modelName } from "../lib/models.ts";
-import { priced } from "../lib/prices.ts";
+import {
+  defaultModel,
+  fallbackModel,
+  familyOf,
+  MODEL_ALIASES,
+  modelId,
+  modelName,
+  modelTitle,
+  newerThan,
+  newerThanShortNames,
+  onShortName,
+  versionOf,
+} from "../lib/models.ts";
+import { priced, PRICES } from "../lib/prices.ts";
+import { modelNotices } from "../lib/subscriptions.ts";
 import { compile } from "../lib/prompts.ts";
 import { newTask } from "../lib/tasks/model.ts";
 import { fileStore } from "../lib/tasks/files.ts";
@@ -193,7 +206,128 @@ describe("a role's model", () => {
   });
 });
 
+describe("the newest model of each family", () => {
+  test("a model's family and version, and which of two is newer", () => {
+    assert.deepEqual(versionOf(FABLE), { family: "fable", version: [5, 2] });
+    assert.deepEqual(versionOf("claude-opus-5[1m]"), { family: "opus", version: [5, 0] });
+    assert.deepEqual(versionOf("claude-haiku-4-5-20251001"), { family: "haiku", version: [4, 5] });
+    assert.deepEqual(["claude-mythos-5-2", "claude-fable", "m", "<synthetic>"].map(versionOf), [null, null, null, null]);
+    assert.ok(newerThan(FABLE, "claude-fable-5-1"));
+    assert.ok(newerThan("claude-opus-6", OPUS));
+    assert.ok(newerThan("claude-opus-5-10", "claude-opus-5-9"), "by number, not by text");
+    assert.ok(!newerThan("claude-fable-5-1", FABLE));
+    assert.ok(!newerThan(FABLE, FABLE));
+    assert.ok(!newerThan("claude-fable-9", OPUS), "only within a family");
+    assert.deepEqual([FABLE, "claude-opus-5", "claude-sonnet-5-5[1m]", "m"].map(modelTitle), ["Fable 5.2", "Opus 5", "Sonnet 5.5", "m"]);
+  });
+
+  test("each short name is the newest model of its family this version can price", () => {
+    for (const [family, id] of Object.entries(MODEL_ALIASES)) {
+      const newer = Object.keys(PRICES).filter((model) => newerThan(model, id));
+      assert.deepEqual(newer, [], `${family} is ${id}, though this version prices ${newer.join(", ")}`);
+    }
+  });
+
+  test("the models in use that are newer than a short name, and the roles a short name moves", () => {
+    assert.deepEqual(
+      newerThanShortNames([
+        "claude-fable-5-1",
+        "claude-fable-9-1[1m]",
+        "claude-fable-7",
+        OPUS,
+        "claude-opus-5",
+        "claude-haiku-4-5-20251001",
+        "claude-mythos-9",
+        "m",
+      ]),
+      { fable: "claude-fable-9-1" }
+    );
+    assert.deepEqual(newerThanShortNames([FABLE, OPUS]), {});
+    const raw = { model: "sonnet", roles: { planner: {}, builder: { model: "Opus" }, reviewer: { model: "claude-opus-5" } } };
+    assert.deepEqual(
+      ["planner", "builder", "reviewer", "tester"].map((role) => onShortName(raw, role)),
+      [true, true, false, true]
+    );
+    assert.ok(onShortName({ roles: { planner: {} } }, "planner"), "left out: the default, a short name");
+    assert.ok(!onShortName({ model: "claude-fable-5-1" }, "planner"), "a model id is kept on purpose");
+  });
+
+  test("what keeps roles off the newest: a newer model in use here, and a team behind this version", () => {
+    const a6gHome = process.env["A6G_HOME"] as string;
+    write(join(a6gHome, "subscriptions"), {
+      "default.hours.json": {
+        cursors: {},
+        hours: {},
+        sessions: {},
+        tallies: {
+          "2026-10-01T09": { "claude-sonnet-9": { requests: 5 }, "claude-fable-9-1": { requests: 1 } },
+          "2026-11-10T08": { "claude-fable-9-1": { requests: 1 } },
+          "2026-11-12T09": { "claude-fable-9-1[1m]": { requests: 2 }, [OPUS]: { requests: 9 } },
+          "2026-11-19T08": { "claude-haiku-9": { requests: 0 } },
+        },
+      },
+    });
+    // Registered by a version whose Fable was 5.1: the planner is on the default, the reviewer names 5.1 itself.
+    const home = makeRepo(baseTeam({ roles: { planner: {}, builder: {}, reviewer: { model: "claude-fable-5-1" } } }));
+    write(join(a6gHome, "teams"), {
+      "fixture.json": {
+        name: "fixture",
+        home,
+        run: tmp("a6g-run-"),
+        version: "0.8.8",
+        model: "claude-fable-5-1",
+        models: { planner: "claude-fable-5-1", builder: OPUS, reviewer: "claude-fable-5-1" },
+      },
+    });
+    try {
+      const notices = modelNotices(new Date("2026-11-20T12:00:00Z"));
+      assert.deepEqual(
+        notices.map((notice) => notice.key),
+        ["factory claude-fable-9-1", `team fixture ${FABLE}`]
+      );
+      assert.equal(
+        notices[0]?.text,
+        `Fable 9.1 (claude-fable-9-1) is in use on default since 2026-10-01, but Anything Factory ${PACKAGE.version} runs Fable roles on Fable 5.2 (${FABLE}): a release that knows Fable 9.1 moves them (a6g self-install it, then a6g upgrade <team>)`
+      );
+      assert.equal(
+        notices[1]?.text,
+        `fixture runs its planner on Fable 5.1 (claude-fable-5-1), but Anything Factory ${PACKAGE.version} runs Fable roles on Fable 5.2 (${FABLE}): a6g upgrade fixture moves it`
+      );
+      // Out of the fortnight it looks at, a model in use says nothing.
+      assert.deepEqual(
+        modelNotices(new Date("2026-12-20T12:00:00Z")).map((notice) => notice.key),
+        [`team fixture ${FABLE}`]
+      );
+    } finally {
+      rmSync(join(a6gHome, "subscriptions"), { recursive: true, force: true });
+      rmSync(join(a6gHome, "teams"), { recursive: true, force: true });
+    }
+  });
+});
+
 describe("register and the watchdog", () => {
+  test("the watchdog says once what keeps roles off the newest model", async () => {
+    const w = await fakeWorld();
+    try {
+      const hour = new Date(Date.now() - 3_600_000).toISOString().slice(0, 13);
+      write(join(w.a6gHome, "subscriptions"), {
+        "default.hours.json": { cursors: {}, hours: {}, sessions: {}, tallies: { [hour]: { "claude-fable-9-1": { requests: 4 } } } },
+      });
+      const log = () => readFileSync(join(w.a6gHome, "watchdog.log"), "utf8");
+      const told = () => w.calls().filter((call) => call.startsWith("osascript") && call.includes("Fable 9.1")).length;
+      assert.equal((await w.a6g("watchdog", "run")).code, 0);
+      assert.match(log(), /Fable 9\.1 \(claude-fable-9-1\) is in use on default since \d{4}-\d\d-\d\d, but Anything Factory /);
+      assert.equal(told(), 1);
+      // The next reading of the subscriptions finds the same, and says nothing more.
+      rmSync(join(w.a6gHome, ".stamp-subscriptions"));
+      assert.equal((await w.a6g("watchdog", "run")).code, 0);
+      assert.equal(log().match(/is in use on default/g)?.length, 1, log());
+      assert.equal(told(), 1);
+    } finally {
+      await w.close();
+    }
+  });
+
   test("register records each role's model and says them; the watchdog starts the planner on its own", async () => {
     const w = await fakeWorld(baseTeam({ roles: { planner: {}, builder: { limit: 2 }, scaffolder: {}, reviewer: { limit: 1 } } }), { register: false });
     try {
