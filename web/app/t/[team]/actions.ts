@@ -48,6 +48,7 @@ import {
   stakeholderOf,
   storeFor,
   subscriptionsFromWeb,
+  tasksFor,
   teamDoc,
 } from "../../../server/factory.ts";
 import { answerText, asRecommended, shownAs, waitingOf } from "../../../server/inbox.ts";
@@ -141,7 +142,7 @@ export async function addTaskAction(_previous: TaskFormState, form: FormData): P
     if (!(await teamDoc(team))) return again("No such team.");
     const after = admin ? (taskIds(fields.after) ?? []) : [];
     if (after.length) {
-      const known = new Set((await storeFor(team).tasks.all()).map((t) => t.id));
+      const known = new Set((await tasksFor(team)).map((t) => t.id));
       const missing = after.filter((id) => !known.has(id));
       if (missing.length) return again(`There's no task ${missing.map((id) => `#${id}`).join(", ")} on this team.`);
     }
@@ -315,10 +316,11 @@ export async function answerAction(_previous: AnswerFormState, form: FormData): 
 }
 
 // What a pause, a stop or a resume asked for, in words.
-function controlWords(control: { kind: string; scope: HoldScope | null; tasks: string[]; journeys: string[] }): string {
+function controlWords(control: { kind: string; scope: HoldScope | null; tasks: string[]; journeys: string[]; until?: "reset" | null }): string {
   if (control.kind === "resume") return "resume";
-  if (control.scope === "now" || !control.scope) return "stop";
-  return `pause after ${describeHold({ scope: control.scope, tasks: control.tasks, journeys: control.journeys })}`;
+  const until = control.until === "reset" ? ", until its usage limit resets" : "";
+  if (control.scope === "now" || !control.scope) return `stop${until}`;
+  return `pause after ${describeHold({ scope: control.scope, tasks: control.tasks, journeys: control.journeys })}${until}`;
 }
 
 // When the team's Mac applies what was asked: within a minute, or once one runs it.
@@ -328,13 +330,15 @@ async function applies(team: string): Promise<string> {
 }
 
 // An admin stops, pauses or resumes the team, as the operator: "stop" is a pause now (nothing starts or merges;
-// members finish their turn), "pause" waits for the work or journeys under way. The lead's watchdog applies it within a
-// minute; the page refreshes in place and says so in a toast.
+// members finish their turn), "pause" waits for the work or journeys under way. With `until` "reset", the pause ends
+// when the usage limit the team waits on resets (its lead resumes it then); a stop asked of a team stopped already
+// only changes that. The lead's watchdog applies it within a minute; the page refreshes in place and says so in a toast.
 export async function controlAction(form: FormData): Promise<ActionResult> {
   const team = text(form, "team");
   const kind = text(form, "kind");
   const scope = kind === "stop" ? "now" : text(form, "scope");
   const note = text(form, "note").trim();
+  const until = text(form, "until") === "reset" ? ("reset" as const) : null;
   const journeys = form.getAll("journey").filter((value): value is string => typeof value === "string" && TASK_ID.test(value));
   if (!TEAM_PARAM.test(team)) return { error: "No such team." };
   const action = kind === "resume" ? "team.resumed" : "team.paused";
@@ -345,10 +349,18 @@ export async function controlAction(form: FormData): Promise<ActionResult> {
     if (kind !== "pause" && kind !== "stop" && kind !== "resume") throw new Refused("That isn't a stop, a pause or a resume.");
     if (kind !== "resume" && !isHoldScope(scope)) throw new Refused("Choose when the team pauses.");
     if (note.length > LIMITS.note) throw new Refused(`Keep the note to ${LIMITS.note} characters.`);
-    if (!(await teamDoc(team))) throw new Refused("No such team.");
+    const doc = await teamDoc(team);
+    if (!doc) throw new Refused("No such team.");
+    // Only where it will be read: a lead on an earlier factory version would leave the team paused for good.
+    if (until && kind !== "resume" && !doc.status?.untilReset)
+      throw new Refused(
+        "The team's Mac runs a factory version that can't end a pause at the usage limit's reset. Upgrade it, or resume the team yourself."
+      );
     const from = (await stakeholderOf(team, viewer, "operator")).id;
     const control =
-      kind !== "resume" && isHoldScope(scope) ? await pauseFromWeb(team, { scope, journeys, note, from }) : await resumeFromWeb(team, { note, from });
+      kind !== "resume" && isHoldScope(scope)
+        ? await pauseFromWeb(team, { scope, journeys, note, from, until })
+        : await resumeFromWeb(team, { note, from });
     const what = controlWords(control);
     result = { ok: `Asked to ${what}. ${await applies(team)}` };
     logged(viewer, { action, outcome: "ok", team, target: control.id, detail: `${what}${note ? `: ${note}` : ""}` });

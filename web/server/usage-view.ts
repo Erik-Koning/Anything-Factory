@@ -2,7 +2,8 @@
 // (lib/fleet.ts MachineSubscription): pure, so it's tested without a database.
 //
 // A subscription is its login: the same login reported by two machines is one subscription, its limits as most recently
-// read and its usage added up (each machine counts only its own transcripts). Usage is in the API-equivalent dollars
+// read and its usage added up (each machine counts only its own transcripts), named by the address it signs in with.
+// The names it goes by in a6g (two folders on a machine can share a login) narrow it to what each of them used. Usage is in the API-equivalent dollars
 // of lib/prices.ts and in tokens: processed tokens are input, cache reads, cache writes and output together, as T3
 // Code counts them.
 import { type MachineSubscription, USAGE_FIELDS, type UsageBucket, type UsageField } from "../../lib/fleet.ts";
@@ -41,7 +42,11 @@ export interface Reported {
 // One subscription across the machines that report it.
 export interface Subscription {
   key: string;
+  // What the page calls it: the address its login signs in with, else its names in a6g.
   name: string;
+  email: string | null;
+  // The names it goes by in a6g (a6g subscriptions) on its machines, A to Z.
+  names: string[];
   // Its place in the page's palette, by name, so it keeps its colour whatever is shown.
   colour: number;
   plan: string | null;
@@ -64,17 +69,22 @@ const bucketsInto = (into: Map<string, Map<string, Totals>>, buckets: UsageBucke
   }
 };
 
+// A subscription's key: its login, or its machine and name when it's signed out.
+export const keyOf = (machine: Reported["machine"], sub: MachineSubscription): string => sub.login ?? `${machine.id}/${sub.name}`;
+
 // Every subscription the reports name, one per login (or per machine and name for one signed out), in name order.
 export function subscriptionsOf(reports: readonly Reported[]): Subscription[] {
   const by = new Map<string, Subscription>();
   for (const { machine, subscriptions } of reports) {
     for (const sub of subscriptions) {
-      const key = sub.login ?? `${machine.id}/${sub.name}`;
+      const key = keyOf(machine, sub);
       const had = by.get(key);
       if (!had) {
         const fresh: Subscription = {
           key,
           name: sub.name,
+          email: sub.email ?? null,
+          names: [sub.name],
           colour: 0,
           plan: sub.plan,
           machines: [machine.name],
@@ -92,7 +102,8 @@ export function subscriptionsOf(reports: readonly Reported[]): Subscription[] {
         continue;
       }
       if (!had.machines.includes(machine.name)) had.machines.push(machine.name);
-      if (!had.name.split(" / ").includes(sub.name)) had.name = `${had.name} / ${sub.name}`;
+      if (!had.names.includes(sub.name)) had.names.push(sub.name);
+      had.email ??= sub.email ?? null;
       if ((sub.at ?? "") > (had.latest.at ?? "")) {
         had.latest = sub;
         had.plan = sub.plan ?? had.plan;
@@ -105,11 +116,46 @@ export function subscriptionsOf(reports: readonly Reported[]): Subscription[] {
       bucketsInto(had.hours, sub.hours);
     }
   }
-  const list = [...by.values()].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+  for (const sub of by.values()) {
+    sub.names.sort();
+    sub.name = sub.email ?? sub.names.join(" / ");
+  }
+  const list = [...by.values()].sort(byName);
   list.forEach((sub, i) => {
     sub.colour = i % PALETTE_SIZE;
   });
   return list;
+}
+
+const byName = (a: Subscription, b: Subscription): number => a.name.localeCompare(b.name) || a.key.localeCompare(b.key);
+
+// A subscription narrowed to what it used under one of its names: that name's sessions, teams and limits, its own
+// name and colour kept. Names on one login share its windows, but each counts its own transcripts and has its own
+// limits for the teams (a6g subscriptions limit).
+export function subscriptionAs(reports: readonly Reported[], sub: Subscription, name: string): Subscription {
+  const only = subscriptionsOf(
+    reports.map(({ machine, subscriptions }) => ({
+      machine,
+      subscriptions: subscriptions.filter((s) => s.name === name && keyOf(machine, s) === sub.key),
+    }))
+  )[0];
+  return only ? { ...only, name: sub.email ?? only.name, email: sub.email, colour: sub.colour } : sub;
+}
+
+export type Sort = "used" | "name";
+export const SORTS: { value: Sort; label: string }[] = [
+  { value: "used", label: "Most used" },
+  { value: "name", label: "A–Z" },
+];
+
+// The subscriptions in the page's order: by name, or most used first: of its week as last read (then its session) on
+// the Limits view, of the cost or tokens over the window on the others. Each keeps its colour.
+export function sortedBy(subs: readonly Subscription[], sort: Sort, metric: Metric, days: Period, now: Date): Subscription[] {
+  if (sort === "name") return [...subs].sort(byName);
+  if (metric !== "limits") return ranked(usageOf(subs, days, now).series, metric).map((s) => s.sub);
+  const t = now.getTime();
+  const used = (w: MachineSubscription["weekly"]) => (w && (!w.resetsAt || Date.parse(w.resetsAt) > t) ? w.percent : -1);
+  return [...subs].sort((a, b) => used(b.latest.weekly) - used(a.latest.weekly) || used(b.latest.session) - used(a.latest.session) || byName(a, b));
 }
 export const PALETTE_SIZE = 6;
 
@@ -272,6 +318,18 @@ export const paceOf = (used: number, elapsed: number | null): Pace | null => {
   const gap = used - elapsed * 100;
   return gap > 5 ? "ahead" : gap < -5 ? "under" : "on";
 };
+
+// A week used on at the pace it has gone so far: when it would be used up, or "lasts" when at that pace it lasts until
+// it resets. Null when that can't be said: less than six hours of it run, no reset known (or it has passed), or used
+// up already.
+const SURE_AFTER = 6 * 3_600_000;
+export function usedUpAt(used: number, resetsAt: string | null, now: number): number | "lasts" | null {
+  const resets = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  const start = resets - (DURATION.weekly ?? 0);
+  if (Number.isNaN(resets) || resets <= now || used >= 100 || now - start < SURE_AFTER) return null;
+  const at = used > 0 ? start + ((now - start) * 100) / used : Infinity;
+  return at < resets ? at : "lasts";
+}
 
 function pool(kind: WindowKind, label: string, parts: Omit<PoolPart, "weight">[], now: number): Pool {
   const weights = parts.map((p) => (kind === "session" ? planWeight(p.sub.plan) : 1));

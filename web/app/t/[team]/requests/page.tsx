@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Ago, Chip, clip, Notice, type SearchParams } from "../../../../components/ui.tsx";
 import { can, canSeeRequest, senderLabel } from "../../../../server/access.ts";
-import { linkedStakeholder, storeFor } from "../../../../server/factory.ts";
+import { linkedStakeholder, storeFor, tasksFor } from "../../../../server/factory.ts";
 import { rejectionOf, requestState } from "../../../../server/views.ts";
 import { teamFor } from "../team.ts";
 import { RequestForm } from "./request-form.tsx";
@@ -16,7 +16,7 @@ export default async function RequestsPage({ params, searchParams }: { params: P
   const all = can(viewer, "requests:all", team.name);
   const [requests, tasks, stakeholders, own] = await Promise.all([
     store.requests.all(),
-    store.tasks.all(),
+    tasksFor(team.name),
     // Who sent what is read only for those who may see every request.
     all ? store.stakeholders.all() : Promise.resolve([]),
     linkedStakeholder(team.name, viewer.userId),

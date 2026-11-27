@@ -3,7 +3,7 @@
 // contexts there are, which engines run, and the containers on each.
 import { a6g, baseTeam, makeRepo, ROOT, tmp, write } from "./helpers.ts";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { loadTeam } from "../lib/config.ts";
@@ -371,6 +371,23 @@ describe("register", () => {
     } finally {
       await w.close();
     }
+  });
+
+  test("a command that opens a team's store closes it: a Mongo client left open keeps the process alive, and its locks", () => {
+    // The upgrade of a Mongo team with a planner once asked for the restart and never ended, holding the merge lock it
+    // ran under. The CLI ends when nothing is left open (bin/a6g.ts sets the exit code), so every store opened is closed.
+    const left: string[] = [];
+    let opened = 0;
+    for (const file of (readdirSync(join(ROOT, "lib"), { recursive: true }) as string[]).filter((name) => name.endsWith(".ts"))) {
+      const lines = readFileSync(join(ROOT, "lib", file), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        if (!/\bawait openStore\(/.test(line)) return;
+        opened++;
+        if (!lines.slice(i, i + 40).some((l) => l.includes(".close()"))) left.push(`lib/${file}:${i + 1}`);
+      });
+    }
+    assert.ok(opened > 15, `the pattern still finds where stores are opened (${opened})`);
+    assert.deepEqual(left, []);
   });
 
   test("a member's DOCKER_HOST is the team's engine, whatever team.json's vars say", () => {

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Ago, Chip, Notice, type SearchParams } from "../../../../../components/ui.tsx";
 import { awaitsStream, DIMENSIONS, journeyDue, streamLabel } from "../../../../../../lib/tasks/model.ts";
 import { can, TASK_ID } from "../../../../../server/access.ts";
-import { storeFor } from "../../../../../server/factory.ts";
+import { storeFor, tasksFor } from "../../../../../server/factory.ts";
 import { waitsOnOperator } from "../../../../../../lib/tasks/answer.ts";
 import { originsFor } from "../../../../../server/origin.ts";
 import { PROPOSALS } from "../../../../../server/views.ts";
@@ -18,7 +18,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const { viewer, team } = await teamFor(name);
   if (!can(viewer, "team:board", team.name) || !TASK_ID.test(id)) notFound();
   const store = storeFor(team.name);
-  const [task, tasks, origins] = await Promise.all([store.tasks.get(id), store.tasks.all(), originsFor(team.name, viewer)]);
+  const [task, tasks, origins] = await Promise.all([store.tasks.get(id), tasksFor(team.name), originsFor(team.name, viewer)]);
   if (!task) notFound();
   const admin = can(viewer, "proposals:decide", team.name);
   const decide = admin && (PROPOSALS.includes(task.status) || task.status === "triage") && task.kind !== "journey" && task.kind !== "design";
