@@ -1,5 +1,20 @@
 # Changelog
 
+## A check that stands through the team's notes, a reviewer's copy of its own, and a team that rests while it waits on you
+
+- **A commit of the team's notes no longer throws a check away.** The check after merges drops its run when the
+  checkout's commit moves under it, and the planner commits its decisions, lessons and direction (`.a6g/*.md`) on the
+  integration branch whenever it likes: a team's suite of almost two hours was thrown away for a `lessons.md`. A move
+  that is only such commits now leaves the run standing for the commit it ran on; any other change still runs it again.
+- **A reviewer's copy is its team's own.** The reviewer and the security reviewer work in `/tmp/review-<team>-<n>`,
+  where two teams' reviewers shared `/tmp/review-<n>`, and give the copy its own dependencies (the team's
+  `worktreeSetup`, run in the copy), never the checkout's linked in: a copy that borrowed the checkout's `node_modules`
+  let an install in it point the team's workspace links into the copy, and the team's app stopped once it was removed.
+- **A team that waits only on you rests.** Blocked tasks, and approved ones set to start after a task still open, are
+  nothing a member could take on, so a team with only those beside your question or your decision now counts as
+  waiting on you: one whose single approved task waited on a question ticked every ten minutes for a night, with
+  nobody working. The planner still looks at a blocked task on the hourly tick.
+
 ## 0.8.17: An upgrade that ends
 
 - **`a6g upgrade` of a team with a planner no longer hangs.** Since 0.8.15 it asks the lead to restart the planner on
