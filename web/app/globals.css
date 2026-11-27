@@ -5013,6 +5013,11 @@ ol.setup > li > * {
 .week-pace .chip {
   white-space: normal;
 }
+/* When the week runs out before it resets, at its pace so far: said in the caution's colour, as part of the line. */
+.week-pace .runs-out {
+  color: var(--warn);
+  font-weight: 600;
+}
 .facts .week-pace + .way {
   display: inline-block;
   margin-top: 6px;
@@ -5031,6 +5036,18 @@ ol.setup > li > * {
   }
   .settings-word,
   .switch-team {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+/* On the narrowest phones the switcher's key is its arrows alone: with the word, the gear beside the controls pushed
+   it onto a line of its own. */
+@media (max-width: 380px) {
+  .switch-word {
     position: absolute;
     width: 1px;
     height: 1px;

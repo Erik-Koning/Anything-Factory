@@ -261,10 +261,6 @@ describe("a machine's subscriptions in its report", () => {
     for (const wrong of [
       [sub({ name: "Not A Name" })],
       [sub({ login: "the-account-id@example.com" })],
-      [sub({ email: "not an address" })],
-      [sub({ email: "two@at@example.com" })],
-      [sub({ email: "a\u202eb@example.com" })],
-      [sub({ email: `${"a".repeat(250)}@example.com` })],
       [sub({ days: [["2026-11-15", "claude-opus-5-5", 3]] })],
       [sub({ hours: [["2026-11-15", "claude-opus-5-5", 3, 10, 20, 30, 40, 1.5, 0.1, 0.4, 0.5, 0.5, 0, 2, 0]] })],
       [sub({ days: [["2026-11-15", "claude-opus-5-5", -1, 10, 20, 30, 40, 1.5, 0.1, 0.4, 0.5, 0.5, 0, 2, 0]] })],
@@ -275,6 +271,20 @@ describe("a machine's subscriptions in its report", () => {
       const parsed = report(wrong);
       assert.equal(parsed?.name, "studio", JSON.stringify(wrong).slice(0, 80));
       assert.equal(parsed?.subscriptions, undefined, JSON.stringify(wrong).slice(0, 80));
+    }
+  });
+
+  test("an address that isn't one is left out, and its subscription and the machine's others still count", () => {
+    for (const email of [
+      "not an address",
+      "two@at@example.com",
+      "a\u202eb@example.com",
+      `${"a".repeat(250)}@example.com`,
+      7,
+      { address: "x@example.com" },
+    ]) {
+      const parsed = report([sub({ email: email as string }), sub({ name: "other" })])?.subscriptions;
+      assert.deepEqual(parsed, [sub({ email: null }), sub({ name: "other" })], JSON.stringify(email).slice(0, 40));
     }
   });
 

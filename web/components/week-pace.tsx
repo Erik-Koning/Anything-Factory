@@ -24,10 +24,9 @@ export function WeekPace({ subscriptions }: { subscriptions: NonNullable<Spend["
                 <Chip tone="warn">used up</Chip>
               </>
             ) : typeof out === "number" ? (
-              <>
-                {" "}
-                <Chip tone="caution">at this pace, used up in {span(out - now)}</Chip>
-              </>
+              // Words in the caution's colour, not a chip: in the overview's narrow Status column a chip this long
+              // wrapped into two tight lines.
+              <span className="runs-out"> · at this pace, used up in {span(out - now)}</span>
             ) : out === "lasts" ? (
               <span className="muted"> · at this pace it lasts the week</span>
             ) : null}

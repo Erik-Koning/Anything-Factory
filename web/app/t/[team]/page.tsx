@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { TaskGraph } from "../../../components/task-graph.tsx";
 import { SpendPanel } from "../../../components/spend-panel.tsx";
-import { TeamControls } from "../../../components/team-controls.tsx";
+import { controlsToSay, TeamControls } from "../../../components/team-controls.tsx";
 import { Ago, Chip, Notice, type SearchParams } from "../../../components/ui.tsx";
 import { WeekPace } from "../../../components/week-pace.tsx";
 import { can } from "../../../server/access.ts";
@@ -194,9 +194,10 @@ export default async function OverviewPage({ params, searchParams }: { params: P
         journeysPanel
       )}
 
-      {/* Under the work, for its admins: where its controls stand, then what it spent. What it may spend, the
-          subscriptions it runs on, the agreement and its place on the site are on Settings. */}
-      {control ? (
+      {/* Under the work, for its admins: where its controls stand, when there's something to say of them, then what it
+          spent. What it may spend, the subscriptions it runs on, the agreement and its place on the site are on
+          Settings. */}
+      {control && controlsToSay(team, controls) ? (
         <section className="panel runs" aria-labelledby="runs">
           <h2 id="runs">How it runs</h2>
           <TeamControls team={team} controls={controls} />

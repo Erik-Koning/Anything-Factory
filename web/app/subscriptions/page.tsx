@@ -80,7 +80,9 @@ export default async function SubscriptionsPage({ searchParams }: { searchParams
   const periods = PERIODS.map((p) => ({ label: p.label, href: href({ period: p.days === 30 ? null : String(p.days) }), on: p.days === days }));
   const views = METRICS.map((m) => ({ label: m.label, href: href({ view: m.value === "limits" ? null : m.value }), on: m.value === metric }));
   const sorts = SORTS.map((s) => ({ label: s.label, href: href({ sort: s.value === "used" ? null : s.value }), on: s.value === sort }));
-  const accounts = all.map((s) => ({
+  // The subscriptions to choose from stay A–Z whatever the order below: "most used" is of the week on Limits and of the
+  // cost or tokens elsewhere, so the keys would change places from one view to the next.
+  const accounts = sortedBy(all, "name", metric, days, now).map((s) => ({
     key: s.key,
     label: s.name,
     colour: s.colour,

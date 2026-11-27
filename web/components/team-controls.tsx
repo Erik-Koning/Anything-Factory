@@ -32,6 +32,15 @@ function EndsAtReset({ hold }: { hold: HoldState }) {
   );
 }
 
+// Whether the controls have anything to say: one asked, a pause under way or in force, or an action's outcome. With
+// none of those the part would hold only where the buttons are, so the overview leaves its panel out.
+export function controlsToSay(team: TeamDoc, controls: Control[]): boolean {
+  const status = team.status;
+  const { pending, recent } = controlsView(status, controls);
+  const held = status?.state === "paused" || (status?.state === "pausing" && Boolean(status.hold));
+  return pending !== null || held || recent.length > 0 || actionsOf(controls).length > 0;
+}
+
 export function TeamControls({ team, controls }: { team: TeamDoc; controls: Control[] }) {
   const status = team.status;
   const hold = status?.hold ?? null;

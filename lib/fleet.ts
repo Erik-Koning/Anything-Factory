@@ -304,8 +304,9 @@ function parseSubscriptions(value: unknown): MachineSubscription[] | undefined {
     const { name, login, email, plan, at, weekly, session, models, extra, week, limits, closed, teams, today, days, hours, sessions, counted } = sub;
     if (typeof name !== "string" || !SUBSCRIPTION.test(name)) return undefined;
     const ownLogin = orNull(login, (v): v is string => typeof v === "string" && LOGIN.test(v));
-    const address = email === undefined ? null : orNull(email, isEmail);
-    if (address === undefined) return undefined;
+    // An address that isn't one is left out, and the subscription still counts under its name: the address is one
+    // label on the page, and a version that sends a form this one doesn't take shouldn't hide a machine's limits.
+    const address = isEmail(email) ? email : null;
     const ownPlan = orNull(plan, (v): v is string => isText(v, 40));
     const readAt = orNull(at, isTime);
     const week7 = parseWindow(weekly);
