@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.19: A business lead the planner consults, and members that carry on when Claude Code is too old for their model
+
+### A business, marketing and growth lead
+
+- **A team can have a business lead** (`"business-lead": {"limit": 1}` in team.json's roles), its business, marketing
+  and growth voice, on Fable like the innovator. It reads and files and builds nothing, sends nothing outside the team,
+  and leaves money to you.
+- **Every feature gets its read before the approver.** The planner's context lists the features proposed without one
+  and says to start the business lead on them, a batch at a time. It notes each on the task: back, reshape or doubt,
+  with who the feature brings in, keeps or pays, how people will hear of it and the number that would show it worked.
+  The approver sends a feature without a read back, holds one it said to reshape until the planner has, and approves
+  one it doubts only by overruling it with a reason, so what's built is what business, marketing and the tech side
+  agree on.
+- **It ranks the plan and makes growth passes.** At each cycle's start the planner asks it for a plan read (the three
+  it would build first, what to drop, the gap nothing on the board fills), and when ideas run low its growth passes
+  (onboarding, channels and partners, the words on public pages, how the product pays) alternate with the innovator's.
+
+### Members carry on when this Mac's Claude Code is too old for their model
+
+- **They run on Opus until it's updated.** T3 Code's model catalogue names the oldest Claude Code each model needs and
+  refuses to start a member on a model the installed one is too old for. On 27 November every team's innovator and
+  scaffolder were refused Fable 5.2 for a day (it wanted Claude Code 2.1.321; this Mac had 2.1.311), and since the
+  guard held the planner to Fable for them, one team's ideas pass waited on a question to you. Now each watchdog run
+  reads the catalogue and the installed version: a member on such a model runs on its fallback (Opus for Fable), the
+  guard holds the planner to it and its ticks say so, and back on its own once Claude Code is new enough. The planner
+  keeps its own model, since T3 Code starts its thread without that check.
+- **You're told what to update.** The watchdog's log and alert, `a6g status` and `a6g doctor` (a FAIL per team) say
+  which roles run on Opus and why: "this Mac's Claude Code 2.1.311 is older than the 2.1.321 T3 Code needs to start
+  Fable: update it (brew upgrade --cask claude-code, or claude update)". A start refused as `model_unavailable` is no
+  longer a question for you: the planner notes it and carries on.
+
 ## 0.8.18: Proposals that lead with their ask, each team's repository on Teams, and a word when your teams aren't on the newest model
 
 ### Decisions lead with the ask, and a score reads as bars
