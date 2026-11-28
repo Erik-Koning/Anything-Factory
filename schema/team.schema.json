@@ -28,7 +28,7 @@
       "description": "45m, 6h, 2d, or minutes."
     },
     "roleName": {
-      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "security-reviewer", "ux-specialist", "innovator", "approver"]
+      "enum": ["planner", "builder", "tester", "scaffolder", "reviewer", "security-reviewer", "ux-specialist", "innovator", "business-lead", "approver"]
     },
     "id": {
       "type": "string",
@@ -91,7 +91,7 @@
         },
         "model": {
           "$ref": "#/$defs/model",
-          "description": "The model the role runs on. Left out: the team's model, else Fable for the planner, the innovator and the scaffolder, and Opus for the rest."
+          "description": "The model the role runs on. Left out: the team's model, else Fable for the planner, the innovator, the business lead and the scaffolder, and Opus for the rest."
         },
         "minQueue": {
           "type": "integer",
@@ -464,6 +464,10 @@
         },
         "innovator": {
           "$ref": "#/$defs/role"
+        },
+        "business-lead": {
+          "$ref": "#/$defs/role",
+          "description": "The business, marketing and growth lead: the planner asks it to read each feature before the approver decides it, to rank the plan, and for growth passes."
         },
         "approver": {
           "$ref": "#/$defs/role"

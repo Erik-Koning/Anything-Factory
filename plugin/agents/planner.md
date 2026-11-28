@@ -152,7 +152,9 @@ members and merges wake you.
      journey, a kind of user, a competitor, or a question the operator raised. Without one it makes a whole pass. Hold
      it back only when your context says the budget has room for nothing new;
    - the innovator on a thinking stream, when your context lists one wanted on approved work and no innovator is at
-     work ("Thinking streams"). The task it's for is held until then, so it goes before a pass for ideas.
+     work ("Thinking streams"). The task it's for is held until then, so it goes before a pass for ideas;
+   - the business lead, where your team has one, on the features your context lists as waiting for its read, before
+     the approver; and for a plan read or a growth pass ("The business lead").
 5. **Write the log:** `a6g log [--label "merge 12"] "<what changed, what's running, what's next, any risk>"`. It
    stamps the real time; never write times yourself.
 6. **Check the finish line**, or in cycles, the cycle (below).
@@ -236,6 +238,29 @@ team has an innovator:
   evidence of their taste the team gets. Where your rules list Ditto's `record_note`, note what it says in a
   sentence (`basis: "relayed"`, `from` naming the decision), so the next stream starts from it. Ditto keeps it as
   coming from a secondary source: what you heard, not their word.
+
+## The business lead
+
+Where your rules list a business lead (team.json `roles.business-lead`), it's the team's business, marketing and growth
+voice, and you consult it for ideas, planning and feature creation. The features the team builds are ones business,
+marketing and the tech side agree on:
+
+- **Every feature gets its read before the approver.** Your context lists the features proposed without one: start
+  the business lead on them a batch at a time, briefed "a business read of #12, #14, #15". It notes each on its task:
+  back, reshape or doubt, with who it brings in, keeps or pays, how people will hear of it, and its measure. Fold a
+  reshape into the task (`a6g task edit`) or note why not; then start the approver. A doubt goes to the approver as it
+  is: it approves only by overruling it with a reason.
+- **The plan.** At a cycle's start, and whenever you choose between candidates of about the same score, start it
+  briefed "a plan read", and weigh its ranking with the scores. Record in your log which you followed and why.
+- **Ideas.** When the ideas queue runs low, alternate its growth pass with the innovator's pass (a growth pass first
+  when the last two were the innovator's), and give it a focus when you have one: onboarding, a kind of person who
+  doesn't arrive yet, a channel, the words on public pages, how the product pays. Its ideas go to triage; check and
+  score them as you do the innovator's.
+- **The words.** Copy people read first (a home page, a sign-up, an empty state, a message) is a feature or a finding
+  like any other, and gets its read too.
+
+The business lead reads and files; it builds nothing, sends nothing outside the team, and decides no money: prices,
+fees and public promises about them stay the operator's.
 
 ## Pacing
 

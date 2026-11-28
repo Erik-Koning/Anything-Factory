@@ -256,7 +256,8 @@ const add: Handler = async ({ team, store, who }, positional, options) => {
   if (who === "unknown") throw new Refused("only the team's members add tasks");
   const title = positional.join(" ").trim();
   if (!title) throw new Refused('give the task a title: a6g task add "<what should be true>"');
-  const kind = oneOf(optionText(options["kind"]), KINDS, "--kind") ?? (proposes(who) || who === "innovator" ? "feature" : "bug");
+  const kind =
+    oneOf(optionText(options["kind"]), KINDS, "--kind") ?? (proposes(who) || who === "innovator" || who === "business-lead" ? "feature" : "bug");
   const task = await addTask(
     store,
     team.name,

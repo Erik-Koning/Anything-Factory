@@ -277,6 +277,14 @@ export const ROLES: Record<string, RoleDefaults> = {
     readOnly: true,
     write: [],
   },
+  // Optional: the business, marketing and growth voice the planner consults for ideas, planning and each feature
+  // before the approver decides it (plugin/agents/business-lead.md).
+  "business-lead": {
+    summary: "the business, marketing and growth lead: reads each feature for who it brings, keeps or pays; files growth ideas; ranks the plan",
+    limit: 1,
+    readOnly: true,
+    write: [],
+  },
   approver: { summary: "approves or sends back the planner's proposals, within the team's approval rules", limit: 1, readOnly: true, write: [] },
 };
 

@@ -93,10 +93,11 @@ async function graph(): Promise<string | null> {
             lastPass: lastFinished(instancesOf(team, "innovator")),
           }
         : undefined;
+      const business = team.roles["business-lead"] ? { running: counts ? atWork("business-lead") : null } : undefined;
       // How readily to ask the operator, as it stands now (the working agreement), and what they overturned.
       const checkIns = agreementContext(await store.controls.all(), await store.decisions.all(), team.operator);
       return [
-        clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas }), 2500),
+        clip(summary(all, { approval: team.approval.mode, requests: await store.requests.all(), ideas, business }), 2500),
         paceText,
         clip(checkIns, 2800),
       ].join("\n");
