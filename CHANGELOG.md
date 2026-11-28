@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.22: A planner with room to work, one that stalled is woken, and a retired one stays retired
+
+- **The planner's context window fits what it carries.** Every turn starts with the team's rules, its decisions and
+  lessons, the repository's CLAUDE.md and Claude Code's own instructions. The window was 160,000 tokens for every
+  team, and a team whose documents had grown to 119,000 was left about 8,000 to work in: its planner compacted every
+  three minutes, lost its place each time, and had turns ended by Claude Code ("Autocompact is thrashing"). The window
+  is now what the planner carries plus 80,000 tokens to work in, set when the team is registered or upgraded;
+  `roles.planner.compactAt` in team.json still sets it outright. `a6g doctor` fails a team whose registered window
+  leaves its planner under 40,000, and says what fixes it.
+- **A planner T3 Code left queued is woken.** When a turn fails with a message queued behind it, T3 Code never starts
+  that message: the thread says "queued", nothing runs, and nothing will until another message arrives. The watchdog
+  read that as a planner busy with a turn, so it sent no tick, and a restart waited on it for good. One queued for
+  five minutes with no turn running is now ticked like an idle planner, and `a6g rotate`, an upgrade's restart and a
+  move to another subscription treat it as free.
+- **A retired planner stays retired.** The check after merges can run for an hour, and it reported to the planner
+  thread it had read when it began. A planner restarted meanwhile was woken by that report and ran the team beside
+  the new one, starting members and queueing merges of its own. The report now goes to the planner of the moment, and
+  the watchdog tells any retired planner it finds in a turn to stand down (T3 Code has no way to stop a thread).
+
 ## 0.8.21: The business lead sets what, never how, and holds nothing back; the tech side builds the solution the problem deserves
 
 - **The business lead helps set the direction and the feature strategy, mostly what gets built and for whom, never

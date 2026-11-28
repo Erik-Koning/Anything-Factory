@@ -149,8 +149,8 @@ export function plannerBusy(run: string, then: string): string | null {
   if (busy) return `the planner has ${busy} members running; they report to it, so ${then} once they've finished`;
   const thread = t3.threadShow(old);
   if (!thread && t3.threadExists(old) !== false) return `T3 Code couldn't say what planner ${old} is doing; try again`;
-  if (thread && !thread.archived && t3.BUSY.includes(thread.status ?? ""))
-    return `the planner is in the middle of a turn (${thread.status}); ${then} once it's idle`;
+  // One T3 Code left queued with nothing running (lib/t3.ts stalled) is free: nothing of its own will start.
+  if (thread && !thread.archived && t3.midTurn(thread)) return `the planner is in the middle of a turn (${thread.status}); ${then} once it's idle`;
   // Waiting on a person: an answer would resume the old planner beside the new one.
   if (thread && !thread.archived && (thread.status === "waiting" || (thread.pendingRequestCount ?? 0) > 0))
     return `the planner is waiting for an answer in T3 Code; answer it (or dismiss the request), then ${then}`;
