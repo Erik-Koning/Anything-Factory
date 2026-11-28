@@ -248,9 +248,16 @@ export async function doctor(): Promise<number> {
       let stale: string[] | null;
       if (pin === PACKAGE.version) stale = Object.keys(team.roles).filter((role) => promptStale(team, role, entry.run));
       else {
-        // The roles as written: the pinned version may have one this version doesn't.
+        // The roles it registered (the pinned version may have one this version doesn't), else the roles as written. A
+        // role written but not registered is one the pinned loader leaves out (an approver under the operator's own
+        // approval), whose prompt it refuses to compile.
+        const registered = Object.keys(entry.models ?? {});
         const written: unknown = team.raw?.roles;
-        const roles = written && typeof written === "object" && !Array.isArray(written) ? Object.keys(written) : Object.keys(team.roles);
+        const roles = registered.length
+          ? registered
+          : written && typeof written === "object" && !Array.isArray(written)
+            ? Object.keys(written)
+            : Object.keys(team.roles);
         const judged = pinnedStale(pin, name, entry.run, roles);
         if ("error" in judged) {
           fail(`${name}: Anything Factory ${pin}, which it pins, can't load its rules or compile its prompts: ${judged.error}`);

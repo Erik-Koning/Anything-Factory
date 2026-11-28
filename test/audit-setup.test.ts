@@ -140,6 +140,29 @@ describe("installing and pinning releases, on a machine of its own", () => {
     assert.match((await launcher(["doctor"])).out, /^warn {2}fixture: prompts out of date for planner.*team\.json changed after it was registered/m);
   });
 
+  test("doctor judges a pinned team by the roles it registered, not one its rules list and leave out", async () => {
+    // An approver listed under the operator's own approval: the loader leaves it out, so it was never registered.
+    const roles = baseTeam().roles ?? {};
+    const home = makeRepo(baseTeam({ factory: "0.2.99", t3ProjectId: "p1", approval: { mode: "operator" }, roles: { ...roles, approver: { limit: 1 } } }));
+    const runDir = join(m.root, "runs", "fixture");
+    mkdirSync(join(m.a6gHome, "teams"), { recursive: true });
+    const registeredAt = new Date();
+    utimesSync(join(home, ".a6g", "team.json"), new Date(registeredAt.getTime() - 60_000), new Date(registeredAt.getTime() - 60_000));
+    const models = Object.fromEntries(Object.keys(roles).map((role) => [role, "claude-opus-5-5"]));
+    writeFileSync(
+      join(m.a6gHome, "teams", "fixture.json"),
+      JSON.stringify({ name: "fixture", title: "Fixture team", home, run: runDir, version: "0.2.99", models, registeredAt: registeredAt.toISOString() })
+    );
+    for (const role of Object.keys(roles)) {
+      const prompt = await node(join(versions, "0.2.99", "bin", "a6g.ts"), ["prompt", "fixture", role], { env: m.env });
+      mkdirSync(join(runDir, "prompts"), { recursive: true });
+      writeFileSync(join(runDir, "prompts", `${role}.md`), prompt.out);
+    }
+    const doctor = (await launcher(["doctor"])).out;
+    assert.match(doctor, /^ok {4}fixture: rules load, prompts current \(judged by 0\.2\.99\)/m, doctor);
+    assert.doesNotMatch(doctor, /can't load its rules or compile its prompts/);
+  });
+
   test("a source checkout runs its own code; the installed a6g hands a pinned team over (#18)", async () => {
     const home = makeRepo(baseTeam({ factory: "0.2.99" }));
     const fromSource = await node(join(ROOT, "bin", "a6g.ts"), ["prompt", home, "planner"], { cwd: home, env: m.env });
