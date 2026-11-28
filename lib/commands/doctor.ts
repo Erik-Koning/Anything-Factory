@@ -5,10 +5,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { browserProblem } from "../browser.ts";
+import { claudeCodeHere, tooOldFor, tooOldWords } from "../claude-code.ts";
 import { loadTeam, TeamError } from "../config.ts";
 import * as docker from "../docker.ts";
 import { emailSettings, readKey } from "../email.ts";
 import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
+import { fallbackModel, modelName } from "../models.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
 import { promptFile, promptStale } from "../prompts.ts";
 import { readSteering } from "../steer.ts";
@@ -192,12 +194,24 @@ export async function doctor(): Promise<number> {
       );
   }
 
+  const here = claudeCodeHere();
   for (const name of teamNames()) {
     try {
       const entry = readRegistry(name);
       if (!entry) continue;
       for (const [role, wait] of Object.entries(readSteering(entry.run)?.waiting ?? {}))
         warn(`${name}: the ${role === "planner" ? "planner waits" : `${role}s wait`} for a subscription: ${describeWait(wait)}`);
+      // A member on a model this Claude Code is too old for runs on its fallback (lib/steer.ts) until it's updated.
+      const tooOld = Object.entries(entry.models ?? {}).flatMap(([role, model]) => {
+        const min = role === "planner" ? null : tooOldFor(model, here);
+        return min ? [{ role, model, min }] : [];
+      });
+      for (const model of new Set(tooOld.map((t) => t.model))) {
+        const these = tooOld.filter((t) => t.model === model);
+        fail(
+          `${name}: its ${these.map((t) => `${t.role}s`).join(", ")} run on ${modelName(fallbackModel(model) ?? model)} for now, not ${modelName(model)}: ${tooOldWords(model, these[0]?.min ?? "", here)}`
+        );
+      }
       // Whether the rules load is the pinned version's to say (below); this version's loader only reads the pin.
       const team = loadTeam(entry.home, { strict: false });
       // Its agents run the registered version; a6g register would compile with the pinned one.
