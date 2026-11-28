@@ -13,6 +13,7 @@ import { heartbeatSettings, hostOf, lastPing } from "../heartbeat.ts";
 import { fallbackModel, modelName } from "../models.ts";
 import { A6G_HOME, entryOf, type FactoryPackage, PACKAGE, readRegistry, versionDir } from "../paths.ts";
 import { promptFile, promptStale } from "../prompts.ts";
+import { tightRoom } from "../room.ts";
 import { readSteering } from "../steer.ts";
 import { accounts, configDirOf, describeWait, loginOf, modelNotices, onOwn, sameLogins, teamUses } from "../subscriptions.ts";
 import * as t3 from "../t3.ts";
@@ -214,6 +215,10 @@ export async function doctor(): Promise<number> {
       }
       // Whether the rules load is the pinned version's to say (below); this version's loader only reads the pin.
       const team = loadTeam(entry.home, { strict: false });
+      // A planner whose rules and documents nearly fill the window its context is compacted in (lib/room.ts).
+      const window = entry.worker ? null : (t3.teamInstances(name)?.["planner"]?.compactAt ?? null);
+      const tight = window && !team.problems.length ? tightRoom(team, window, { set: team.roles["planner"]?.compactAt !== undefined, name }) : null;
+      if (tight) fail(`${name}: ${tight}`);
       // Its agents run the registered version; a6g register would compile with the pinned one.
       const pin = team.factory ?? PACKAGE.version;
       if (pin === PACKAGE.version && team.problems.length) throw new TeamError(team.file, team.problems);

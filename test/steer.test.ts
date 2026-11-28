@@ -388,13 +388,13 @@ describe("a role's instance on a login of its own", () => {
       },
     };
     assert.deepEqual(teamInstances("app", settings), {
-      planner: { id: "a6g-app-planner", homePath: null },
-      builder: { id: "a6g-app-builder", homePath: "/logins/two" },
+      planner: { id: "a6g-app-planner", homePath: null, compactAt: null },
+      builder: { id: "a6g-app-builder", homePath: "/logins/two", compactAt: null },
     });
     const moved = withHomes(settings, "app", { planner: "/logins/two", builder: null });
     assert.deepEqual(teamInstances("app", moved), {
-      planner: { id: "a6g-app-planner", homePath: "/logins/two" },
-      builder: { id: "a6g-app-builder", homePath: null },
+      planner: { id: "a6g-app-planner", homePath: "/logins/two", compactAt: null },
+      builder: { id: "a6g-app-builder", homePath: null, compactAt: null },
     });
     assert.deepEqual(moved.providerInstances?.["mine"], settings.providerInstances?.["mine"], "the person's own instance is left alone");
   });

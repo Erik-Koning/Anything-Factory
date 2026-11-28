@@ -786,6 +786,18 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     }
   };
   const planner = existsSync(threadFile) ? readFileSync(threadFile, "utf8").trim() : "";
+  // A retired planner in a turn again (a late message reached it, or a person wrote to it) runs the team beside the
+  // new one, starting members and queueing merges of its own. T3 Code can't stop a thread, so it's told to stand down,
+  // at most every half hour; one in the middle of a turn reads that as its next.
+  const retiredList = join(run, "planner-thread.retired");
+  const retiredIds = new Set(existsSync(retiredList) ? readFileSync(retiredList, "utf8").split(/\s+/).filter(Boolean) : []);
+  if (retiredIds.size)
+    for (const id of t3.activeThreadsOn(entry.project, entry.plannerInstance, plannerTitle, RETIRED_WOKEN_MIN) ?? []) {
+      if (id === planner || !retiredIds.has(id)) continue;
+      const woken = t3.threadShow(id);
+      if (!woken || woken.archived || !t3.midTurn(woken) || !oncePer(`stand-down-${id.replace(/[^a-z0-9]+/gi, "-")}`, 30)) continue;
+      log(`retired planner ${id} is at work again: ${t3.threadSend(id, standDown(planner)) ? "told to stand down" : "it couldn't be told to stand down"}`);
+    }
   if (!planner) return startPlanner("none recorded");
   const thread = t3.threadShow(planner);
   if (!thread || thread.archived) {
@@ -874,8 +886,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     return;
   }
   const quietMembers = t3.quietChildren(planner, w.stuckAfterMin ?? 45);
+  // One T3 Code left queued with nothing running (lib/t3.ts stalled) is ticked like an idle one: a message starts its
+  // next turn, and nothing else will.
+  const stalledQueue = t3.stalled(thread);
+  const standing = stalledQueue ? "queued with nothing running" : status;
   log(
-    `planner ${status} (quiet ${quiet} min); members ${members.map((r) => `${r.instance}:${r.n}`).join(" ") || "none"}${quietMembers.length ? `; quiet members: ${quietMembers.join("; ")}` : ""}`
+    `planner ${standing} (quiet ${quiet} min); members ${members.map((r) => `${r.instance}:${r.n}`).join(" ") || "none"}${quietMembers.length ? `; quiet members: ${quietMembers.join("; ")}` : ""}`
   );
 
   // A foundation that waits for the operator's word on its design leaves the team nothing to build, and their answer
@@ -889,7 +905,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   // proposal, their decisions on its proposals: both reach the planner within a minute by themselves (lib/answers.ts).
   const awaitsOperator = graph !== null && unsorted === 0 && members.every((r) => r.n === 0) && waitsOnlyOnOperator(graph, operatorDecides(entry.home));
   const tickText = (extra = "") => `tick (${new Date().toLocaleString("sv-SE").slice(0, 16)}${extra}).${envNote}${holdNote(run)}${steeringNote(run)}`;
-  if (BUSY.includes(status)) {
+  if (BUSY.includes(status) && !stalledQueue) {
     if (quiet >= (w.stuckAfterMin ?? 45) && oncePer("stuck", 60)) {
       log(`planner ${planner} has been ${status} with nothing happening for ${quiet} min`);
       await alert("stuck", `The planner looks stuck (${quiet} min without activity). Open T3 Code to look.`);
@@ -934,7 +950,7 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
     )
       log("hourly tick (everything open waits for the operator)");
   } else if ((envNote && oncePer("env-down", 30)) || oncePer("tick", w.tickEveryMin ?? 10)) {
-    log(t3.threadSend(planner, tickText()) ? `tick (planner was ${status})` : "couldn't send a tick");
+    log(t3.threadSend(planner, tickText()) ? `tick (planner was ${standing})` : "couldn't send a tick");
   }
   if (quietMembers.length && oncePer("stuck-members", 60)) notify(title, `Members quiet for ${w.stuckAfterMin ?? 45}+ min: ${quietMembers.join("; ")}`);
 
@@ -947,6 +963,12 @@ async function watchTeam(entry: RegistryEntry, reach: Channel[], replies: Reply[
   );
   trimLog(run);
 }
+
+// How lately something must have happened in a retired planner's thread for the watchdog to look whether it's at work.
+const RETIRED_WOKEN_MIN = 15;
+// What a retired planner found at work is told. `now` is the team's planner, "" while a fresh one is still to start.
+const standDown = (now: string): string =>
+  `This planner thread was retired when the team's planner was restarted${now ? `: ${now} is its planner now` : ""}. A late message woke this one. Stand down: start no members, queue no merges, change no tasks or documents, write nothing to the log, and message nobody. The members you started report into the task graph, where the team's planner picks their work up; when one's report reaches you, end your turn without acting on it.`;
 
 // A message for the planner: sent, or kept for it while it waits for a subscription (lib/steer.ts), since a turn it
 // can't run would lose it; the watchdog passes kept ones on once it can work. Resolves to whether it was taken.

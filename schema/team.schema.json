@@ -87,7 +87,7 @@
         "compactAt": {
           "type": "integer",
           "minimum": 1,
-          "description": "Planner only: compact its context at this many tokens."
+          "description": "Planner only: the window its context is compacted in, in tokens. Left out, it fits what the planner carries plus room to work in."
         },
         "model": {
           "$ref": "#/$defs/model",

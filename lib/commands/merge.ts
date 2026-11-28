@@ -231,11 +231,15 @@ async function merge(argv: string[]): Promise<number> {
     writeJson(recordFile, kept.last);
     appendFileSync(join(state, "merges.log"), `${localTime()} ${branch} ${result} ${message}\n`);
   };
+  // The team's planner at this moment: read each time something is said to it, since the check after merges can run
+  // for an hour and a planner restarted meanwhile is retired, and would run the team beside the new one if woken.
+  const plannerNow = (): string =>
+    runDir && existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
   // A queued merge wakes the planner once, with the whole result.
   const wake = () => {
     const last = kept.last;
     if (!process.env.A6G_MERGE_QUEUED || !runDir || !last) return;
-    const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
+    const planner = plannerNow();
     if (planner) threadSend(planner, `merge-queue: ${branch} ${last.result}${last.sha ? ` at ${last.sha}` : ""}. ${last.message}`.trim());
   };
 
@@ -278,8 +282,13 @@ async function merge(argv: string[]): Promise<number> {
   const check = async (merged: boolean): Promise<void> => {
     if (!process.env.A6G_MERGE_QUEUED || !runDir) return;
     try {
-      const planner = existsSync(join(runDir, "planner-thread")) ? readFileSync(join(runDir, "planner-thread"), "utf8").trim() : "";
-      await verifyAfterMerge(home, team, runDir, branch, { merged, wake: (text) => planner && threadSend(planner, text) });
+      await verifyAfterMerge(home, team, runDir, branch, {
+        merged,
+        wake: (text) => {
+          const planner = plannerNow();
+          return planner && threadSend(planner, text);
+        },
+      });
     } catch (error) {
       console.error(`merge: the check after merges failed: ${(error as Error).message}`);
     }

@@ -217,7 +217,6 @@ export interface Team {
   protect: string[];
   isolation: string;
   startPrompt: string | null;
-  plannerCompactAt: number;
   legacyInstances: Record<string, string>;
 }
 
@@ -923,7 +922,6 @@ export function normalize(raw: RawTeam, home: string): { team: Team; problems: s
     protect: list(input.protect, "protect", regex) ?? [],
     isolation: isolation === "user" ? "user" : "strict",
     startPrompt: textOrNull(input.startPrompt, "startPrompt") ?? null,
-    plannerCompactAt: roles["planner"]?.compactAt ?? 160000,
     legacyInstances,
   };
   if (team.tasks.store === "mongo" && team.tasks.lead && !push)

@@ -38,6 +38,7 @@ import {
 import { heldFallbacks, plannerBusy, readSteering, retirePlanner, steer } from "../steer.ts";
 import { describeSpend, type Spend } from "../tasks/spend.ts";
 import { compile, promptFile, writePrompt } from "../prompts.ts";
+import { plannerWindow } from "../room.ts";
 import { dittoServer, hasToken, writeMcpConfig } from "../ditto.ts";
 import { operatorOnly } from "../session.ts";
 import * as t3 from "../t3.ts";
@@ -296,7 +297,7 @@ function registerTeam(
       displayName: `${team.title} · ${role}`,
       launchArgs: flags.join(" "),
       environment: memberEnvironment(team, role, { home, run, version, engine }),
-      compactAt: role === "planner" ? team.plannerCompactAt : null,
+      compactAt: role === "planner" ? plannerWindow(team) : null,
       homePath: homeOf(role),
     });
   }

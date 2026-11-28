@@ -71,6 +71,19 @@ export const threadAtWork = (id: string): boolean => {
   return BUSY.includes(status) || status === "waiting";
 };
 
+// A thread T3 Code has left queued for good: when the turn ahead of a queued message fails (Claude Code ends one whose
+// compaction can't keep up), the message never starts, no run is active, and the thread says "queued" until another
+// message arrives, which does start a turn. Told from a message about to start by how long nothing has happened.
+export const STALLED_AFTER_MIN = 5;
+export const stalled = (thread: T3Thread | null, now = Date.now()): boolean =>
+  thread?.status === "queued" &&
+  !thread.activeRunId &&
+  typeof thread.updatedAt === "string" &&
+  now - Date.parse(thread.updatedAt) >= STALLED_AFTER_MIN * 60_000;
+
+// In the middle of a turn: busy, and not left queued with nothing running.
+export const midTurn = (thread: T3Thread | null): boolean => BUSY.includes(thread?.status ?? "") && !stalled(thread);
+
 // A thread as `t3 thread show --json` prints it (the fields the factory reads).
 export interface T3Thread {
   id?: string;
@@ -79,6 +92,8 @@ export interface T3Thread {
   archived?: boolean;
   updatedAt?: string;
   pendingRequestCount?: number;
+  // The run it's in the middle of, null between turns.
+  activeRunId?: string | null;
   // The model it was started on.
   model?: string;
   [key: string]: unknown;
@@ -189,6 +204,13 @@ export function threadExists(id: string): boolean | null {
 export const liveThreadsOn = (project: string, instance: string, title: string, sinceMin: number): string[] | null =>
   query<{ id: string }>(
     `select thread_id as id from orchestration_v2_projection_threads where project_id = '${q(project)}' and provider_instance_id = '${q(instance)}' and title = '${q(title)}' and archived_at is null and deleted_at is null and created_at >= ${ago(sinceMin)} order by created_at desc`
+  )?.map((row) => row.id) ?? null;
+
+// The threads on an instance, with this title, that something happened in within the last sinceMin minutes, newest
+// first: where a retired planner that was woken shows. null when the database can't be read.
+export const activeThreadsOn = (project: string, instance: string, title: string, sinceMin: number): string[] | null =>
+  query<{ id: string }>(
+    `select thread_id as id from orchestration_v2_projection_threads where project_id = '${q(project)}' and provider_instance_id = '${q(instance)}' and title = '${q(title)}' and archived_at is null and deleted_at is null and updated_at >= ${ago(sinceMin)} order by updated_at desc`
   )?.map((row) => row.id) ?? null;
 
 // The model a thread was started on, from the database (a thread keeps it); null when it isn't there or can't be read.
@@ -450,19 +472,29 @@ export function instance({
 
 // A team's instances on this machine, by role (A6G_ROLE): each one's id and the config folder its Claude runs on
 // (null: this Mac's own login). Null when T3's settings can't be read.
-export function teamInstances(team: string, settings?: T3Settings): Record<string, { id: string; homePath: string | null }> | null {
+export function teamInstances(
+  team: string,
+  settings?: T3Settings
+): Record<string, { id: string; homePath: string | null; compactAt: number | null }> | null {
   let read: T3Settings;
   try {
     read = settings ?? readSettings();
   } catch {
     return null;
   }
-  const found: Record<string, { id: string; homePath: string | null }> = {};
+  const found: Record<string, { id: string; homePath: string | null; compactAt: number | null }> = {};
   for (const [id, entry] of Object.entries(read.providerInstances ?? {})) {
     if (!ofTeam(entry, team)) continue;
     const role = (entry.environment ?? []).find((variable) => variable.name === "A6G_ROLE")?.value;
     const home = entry.config?.homePath;
-    if (role) found[role] = { id, homePath: typeof home === "string" && home.trim() ? home : null };
+    // The window its context is compacted in (the planner's: lib/room.ts), null when T3 Code is left to its own.
+    const compactAt = Number(entry.config?.autoCompactWindow);
+    if (role)
+      found[role] = {
+        id,
+        homePath: typeof home === "string" && home.trim() ? home : null,
+        compactAt: Number.isFinite(compactAt) && compactAt > 0 ? compactAt : null,
+      };
   }
   return found;
 }
