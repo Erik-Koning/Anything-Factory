@@ -343,7 +343,7 @@ export interface BusinessState {
 }
 // A business lead's read of a feature: a note of its on the task (plugin/agents/business-lead.md).
 export const readByBusiness = (t: Task): boolean => t.notes.some((note) => note.by === "business-lead");
-// Features proposed for the approver that the business lead hasn't read: the planner starts it on them first.
+// Features proposed that the business lead hasn't read: the planner starts it on them, and nothing waits for it.
 export const awaitingBusinessRead = (all: Task[]): Task[] => all.filter((t) => t.kind === "feature" && t.status === "proposed" && !readByBusiness(t));
 
 // After a pass that filed nothing, the next isn't asked for (only started with a focus) for this long.
@@ -472,16 +472,16 @@ export function summary(
       `Approved research for you to route by what it asks: ${research.map(line).join("; ")}. Start the teammate its words call for, briefed "on task <id>": the innovator for ideas, a market or growth; the UX specialist for how pages look and work; the security reviewer for who may reach what; a tester for a spec. Or research it yourself. Each is done once their report is on it and you've acted on it (a6g task status <id> done).${innovator}`
     );
   }
-  // Every feature goes to the business lead for its read before the approver decides it.
+  // Every feature gets the business lead's read of what it's for; nothing waits for it.
   const unread = business ? awaitingBusinessRead(all) : [];
   if (unread.length) {
     const ids = unread.slice(0, 8).map((t) => `#${t.id}`);
     parts.push(
-      `Features waiting for the business lead's read before the approver: ${ids.join(", ")}${unread.length > 8 ? ", …" : ""}. ${
+      `Features the business lead hasn't read yet: ${ids.join(", ")}${unread.length > 8 ? ", …" : ""}. ${
         business?.running
           ? "A business lead is at work; start one on any it isn't reading once it's done."
-          : `Start it now, briefed "a business read of ${ids.join(", ")}".`
-      }`
+          : `Start it, briefed "a business read of ${ids.join(", ")}".`
+      } Nothing waits for its read: the approver decides as it would, and what sharpens the outcome goes in before it's built.`
     );
   }
   if (ideas) {

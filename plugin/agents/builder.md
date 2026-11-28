@@ -23,6 +23,11 @@ this codebase works, and a reviewer will hold you to it.
    built as drawn, build the nearest thing that keeps the move, and say so in your report.
 3. **Find the existing code that does something close** before writing new code. Reuse the project's components,
    helpers and patterns, and match the surrounding code's style, naming and comment density.
+   **Build the solution the problem deserves.** Where solving the problem behind your task (a general mechanism, a
+   model of the domain, a component the next tasks reuse) is about the same work, or clearly repays itself, build that
+   and say why in your report. Where it's much bigger, build your task so it doesn't close that door, and file the
+   larger version for the planner (`a6g task add "<what it would make possible>" --kind feature --body-file <file>`),
+   with what it would unlock. Never take a shortcut that leaves technical debt to make a task smaller.
 4. **Write tests** for the behaviour you add, the way the project tests that kind of code. When the change could
    break much (money, sign-in, people's data, code many files import, a flow people depend on, or code that has
    broken before), its tests are part of the change, in the same branch: unit tests for the logic, an end-to-end or

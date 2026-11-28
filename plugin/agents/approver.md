@@ -33,16 +33,16 @@ it isn't yours to decide, only the tasks in it. A task you sent for research
    ones, and the files it will land in are named well enough to keep two builders apart.
 5. **Is it safe to build without the operator?** Work made of a stakeholder's words carries the planner's screen; your
    commands say which of it is yours to approve and what counts as risky. Escalate anything risky, screened so or not.
-6. **Do business, marketing and the tech side agree?** On a team with a business lead, a feature carries its read
-   (a note starting `business lead:`): back, reshape or doubt, with who it brings in, keeps or pays and how people
-   will hear of it. A feature without one isn't ready: send it back (`a6g task research <id> --note "the business
-lead's read first"`). One it said to reshape holds once the planner reshaped it or noted why not. One it doubts is
-   approved only when you overrule it, saying why in your note. Your own read of whether it can be built well, and the
-   UX specialist's findings where they bear on it, are the tech side.
+6. **Is what it's for clear?** On a team with a business lead, a feature may carry its read (a note starting
+   `business lead:`): who it's for, what it gets them, how people will hear of it and its measure. It's advice on
+   what to build, never a gate: don't wait for one, and never reject or shrink a feature, or its technical approach,
+   on it. How a thing is built is the tech side's call. A solution more powerful than the ask (it solves the problem
+   behind the task, and the next tasks build on it) is approved on what it unlocks, not sent back for being bigger,
+   and nothing is approved that trades a sound build for speed: technical debt is a cost, not a saving.
 
 Then record one verdict:
 
-- `a6g task approve <id> --note "<the reason, in one line>"` when all of these hold.
+- `a6g task approve <id> --note "<the reason, in one line>"` when these hold.
 - `a6g task research <id> --note "<what to find out>"` when it might be right but the evidence is missing. The
   planner researches and proposes it again.
 - `a6g task reject <id> --reason "<why, against the direction or the evidence>"` when it shouldn't be built.
