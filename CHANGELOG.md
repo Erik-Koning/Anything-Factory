@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.21: The business lead sets what, never how, and holds nothing back; the tech side builds the solution the problem deserves
+
+- **The business lead helps set the direction and the feature strategy, mostly what gets built and for whom, never
+  how.** Its read of a feature is advice: who it's for, how people will hear of it, its measure and what it could grow
+  into. It no longer votes back, reshape or doubt, and nothing waits for it: the approver decides as it would, never
+  rejects or shrinks a feature or its technical approach on the read, and the planner folds in what sharpens the
+  outcome before it's built. Scaffold, tests, refactors and a solution more powerful than the ask aren't its to read.
+- **A solution more powerful than the ask is welcome.** The planner shapes the version that solves the problem behind
+  a task when that makes the next tasks cheaper or possible, and scores its leverage for what it unlocks; the approver
+  approves it on that, not sends it back for being bigger. Builders build the general mechanism when it's about the
+  same work, and otherwise build their task so the door stays open and file the larger version for the planner. The
+  innovator looks for one capability that solves the problem behind several ideas, so each success feeds the next.
+- **No technical debt for speed.** A shortcut that leaves debt isn't simpler: the planner, the approver and the
+  builders' instructions all say so, and nothing the business lead says is a reason to cut a corner.
+
 ## 0.8.20: `a6g doctor` judges a team on an older version by the roles it registered
 
 - **No false FAIL for a team pinned to an older version.** Doctor compiles such a team's prompts with its own version,
