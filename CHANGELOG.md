@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.20: `a6g doctor` judges a team on an older version by the roles it registered
+
+- **No false FAIL for a team pinned to an older version.** Doctor compiles such a team's prompts with its own version,
+  and took its roles from team.json as written. A role written there that its rules leave out (an approver under your
+  own approval, never started or registered) made that version refuse, and doctor failed the team although nothing
+  was wrong. It now takes the roles the team registered.
+
 ## 0.8.19: A business lead the planner consults, and members that carry on when Claude Code is too old for their model
 
 ### A business, marketing and growth lead
