@@ -17,10 +17,15 @@
 // there until that limit resets (lib/subscriptions.ts fallbackFor): its members and the watchdog's threads start on
 // Opus, and the guard holds the planner to it. A planner thread keeps the model it started on, so one on Fable then is
 // retired once it's free, as for a move, and the watchdog starts the next on Opus; and back on Fable once it resets.
+//
+// A member role whose model this Mac's Claude Code is too old for (T3 Code refuses to start it, lib/claude-code.ts) runs
+// on that model's fallback the same way until Claude Code is updated. The planner keeps its own: T3 Code starts the
+// planner's thread from its CLI, which doesn't check.
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { accountClosures } from "./budget.ts";
 import { restartAsked } from "./actions.ts";
+import { type ClaudeCode, claudeCodeHere, tooOldFor, tooOldWords } from "./claude-code.ts";
 import { applied, markApplied, readLimits, whoAsked } from "./holds.ts";
 import { fallbackModel, familyOf, modelName } from "./models.ts";
 import type { RegistryEntry } from "./paths.ts";
@@ -178,8 +183,9 @@ export interface SteerResult {
 export type SteerEntry = Pick<RegistryEntry, "name" | "run" | "worker"> & Partial<Pick<RegistryEntry, "model" | "models">>;
 
 // Chooses each role's subscription and moves those that should and can, and each role's model while its own model's
-// limit is used up there. Null when T3 Code's settings can't be read.
-export function steer(entry: SteerEntry, now = new Date()): SteerResult | null {
+// limit is used up there, or this Mac's Claude Code is too old for it (`here`, read when not given). Null when T3
+// Code's settings can't be read.
+export function steer(entry: SteerEntry, now = new Date(), here?: ClaudeCode): SteerResult | null {
   const instances = t3.teamInstances(entry.name);
   if (!instances) return null;
   const list = accounts();
@@ -277,10 +283,20 @@ export function steer(entry: SteerEntry, now = new Date()): SteerResult | null {
   // model's limit. A role that waits starts nothing, so it needs none.
   const ownModel = (role: string): string | null => entry.models?.[role] ?? entry.model ?? null;
   const models: Record<string, Fallback> = {};
+  let claude: ClaudeCode | null = here ?? null;
   for (const role of roles) {
     const own = ownModel(role);
-    const fallback = own && !choice.waiting[role] ? fallbackFor(own, on[role] ?? null, state, now) : null;
-    if (fallback) models[role] = fallback;
+    if (!own || choice.waiting[role]) continue;
+    const fallback = fallbackFor(own, on[role] ?? null, state, now);
+    if (fallback) {
+      models[role] = fallback;
+      continue;
+    }
+    const to = role === "planner" ? null : fallbackModel(own);
+    if (!to) continue;
+    claude ??= claudeCodeHere();
+    const min = tooOldFor(own, claude);
+    if (min) models[role] = { from: own, model: to, subscription: on[role] ?? "", until: null, why: tooOldWords(own, min, claude), cause: "claude-code" };
   }
   // News when a role falls back or comes back, not when only a reading's figures changed.
   const had = previous?.models ?? {};
@@ -294,7 +310,13 @@ export function steer(entry: SteerEntry, now = new Date()): SteerResult | null {
     }
   for (const [role, fallback] of Object.entries(had))
     if (!models[role] && roles.includes(role) && !choice.waiting[role]) {
-      const back = `${who(role)} ${runs(role)} on ${modelName(fallback.from)} again${on[role] === fallback.subscription ? `: ${owns(fallback.subscription)} ${modelName(fallback.from)} limit has room again` : ""}`;
+      const because =
+        fallback.cause === "claude-code"
+          ? `: this Mac's Claude Code is new enough for it`
+          : on[role] === fallback.subscription
+            ? `: ${owns(fallback.subscription)} ${modelName(fallback.from)} limit has room again`
+            : "";
+      const back = `${who(role)} ${runs(role)} on ${modelName(fallback.from)} again${because}`;
       said.push(`the ${back}`);
       changes.push(back);
       signature.push(`${role}:model:${fallback.from}`);

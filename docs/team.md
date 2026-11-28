@@ -127,13 +127,18 @@ Each entry in `roles` takes:
 | `deny`      | Regexes the role may never write, even inside `write`                                                                                                                                                                                                            |
 | `branch`    | The role's branch pattern (builders, testers and the scaffolder)                                                                                                                                                                                                 |
 | `mcp`       | Outside tools the role may call. The planner has the Gmail tools by default; the guard lets email go only to `owner`                                                                                                                                             |
-| `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, security-reviewer, ux-specialist and innovator                                                                                                                                |
+| `readOnly`  | Changes nothing in the checkout, not even its git state. The default for reviewer, security-reviewer, ux-specialist, innovator and business-lead                                                                                                                 |
 | `compactAt` | (planner) T3 Code compacts the planner's context at this many tokens (default 160000)                                                                                                                                                                            |
 | `model`     | The model the role runs on: `fable`, `opus`, `sonnet` or `haiku`, or a model id. See [Models](#models)                                                                                                                                                           |
 | `minQueue`  | (innovator) The planner starts the innovator whenever fewer than this many ideas (features not yet started) are queued (default 5; 0 leaves it to the planner)                                                                                                   |
 
-The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer, ux-specialist, innovator and approver
-(the reviewer, the security reviewer, the UX specialist, the innovator and the approver are read-only). The security
+The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer, ux-specialist, innovator,
+business-lead and approver (the reviewer, the security reviewer, the UX specialist, the innovator, the business lead and
+the approver are read-only). The business lead is optional (`"business-lead": {"limit": 1}`): the team's business,
+marketing and growth voice. The planner starts it on every feature proposed before the approver decides it, and it
+notes its read on the task (back, reshape or doubt, with who it brings in, keeps or pays, how people hear of it and
+its measure); the approver approves a feature it doubts only by overruling it with a reason. The planner also asks it
+to rank the plan at a cycle's start and alternates its growth passes with the innovator's when ideas run low. The security
 reviewer reads a branch for what it lets someone do that they shouldn't; a team with one merges some branches only
 once it has passed them (`security`, below). The scaffolder owns the means of checking: it sets up and
 keeps the test harness and its manifest (`.a6g/harness.json`, which only its lane names), makes a repository's
@@ -219,7 +224,7 @@ that build it and check it on Opus:
 
 | Role                                                                  | Default            |
 | --------------------------------------------------------------------- | ------------------ |
-| planner, innovator, scaffolder                                        | `claude-fable-5-2` |
+| planner, innovator, business-lead, scaffolder                         | `claude-fable-5-2` |
 | builder, tester, reviewer, security-reviewer, ux-specialist, approver | `claude-opus-5-5`  |
 
 A wrong plan or a wrong foundation costs every task built on it, so the dearer model goes where a mistake travels

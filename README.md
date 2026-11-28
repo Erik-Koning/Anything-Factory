@@ -159,6 +159,14 @@ something. The innovator researches users' problems, feedback, the market and co
 improvements. It files its best ideas, at most five a pass, each with its evidence and a suggested score on the
 team's matrix in the description. The planner checks the evidence and records the score that counts.
 
+A team can also have a business lead (`"business-lead": {"limit": 1}`), its business, marketing and growth voice,
+which the planner consults for ideas, planning and each feature. Every feature proposed goes to it before the approver:
+it notes back, reshape or doubt on the task, with who the feature brings in, keeps or pays, how people will hear of it
+and the number that would show it worked, and the approver approves one it doubts only by overruling it with a
+reason. It ranks the plan at each cycle's start, and its growth passes (onboarding, channels and partners, the words on
+public pages, how the product pays) alternate with the innovator's when ideas run low. It builds nothing, sends
+nothing outside the team, and leaves money to you.
+
 To stop a team gracefully, let what it's doing finish first: `a6g pause my-app --after tasks` lets the work under way
 (being built, in review, sent back for changes) finish and merge while nothing new is claimed; `--after journeys` lets
 the journeys under way (or `--journeys 3,7`) finish, their verification and polish included. Once nothing in it can

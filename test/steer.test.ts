@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { accountClosures, budgetCheck } from "../lib/budget.ts";
+import { modelNeeds, tooOldFor } from "../lib/claude-code.ts";
 import {
   type Account,
   choose,
@@ -29,6 +30,7 @@ import { instance, teamInstances, type T3Settings, withHomes } from "../lib/t3.t
 import type { Control, Limits } from "../lib/tasks/controls.ts";
 import { blendedWeek, describeSpend, type Spend, spendOf, type UsageDay } from "../lib/tasks/spend.ts";
 import { collectUsage, encodePath, transcriptDirsByAccount } from "../lib/usage.ts";
+import { which } from "../lib/util.ts";
 
 const NOW = new Date("2026-11-04T12:00:00Z");
 const later = (hours: number): string => new Date(NOW.getTime() + hours * 3_600_000).toISOString();
@@ -925,4 +927,98 @@ describe("the watchdog, status and the guard while a subscription has used up Fa
       await w.close();
     }
   });
+});
+
+describe("a member on a model this Mac's Claude Code is too old for", () => {
+  const FABLE = "claude-fable-5-2";
+  const OPUS = "claude-opus-5-5";
+  const catalogue = (fable: string) => ({
+    manifest: {
+      providers: {
+        claudeAgent: {
+          models: [
+            { slug: FABLE, aliases: ["fable"], adapter: { claudeCode: { minVersion: fable } } },
+            { slug: OPUS, aliases: ["opus"], adapter: { claudeCode: { minVersion: "2.0.0" } } },
+          ],
+        },
+      },
+    },
+  });
+
+  test("what the catalogue needs, and when the installed one is too old", () => {
+    const dir = tmp("a6g-manifest-");
+    write(dir, { "model-manifest.json": catalogue("2.1.321") });
+    const needs = modelNeeds(join(dir, "model-manifest.json"));
+    assert.equal(needs[FABLE], "2.1.321");
+    assert.equal(needs["fable"], "2.1.321");
+    assert.deepEqual(modelNeeds(join(dir, "missing.json")), {});
+    assert.equal(tooOldFor(FABLE, { version: "2.1.311", needs }), "2.1.321");
+    assert.equal(tooOldFor(FABLE, { version: "2.1.326", needs }), null);
+    assert.equal(tooOldFor(OPUS, { version: "2.1.311", needs }), null);
+    assert.equal(tooOldFor(FABLE, { version: null, needs }), null, "nothing is refused for a guess");
+    assert.equal(tooOldFor("claude-haiku-5-5", { version: "1.0.0", needs }), null);
+  });
+
+  // The installed claude answers for real here, so a catalogue that needs a version no Claude Code has makes it too old.
+  test(
+    "its members start on Opus until Claude Code is new enough, the planner keeps its own, and doctor says what to update",
+    { skip: which("claude") ? false : "claude isn't on PATH" },
+    async () => {
+      const { fakeWorld } = await import("./fake-t3.ts");
+      const { baseTeam } = await import("./helpers.ts");
+      const roles = ["planner", "builder", "scaffolder"];
+      const w = await fakeWorld(baseTeam({ roles: { planner: {}, builder: { limit: 2 }, scaffolder: {} } }));
+      try {
+        const file = join(w.a6gHome, "teams", "fixture.json");
+        write(join(w.a6gHome, "teams"), {
+          "fixture.json": { ...JSON.parse(readFileSync(file, "utf8")), model: FABLE, models: { planner: FABLE, builder: OPUS, scaffolder: FABLE } },
+        });
+        write(join(w.t3Home, "userdata"), {
+          "settings.json": {
+            providerInstances: Object.fromEntries(
+              roles.map((role) => [
+                `a6g-fixture-${role}`,
+                instance({ displayName: role, launchArgs: "", environment: { A6G_TEAM: "fixture", A6G_ROLE: role } }),
+              ])
+            ),
+          },
+          "model-manifest.json": catalogue("999.0.0"),
+        });
+        const log = () => readFileSync(join(w.run, "watchdog.log"), "utf8");
+        assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+        assert.match(
+          log(),
+          /the scaffolders run on Opus for now: this Mac's Claude Code \d+\.\d+\.\d+ is older than the 999\.0\.0 T3 Code needs to start Fable: update it \(brew upgrade --cask claude-code, or claude update\)/
+        );
+        assert.doesNotMatch(log(), /the (planner|builders) runs? on Opus/);
+        const models = JSON.parse(readFileSync(join(w.run, "subscription.json"), "utf8")).models;
+        assert.deepEqual(Object.keys(models), ["scaffolder"]);
+        assert.equal(models.scaffolder.cause, "claude-code");
+        const env = { A6G_HOME: w.a6gHome, T3CODE_HOME: w.t3Home, HOME: w.env["HOME"] ?? "" };
+        const scaffolder = (model: string) =>
+          guard(
+            w.home,
+            "planner",
+            "mcp__t3-code__delegate_task",
+            { target: { providerInstanceId: "a6g-fixture-scaffolder", model }, isolation: "worktree" },
+            { run: w.run, env }
+          );
+        assert.equal(scaffolder(FABLE).outcome, "refuse");
+        assert.equal(scaffolder(OPUS).outcome, "allow");
+        assert.match(
+          (await w.a6g("doctor")).out,
+          /FAIL\s+fixture: its scaffolders run on Opus for now, not Fable: this Mac's Claude Code \d+\.\d+\.\d+ is older than the 999\.0\.0/
+        );
+        // Updated: back on Fable.
+        write(join(w.t3Home, "userdata"), { "model-manifest.json": catalogue("2.0.0") });
+        assert.equal((await w.a6g("watchdog", "run", "fixture")).code, 0);
+        assert.match(log(), /the scaffolders run on Fable again: this Mac's Claude Code is new enough for it/);
+        assert.deepEqual(JSON.parse(readFileSync(join(w.run, "subscription.json"), "utf8")).models, {});
+        assert.equal(scaffolder(FABLE).outcome, "allow");
+        assert.doesNotMatch((await w.a6g("doctor")).out, /run on Opus for now/);
+      } finally {
+        await w.close();
+      }
+    }
+  );
 });

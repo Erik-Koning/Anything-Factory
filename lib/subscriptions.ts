@@ -522,6 +522,9 @@ export interface Fallback {
   subscription: string;
   until: string | null;
   why: string;
+  // "claude-code": this Mac's Claude Code is too old for the role's own model (lib/claude-code.ts), until it's updated;
+  // left out, the subscription's own limit for that model is used up.
+  cause?: "claude-code";
 }
 
 // "default's", "refdocs'".
