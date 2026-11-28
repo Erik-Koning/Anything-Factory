@@ -111,6 +111,10 @@ Hold the pass to what a founder would ask of it:
   organisation's own funders). A list of grants or funding rounds isn't an income bet, nor is money that goes to the
   organisations rather than to the product. Pointing at an earlier income idea counts only with a new payer, price or
   test noted on it. Money is the operator's to decide: file it as theirs.
+- **A capability, not only a feature.** Look for the problem behind several ideas at once: one capability (an engine,
+  a model of the domain, a channel the product owns) that solves the job and makes the next ideas cheap or possible,
+  so each success feeds the next. File it as the bet, with the ideas it unlocks named in its description and its
+  leverage scored for them; the planner weighs it on what it unlocks, not on being bigger than one feature.
 - **Upside first.** Rank by how much changes if the bet is right, then by how sure you are; not by how sure the build
   is. Every idea's bet gives its upside as a number a year out, from a stated base ("if right, by <date>: 40 donors a
   month from shared needs, of 120"), and you rank by it; a word ("compounds", "meaningful") isn't one. One whose upside

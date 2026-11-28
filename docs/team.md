@@ -136,8 +136,10 @@ The roles are planner, builder, tester, scaffolder, reviewer, security-reviewer,
 business-lead and approver (the reviewer, the security reviewer, the UX specialist, the innovator, the business lead and
 the approver are read-only). The business lead is optional (`"business-lead": {"limit": 1}`): the team's business,
 marketing and growth voice. The planner starts it on every feature proposed before the approver decides it, and it
-notes its read on the task (back, reshape or doubt, with who it brings in, keeps or pays, how people hear of it and
-its measure); the approver approves a feature it doubts only by overruling it with a reason. The planner also asks it
+notes its read on the task: who it's for, how people will hear of it, its measure and what it could grow into. It
+helps set the direction and the feature strategy, mostly what gets built and never how, and nothing waits for its
+read: the approver decides as it would, and technical and innovative work (scaffold, tests, refactors, a solution
+more powerful than the ask) is the tech side's call. The planner also asks it
 to rank the plan at a cycle's start and alternates its growth passes with the innovator's when ideas run low. The security
 reviewer reads a branch for what it lets someone do that they shouldn't; a team with one merges some branches only
 once it has passed them (`security`, below). The scaffolder owns the means of checking: it sets up and

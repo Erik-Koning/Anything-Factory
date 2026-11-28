@@ -160,10 +160,10 @@ improvements. It files its best ideas, at most five a pass, each with its eviden
 team's matrix in the description. The planner checks the evidence and records the score that counts.
 
 A team can also have a business lead (`"business-lead": {"limit": 1}`), its business, marketing and growth voice,
-which the planner consults for ideas, planning and each feature. Every feature proposed goes to it before the approver:
-it notes back, reshape or doubt on the task, with who the feature brings in, keeps or pays, how people will hear of it
-and the number that would show it worked, and the approver approves one it doubts only by overruling it with a
-reason. It ranks the plan at each cycle's start, and its growth passes (onboarding, channels and partners, the words on
+which the planner consults for ideas, planning and each feature. It helps set the direction and the feature strategy,
+mostly what gets built and never how: on each feature it notes who it's for, how people will hear of it, the number
+that would show it worked and what it could grow into. Nothing waits for its read, and how a thing is built (how far
+a solution reaches, refactors, tests) stays the tech side's call. It ranks the plan at each cycle's start, and its growth passes (onboarding, channels and partners, the words on
 public pages, how the product pays) alternate with the innovator's when ideas run low. It builds nothing, sends
 nothing outside the team, and leaves money to you.
 

@@ -37,21 +37,35 @@ describe("the business lead", () => {
     const planner = compile(team, "planner");
     assert.match(
       planner,
-      /Business lead: this team has one, its business, marketing and growth voice\. Every feature goes to it for a read before the approver/
+      /Business lead: this team has one, its business, marketing and growth voice\. It helps set the direction and the feature strategy, what gets built and for whom, never how/
     );
+    assert.match(planner, /Nothing waits for its read/);
     assert.match(
       planner,
       /\| business-lead \| `a6g-fixture-business-lead` \| `"claude-fable-5-2"` \| `"shared"` \| 1 \| the business, marketing and growth lead/
     );
     const lead = compile(team, "business-lead");
-    assert.match(lead, /`a6g task note <id> "business lead: back\|reshape\|doubt: <the case, in a few lines>"`/);
+    assert.match(lead, /`a6g task note <id> "business lead: for <who, and what it gets them>\. Told by: …\. Measure: …\. Could grow into: …"`/);
+    assert.match(lead, /what it's for, never how it's built\. Nothing waits for it\./);
+    assert.doesNotMatch(lead, /doubt|reshape/, "no vote that holds work back");
     assert.match(lead, /`a6g task add "<the outcome, in a few words>" --kind feature --body-file <file>/);
     assert.match(lead, /`WebSearch` and `WebFetch`/);
     assert.match(lead, /## Scoring\n\nEvery proposal is scored 0 to 3/);
     assert.match(lead, /You read and file, and build nothing/);
     assert.match(lead, /a growth idea beyond the documents is welcome when it follows the direction/);
-    assert.match(readFileSync(join(ROOT, "plugin", "agents", "approver.md"), "utf8"), /Do business, marketing and the tech side agree\?/);
-    assert.match(readFileSync(join(ROOT, "plugin", "agents", "planner.md"), "utf8"), /## The business lead\n/);
+    const agent = (name: string) => readFileSync(join(ROOT, "plugin", "agents", `${name}.md`), "utf8");
+    // It sets what, never how, and holds nothing back; the tech side may build past the ask.
+    assert.match(
+      agent("approver"),
+      /It's advice on\s+what to build, never a gate: don't wait for one, and never reject or shrink a feature, or its technical approach,\s+on it\./
+    );
+    assert.match(agent("approver"), /A solution more powerful than the ask .* is approved on what it unlocks, not sent back for being bigger/s);
+    assert.match(agent("planner"), /## The business lead\n/);
+    assert.match(agent("planner"), /\*\*Every feature gets its read, and nothing waits for it\.\*\*/);
+    assert.match(agent("planner"), /\*\*The solution, not only the ask\.\*\*/);
+    assert.match(agent("builder"), /\*\*Build the solution the problem deserves\.\*\*/);
+    assert.match(agent("innovator"), /\*\*A capability, not only a feature\.\*\*/);
+    for (const name of ["business-lead", "approver", "planner"]) assert.doesNotMatch(agent(name), /back, reshape or doubt|One it doubts/, name);
   });
 
   test("the planner's context lists the features proposed without its read, and starts it on them", () => {
@@ -68,7 +82,7 @@ describe("the business lead", () => {
     );
     assert.match(
       summary(all, { approval: "thresholds", business: { running: 0 } }),
-      /Features waiting for the business lead's read before the approver: #1, #3\. Start it now, briefed "a business read of #1, #3"\./
+      /Features the business lead hasn't read yet: #1, #3\. Start it, briefed "a business read of #1, #3"\. Nothing waits for its read: the approver decides as it would/
     );
     assert.match(summary(all, { approval: "thresholds", business: { running: 1 } }), /A business lead is at work/);
     assert.doesNotMatch(summary(all, { approval: "thresholds" }), /business lead/, "nothing on a team without one");
